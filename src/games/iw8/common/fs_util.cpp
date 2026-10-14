@@ -1,7 +1,7 @@
 #include <std_include.hpp>
 // fs_util.cpp — implementation of fs_util.h using <filesystem> + <cstdio>.
-#include "common/fs_util.h"
-#include "common/log.h"
+#include "fs_util.h"
+#include "log.h"
 #include <cstdio>
 #include <filesystem>
 #include <system_error>

@@ -1,7 +1,7 @@
 #include <std_include.hpp>
-#include "assets/replay_impact.h"
+#include "replay_impact.h"
 
-#include "assets/replay_impact_data.h"
+#include "replay_impact_data.h"
 
 #include <algorithm>
 #include <array>

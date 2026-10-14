@@ -1,6 +1,6 @@
 #pragma once
 
-#include "zone/iw8_zone.h"
+#include "../zone/iw8_zone.h"
 
 #include <cstdint>
 #include <string>

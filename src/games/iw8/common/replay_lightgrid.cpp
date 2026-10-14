@@ -1,5 +1,5 @@
 #include <std_include.hpp>
-#include "common/replay_lightgrid.h"
+#include "replay_lightgrid.h"
 #include <cmath>
 #include <cstring>
 #include <filesystem>

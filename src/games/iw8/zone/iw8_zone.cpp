@@ -1,9 +1,9 @@
 #include <std_include.hpp>
-#include "zone/iw8_zone.h"
+#include "iw8_zone.h"
 
 #include <chrono>
 #include <map>
-#include "common/log.h"
+#include "../common/log.h"
 #include <algorithm>
 
 namespace iw8

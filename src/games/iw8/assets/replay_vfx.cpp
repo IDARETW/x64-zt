@@ -1,5 +1,5 @@
 #include <std_include.hpp>
-#include "assets/replay_vfx.h"
+#include "replay_vfx.h"
 
 #include <cstddef>
 #include <cstdint>

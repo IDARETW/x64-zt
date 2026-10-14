@@ -24,10 +24,21 @@ namespace zonetool
 		token_name_resolver token_name;
 	};
 
+	struct zone_conversion
+	{
+		std::filesystem::path source_game_path;
+		std::filesystem::path target_game_path;
+		std::filesystem::path output_folder;
+		std::unordered_map<std::string, std::string> options;
+	};
+
+	using zone_converter = void(*)(const std::filesystem::path& zone_path, const zone_conversion& conversion);
+
 	struct converter
 	{
 		std::string_view source;
 		std::string_view target;
 		asset_dumper dump_asset;
+		zone_converter convert_zone;
 	};
 }

@@ -47,17 +47,49 @@ namespace zonetool::cli
 
 			std::cout << std::format("{} of {} zones passed\n", zones.size() - failed, zones.size());
 		}
+
+		void convert_zone(const settings& settings, const converter& converter, const std::filesystem::path& zone_path,
+			std::unordered_map<std::string, std::string> options)
+		{
+			zone_conversion conversion{};
+			conversion.source_game_path = settings.game_path;
+			conversion.target_game_path = settings.game_path_of(converter.target).value_or(std::filesystem::path{});
+			conversion.output_folder = "output";
+
+			if (settings.config.contains("tools"))
+			{
+				for (const auto& [name, value] : settings.config["tools"].items())
+				{
+					options.try_emplace(name, value.get<std::string>());
+				}
+			}
+
+			conversion.options = std::move(options);
+			converter.convert_zone(zone_path, conversion);
+		}
 	}
 
 	void dump_zone(const settings& settings, const std::span<const std::string> args)
 	{
-		constexpr std::string_view usage = "dumpzone <zone> [--target <game>]";
+		constexpr std::string_view usage = "dumpzone <zone> [--target <game> [--<option> <value>]...]";
 
-		const auto has_target = args.size() == 3 && args[1] == "--target";
+		const auto has_target = args.size() >= 3 && args.size() % 2 == 1 && args[1] == "--target";
 		if (args.size() != 1 && !has_target)
 		{
 			std::cout << std::format("usage: {}\n", usage);
 			return;
+		}
+
+		std::unordered_map<std::string, std::string> options;
+		for (auto i = 3u; i + 1 < args.size(); i += 2)
+		{
+			if (!args[i].starts_with("--"))
+			{
+				std::cout << std::format("usage: {}\n", usage);
+				return;
+			}
+
+			options[args[i].substr(2)] = args[i + 1];
 		}
 
 		const converter* converter{};
@@ -71,10 +103,25 @@ namespace zonetool::cli
 			}
 		}
 
-		if (const auto path = require_zone(settings, args, usage))
+		const auto path = require_zone(settings, args, usage);
+		if (!path)
 		{
-			settings.game->dump_zone(settings.zone_folder(), *path, converter ? converter->dump_asset : nullptr);
+			return;
 		}
+
+		if (converter && converter->convert_zone)
+		{
+			convert_zone(settings, *converter, *path, std::move(options));
+			return;
+		}
+
+		if (!options.empty())
+		{
+			std::cout << "options need a converter that converts whole zones\n";
+			return;
+		}
+
+		settings.game->dump_zone(settings.zone_folder(), *path, converter ? converter->dump_asset : nullptr);
 	}
 
 	void verify_zone(const settings& settings, const std::span<const std::string> args)

@@ -109,6 +109,16 @@ namespace zonetool::cli
 		return this->game_path / "zone";
 	}
 
+	std::optional<std::filesystem::path> settings::game_path_of(const std::string_view name) const
+	{
+		if (!this->config.contains("paths") || !this->config["paths"].contains(name))
+		{
+			return {};
+		}
+
+		return this->config["paths"][name].get<std::string>();
+	}
+
 	settings load_settings(std::vector<std::string>& args)
 	{
 		const auto config = read_config();
@@ -120,6 +130,7 @@ namespace zonetool::cli
 		}
 
 		settings result{};
+		result.config = config;
 		result.game = select_game(requested_game);
 
 		auto requested_path = take_option(args, "-path");

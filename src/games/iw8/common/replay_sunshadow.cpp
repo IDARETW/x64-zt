@@ -1,5 +1,5 @@
 #include <std_include.hpp>
-#include "common/replay_sunshadow.h"
+#include "replay_sunshadow.h"
 
 #include <d3d11.h>
 #include <d3dcompiler.h>

@@ -4484,7 +4484,7 @@ Json BuildRender(const Json &world, const VisibilityGroups &visibility,
         // and leave occlusion to Umbra and GPU culling. Replay does not flood
         // IW3's portals, so props owned by another source cell vanished as the
         // camera crossed into a neighbouring cell. Merge every tree into one leaf.
-        std::set<unsigned> surfaces, models;
+        std::set<unsigned> surfaces, cellModels;
         Vec3 minimum{}, maximum{};
         bool first = true;
         for (const auto &cell : output["dpvs"]["cells"])
@@ -4505,12 +4505,12 @@ Json BuildRender(const Json &world, const VisibilityGroups &visibility,
                 for (const auto &surface : tree.at("surfaces"))
                     surfaces.insert(surface.get<unsigned>());
                 for (const auto &model : tree.value("models", Json::array()))
-                    models.insert(model.get<unsigned>());
+                    cellModels.insert(model.get<unsigned>());
             }
         }
         Json tree = {{"bounds", {minimum, maximum}},
                      {"surfaces", std::vector<unsigned>(surfaces.begin(), surfaces.end())},
-                     {"models", std::vector<unsigned>(models.begin(), models.end())}};
+                     {"models", std::vector<unsigned>(cellModels.begin(), cellModels.end())}};
         if (visibility.nativeTopology)
         {
             tree["childCount"] = 0;

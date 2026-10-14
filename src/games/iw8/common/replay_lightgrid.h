@@ -1,5 +1,5 @@
 #pragma once
-#include "zone/iw8_zone.h"
+#include "../zone/iw8_zone.h"
 #include <array>
 #include <string>
 #include <vector>

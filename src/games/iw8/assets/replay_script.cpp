@@ -1,7 +1,7 @@
 #include <std_include.hpp>
-#include "assets/replay_script.h"
+#include "replay_script.h"
 
-#include "zone/iw8_zonebuffer.h"
+#include "../zone/iw8_zonebuffer.h"
 
 #include <algorithm>
 #include <array>
@@ -39,7 +39,7 @@ struct GscToken
     uint32_t id;
     std::string_view name;
 };
-#include "assets/gsc_tool_iw8_tokens.inc"
+#include "gsc_tool_iw8_tokens.inc"
 
 std::string_view gscToolTokenName(const uint32_t id)
 {

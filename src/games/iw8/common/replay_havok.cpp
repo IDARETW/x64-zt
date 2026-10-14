@@ -1,9 +1,9 @@
 #include <std_include.hpp>
-#include "common/replay_havok.h"
-#include "common/replay_opaque_strings.h"
+#include "replay_havok.h"
+#include "replay_opaque_strings.h"
 
-#include "common/fs_util.h"
-#include "common/log.h"
+#include "fs_util.h"
+#include "log.h"
 
 #include <Windows.h>
 #include <bcrypt.h>

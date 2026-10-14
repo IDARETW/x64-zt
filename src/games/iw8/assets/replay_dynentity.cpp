@@ -1,5 +1,5 @@
 #include <std_include.hpp>
-#include "assets/replay_dynentity.h"
+#include "replay_dynentity.h"
 
 #include <cmath>
 #include <cstring>

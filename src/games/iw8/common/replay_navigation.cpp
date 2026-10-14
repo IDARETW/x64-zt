@@ -1,7 +1,7 @@
 #include <std_include.hpp>
-#include "common/replay_navigation.h"
+#include "replay_navigation.h"
 
-#include "common/log.h"
+#include "log.h"
 
 #include <algorithm>
 #include <atomic>
@@ -2099,13 +2099,13 @@ Result Build(const Source &source)
             if (ix % spacing != spacing / 2 || iy % spacing != spacing / 2)
                 continue;
             const Vec3 ground = grid.Center(static_cast<std::uint32_t>(cell));
-            const bool near = std::any_of(nodes.begin(), nodes.end(), [&](const PathNode &node) {
+            const bool covered = std::any_of(nodes.begin(), nodes.end(), [&](const PathNode &node) {
                 const float dx = node.origin[0] - ground[0];
                 const float dy = node.origin[1] - ground[1];
                 return dx * dx + dy * dy < 48.0f * 48.0f &&
                        std::abs(node.origin[2] - ground[2]) < 40.0f;
             });
-            if (!near)
+            if (!covered)
                 points.push_back({Add(ground, {0.0f, 0.0f, kEyeHeight}), 0});
         }
     }

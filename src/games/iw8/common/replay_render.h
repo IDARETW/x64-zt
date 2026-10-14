@@ -1,6 +1,6 @@
 #pragma once
-#include "zone/iw8_zone.h"
-#include "common/replay_bounds.h"
+#include "../zone/iw8_zone.h"
+#include "replay_bounds.h"
 #include <array>
 #include <string>
 #include <vector>

@@ -1,7 +1,7 @@
 #pragma once
 
-#include "iw8_map_structs.h"
-#include "zone/replay_spawns.h"
+#include "../iw8_map_structs.h"
+#include "../zone/replay_spawns.h"
 
 #include <algorithm>
 #include <array>
