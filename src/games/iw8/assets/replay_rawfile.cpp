@@ -1,7 +1,7 @@
 #include <std_include.hpp>
-#include "assets/replay_rawfile.h"
+#include "replay_rawfile.h"
 
-#include "assets/replay_script.h"
+#include "replay_script.h"
 
 #include <array>
 #include <cstring>

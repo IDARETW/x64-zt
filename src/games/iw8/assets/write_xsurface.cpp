@@ -1,11 +1,11 @@
 #include <std_include.hpp>
-#include "assets/write_xsurface.h"
-#include "common/log.h"
-#include "dump/conv_xsurface.h"
-#include "dump/xse_dump.h"
-#include "iw8_focus_structs.h"
-#include "iw8_structs.h"
-#include "zone/iw8_zone.h"
+#include "write_xsurface.h"
+#include "../common/log.h"
+#include "../dump/conv_xsurface.h"
+#include "../dump/xse_dump.h"
+#include "../iw8_focus_structs.h"
+#include "../iw8_structs.h"
+#include "../zone/iw8_zone.h"
 #include <cstring>
 
 namespace iw8xs_dump

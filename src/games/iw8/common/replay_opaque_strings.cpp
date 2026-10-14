@@ -1,5 +1,5 @@
 #include <std_include.hpp>
-#include "common/replay_opaque_strings.h"
+#include "replay_opaque_strings.h"
 
 #include <algorithm>
 #include <array>
@@ -16,7 +16,7 @@ struct OpaqueStringEntry
     std::uint32_t id;
 };
 
-#include "common/replay_opaque_strings.inc"
+#include "replay_opaque_strings.inc"
 
 std::uint64_t HashOpaqueString(const std::string_view value)
 {

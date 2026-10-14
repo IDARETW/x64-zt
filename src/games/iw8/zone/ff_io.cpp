@@ -1,9 +1,9 @@
 #include <std_include.hpp>
-#include "zone/ff_io.h"
+#include "ff_io.h"
 
-#include "zone/iw8_ffheader.h"
-#include "common/fs_util.h"
-#include "common/log.h"
+#include "iw8_ffheader.h"
+#include "../common/fs_util.h"
+#include "../common/log.h"
 
 #include <algorithm>
 #include <cerrno>

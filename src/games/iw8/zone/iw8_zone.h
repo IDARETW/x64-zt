@@ -1,6 +1,6 @@
 #pragma once
-#include "iw8_structs.h"
-#include "zone/iw8_zonebuffer.h"
+#include "../iw8_structs.h"
+#include "iw8_zonebuffer.h"
 #include <cstdint>
 #include <functional>
 #include <stdexcept>

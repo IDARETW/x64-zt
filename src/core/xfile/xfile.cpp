@@ -434,6 +434,8 @@ namespace zonetool::xfile
 		case container::iw7:
 			read_iw7(reader, format, file);
 			break;
+		case container::unsupported:
+			throw std::runtime_error(std::format("the {} container has no v2 reader", format.unsigned_magic));
 		}
 
 		return file;

@@ -1,5 +1,5 @@
 #include <std_include.hpp>
-#include "common/replay_render.h"
+#include "replay_render.h"
 #include <algorithm>
 #include <cmath>
 #include <cstring>

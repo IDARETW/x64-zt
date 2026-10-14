@@ -1,6 +1,6 @@
 #pragma once
 
-#include "common/replay_bounds.h"
+#include "replay_bounds.h"
 
 #include <array>
 #include <cstddef>

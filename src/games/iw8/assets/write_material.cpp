@@ -1,7 +1,7 @@
 #include <std_include.hpp>
-#include "common/log.h"
-#include "dump/material_dumpsrc.h"
-#include "zone/iw8_zone.h"
+#include "../common/log.h"
+#include "../dump/material_dumpsrc.h"
+#include "../zone/iw8_zone.h"
 #include <cstdint>
 #include <cstring>
 

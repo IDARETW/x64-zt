@@ -1,5 +1,5 @@
 #include <std_include.hpp>
-#include "assets/replay_sound.h"
+#include "replay_sound.h"
 
 #include <Windows.h>
 #include <bcrypt.h>

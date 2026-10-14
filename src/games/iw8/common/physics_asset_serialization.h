@@ -1,7 +1,7 @@
 #pragma once
-#include "iw8_structs.h"
-#include "zone/iw8_zonebuffer.h"
-#include "common/replay_havok.h"
+#include "../iw8_structs.h"
+#include "../zone/iw8_zonebuffer.h"
+#include "replay_havok.h"
 #include <array>
 #include <cstdint>
 #include <cstring>

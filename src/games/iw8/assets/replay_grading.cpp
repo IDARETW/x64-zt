@@ -1,5 +1,5 @@
 #include <std_include.hpp>
-#include "assets/replay_grading.h"
+#include "replay_grading.h"
 
 #include <array>
 #include <cstring>

@@ -1,8 +1,8 @@
 #pragma once
-#include "zone/iw8_zone.h"
-#include "zone/replay_map_layout.h"
-#include "common/replay_render.h"
-#include "common/replay_sunshadow.h"
+#include "iw8_zone.h"
+#include "replay_map_layout.h"
+#include "../common/replay_render.h"
+#include "../common/replay_sunshadow.h"
 #include <cstdint>
 #include <string>
 

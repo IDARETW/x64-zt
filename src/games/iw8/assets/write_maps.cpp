@@ -1,9 +1,9 @@
 #include <std_include.hpp>
-#include "iw8_structs.h"
-#include "zone/iw8_zone.h"
-#include "zone/maps_write.h"
-#include "common/replay_lightgrid.h"
-#include "common/replay_render.h"
+#include "../iw8_structs.h"
+#include "../zone/iw8_zone.h"
+#include "../zone/maps_write.h"
+#include "../common/replay_lightgrid.h"
+#include "../common/replay_render.h"
 
 #include <algorithm>
 #include <array>

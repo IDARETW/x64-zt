@@ -1,10 +1,10 @@
 #include <std_include.hpp>
-#include "common/log.h"
-#include "dump/image_dump.h"
-#include "iw8_focus_structs.h"
-#include "iw8_structs.h"
-#include "zone/iw8_zone.h"
-#include "zone/iw8_zonebuffer.h"
+#include "../common/log.h"
+#include "../dump/image_dump.h"
+#include "../iw8_focus_structs.h"
+#include "../iw8_structs.h"
+#include "../zone/iw8_zone.h"
+#include "../zone/iw8_zonebuffer.h"
 #include <cstdint>
 #include <cstring>
 #include <string>

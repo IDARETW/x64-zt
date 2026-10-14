@@ -1,5 +1,5 @@
 games = {
-	known = {"h1", "h2", "iw7"},
+	known = {"h1", "h2", "iw3", "iw7", "iw8"},
 	enabled = {},
 	dependencies = {
 		h1 = function()
@@ -12,6 +12,22 @@ games = {
 		end,
 		iw7 = function()
 			dependencies.use(directxtex)
+		end,
+		iw3 = function()
+		end,
+		iw8 = function()
+			dependencies.use(directxtex)
+			filter "kind:ConsoleApp"
+				links {"bcrypt", "d3dcompiler", "d3d11"}
+			filter {}
+		end,
+	},
+	converter_imports = {
+		iw3_iw8 = function()
+			files {"src/convert/iw3_iw8/resources.rc"}
+			resincludedirs {"src/convert/iw3_iw8"}
+			-- The Havok baker maps the Replay executable at its own image base until native Havok replaces it.
+			linkoptions {"/BASE:0x180000000", "/DYNAMICBASE:NO"}
 		end,
 	},
 	converter_dependencies = {
@@ -162,5 +178,10 @@ function games.import()
 
 	for _, converter in ipairs(games.converters()) do
 		links {"convert-" .. converter.source .. "-" .. converter.target}
+
+		local import = games.converter_imports[converter.source .. "_" .. converter.target]
+		if import then
+			import()
+		end
 	end
 end

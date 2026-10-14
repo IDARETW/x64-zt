@@ -8,6 +8,7 @@ namespace zonetool::xfile
 	{
 		s1,
 		iw7,
+		unsupported,
 	};
 
 	struct format

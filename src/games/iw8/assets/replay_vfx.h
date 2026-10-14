@@ -1,7 +1,7 @@
 #pragma once
 
-#include "iw8_focus_structs.h"
-#include "zone/iw8_zone.h"
+#include "../iw8_focus_structs.h"
+#include "../zone/iw8_zone.h"
 
 #include <array>
 #include <string>

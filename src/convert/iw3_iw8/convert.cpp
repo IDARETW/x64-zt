@@ -1,4 +1,5 @@
 #include <std_include.hpp>
+#include <game.hpp>
 #include <iw8/zone/ff_io.h>
 #include <iw8/common/fs_util.h>
 #include <iw8/common/log.h>

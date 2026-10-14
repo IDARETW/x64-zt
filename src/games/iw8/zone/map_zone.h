@@ -1,14 +1,14 @@
 #pragma once
-#include "iw8_map_structs.h" // pinned Replay 1.20 map field maps and sizes
-#include "iw8_structs.h"
-#include "zone/iw8_zone.h"
-#include "zone/iw8_zonebuffer.h"
-#include "common/physics_asset_serialization.h"
-#include "common/replay_havok.h"
-#include "zone/replay_map_layout.h"
-#include "zone/replay_netconst.h"
-#include "zone/replay_spawns.h"
-#include "common/replay_static_model_collision.h"
+#include "../iw8_map_structs.h" // pinned Replay 1.20 map field maps and sizes
+#include "../iw8_structs.h"
+#include "iw8_zone.h"
+#include "iw8_zonebuffer.h"
+#include "../common/physics_asset_serialization.h"
+#include "../common/replay_havok.h"
+#include "replay_map_layout.h"
+#include "replay_netconst.h"
+#include "replay_spawns.h"
+#include "../common/replay_static_model_collision.h"
 
 #include <array>
 #include <string>
