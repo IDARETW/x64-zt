@@ -8,6 +8,8 @@
 #include <fstream>
 #include <iterator>
 #include <limits>
+#include <map>
+#include <mutex>
 #include <numeric>
 #include <optional>
 #include <set>
@@ -27,7 +29,7 @@ template <class T> void append(std::vector<uint8_t> &b, T v)
 }
 std::vector<uint8_t> unhex(const std::string &s)
 {
-    if (s.size() % 2 || s.size() > 131072)
+    if (s.size() % 2 || s.size() > 8388608)
         throw std::runtime_error("Invalid material byte data");
     std::vector<uint8_t> b;
     for (size_t i = 0; i < s.size(); i += 2)
@@ -57,7 +59,14 @@ bool nativeEffectTechset(const std::string_view name)
            name ==
                "elcq/unlit_6_effect_bad_tca_802_4_0_1_0_0_0_100060023_0_0_3_0_0" ||
            name ==
-               "elcq/unlit_6_effect_bad_ta0_802_4_0_1_0_0_0_100020023_0_0_2_0_0";
+               "elcq/unlit_6_effect_bad_ta0_802_4_0_1_0_0_0_100020023_0_0_2_0_0" ||
+           name == "elcq/dist_10_distortion_rpl_ta1_0_12_0_0_0";
+}
+
+// Stock refraction (heat haze) techset of common_mp elcq/vfx_dist_heat_1.
+bool nativeDistortionEffectTechset(const std::string_view name)
+{
+    return name == "elcq/dist_10_distortion_rpl_ta1_0_12_0_0_0";
 }
 
 bool nativeSimpleAlphaEffectTechset(const std::string_view name)
@@ -83,6 +92,12 @@ std::optional<uint8_t> generatedTextureSlot(const char *name)
         return uint8_t{9};
     if (!std::strcmp(name, "sourceResponseAtlas"))
         return uint8_t{59};
+    if (!std::strcmp(name, "instanceLighting") || !std::strcmp(name, "lightVolume"))
+        return uint8_t{0x3D};
+    if (!std::strcmp(name, "lightmapPrimary"))
+        return uint8_t{0x3E};
+    if (!std::strcmp(name, "lightmapSecondary"))
+        return uint8_t{0x3F};
     return std::nullopt;
 }
 
@@ -278,7 +293,16 @@ Image LoadImageDefinition(const std::string &path, const nlohmann::json &source,
         image.mipCount > 14 || (image.format != 6 && image.format != 7 && !blocks) ||
         mapType != expectedMapType || std::filesystem::path(pixels).filename() != pixels ||
         pixels.find("..") != std::string::npos)
-        throw std::runtime_error("Invalid resident Replay image definition");
+        throw std::runtime_error("Invalid resident Replay image definition: " + image.name +
+                                 " (format " + std::to_string(image.format) + ", " +
+                                 std::to_string(width) + "x" + std::to_string(height) + ", " +
+                                 std::to_string(image.mipCount) + " mips, flags 0x" +
+                                 [&] {
+                                     char text[16];
+                                     std::snprintf(text, sizeof(text), "%X", image.flags);
+                                     return std::string(text);
+                                 }() +
+                                 ")");
     if (cubemap && (width != height || depth != 1 || numElements != 1))
         throw std::runtime_error("Replay reflection image must be one square cubemap");
     if (array && (width != height || depth != 1 || numElements < 1))
@@ -315,11 +339,26 @@ Image LoadImageDefinition(const std::string &path, const nlohmann::json &source,
     image.numElements = static_cast<uint16_t>(numElements);
     image.semantic = static_cast<uint8_t>(semantic);
     image.category = static_cast<uint8_t>(category);
-    image.pixels.resize(length);
+    // Materials repeat image definitions (world atlas per glass pane, light volume per
+    // entity material): read each file once and share the bytes.
+    static std::mutex cacheMutex;
+    static std::map<std::string, std::weak_ptr<std::vector<uint8_t>>> cache;
+    const auto stamp = std::filesystem::last_write_time(pixelPath, error).time_since_epoch().count();
+    const std::string key = pixelPath.lexically_normal().string() + '|' + std::to_string(stamp) +
+                            '|' + std::to_string(length);
+    const std::lock_guard lock(cacheMutex);
+    if (auto cached = cache[key].lock())
+    {
+        image.pixels.share(std::move(cached));
+        return image;
+    }
+    auto bytes = std::make_shared<std::vector<uint8_t>>(length);
     std::ifstream input(pixelPath, std::ios::binary);
-    if (!input.read(reinterpret_cast<char *>(image.pixels.data()), length))
+    if (!input.read(reinterpret_cast<char *>(bytes->data()), length))
         throw std::runtime_error(std::string("Cannot read ") + (blocks ? "block-compressed" : "RGBA8") +
                                  " image pixels");
+    cache[key] = bytes;
+    image.pixels.share(std::move(bytes));
     return image;
 }
 
@@ -328,6 +367,7 @@ Material LoadMaterial(const std::string &path, const nlohmann::json &j,
 {
     Material m;
     m.material = j.at("material").get<std::string>();
+    m.source = j.value("source", std::string{});
     constexpr std::string_view effectPrefix = "elcq/mw120r_fx_";
     const bool ownedEffect = auxiliaryEffect && m.material.starts_with(effectPrefix) &&
                              m.material.size() <= 128 &&
@@ -542,7 +582,17 @@ Material LoadMaterial(const std::string &path, const nlohmann::json &j,
             const bool simpleAdditive = nativeSimpleAdditiveEffectTechset(m.techset);
             const bool oneBuffer = nativeSimpleAlphaEffectTechset(m.techset) ||
                                    nativeCloudEffectTechset(m.techset) || simpleAdditive;
-            if (materialType != 0x40200Cu || m.materialInfo[0x14] != 1 ||
+            // Distortion: stock vfx_dist_heat_1 metadata (sort 36, featherParms0 +
+            // distortionScale, one buffer).
+            if (nativeDistortionEffectTechset(m.techset))
+            {
+                if (materialType != 0x40200Cu || m.materialInfo[0x11] != 36 ||
+                    m.materialInfo[0x14] != 1 || m.materialInfo[0x15] != 2 ||
+                    m.materialInfo[0x16] != 1 || m.materialInfo[0x1A] != 1 ||
+                    m.materialInfo[0x1B] != 1)
+                    throw std::runtime_error("Replay distortion material has invalid metadata");
+            }
+            else if (materialType != 0x40200Cu || m.materialInfo[0x14] != 1 ||
                 (oneBuffer ? m.materialInfo[0x15] != (simpleAdditive ? 2 : 1) ||
                                   m.materialInfo[0x16] != 1 ||
                                   m.materialInfo[0x1A] != 1 || m.materialInfo[0x1B] != 1
@@ -653,13 +703,28 @@ Material LoadMaterial(const std::string &path, const nlohmann::json &j,
                 m.buffers.size() == 1 && m.buffers.front()[0].empty() &&
                 m.buffers.front()[1].empty() && m.buffers.front()[2].empty() &&
                 m.buffers.front()[3].size() == 48;
+            // Stock atlas effect materials (techsets_common vfx_pyro_exp_rise):
+            // shadow buffer = vertex rows; emissive buffer = vertex rows + 144-byte
+            // pixel block (effect colour, tint, atlas).
             const bool featherBuffers =
                 m.buffers.size() == 2 && m.buffers.front()[0].size() == 160 &&
                 m.buffers.front()[1].empty() && m.buffers.front()[2].empty() &&
-                m.buffers.front()[3].empty() && m.buffers.back()[0].empty() &&
+                m.buffers.front()[3].empty() && m.buffers.back()[0].size() == 160 &&
                 m.buffers.back()[1].empty() && m.buffers.back()[2].empty() &&
-                m.buffers.back()[3].empty();
-            if (!common || (oneBuffer ? !oneBufferBindings : !featherBuffers))
+                m.buffers.back()[3].size() == 144;
+            // Distortion: slot 0x9D (distortionMap); technique 30's buffer holds
+            // 16 vertex bytes (featherParms0) and 96 pixel bytes (row 5 distortionScale).
+            const bool distortion = nativeDistortionEffectTechset(m.techset);
+            const bool distortionBindings =
+                m.images.size() == 1 && m.textureHeaders.size() == 8 &&
+                m.textureHeaders[0] == 0x9D &&
+                std::all_of(m.textureHeaders.begin() + 1, m.textureHeaders.end(),
+                            [](const uint8_t value) { return value == 0; }) &&
+                m.buffers.size() == 1 && m.buffers.front()[0].size() == 16 &&
+                m.buffers.front()[1].empty() && m.buffers.front()[2].empty() &&
+                m.buffers.front()[3].size() == 96;
+            if (distortion ? !distortionBindings
+                           : (!common || (oneBuffer ? !oneBufferBindings : !featherBuffers)))
                 throw std::runtime_error("Replay effect material alias has invalid bindings");
         }
         if (ownedDecalCarrier &&
@@ -768,7 +833,7 @@ void validateRange(const std::vector<uint8_t> &data, uint32_t offset, uint64_t s
 }
 
 void validateUmbraTome(const std::vector<uint8_t> &data, uint32_t objectCount,
-                       uint32_t worldSurfaceCount, unsigned width)
+                       const std::vector<uint32_t> &expectedUserIDs, unsigned width)
 {
     if (data.size() < kUmbraHeaderSize || data.size() > UINT32_MAX ||
         read32(data, 0) != kUmbraVersion || read32(data, 8) != data.size())
@@ -801,9 +866,7 @@ void validateUmbraTome(const std::vector<uint8_t> &data, uint32_t objectCount,
     const uint32_t objectLists = read32(data, 0x58);
     for (uint32_t object = 0; object < objectCount; ++object)
     {
-        const uint32_t expectedUserID =
-            object < worldSurfaceCount ? object : 0x10000000u + object - worldSurfaceCount;
-        if (read32(data, userIDs + object * 4) != expectedUserID ||
+        if (read32(data, userIDs + object * 4) != expectedUserIDs.at(object) ||
             unpackObjectIndex(data, objectLists, uint64_t(object) * width, width) != object)
             throw std::runtime_error("Conservative Umbra object mapping is not lossless");
     }
@@ -852,8 +915,10 @@ replaybounds::Bounds LoadBounds(const nlohmann::json &value)
     {
         const double minimum = value[0][axis].get<double>();
         const double maximum = value[1][axis].get<double>();
+        // Sanity range only: Replay's large (BR) worlds exceed 100000, and IW3
+        // maps such as mp_discovery_night place background terrain at 137k.
         if (!std::isfinite(minimum) || !std::isfinite(maximum) || minimum > maximum ||
-            std::abs(minimum) > 100000 || std::abs(maximum) > 100000)
+            std::abs(minimum) > 262144 || std::abs(maximum) > 262144)
             throw std::runtime_error("Invalid brush-model bounds");
         bounds.midpoint[axis] = float((minimum + maximum) * 0.5);
         const double required =
@@ -1023,6 +1088,36 @@ Mesh Load(const std::string &path)
             throw std::runtime_error("Invalid auxiliary material table");
         for (const auto &definition : definitions)
             m.assetMaterials.push_back(LoadMaterial(path, definition, true));
+    }
+    if (j.contains("sunFlare"))
+    {
+        const auto &sun = j.at("sunFlare");
+        for (const char *key : {"spriteSize", "flareMinSize", "flareMinDot", "flareMaxSize",
+                                "flareMaxDot", "flareMaxAlpha", "flareFadeInTime",
+                                "flareFadeOutTime", "blindMinDot", "blindMaxDot",
+                                "blindMaxDarken", "blindFadeInTime", "blindFadeOutTime",
+                                "glareMinDot", "glareMaxDot", "glareMaxLighten",
+                                "glareFadeInTime", "glareFadeOutTime"})
+        {
+            const double value = sun.at(key).get<double>();
+            if (!std::isfinite(value) || std::abs(value) > 1.0e6)
+                throw std::runtime_error("Invalid sun flare value");
+            m.sunFlare.push_back(value);
+        }
+    }
+    if (j.contains("stockMaterials"))
+    {
+        const auto &names = j.at("stockMaterials");
+        if (!names.is_array() || names.size() > 256)
+            throw std::runtime_error("Invalid stock material table");
+        for (const auto &name : names)
+        {
+            const auto text = name.get<std::string>();
+            if (text.empty() || text.size() > 255 || text.front() == ',' ||
+                text.find('\0') != std::string::npos)
+                throw std::runtime_error("Invalid stock material name");
+            m.stockMaterials.push_back(text);
+        }
     }
     const auto &list = j.at("surfaces");
     const unsigned atlasLayout = j.value("atlasVertexLayout", 1u);
@@ -1480,7 +1575,9 @@ Mesh Load(const std::string &path)
                 for (unsigned k = 0; k < 2; ++k)
                 {
                     const double value = v.at("lightmapUV").at(k).get<double>();
-                    if (!std::isfinite(value) || value < 0 || value >= 65536)
+                    // Tile and flag words (layer rank in bits 12-17) stay exact
+                    // as float integers below 2^24.
+                    if (!std::isfinite(value) || value < 0 || value >= 16777216.0)
                         throw std::runtime_error("Atlas metadata is outside supported range");
                     append(m.aux, float(std::floor(value)));
                 }
@@ -1564,6 +1661,18 @@ Mesh Load(const std::string &path)
         put(sf, 8, uint16_t(vertices.size()));
         put(sf, 10, uint16_t(indices.size() / 3));
         put(sf, 12, baseIndex);
+        // Opaque world triangles (alpha-tested foliage included; sky, blended
+        // layers and brush models excluded) feed the GfxWorld heightfield.
+        if (opaque && !sky && activeModel == 0)
+            m.shadowCasterSurfaces.push_back(i);
+        if (opaque && !sky && activeModel == 0)
+            for (size_t ix = 0; ix < indices.size(); ++ix)
+            {
+                const unsigned a = indices[ix].get<unsigned>();
+                float point[3];
+                std::memcpy(point, m.positions.data() + posOffset + 12 * a, sizeof(point));
+                m.solidTriangles.insert(m.solidTriangles.end(), point, point + 3);
+            }
         put(sf, 16, PTR_FOLLOWS);
         put(sf, 24, i);
         put(sf, 30, uint16_t(lightmapIndex));
@@ -1577,10 +1686,16 @@ Mesh Load(const std::string &path)
         put(sf, 32, uint8_t(castsSunShadow | sunShadowMask |
                             (sky ? 0 : umbraOccluder)));
         auto *bounds = m.bounds.data() + 56 * i;
+        // Culling bounds. Translucent surfaces write no depth, so the GPU
+        // occlusion pass tests them against the wall they sit on: IW3 signs and
+        // decal quads 0-1.4 units off their wall culled out with view angle and
+        // distance (owner, Discovery round 89; inferred cause). A wider margin
+        // keeps them conservative.
+        const float margin = opaque ? 1.0f : 16.0f;
         for (unsigned k = 0; k < 3; ++k)
         {
             put(bounds, 4 * k, (mins[k] + maxs[k]) * 0.5f);
-            put(bounds, 12 + 4 * k, (maxs[k] - mins[k]) * 0.5f + 1.0f);
+            put(bounds, 12 + 4 * k, (maxs[k] - mins[k]) * 0.5f + margin);
         }
         auto *gpu = m.surfData.data() + 88 * i;
         put(gpu, 4, uint32_t(surfaceLayout == 3 ? 4 : surfaceLayout));
@@ -1621,6 +1736,8 @@ void StampWorld(std::vector<uint8_t> &w, const Mesh &m)
         put(w.data(), 0x3F98 + off, PTR_FOLLOWS);
     put(w.data(), 0x41E0, PTR_FOLLOWS); // sortedSurfaces[words*32], disk-backed uint32
     put(w.data(), 0x41F8, PTR_FOLLOWS); // surface casts-sun-shadow bits, runtime
+    // materialLod0SizeThreshold (+0x3EE8): shipped worlds store 0.5 (mp_hideout).
+    put(w.data(), 0x3EE8, 0.5f);
 }
 
 namespace
@@ -1637,7 +1754,7 @@ struct StaticModelLayout
         uint16_t material{};
         replaybounds::Bounds bounds{};
         float drawDistance{};
-        bool backfaceCull{};
+        uint8_t cullType{};
     };
 
     std::vector<Surface> surfaces;
@@ -1705,7 +1822,7 @@ StaticModelLayout BuildStaticModelLayout(const StaticModels &source)
                                            static_cast<uint8_t>(surfaceIndex),
                                            static_cast<uint16_t>(found - result.materials.begin()),
                                            surface.bounds, model.lods.back().distance,
-                                           surface.backfaceCull});
+                                           surface.cullType});
             }
             modelSurfaceCount += lod.surfaces.size();
         }
@@ -1776,6 +1893,12 @@ uint16_t PackQuaternionComponent(const float value)
         std::lround((std::clamp(value, -1.0f, 1.0f) * 0.5f + 0.5f) * 65535.0f));
 }
 } // namespace
+
+replaybounds::Bounds StaticModelWorldBounds(const StaticModels &models, const size_t instance)
+{
+    const auto &placement = models.instances.at(instance);
+    return TransformBounds(models.models.at(placement.model).bounds, placement);
+}
 
 void StampStaticModels(std::vector<uint8_t> &world, const StaticModels &models)
 {
@@ -1932,10 +2055,8 @@ void EmitStaticModels(ZoneWriter &writer, const StaticModels &models,
     for (const auto &surface : layout.surfaces)
     {
         writer.writeT(surface.material);
-        // GfxSModelSurfMatIndirection.cullType: shipped Shipment uses 0xEF for
-        // back-face culled materials and 0x6E for cull-none ones (bit 0 enables
-        // the GPU triangle/cluster back-face tests).
-        writer.writeT<uint8_t>(surface.backfaceCull ? 0xEF : 0x6E);
+        // GfxSModelSurfMatIndirection.cullType (StaticModelCullType).
+        writer.writeT<uint8_t>(surface.cullType);
         writer.writeT<uint8_t>(0x0F);
     }
     writer.align(3);
@@ -2463,6 +2584,15 @@ void RegisterMapMaterials(ZoneWriter &main, ZoneWriter &techsets, const Mesh &me
         registerOne(material);
     for (const auto &material : mesh.assetMaterials)
         registerOne(material);
+    // The common zone owns these; the map only names them. Both zones carry the
+    // name-only reference so each main-zone material keeps a techset-zone peer.
+    for (const auto &name : mesh.stockMaterials)
+    {
+        if (mainRegistered.emplace(ASSET_TYPE_MATERIAL, name).second)
+            RegisterMaterialReference(main, name);
+        if (techsetRegistered.emplace(ASSET_TYPE_MATERIAL, name).second)
+            RegisterMaterialReference(techsets, name);
+    }
 }
 void RegisterReflectionProbeImage(ZoneWriter &w, const Mesh &mesh)
 {
@@ -2513,12 +2643,37 @@ void EmitVertices(ZoneWriter &w, const Mesh &m)
     w.write(m.indices.data(), m.indices.size());
 }
 
-std::vector<uint8_t> BuildUmbraTome(const Mesh &m, const StaticModels &staticModels)
+std::vector<uint8_t> BuildUmbraTome(const Mesh &m, const StaticModels &staticModels,
+                                    const std::vector<uint32_t> &primaryLights,
+                                    const uint32_t reflectionProbeInstances)
 {
     BuildStaticModelLayout(staticModels);
     const uint32_t worldSurfaceCount = m.worldSurfaceCount();
     const uint32_t staticModelCount = static_cast<uint32_t>(staticModels.instances.size());
-    const uint32_t objectCount = worldSurfaceCount + staticModelCount;
+    const uint32_t objectCount = worldSurfaceCount + staticModelCount +
+                                 static_cast<uint32_t>(primaryLights.size()) +
+                                 reflectionProbeInstances;
+    // Umbra user IDs carry the object class in bits 28-30 (query consumer
+    // 0x18CCA80): 0 world surface, 1 static model, 4 primary light (sets the
+    // light's primaryLightVisData bit), 5 reflection-probe instance. Static
+    // local lights reach the light binning (0x186C4F0) only through these
+    // query results.
+    std::vector<uint32_t> userIDList;
+    userIDList.reserve(objectCount);
+    for (uint32_t surface = 0; surface < worldSurfaceCount; ++surface)
+        userIDList.push_back(surface);
+    for (uint32_t model = 0; model < staticModelCount; ++model)
+        userIDList.push_back(0x10000000u + model);
+    for (const uint32_t light : primaryLights)
+    {
+        if (light > 0xFFFFFF)
+            throw std::runtime_error("Replay primary light exceeds the Umbra user-ID range");
+        userIDList.push_back(0x40000000u + light);
+    }
+    // Class 5: reflection-probe instances (reflectionProbeVisData bits);
+    // shipped tomes list them too (mp_hideout: 41).
+    for (uint32_t probe = 0; probe < reflectionProbeInstances; ++probe)
+        userIDList.push_back(0x50000000u + probe);
     if (!objectCount || objectCount > 0x01000000 ||
         uint64_t(worldSurfaceCount) * 56 > m.bounds.size())
         throw std::runtime_error("Replay world surfaces cannot be represented by Umbra object IDs");
@@ -2604,11 +2759,7 @@ std::vector<uint8_t> BuildUmbraTome(const Mesh &m, const StaticModels &staticMod
 
     const uint32_t userIDs = allocate16(tome, uint64_t(objectCount) * 4);
     for (uint32_t object = 0; object < objectCount; ++object)
-    {
-        const uint32_t userID =
-            object < worldSurfaceCount ? object : 0x10000000u + object - worldSurfaceCount;
-        put(tome.data(), userIDs + uint64_t(object) * 4, userID);
-    }
+        put(tome.data(), userIDs + uint64_t(object) * 4, userIDList[object]);
     put(tome.data(), 0x50, userIDs);
 
     const uint32_t objectLists = allocate16(tome, packedObjects.size());
@@ -2679,7 +2830,7 @@ std::vector<uint8_t> BuildUmbraTome(const Mesh &m, const StaticModels &staticMod
 
     put(tome.data(), 0x08, static_cast<uint32_t>(tome.size()));
     put(tome.data(), 0x04, crc32c(tome.data() + 8, tome.size() - 8));
-    validateUmbraTome(tome, objectCount, worldSurfaceCount, indexWidth);
+    validateUmbraTome(tome, objectCount, userIDList, indexWidth);
     return tome;
 }
 

@@ -1,8 +1,16 @@
 #include <std_include.hpp>
 #include "iw3_sound.h"
+#include "iw3_ledger.h"
 
 #include <iw8/common/fs_util.h>
 #include <iw8/common/log.h>
+
+#include <Windows.h>
+#include <mfapi.h>
+#include <mfidl.h>
+#include <mfreadwrite.h>
+#include <shlwapi.h>
+#include <wrl/client.h>
 
 #include <algorithm>
 #include <array>
@@ -339,6 +347,14 @@ class Iwd
         return members_.contains(name);
     }
 
+    std::vector<std::string> Names() const
+    {
+        std::vector<std::string> names;
+        for (const auto &[name, member] : members_)
+            names.push_back(name);
+        return names;
+    }
+
     std::vector<uint8_t> Read(const std::string &name) const
     {
         const Member &member = members_.at(name);
@@ -396,6 +412,105 @@ struct Pcm
     uint8_t channels{};
     std::vector<int16_t> samples;
 };
+
+// IW3 also streams MP3 (ambient loops such as ambient/amb_middle_east1v7_lr.mp3).
+// Windows Media Foundation decodes it to 16-bit PCM in memory.
+std::optional<Pcm> DecodeCompressedAudio(const std::vector<uint8_t> &file, std::string &error)
+{
+    using Microsoft::WRL::ComPtr;
+    static const HRESULT started = MFStartup(MF_VERSION, MFSTARTUP_LITE);
+    if (FAILED(started))
+    {
+        error = "Media Foundation is unavailable";
+        return std::nullopt;
+    }
+    const HRESULT com = CoInitializeEx(nullptr, COINIT_MULTITHREADED);
+    const bool comOwned = SUCCEEDED(com);
+    struct ComScope
+    {
+        bool owned;
+        ~ComScope()
+        {
+            if (owned)
+                CoUninitialize();
+        }
+    } scope{comOwned};
+    if (file.empty() || file.size() > 0x7FFFFFFF)
+    {
+        error = "compressed audio has an invalid size";
+        return std::nullopt;
+    }
+    ComPtr<IStream> stream;
+    stream.Attach(SHCreateMemStream(file.data(), static_cast<UINT>(file.size())));
+    ComPtr<IMFByteStream> byteStream;
+    ComPtr<IMFSourceReader> reader;
+    ComPtr<IMFMediaType> requested;
+    if (!stream || FAILED(MFCreateMFByteStreamOnStream(stream.Get(), &byteStream)) ||
+        FAILED(MFCreateSourceReaderFromByteStream(byteStream.Get(), nullptr, &reader)) ||
+        FAILED(MFCreateMediaType(&requested)) ||
+        FAILED(requested->SetGUID(MF_MT_MAJOR_TYPE, MFMediaType_Audio)) ||
+        FAILED(requested->SetGUID(MF_MT_SUBTYPE, MFAudioFormat_PCM)) ||
+        FAILED(requested->SetUINT32(MF_MT_AUDIO_BITS_PER_SAMPLE, 16)) ||
+        FAILED(reader->SetStreamSelection(static_cast<DWORD>(MF_SOURCE_READER_ALL_STREAMS), FALSE)) ||
+        FAILED(reader->SetStreamSelection(static_cast<DWORD>(MF_SOURCE_READER_FIRST_AUDIO_STREAM), TRUE)) ||
+        FAILED(reader->SetCurrentMediaType(static_cast<DWORD>(MF_SOURCE_READER_FIRST_AUDIO_STREAM),
+                                           nullptr, requested.Get())))
+    {
+        error = "Media Foundation cannot decode the audio";
+        return std::nullopt;
+    }
+    ComPtr<IMFMediaType> actual;
+    if (FAILED(reader->GetCurrentMediaType(static_cast<DWORD>(MF_SOURCE_READER_FIRST_AUDIO_STREAM),
+                                           &actual)))
+    {
+        error = "Media Foundation has no PCM output";
+        return std::nullopt;
+    }
+    Pcm result;
+    result.rate = MFGetAttributeUINT32(actual.Get(), MF_MT_AUDIO_SAMPLES_PER_SECOND, 0);
+    const UINT32 channels = MFGetAttributeUINT32(actual.Get(), MF_MT_AUDIO_NUM_CHANNELS, 0);
+    if (!result.rate || channels < 1 || channels > 2 ||
+        MFGetAttributeUINT32(actual.Get(), MF_MT_AUDIO_BITS_PER_SAMPLE, 0) != 16)
+    {
+        error = "decoded audio has an unsupported format";
+        return std::nullopt;
+    }
+    result.channels = static_cast<uint8_t>(channels);
+    for (;;)
+    {
+        DWORD flags = 0;
+        ComPtr<IMFSample> sample;
+        if (FAILED(reader->ReadSample(static_cast<DWORD>(MF_SOURCE_READER_FIRST_AUDIO_STREAM), 0,
+                                      nullptr, &flags, nullptr, &sample)))
+        {
+            error = "Media Foundation failed while decoding";
+            return std::nullopt;
+        }
+        if (sample)
+        {
+            ComPtr<IMFMediaBuffer> buffer;
+            BYTE *data = nullptr;
+            DWORD length = 0;
+            if (FAILED(sample->ConvertToContiguousBuffer(&buffer)) ||
+                FAILED(buffer->Lock(&data, nullptr, &length)))
+            {
+                error = "Media Foundation returned an unreadable sample";
+                return std::nullopt;
+            }
+            const auto *pcm = reinterpret_cast<const int16_t *>(data);
+            result.samples.insert(result.samples.end(), pcm, pcm + length / 2);
+            buffer->Unlock();
+        }
+        if (flags & MF_SOURCE_READERF_ENDOFSTREAM)
+            break;
+    }
+    if (result.samples.empty())
+    {
+        error = "decoded audio is empty";
+        return std::nullopt;
+    }
+    return result;
+}
 
 std::optional<Pcm> ReadWav(const std::vector<uint8_t> &file, std::string &error)
 {
@@ -547,7 +662,11 @@ struct Iw3Alias
     float lfe{};
     int startDelay{};
     bool looping{};
+    float center{};
+    float envelopMin{}, envelopMax{}, envelopPercentage{};
+    unsigned channel{1}; // IW3 entity channel (flags bits 8-13, soundaliases/channels.def order)
     std::string secondary;
+    std::string curve; // IW3 volume falloff curve (soundaliases/<curve>.vfcurve)
 };
 
 std::map<std::string, std::vector<Iw3Alias>> ReadZoneAliases(const std::filesystem::path &exportRoot)
@@ -586,8 +705,23 @@ std::map<std::string, std::vector<Iw3Alias>> ReadZoneAliases(const std::filesyst
             alias.lfe = source.value("lfe_percentage", 0.0f);
             alias.startDelay = source.value("start_delay", 0);
             alias.looping = (source.value("flags", 0) & 1) != 0;
+            alias.channel = (source.value("flags", 0u) >> 8) & 63u;
+            alias.center = source.value("center_percentage", 0.0f);
+            if (source.contains("envelope") && source.at("envelope").is_object())
+            {
+                alias.envelopMin = source.at("envelope").value("min", 0.0f);
+                alias.envelopMax = source.at("envelope").value("max", 0.0f);
+                alias.envelopPercentage = source.at("envelope").value("percentage", 0.0f);
+            }
             if (source.contains("secondary_alias") && source.at("secondary_alias").is_string())
                 alias.secondary = Lower(source.at("secondary_alias").get<std::string>());
+            if (source.contains("volume_falloff_curve") && source.at("volume_falloff_curve").is_string())
+            {
+                // Curves from another zone carry IW3's ',' reference prefix.
+                alias.curve = Lower(source.at("volume_falloff_curve").get<std::string>());
+                while (!alias.curve.empty() && alias.curve.front() == ',')
+                    alias.curve.erase(alias.curve.begin());
+            }
             if (!alias.file.empty())
                 result[name].push_back(std::move(alias));
         }
@@ -717,6 +851,18 @@ std::map<std::string, std::vector<Iw3Alias>> ReadCsvAliases(const std::vector<st
                 alias.lfe = number("lfe percentage", 0.0f);
                 alias.startDelay = static_cast<int>(number("startdelay", 0.0f));
                 alias.looping = Lower(get("loop")).find("looping") != std::string::npos;
+                // The channel column by name, in soundaliases/channels.def order.
+                static constexpr std::array<std::string_view, 33> kIw3Channels{
+                    "physics",  "auto",    "auto2",       "autodog", "bulletimpact", "bulletwhizby",
+                    "element",  "auto2d",  "vehicle",     "vehiclelimited", "menu",  "body",
+                    "body2d",   "reload",  "reload2d",    "item",    "effects1",     "effects2",
+                    "weapon",   "weapon2d", "nonshock",   "voice",   "local",        "local2",
+                    "ambient",  "hurt",    "player1",     "player2", "music",        "musicnopause",
+                    "mission",  "announcer", "shellshock"};
+                const std::string channelName = Lower(get("channel"));
+                for (std::size_t channel = 0; channel < kIw3Channels.size(); ++channel)
+                    if (channelName == kIw3Channels[channel])
+                        alias.channel = static_cast<unsigned>(channel);
                 alias.secondary = Lower(get("secondaryaliasname"));
                 result[Lower(fields[0])].push_back(std::move(alias));
             }
@@ -778,6 +924,36 @@ Role RoleFor(const std::string &name, const bool looping)
 }
 
 // Stock Replay map-bank curves (mp_shipment.all vfCurves), copied by value.
+// IW3 SNDCURVE text: "SNDCURVE", the knot count, then "distance volume" knots,
+// both normalized; Replay vfCurves use the same (distance, volume) points.
+std::optional<iw8::sound::Curve> ReadIw3Curve(const std::filesystem::path &exportRoot,
+                                              const std::string &name)
+{
+    std::string text;
+    if (name.empty() || name.find_first_of("/\\.") != std::string::npos ||
+        !zt::read_file_str((exportRoot / "soundaliases" / (name + ".vfcurve")).string(), text))
+        return std::nullopt;
+    ledger::Use("soundcurve", name);
+    std::istringstream input(text);
+    std::string magic;
+    std::size_t count = 0;
+    if (!(input >> magic >> count) || magic != "SNDCURVE" || count < 2 || count > 16)
+        return std::nullopt;
+    iw8::sound::Curve curve{"mw120r_" + name, {}};
+    float previous = -1.0f;
+    for (std::size_t index = 0; index < count; ++index)
+    {
+        float distance{}, volume{};
+        if (!(input >> distance >> volume) || !std::isfinite(distance) || !std::isfinite(volume) ||
+            distance < 0.0f || distance > 1.0f || distance < previous || volume < 0.0f ||
+            volume > 1.0f)
+            return std::nullopt;
+        previous = distance;
+        curve.points.push_back({distance, volume});
+    }
+    return curve;
+}
+
 iw8::sound::Curve CurveNamed(const std::string &name)
 {
     if (name == "standard_concave")
@@ -793,8 +969,10 @@ std::set<std::string> ReadScriptSoundNames(const std::filesystem::path &scriptDi
     if (!std::filesystem::is_directory(scriptDirectory, error))
         return names;
     static const std::regex direct(
-        R"re(\b(?:playsound|playloopsound|playsoundasmaster|soundexists)\s*\(\s*"([^"]+)")re", std::regex::icase);
+        R"re(\b(?:playsound|playloopsound|playsoundasmaster|soundexists|ambientplay)\s*\(\s*"([^"]+)")re", std::regex::icase);
     static const std::regex positional(R"re(\bplaysoundatpos\s*\([^;]*?,\s*"([^"]+)"\s*\))re", std::regex::icase);
+    // createfx loop sounds: ent.v[ "soundalias" ] = "alias";
+    static const std::regex createfx(R"re(\[\s*"soundalias"\s*\]\s*=\s*"([^"]+)")re", std::regex::icase);
     for (const auto &entry : std::filesystem::directory_iterator(scriptDirectory, error))
     {
         if (Lower(entry.path().extension().string()) != ".gsc")
@@ -802,7 +980,7 @@ std::set<std::string> ReadScriptSoundNames(const std::filesystem::path &scriptDi
         std::string text;
         if (!zt::read_file_str(entry.path().string(), text))
             continue;
-        for (const std::regex *pattern : {&direct, &positional})
+        for (const std::regex *pattern : {&direct, &positional, &createfx})
             for (auto match = std::sregex_iterator(text.begin(), text.end(), *pattern);
                  match != std::sregex_iterator(); ++match)
                 names.insert(Lower((*match)[1].str()));
@@ -810,11 +988,33 @@ std::set<std::string> ReadScriptSoundNames(const std::filesystem::path &scriptDi
     return names;
 }
 
+std::set<std::string> ReadScriptStringLiterals(const std::filesystem::path &scriptDirectory)
+{
+    std::set<std::string> names;
+    std::error_code error;
+    if (!std::filesystem::is_directory(scriptDirectory, error))
+        return names;
+    static const std::regex literal(R"re("([A-Za-z0-9_]+)")re");
+    for (const auto &entry : std::filesystem::directory_iterator(scriptDirectory, error))
+    {
+        if (Lower(entry.path().extension().string()) != ".gsc")
+            continue;
+        std::string text;
+        if (!zt::read_file_str(entry.path().string(), text))
+            continue;
+        for (auto match = std::sregex_iterator(text.begin(), text.end(), literal);
+             match != std::sregex_iterator(); ++match)
+            names.insert(Lower((*match)[1].str()));
+    }
+    return names;
+}
+
 std::optional<ConvertedSounds> Convert(const std::filesystem::path &exportRoot,
                                        const std::vector<std::filesystem::path> &searchPaths,
-                                       const std::string &map, const std::set<std::string> &requested)
+                                       const std::string &map, const std::set<std::string> &requested,
+                                       const std::set<std::string> &candidates)
 {
-    if (requested.empty())
+    if (requested.empty() && candidates.empty())
         return std::nullopt;
     const auto zoneAliases = ReadZoneAliases(exportRoot);
     const auto csvAliases = ReadCsvAliases(searchPaths, Lower(map));
@@ -831,6 +1031,15 @@ std::optional<ConvertedSounds> Convert(const std::filesystem::path &exportRoot,
     std::vector<std::string> order;
     std::set<std::string> visited;
     std::vector<std::string> pending(requested.begin(), requested.end());
+    std::size_t literalAliases = 0;
+    for (const auto &name : candidates)
+        if (!requested.contains(name) && definition(Lower(name)))
+        {
+            pending.push_back(name);
+            ++literalAliases;
+        }
+    if (literalAliases)
+        zt::info("iw3 sound: %zu alias(es) passed to map script helpers as literals", literalAliases);
     while (!pending.empty())
     {
         const std::string name = Lower(pending.back());
@@ -865,7 +1074,11 @@ std::optional<ConvertedSounds> Convert(const std::filesystem::path &exportRoot,
         const auto bytes = files.Find(path, source);
         std::optional<Pcm> pcm;
         if (bytes)
+        {
             pcm = ReadWav(*bytes, failure);
+            if (!pcm && Lower(path).ends_with(".mp3"))
+                pcm = DecodeCompressedAudio(*bytes, failure);
+        }
         else
             failure = "not found in the extracted zone, raw sound folders or IWDs";
         if (!pcm)
@@ -874,8 +1087,11 @@ std::optional<ConvertedSounds> Convert(const std::filesystem::path &exportRoot,
             missing[path] = true;
             return nullptr;
         }
+        ledger::Use("loadedsound", path);
         iw8::sound::Sample sample;
-        std::string stem = path.ends_with(".wav") ? path.substr(0, path.size() - 4) : path;
+        std::string stem = path.ends_with(".wav") || path.ends_with(".mp3")
+                               ? path.substr(0, path.size() - 4)
+                               : path;
         std::replace(stem.begin(), stem.end(), '/', '\\');
         sample.name = prefix + stem;
         sample.rate = pcm->rate;
@@ -913,6 +1129,7 @@ std::optional<ConvertedSounds> Convert(const std::filesystem::path &exportRoot,
     result.bank.zone = "vehicle_engine_type4_npc";
     result.bank.streamKey = Lower(map) + "_all_loaded";
     std::set<std::string> curves{"default"};
+    std::map<std::string, std::optional<iw8::sound::Curve>> iw3Curves;
     for (const auto &name : order)
     {
         if (!converted.contains(name))
@@ -932,6 +1149,17 @@ std::optional<ConvertedSounds> Convert(const std::filesystem::path &exportRoot,
             if (!source.secondary.empty() && converted.contains(source.secondary))
                 alias.secondaryName = source.secondary;
             alias.flags = role.flags;
+            // IW3 plays 2D channels (channels.def: auto2d, menu, body2d, reload2d,
+            // weapon2d, local, local2, ambient, hurt, player1/2, music, announcer,
+            // shellshock) without spatialisation; the role templates' Replay channels
+            // are 3D, so a 2D IW3 alias takes a 2D Replay entchannel (SndGlobals:
+            // 125 amb_bed_2d for loops, 2 scn_fx_unres_2d otherwise; flags bits 10-17).
+            static constexpr std::array<bool, 33> kIw3Channel2d{
+                false, false, false, false, false, false, false, true,  false, false, true,
+                false, true,  false, true,  false, false, false, false, true,  false, false,
+                true,  true,  true,  true,  true,  true,  true,  true,  false, true,  true};
+            if (source.channel < kIw3Channel2d.size() && kIw3Channel2d[source.channel])
+                alias.flags = (alias.flags & ~(0xFFu << 10)) | ((source.looping ? 125u : 2u) << 10);
             alias.volModIndex = role.volModIndex;
             alias.volMin = std::clamp(source.volMin * role.gain, 0.0f, 1.0f);
             alias.volMax = std::clamp(std::max(source.volMax, source.volMin) * role.gain, 0.0f, 1.0f);
@@ -941,9 +1169,27 @@ std::optional<ConvertedSounds> Convert(const std::filesystem::path &exportRoot,
             alias.distMax = std::max(source.distMax, alias.distMin + 1.0f);
             alias.probability = source.probability > 0 ? source.probability : 1.0f;
             alias.lfePercentage = std::clamp(source.lfe, 0.0f, 1.0f);
+            alias.centerPercentage = std::clamp(source.center, 0.0f, 1.0f);
+            alias.envelopMin = std::max(0.0f, source.envelopMin);
+            alias.envelopMax = std::max(alias.envelopMin, source.envelopMax);
+            alias.envelopPercentage = std::clamp(source.envelopPercentage, 0.0f, 1.0f);
             alias.startDelay = std::max(0, source.startDelay);
-            alias.volumeFalloffCurve = iw8::sound::HashName(role.curve);
-            curves.insert(role.curve);
+            // The alias's own IW3 falloff curve, else IW3's linear default. Replay
+            // evaluates vfCurves exactly as IW3 does: piecewise-linear knots
+            // (0x141B75310) over t = (dist - distMin) / (distMax - distMin)
+            // clamped to [0, 1] (0x141B71959); the donut fade (flags bits 4-6) is off.
+            auto found = iw3Curves.find(source.curve);
+            if (!source.curve.empty() && found == iw3Curves.end())
+                found = iw3Curves.emplace(source.curve, ReadIw3Curve(exportRoot, source.curve)).first;
+            if (!source.curve.empty() && found->second)
+                alias.volumeFalloffCurve = iw8::sound::HashName(found->second->name);
+            else
+            {
+                if (!source.curve.empty() && source.curve != "default")
+                    zt::warn("iw3 sound: %s falloff curve %s is unreadable; linear default",
+                             name.c_str(), source.curve.c_str());
+                alias.volumeFalloffCurve = iw8::sound::HashName("default");
+            }
             alias.reverbMultiplier = role.reverb;
             alias.farReverbMultiplier = role.farReverb;
             alias.stereoSpreadMinDist = role.spreadMin;
@@ -961,6 +1207,18 @@ std::optional<ConvertedSounds> Convert(const std::filesystem::path &exportRoot,
     }
     for (const auto &name : curves)
         result.bank.volumeCurves.push_back(CurveNamed(name));
+    std::size_t convertedCurves = 0;
+    for (const auto &[name, curve] : iw3Curves)
+        if (curve)
+        {
+            result.bank.volumeCurves.push_back(*curve);
+            ++convertedCurves;
+        }
+        else
+            zt::warn("iw3 sound: falloff curve %s did not convert; its aliases use the role curve",
+                     name.c_str());
+    if (convertedCurves)
+        zt::info("iw3 sound: converted %zu IW3 falloff curve(s)", convertedCurves);
     std::vector<iw8::sound::Sample> ordered;
     for (auto &[path, sample] : samples)
         ordered.push_back(std::move(sample));
@@ -976,5 +1234,58 @@ std::optional<ConvertedSounds> Convert(const std::filesystem::path &exportRoot,
         zt::info("iw3 sound: wrote SAB copy to %s", dump);
     }
     return result;
+}
+std::size_t ExtractIwdMembers(const std::filesystem::path &directory,
+                              const std::vector<std::string> &prefixes,
+                              const std::filesystem::path &destination)
+{
+    std::error_code error;
+    if (!std::filesystem::is_directory(directory, error))
+        return 0;
+    std::vector<std::filesystem::path> archives;
+    for (const auto &entry : std::filesystem::directory_iterator(directory, error))
+        if (entry.is_regular_file() && Lower(entry.path().extension().string()) == ".iwd")
+            archives.push_back(entry.path());
+    // IW3 searches later archives first, so they extract first and win.
+    std::sort(archives.rbegin(), archives.rend());
+    std::size_t extracted = 0;
+    for (const auto &archive : archives)
+    {
+        try
+        {
+            const Iwd iwd(archive);
+            for (const auto &name : iwd.Names())
+            {
+                if (name.empty() || name.back() == '/' ||
+                    std::ranges::none_of(prefixes, [&](const std::string &prefix) {
+                        return name.starts_with(prefix);
+                    }))
+                    continue;
+                // Archive member names are untrusted: keep each one inside
+                // the destination.
+                const std::filesystem::path relative(name);
+                if (relative.is_absolute() || relative.has_root_name() ||
+                    std::ranges::any_of(relative, [](const std::filesystem::path &part) {
+                        return part == "..";
+                    }))
+                    continue;
+                const auto target = destination / relative;
+                if (std::filesystem::exists(target, error))
+                    continue;
+                std::filesystem::create_directories(target.parent_path(), error);
+                const auto data = iwd.Read(name);
+                std::ofstream file(target, std::ios::binary);
+                file.write(reinterpret_cast<const char *>(data.data()),
+                           static_cast<std::streamsize>(data.size()));
+                if (file)
+                    ++extracted;
+            }
+        }
+        catch (const std::exception &failure)
+        {
+            zt::warn("iw3: skipped IWD %s: %s", archive.string().c_str(), failure.what());
+        }
+    }
+    return extracted;
 }
 } // namespace iw3::sound

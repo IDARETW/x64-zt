@@ -9,6 +9,7 @@
 #include <iw8/dump/material_dumpsrc.h>
 #include <iw8/dump/xmodel_dump.h>
 #include "iw3_fastfile.h"
+#include "iw3_ledger.h"
 #include "iw3_vision.h"
 #include "iw3_scripts.h"
 #include <iw8/zone/iw8_ffheader.h>
@@ -17,12 +18,17 @@
 #include <iw8/zone/maps_write.h>
 #include <iw8/assets/replay_dynentity.h>
 #include <iw8/common/replay_havok.h>
+#include <iw8/assets/replay_heightfield.h>
+#include <iw8/assets/replay_ies.h>
+#include <iw8/assets/replay_locallights.h>
+#include <iw8/assets/replay_xanim.h>
 #include <iw8/assets/replay_impact.h>
 #include <iw8/common/replay_navigation.h>
 #include <iw8/assets/replay_rawfile.h>
 #include <iw8/assets/replay_grading.h>
 #include <iw8/common/replay_render.h>
 #include <iw8/assets/replay_script.h>
+#include <iw8/assets/replay_stock.h>
 #include <iw8/assets/replay_vfx.h>
 #include <iw8/assets/write_xsurface.h>
 #include <iw8/assets/write_weapon.h>
@@ -36,6 +42,9 @@
 #include <filesystem>
 #include <fstream>
 #include <limits>
+#include <memory>
+#include <optional>
+#include <string_view>
 #include <regex>
 #include <set>
 #include <string>
@@ -62,7 +71,11 @@ struct Args
     std::string lightingProfile = "source";
     float sunIntensityScale = 1.0f;
     bool navigation = true;
+    bool iw3ModeAssets = true;
+    std::string style = "iw3";
     std::string gscTool;
+    std::string actsExecutable;
+    std::string stockCache;
 };
 
 struct MapMetadata
@@ -73,9 +86,16 @@ struct MapMetadata
     std::string description;
     unsigned compassRotation{};
     bool compassRotationSet{};
+    // Ladder rung spacing for the DW client (0 = Replay's 12).
+    float ladderRungDistance{};
     // Contraction of the IW3 minimap region about its centre (see the compass
     // bounds below); build-time only, not written to the package map.json.
-    float minimapScale{0.875f};
+    // 1.0 = IW3's own squared region: Nuketown's art measures about 12 units per
+    // pixel over it (playable strip 378 x 170 px against ~4500 x 2100 units of
+    // playable geometry). The former 0.875, from one in-game point (fixes-25),
+    // left the marker drifting (owner test 2026-10-14). In game the console dvar
+    // mw120r_minimap_scale overrides it (see iw3compat_minimap).
+    float minimapScale{1.0f};
 };
 
 bool isMapId(const std::string &map)
@@ -172,6 +192,12 @@ bool readMetadata(const std::string &path, MapMetadata &metadata)
                 metadata.compassRotation != 180 && metadata.compassRotation != 270)
                 throw std::runtime_error("compassRotation must be 0, 90, 180, or 270 clockwise");
         }
+        if (const auto rungs = data.find("ladderRungDistance"); rungs != data.end())
+        {
+            if (!rungs->is_number() || rungs->get<double>() < 8 || rungs->get<double>() > 32)
+                throw std::runtime_error("ladderRungDistance must be a number from 8 to 32");
+            metadata.ladderRungDistance = rungs->get<float>();
+        }
         if (const auto scale = data.find("minimapScale"); scale != data.end())
         {
             if (!scale->is_number() || scale->get<double>() < 0.5 || scale->get<double>() > 1.5)
@@ -230,6 +256,10 @@ bool writeMetadata(const std::string &directory, const MapMetadata &metadata)
     {
         data["compassRotation"] = metadata.compassRotation;
     }
+    if (metadata.ladderRungDistance > 0.0f && metadata.ladderRungDistance != 12.0f)
+    {
+        data["ladderRungDistance"] = metadata.ladderRungDistance;
+    }
     std::ofstream output(std::filesystem::path(directory) / "map.json", std::ios::binary);
     if (!output)
     {
@@ -238,6 +268,24 @@ bool writeMetadata(const std::string &directory, const MapMetadata &metadata)
     }
     output << data.dump(2) << '\n';
     return output.good();
+}
+
+// Optional package file: the map's loading-screen artwork for the custom-map
+// UI ("MWRI", version 1, width, height, then RGBA8; 1..2048 on each side).
+constexpr char kPreviewFile[] = "preview.rgba";
+
+bool validPreview(const std::filesystem::path &path)
+{
+    std::ifstream input(path, std::ios::binary | std::ios::ate);
+    if (!input)
+        return false;
+    const auto size = static_cast<std::uint64_t>(input.tellg());
+    input.seekg(0);
+    std::uint32_t header[4]{};
+    if (!input.read(reinterpret_cast<char *>(header), sizeof(header)) || header[0] != 0x4952574Du ||
+        header[1] != 1 || header[2] < 1 || header[2] > 2048 || header[3] < 1 || header[3] > 2048)
+        return false;
+    return size == sizeof(header) + std::uint64_t(header[2]) * header[3] * 4;
 }
 
 bool prepareOutputDirectory(const std::string &outputDirectory, const std::string &map)
@@ -257,8 +305,9 @@ bool prepareOutputDirectory(const std::string &outputDirectory, const std::strin
     for (const auto &entry : std::filesystem::directory_iterator(outputDirectory, error))
     {
         if (error || !entry.is_regular_file(error) ||
-            std::find(expected.begin(), expected.end(), entry.path().filename().string()) ==
-                expected.end())
+            (std::find(expected.begin(), expected.end(), entry.path().filename().string()) ==
+                 expected.end() &&
+             entry.path().filename() != kPreviewFile))
         {
             err("build-map: output directory must be empty or contain only this map's files");
             return false;
@@ -302,7 +351,7 @@ bool validateZoneFile(const std::string &path, ZoneValidation *details = nullptr
     }
 
     if (header.transientFileType != 0 || header.residentHash != 0 ||
-        header.xfileHeader.preloadWalkSize != 0 ||
+        header.xfileHeader.preloadWalkSize == 0 ||
         header.xfileHeader.blockSize[iw8::XFILE_BLOCK_TEMP] != sizeof(IW8_XAssetList) ||
         header.xfileHeader.blockSize[iw8::XFILE_BLOCK_CALLBACK] != 0 ||
         header.xfileHeader.blockSize[iw8::XFILE_BLOCK_SCRIPT] != 0 ||
@@ -448,9 +497,20 @@ bool validatePackage(const std::string &packageDirectory, const std::string &map
         return false;
     }
     std::sort(actual.begin(), actual.end());
+    if (const auto preview = std::find(actual.begin(), actual.end(), kPreviewFile);
+        preview != actual.end())
+    {
+        if (!validPreview(std::filesystem::path(packageDirectory) / kPreviewFile))
+        {
+            err("validate: preview.rgba is not a valid MWRI image");
+            return false;
+        }
+        actual.erase(preview);
+    }
     if (actual != expectedFiles(map))
     {
-        err("validate: output must contain exactly five map fastfiles and map.json");
+        err("validate: output must contain exactly five map fastfiles and map.json "
+            "(and optionally preview.rgba)");
         return false;
     }
 
@@ -487,14 +547,16 @@ bool validatePackage(const std::string &packageDirectory, const std::string &map
             err("validate: map render definitions must reside in the techset zone and images in the main zone");
             valid = false;
         }
-        for (size_t index = 2; index < 4; ++index)
+        // eng_<map> carries the map's English strings (LocalizeEntry) and the
+        // stock CODCaster image stock packs there; ww_<map> only the worldwide
+        // CODCaster images (section 19).
+        const auto &english = validation[2].typeCounts;
+        const auto &worldwide = validation[3].typeCounts;
+        if (validation[2].assetCount != english[ASSET_TYPE_LOCALIZE] + english[ASSET_TYPE_IMAGE] ||
+            validation[3].assetCount != worldwide[ASSET_TYPE_IMAGE])
         {
-            if (validation[index].assetCount)
-            {
-                err("validate: generated localization companions must be empty");
-                valid = false;
-                break;
-            }
+            err("validate: eng_ may hold only localized strings and images, ww_ only images");
+            valid = false;
         }
     }
     if (valid)
@@ -634,6 +696,10 @@ template <typename Buffer> Iw8WriteParams writeParams(const Buffer &buffer)
         params.totalDecompressed += params.blockSize[index];
     }
     params.calcSize = buffer.calcSize();
+    // Converted maps record ~2.5 plan entries of ~3.5 bytes per top-level asset
+    // (Nuketown 19905 bytes / 2535 assets, Gulag 26469 / 2908).
+    params.preloadWalkSize =
+        (std::max)(params.preloadWalkSize, uint64_t(128) * buffer.assetCount());
     return params;
 }
 
@@ -673,6 +739,7 @@ iw8::MapSun loadLighting(const Args &args, const std::string &dumpDirectory,
             throw std::runtime_error("invalid map lighting schema");
         }
         lighting.intensity = data.at("intensity").get<float>();
+        lighting.lightUnitScale = data.value("light_unit_scale", 1.0f);
 
         float directionLength = 0.0f;
         float upLength = 0.0f;
@@ -811,6 +878,65 @@ iw8::MapSun loadLighting(const Args &args, const std::string &dumpDirectory,
     return lighting;
 }
 
+// IW3 lights a surface with diffuse = color * r_diffuseColorScale (1) * falloff(d / radius),
+// in the units of the IW3 sun the world keeps (R_SetLightProperties; light_point_linear
+// samples falloff_linear = 1 - d/r). Replay's record builder (0x19A9020) turns ComPrimaryLight
+// intensity into sphere-light radiance intensity * color / bulb^2, and the stock forward+ shader
+// applies the sphere form factor ~ N.L * bulb^2 / d^2: irradiance = intensity * color * N.L / d^2,
+// inside a window that is 1 up to 80% of the radius (1 / distance falloff 0.2). Each IW3 spot or
+// omni gets the intensity that gives IW3's brightness where its axis meets the world (a spot's
+// lit surface), capped at half its radius.
+void calibrateLocalLights(iw8::MapSun &lighting, const std::vector<float> &solidTriangles)
+{
+    for (size_t index = 0; index < lighting.primaryLights.size(); ++index)
+    {
+        auto &light = lighting.primaryLights[index];
+        if (light.type < 2 || index == lighting.sunPrimaryLightIndex || light.radius <= 0.0f)
+            continue;
+        if (light.definition != "light_point_linear")
+            warn("local light %zu: IW3 light def '%s' falloff assumed linear", index,
+                 light.definition.c_str());
+        double reference = light.radius * 0.5;
+        if (light.type == 2)
+        {
+            // Emission axis = -ComPrimaryLight dir. Nearest triangle hit (Moller-Trumbore).
+            const double o[3]{light.origin[0], light.origin[1], light.origin[2]};
+            const double d[3]{-light.direction[0], -light.direction[1], -light.direction[2]};
+            double nearest = reference;
+            for (size_t t = 0; t + 9 <= solidTriangles.size(); t += 9)
+            {
+                const float *v = &solidTriangles[t];
+                const double e1[3]{v[3] - v[0], v[4] - v[1], v[5] - v[2]};
+                const double e2[3]{v[6] - v[0], v[7] - v[1], v[8] - v[2]};
+                const double p[3]{d[1] * e2[2] - d[2] * e2[1], d[2] * e2[0] - d[0] * e2[2],
+                                  d[0] * e2[1] - d[1] * e2[0]};
+                const double det = e1[0] * p[0] + e1[1] * p[1] + e1[2] * p[2];
+                if (std::abs(det) < 1e-9)
+                    continue;
+                const double s[3]{o[0] - v[0], o[1] - v[1], o[2] - v[2]};
+                const double u = (s[0] * p[0] + s[1] * p[1] + s[2] * p[2]) / det;
+                if (u < 0.0 || u > 1.0)
+                    continue;
+                const double q[3]{s[1] * e1[2] - s[2] * e1[1], s[2] * e1[0] - s[0] * e1[2],
+                                  s[0] * e1[1] - s[1] * e1[0]};
+                const double w = (d[0] * q[0] + d[1] * q[1] + d[2] * q[2]) / det;
+                if (w < 0.0 || u + w > 1.0)
+                    continue;
+                const double distance = (e2[0] * q[0] + e2[1] * q[1] + e2[2] * q[2]) / det;
+                if (distance > 1.0 && distance < nearest)
+                    nearest = distance;
+            }
+            reference = nearest;
+        }
+        reference = std::max(reference, 16.0);
+        const double falloff = 1.0 - reference / light.radius;
+        light.intensity = static_cast<float>(falloff * reference * reference) * lighting.lightUnitScale;
+        info("local light %zu: IW3 color %.3f %.3f %.3f, reference %.1f of radius %.0f -> intensity %.1f",
+             index, light.color[0], light.color[1], light.color[2], reference, light.radius,
+             light.intensity);
+    }
+}
+
 iw8::havok::BakeResult loadCollision(const Args &args, const std::string &dumpDirectory,
                                      const std::string &assetName)
 {
@@ -835,6 +961,191 @@ iw8::havok::BakeResult loadCollision(const Args &args, const std::string &dumpDi
     return collision;
 }
 
+// Output side of the per-asset ledger (checklist section 20): every asset the
+// map's zones register, with where it came from. Origins come from the render
+// materials (their IW3 source, textures, techsets and shaders), the prepared
+// IW3 models, effects and other prepared data, and fixed rules for the world and
+// generated assets. Anything else is UNEXPLAINED.
+struct OutputLedgerRow
+{
+    std::string zone, type, name, origin;
+};
+
+std::vector<OutputLedgerRow> outputLedgerRows(
+    const std::string &zone, const std::vector<std::pair<IW8_XAssetType, std::string>> &assets,
+    const replayrender::Mesh &mesh, const iw3::PreparedMap *prepared, const std::string &map,
+    const iw8::stock::Copier *stock)
+{
+    std::map<std::pair<int, std::string>, std::string> origins;
+    const auto set = [&](const int type, const std::string &name, const std::string &origin) {
+        if (!name.empty())
+            origins.emplace(std::pair{type, name}, origin);
+    };
+    const auto addMaterial = [&](const replayrender::Material &m) {
+        const std::string what = m.material + (m.source.empty() ? std::string(" (generated variant)")
+                                                                : " (IW3 " + m.source + ")");
+        set(ASSET_TYPE_MATERIAL, m.material,
+            m.source.empty() ? "generated material variant" : "IW3 material " + m.source);
+        set(ASSET_TYPE_TECHSET, m.techset, "techset of material " + what);
+        for (const auto &shader : m.shaders)
+            set(shader.type, shader.name, "shader of material " + what);
+        for (const auto &image : m.imageDefinitions)
+            set(ASSET_TYPE_IMAGE, image.name, "texture of material " + what);
+        set(ASSET_TYPE_DECAL_VOLUME_MATERIAL, m.decalVolumeMaterial, "decal volume of material " + what);
+    };
+    addMaterial(mesh);
+    for (const auto &m : mesh.additionalMaterials)
+        addMaterial(m);
+    for (const auto &m : mesh.assetMaterials)
+        addMaterial(m);
+    set(ASSET_TYPE_IMAGE, mesh.reflectionProbeArrayImage.name, "IW3 reflection probes (GfxWorld)");
+    for (const auto &name : mesh.stockMaterials)
+        set(ASSET_TYPE_MATERIAL, name,
+            "name-only reference to the stock common-zone material (loaded with the common zones)");
+    if (prepared)
+    {
+        for (const auto &model : prepared->xmodels)
+        {
+            const std::string origin = model.role + " from IW3 model " + model.source;
+            set(ASSET_TYPE_XMODEL, model.model.name, origin);
+            for (const auto &lod : model.lods)
+                set(ASSET_TYPE_XMODELSURFS, lod.name, "LOD of " + origin);
+            set(ASSET_TYPE_PHYSICSASSET, model.physicsAsset.name, "physics of " + origin);
+        }
+        for (const auto &effect : prepared->vfxEffects)
+            set(ASSET_TYPE_VFX, effect.name, "IW3 effect");
+        for (const auto &anim : prepared->xanims)
+            set(ASSET_TYPE_XANIM, anim.name, "IW3 xanim");
+        for (const auto &raw : prepared->rawFiles)
+            set(ASSET_TYPE_RAWFILE, raw.name,
+                raw.name.starts_with("vision/") ? "IW3 vision (converted, layer 17)"
+                : raw.name.starts_with("sun/")  ? "IW3 sun (layer 17)"
+                                                : "IW3 map-local raw file");
+        if (prepared->soundBank)
+            set(ASSET_TYPE_SOUNDBANK, prepared->soundBank->name, "IW3 sound aliases (map bank)");
+        if (!prepared->gradingClutName.empty())
+        {
+            set(ASSET_TYPE_GRADINGCLUT, prepared->gradingClutName, "IW3 film grade (layer 17)");
+            set(ASSET_TYPE_IMAGE, "gradingclut" + prepared->gradingClutName, "IW3 film grade (layer 17)");
+        }
+        if (!prepared->vfxLightDef.empty())
+            set(ASSET_TYPE_LIGHTDEF, prepared->vfxLightDef, "light of IW3 effects / local lights");
+    }
+    if (stock)
+        for (const auto &[key, origin] : stock->Origins())
+            origins.emplace(key, origin);
+
+    std::vector<OutputLedgerRow> rows;
+    for (const auto &[type, name] : assets)
+    {
+        std::string origin;
+        if (const auto found = origins.find({static_cast<int>(type), name}); found != origins.end())
+            origin = found->second;
+        else
+            switch (type)
+            {
+            case ASSET_TYPE_GFX_MAP:
+            case ASSET_TYPE_GFX_MAP_TRZONE:
+            case ASSET_TYPE_COL_MAP:
+            case ASSET_TYPE_COM_MAP:
+            case ASSET_TYPE_GLASS_MAP:
+            case ASSET_TYPE_FX_MAP:
+            case ASSET_TYPE_MAP_ENTS:
+                origin = "IW3 world (gfxworld, clipmap, comworld, mapents)";
+                break;
+            case ASSET_TYPE_AIPATHS:
+            case ASSET_TYPE_NAVMESH:
+            case ASSET_TYPE_TACGRAPH:
+                origin = "bot navigation generated from the converted collision";
+                break;
+            case ASSET_TYPE_EDGELIST:
+                origin = "IW3 ladders (clipmap)";
+                break;
+            case ASSET_TYPE_DYNENTITYLIST:
+                origin = "IW3 dynamic entities";
+                break;
+            case ASSET_TYPE_IMPACT_FX:
+                origin = "impact table (IW3 impacts or Replay's, per --style)";
+                break;
+            case ASSET_TYPE_NET_CONST_STRINGS:
+                origin = "level string tables (models, effects, anims the zone uses)";
+                break;
+            case ASSET_TYPE_SCRIPTFILE:
+                origin = "IW3 map GSC, translated";
+                break;
+            case ASSET_TYPE_LOCALIZE:
+                origin = "map-intro chyron (generated, section 19)";
+                break;
+            case ASSET_TYPE_STREAMKEY:
+                if (prepared && prepared->soundBank)
+                    origin = "IW3 sound aliases (map bank SAB)";
+                break;
+            case ASSET_TYPE_RAWFILE:
+                if (name == map || name == map + "_load")
+                    origin = "zone marker";
+                break;
+            case ASSET_TYPE_LIGHTDEF:
+                if (name == "flashlight" || name == "light_ies_nvg_flashlight")
+                    origin = "stock IES light (section 19)";
+                else if (name == "light_point_linear")
+                    origin = "IW3 local lights (comworld)";
+                break;
+            case ASSET_TYPE_IMAGE:
+                if (name == iw8::heightfield::kHeightmapName || name == iw8::heightfield::kOutdoorName)
+                    origin = "generated from the converted world (heightfield)";
+                else if (name == iw8::ies::kLookupName)
+                    origin = "stock IES profiles (section 19)";
+                else if (name == "compass_map_" + map)
+                    origin = "IW3 minimap image";
+                break;
+            case ASSET_TYPE_MATERIAL:
+                if (name == "compass_map_" + map)
+                    origin = "minimap material for the IW3 minimap image";
+                break;
+            case ASSET_TYPE_PHYSICSASSET:
+                if (name.starts_with("mw120r_glasschunk"))
+                    origin = "glass shard physics (IW3 glass)";
+                break;
+            default:
+                break;
+            }
+        rows.push_back({zone, iw8sz::type_name(type), name, origin.empty() ? "UNEXPLAINED" : origin});
+    }
+    return rows;
+}
+
+void writeOutputLedger(const std::vector<OutputLedgerRow> &rows)
+{
+    std::filesystem::path path = iw3::ledger::Report();
+    if (path.empty())
+        return;
+    std::string text = path.string();
+    if (text.ends_with(".iw3-assets.tsv"))
+        text.replace(text.size() - 15, 15, ".iw8-assets.tsv");
+    std::ofstream output(text, std::ios::binary | std::ios::trunc);
+    output << "zone\ttype\tname\torigin\n";
+    std::map<std::string, std::size_t> unexplained;
+    std::map<std::pair<std::string, std::string>, std::size_t> counts;
+    for (const auto &row : rows)
+    {
+        output << row.zone << '\t' << row.type << '\t' << row.name << '\t' << row.origin << '\n';
+        ++counts[{row.zone, row.type}];
+        if (row.origin == "UNEXPLAINED")
+            ++unexplained[row.type];
+    }
+    info("build-map: output ledger: %zu asset(s) across %zu zone/type group(s) written to %s",
+         rows.size(), counts.size(), text.c_str());
+    for (const auto &[type, count] : unexplained)
+    {
+        std::string examples;
+        for (const auto &row : rows)
+            if (row.type == type && row.origin == "UNEXPLAINED" && examples.size() < 160)
+                examples += (examples.empty() ? "" : ", ") + row.name;
+        warn("build-map: output ledger: %zu %s asset(s) are UNEXPLAINED: %s", count, type.c_str(),
+             examples.c_str());
+    }
+}
+
 int writeMapPackage(const Args &args, const std::string &map, const std::string &outputDirectory,
                     const std::string &entities, const iw8::MapBounds &bounds,
                     const std::string &dumpDirectory, const MapMetadata &metadata,
@@ -848,8 +1159,33 @@ int writeMapPackage(const Args &args, const std::string &map, const std::string 
     }
 
     LapTimer timing("package");
+    std::vector<OutputLedgerRow> ledgerRows;
+    // Stock assets every shipped map carries and IW3 has no source for (section
+    // 19): surface-fx `void` with its effects, and the CODCaster images.
+    std::unique_ptr<iw8::stock::Copier> stockCopier;
+    {
+        std::string acts = args.actsExecutable;
+        if (acts.empty())
+            if (const char *value = std::getenv("IW8_ACTS"); value && *value)
+                acts = value;
+        if (acts.empty() || args.replayExecutable.empty())
+            warn("build-map: no --acts (or IW8_ACTS) and --replay: the stock surface-fx table `void` and the "
+                 "CODCaster images are not copied");
+        else
+        {
+            iw8::stock::Options options;
+            options.acts = acts;
+            options.replayExecutable = args.replayExecutable;
+            options.cacheDirectory =
+                args.stockCache.empty()
+                    ? std::filesystem::absolute(outputDirectory).parent_path() / "_stock_cache"
+                    : std::filesystem::path(args.stockCache);
+            stockCopier = std::make_unique<iw8::stock::Copier>(options);
+            timing.lap("stock exports");
+        }
+    }
     const std::string assetName = "maps/mp/" + map + ".d3dbsp";
-    const iw8::MapSun lighting = loadLighting(args, dumpDirectory, assetName);
+    iw8::MapSun lighting = loadLighting(args, dumpDirectory, assetName);
     const std::string renderPath = path_join(dumpDirectory, assetName + ".render.json");
     if (!file_exists(renderPath))
     {
@@ -857,18 +1193,69 @@ int writeMapPackage(const Args &args, const std::string &map, const std::string 
     }
     const auto renderMesh = replayrender::Load(renderPath);
     timing.lap("render load");
+    calibrateLocalLights(lighting, renderMesh.solidTriangles);
     // Use the final ComWorld sun vector, including any requested profile.
     // Replay rejects compressed shadows whose stored direction differs from
     // the active sun. Moving entities and breakable panes are not baked.
-    const auto sunShadow = prepared
-        ? replaysunshadow::Bake(prepared->shadowScene,
-                                {lighting.direction[0], lighting.direction[1], lighting.direction[2]},
-                                renderMesh.sceneBounds)
-        : replaysunshadow::Data{};
+    // Shipped worlds keep this blob near 14-20 MB; a large IW3 world at one unit
+    // per texel can reach hundreds of MB, so it uses Backlot's two-unit texels.
+    // Worlds far larger than their play space (Greenband: 5.2M caster triangles
+    // over +/-100000 units) overflow even then; their last step bakes only the
+    // casters that can shadow the minimap region plus a margin.
+    constexpr std::size_t kSunShadowBudget = 96u * 1024u * 1024u;
+    const auto bakeSunShadow = [&](const float sampleSize, const replaybounds::Bounds *focus)
+        -> std::optional<replaysunshadow::Data> {
+        try
+        {
+            auto data = replaysunshadow::Bake(
+                prepared->shadowScene, {lighting.direction[0], lighting.direction[1], lighting.direction[2]},
+                renderMesh.sceneBounds, sampleSize, focus);
+            if (data.bytes.size() <= kSunShadowBudget)
+                return data;
+            info("sun-shadow: %zu bytes at %.0f unit(s) per texel%s exceed the %zu-byte budget",
+                 data.bytes.size(), sampleSize, focus ? " (play-space crop)" : "", kSunShadowBudget);
+        }
+        catch (const std::runtime_error &error)
+        {
+            if (std::string_view(error.what()).find("exceeds") == std::string_view::npos)
+                throw;
+            info("sun-shadow: %s at %.0f unit(s) per texel%s", error.what(), sampleSize,
+                 focus ? " (play-space crop)" : "");
+        }
+        return std::nullopt;
+    };
+    replaysunshadow::Data sunShadow;
+    if (prepared)
+    {
+        auto baked = bakeSunShadow(1.0f, nullptr);
+        if (!baked)
+            baked = bakeSunShadow(2.0f, nullptr);
+        if (!baked && compassBounds)
+        {
+            constexpr float margin = 4096.0f;
+            replaybounds::Bounds focus = renderMesh.sceneBounds;
+            const float minX = std::min(compassBounds->northwestX, compassBounds->southeastX) - margin;
+            const float maxX = std::max(compassBounds->northwestX, compassBounds->southeastX) + margin;
+            const float minY = std::min(compassBounds->northwestY, compassBounds->southeastY) - margin;
+            const float maxY = std::max(compassBounds->northwestY, compassBounds->southeastY) + margin;
+            focus.midpoint[0] = (minX + maxX) * 0.5f;
+            focus.midpoint[1] = (minY + maxY) * 0.5f;
+            focus.halfSize[0] = (maxX - minX) * 0.5f;
+            focus.halfSize[1] = (maxY - minY) * 0.5f;
+            info("sun-shadow: baking only casters that shadow the minimap region +%.0f units "
+                 "(%.0f..%.0f, %.0f..%.0f)", margin, minX, maxX, minY, maxY);
+            baked = bakeSunShadow(2.0f, &focus);
+        }
+        if (!baked)
+            throw std::runtime_error("compressed sun-shadow does not fit the native format even at two "
+                                     "units per texel over the play space");
+        sunShadow = std::move(*baked);
+    }
     if (!sunShadow.bytes.empty())
-        info("sun-shadow: baked %u cells at %u resolution, %zu native compressed bytes",
+        info("sun-shadow: baked %u cells at %u resolution (%u uniform, %u quadtree), %zu native "
+             "compressed bytes",
              sunShadow.parameters.forestSize, sunShadow.parameters.resolution,
-             sunShadow.bytes.size());
+             sunShadow.uniformCells, sunShadow.treeCells, sunShadow.bytes.size());
     timing.lap("sun shadow bake");
     const auto glassInitCount = static_cast<uint32_t>(renderMesh.glassPanes.size());
     iw8::havok::PhysicsAsset glassPhysics;
@@ -974,6 +1361,8 @@ int writeMapPackage(const Args &args, const std::string &map, const std::string 
                                                   prepared->gradingClutPixels);
             for (const auto &rawFile : prepared->rawFiles)
                 iw8::rawfile::Register(writer, rawFile.name, rawFile.data);
+            for (const auto &anim : prepared->xanims)
+                iw8::xanim::Register(writer, anim);
             if (prepared->soundBank)
                 iw8::sound::RegisterBank(writer, *prepared->soundBank);
             for (const auto &model : prepared->xmodels)
@@ -996,6 +1385,8 @@ int writeMapPackage(const Args &args, const std::string &map, const std::string 
                               prepared ? prepared->smallGlassEffect : std::string{},
                               prepared ? prepared->impactOverrides
                                        : iw8::impact::EffectOverrides{});
+        if (stockCopier)
+            stockCopier->RegisterSurfaceEffects(writer, techsets);
         if (!renderMesh.glassPanes.empty())
         {
             writer.add(ASSET_TYPE_FX_MAP, assetName,
@@ -1007,14 +1398,63 @@ int writeMapPackage(const Args &args, const std::string &map, const std::string 
         const auto sunPrimaryLightIndex = lighting.sunPrimaryLightIndex;
         const replayrender::StaticModels staticModels =
             prepared ? prepared->staticModels : replayrender::StaticModels{};
+        const std::array<float, 3> sunDirection{lighting.direction[0], lighting.direction[1],
+                                                lighting.direction[2]};
+        // The world's IES lookup strip and the stock IES LightDefs (flashlight,
+        // NVG illuminator), as shipped maps carry; registered before the world.
+        iw8::ies::Register(writer);
+        // Native GfxWorld heightfield and outdoor mask (shipped worlds carry
+        // both); the images precede the world that references them.
+        std::optional<iw8::heightfield::Data> heightfield;
+        if (!renderMesh.solidTriangles.empty())
+        {
+            // Opaque world triangles plus every sun-shadow caster, which adds the
+            // static models (shipped heightmaps include model-built structures).
+            std::vector<float> solid = renderMesh.solidTriangles;
+            if (prepared)
+                for (const auto &surface : prepared->shadowScene.surfaces)
+                    for (const auto &vertex : surface.vertices)
+                        solid.insert(solid.end(), vertex.position.begin(), vertex.position.end());
+            heightfield = iw8::heightfield::Build(solid, renderMesh.sceneBounds);
+            iw8::heightfield::Register(writer, *heightfield);
+            info("heightfield: %ux%u over %zu triangles", heightfield->size, heightfield->size,
+                 renderMesh.solidTriangles.size() / 9);
+        }
+        // Local (spot/omni) primary lights: GfxWorld volumes, shadow frustums,
+        // BVH and static caster lists.
+        std::vector<iw8::locallights::Light> localLightSources;
+        for (const auto &source : lighting.primaryLights)
+        {
+            iw8::locallights::Light light;
+            light.type = source.type;
+            light.canUseShadowMap = source.canUseShadowMap;
+            std::copy(std::begin(source.origin), std::end(source.origin), light.origin.begin());
+            // ComPrimaryLight dir points back toward the light (IW3 negates the
+            // angle vector, cg_ents_mp; shipped Replay spot volumes cover -dir:
+            // mp_hideout 42/42 unshadowed spots). The volumes need the emission axis.
+            for (size_t component = 0; component < 3; ++component)
+                light.direction[component] = -source.direction[component];
+            light.radius = source.radius;
+            light.cosHalfFovOuter = source.cosHalfFovOuter;
+            localLightSources.push_back(light);
+        }
+        const auto localLights = iw8::locallights::Build(localLightSources, sunPrimaryLightIndex,
+                                                         renderMesh, staticModels);
+        if (!localLights.Empty())
+            info("local lights: %zu volume(s), %zu dynamic-shadow, %zu mesh vertices",
+                 localLights.umbraLights.size(), localLights.aabbLights.size(),
+                 localLights.vertices.size());
         writer.add(ASSET_TYPE_GFX_MAP, assetName,
                    [assetName, renderPath, &renderMesh, primaryLightCount,
                     sunPrimaryLightIndex, staticModels, dynamicCounts,
-                    &sunShadow](iw8::ZoneWriter &output) {
+                    &sunShadow, sunDirection, &heightfield,
+                    &localLights](iw8::ZoneWriter &output) {
                        iw8maps::emitGfxMapBody(output, assetName.c_str(), renderPath,
                                                renderMesh, primaryLightCount, sunPrimaryLightIndex,
                                                staticModels, dynamicCounts.models,
-                                               dynamicCounts.brushes, sunShadow);
+                                               dynamicCounts.brushes, sunShadow, sunDirection,
+                                               heightfield ? &*heightfield : nullptr,
+                                               &localLights);
                    });
         writer.add(ASSET_TYPE_GLASS_MAP, assetName,
                    [assetName, &renderMesh](iw8::ZoneWriter &output) {
@@ -1041,12 +1481,24 @@ int writeMapPackage(const Args &args, const std::string &map, const std::string 
             std::string generated = "iw3compat_minimap()\n{\n";
             if (assets.hasCompass && compassBounds)
             {
-                char line[320];
-                std::snprintf(line, sizeof(line),
-                              "    setminimap( \"compass_map_%s\", %.3f, %.3f, %.3f, %.3f, 1, "
-                              "\"compass_map_%s\" );\n",
-                              map.c_str(), compassBounds->northwestX, compassBounds->northwestY,
-                              compassBounds->southeastX, compassBounds->southeastY, map.c_str());
+                // The console dvar mw120r_minimap_scale overrides the region scale
+                // relative to IW3's squared region (restart the match to apply), so
+                // the minimap can be calibrated in game without a rebuild.
+                const float cx = (compassBounds->northwestX + compassBounds->southeastX) * 0.5f;
+                const float cy = (compassBounds->northwestY + compassBounds->southeastY) * 0.5f;
+                const float base = metadata.minimapScale;
+                char line[1024];
+                std::snprintf(
+                    line, sizeof(line),
+                    "    scale = getdvarfloat( \"mw120r_minimap_scale\" );\n"
+                    "    if ( scale <= 0 )\n"
+                    "        scale = %.4f;\n"
+                    "    k = scale / %.4f;\n"
+                    "    setminimap( \"compass_map_%s\", %.3f + %.3f * k, %.3f + %.3f * k, "
+                    "%.3f + %.3f * k, %.3f + %.3f * k, 1, \"compass_map_%s\" );\n",
+                    base, base, map.c_str(), cx, compassBounds->northwestX - cx, cy,
+                    compassBounds->northwestY - cy, cx, compassBounds->southeastX - cx, cy,
+                    compassBounds->southeastY - cy, map.c_str());
                 generated += line;
             }
             generated += "}\n";
@@ -1115,18 +1567,27 @@ int writeMapPackage(const Args &args, const std::string &map, const std::string 
             for (const auto &model : scriptModels)
                 if (zoneModels.contains(model))
                     models.insert(model);
+            // Stock stand-ins (--style iw8 effects, unconverted graphs) live in the
+            // always-loaded common MP zones; loadfx still needs their name in a
+            // loaded "vfx" table.
             std::set<std::string> effects;
             for (const auto &effect : scriptEffects)
-                if (zoneEffects.contains(effect))
+                if (zoneEffects.contains(effect) ||
+                    (effect.starts_with("vfx/") && !effect.starts_with("vfx/mw120r/")))
                     effects.insert(effect);
             levelStrings[0].assign(models.begin(), models.end());  // "mdl"
             levelStrings[6].assign(effects.begin(), effects.end()); // "vfx"
+            // Script-played animations (scriptmodelplayanim) resolve through
+            // the level "anm" table, like script models through "mdl".
+            if (prepared)
+                for (const auto &anim : prepared->xanims)
+                    levelStrings[16].push_back(anim.name); // "anm"
             info("assets: level NetConstStrings: %zu model(s), %zu effect(s)", models.size(),
                  effects.size());
         }
         iw8::registerMapWorldAssets(
             writer, worldStrings, assetName, mapEntities, bounds, lighting, collision,
-            glassInitCount, glassPieceLimit, dynamicCounts.models, dynamicCounts.brushes,
+            glassInitCount, glassPieceLimit, dynamicCounts,
             prepared && prepared->vfxLightDef == "light_point_linear", levelStrings);
         timing.lap("asset registration");
         techsets.build();
@@ -1144,6 +1605,11 @@ int writeMapPackage(const Args &args, const std::string &map, const std::string 
             result = 1;
         }
         timing.lap("zone write");
+        for (auto &row : outputLedgerRows(map, writer.assetList(), renderMesh, prepared, map, stockCopier.get()))
+            ledgerRows.push_back(std::move(row));
+        for (auto &row : outputLedgerRows("techsets_" + map, techsets.assetList(), renderMesh, prepared, map,
+                                          stockCopier.get()))
+            ledgerRows.push_back(std::move(row));
         info("build-map: main zone contains %zu assets", writer.assetCount());
         info("build-map: techset zone contains %zu assets", techsets.assetCount());
     }
@@ -1158,12 +1624,69 @@ int writeMapPackage(const Args &args, const std::string &map, const std::string 
     };
     // Shipped srv_<map> zones hold only server extras; the world lives in the main zone.
     writeEmpty("srv_" + map + ".ff");
-    writeEmpty("eng_" + map + ".ff");
-    writeEmpty("ww_" + map + ".ff");
+    iw8::ZoneWriter english;
+    if (prepared && !prepared->chyronClock.empty())
+    {
+        // The map-intro chyron the MP HUD shows at match start (stock keeps
+        // every shipped map's in eng_code_post_gfx): per team, operation,
+        // clock (the game appends the running seconds), location, unit.
+        // IW3 maps name no location; "Classified" is the stock wording for one.
+        std::string operation = metadata.title.empty() ? map : metadata.title;
+        if (operation.ends_with(" (Classic)"))
+            operation.resize(operation.size() - 10);
+        const char *teams[]{"allies", "axis"};
+        for (size_t team = 0; team < 2; ++team)
+        {
+            const std::string prefix = "mp_chyron/" + map + "_" + teams[team] + "_";
+            const std::string lines[]{"Operation: " + operation, prepared->chyronClock,
+                                      "Classified", prepared->chyronUnits[team]};
+            for (size_t line = 0; line < 4; ++line)
+                iw8::localize::Register(english, prefix + std::to_string(line + 1), lines[line]);
+        }
+        info("build-map: eng_%s: map-intro chyron '%s' / '%s' / %s vs %s", map.c_str(),
+             operation.c_str(), prepared->chyronClock.c_str(), prepared->chyronUnits[0].c_str(),
+             prepared->chyronUnits[1].c_str());
+    }
+    iw8::ZoneWriter worldwide;
+    if (stockCopier)
+    {
+        stockCopier->RegisterEnglishImages(english);
+        stockCopier->RegisterWorldwideImages(worldwide);
+    }
+    // The language packs: eng_<map> (English strings and images), ww_<map>
+    // (worldwide images); empty zones when there is nothing to carry.
+    for (auto *zone : {&english, &worldwide})
+    {
+        const std::string name = (zone == &english ? "eng_" : "ww_") + map;
+        if (!zone->assetCount())
+        {
+            writeEmpty(name + ".ff");
+            continue;
+        }
+        zone->build();
+        if (!iw8_write(path_join(outputDirectory, name + ".ff"), zone->body(), writeParams(*zone)))
+            result = 1;
+        for (auto &row : outputLedgerRows(name, zone->assetList(), renderMesh, prepared, map, stockCopier.get()))
+            ledgerRows.push_back(std::move(row));
+        info("build-map: %s contains %zu assets", name.c_str(), zone->assetCount());
+    }
+    writeOutputLedger(ledgerRows);
 
     if (result == 0 && !writeMetadata(outputDirectory, metadata))
     {
         result = 1;
+    }
+    if (const auto preview = std::filesystem::path(dumpDirectory) / kPreviewFile;
+        result == 0 && std::filesystem::is_regular_file(preview))
+    {
+        std::error_code copyError;
+        std::filesystem::copy_file(preview, std::filesystem::path(outputDirectory) / kPreviewFile,
+                                   std::filesystem::copy_options::overwrite_existing, copyError);
+        if (copyError)
+        {
+            err("build-map: cannot copy preview.rgba: %s", copyError.message().c_str());
+            result = 1;
+        }
     }
 
     if (result == 0 && !validatePackage(outputDirectory, map))
@@ -1268,13 +1791,10 @@ int buildMap(const Args &args, const iw3::PreparedMap *prepared = nullptr)
                  compassBounds.northwestX, compassBounds.northwestY, compassBounds.southeastX,
                  compassBounds.southeastY);
         }
-        // Replay draws a converted IW3 minimap too large about the map centre:
-        // the player's position on it drifts toward the centre with distance.
-        // Calibrated on Nuketown (fixes-25): a player located from the scene at
-        // (1206, 630) was shown on the art for (1072, 545), i.e. at 0.86-0.89 of
-        // the true distance from the centre. Contracting the declared region by
-        // that factor puts the art under the player again; the centre (where
-        // the minimap already lined up) and the orientation are unchanged.
+        // Optional contraction of the declared region about its centre (metadata
+        // minimapScale; default 1.0 = IW3's region). fixes-25 used 0.875 from one
+        // in-game point ((1206, 630) shown at (1072, 545)); measured against the
+        // art that over-contracted, and the marker drifted (owner test 2026-10-14).
         if (metadata.minimapScale != 1.0f)
         {
             const float centerX = (compassBounds.northwestX + compassBounds.southeastX) * 0.5f;
@@ -1351,8 +1871,8 @@ int buildMap(const Args &args, const iw3::PreparedMap *prepared = nullptr)
             bounds.mn[index] = data.at("min").at(index).get<float>();
             bounds.mx[index] = data.at("max").at(index).get<float>();
             if (!std::isfinite(bounds.mn[index]) || !std::isfinite(bounds.mx[index]) ||
-                bounds.mn[index] >= bounds.mx[index] || std::abs(bounds.mn[index]) > 100100.0f ||
-                std::abs(bounds.mx[index]) > 100100.0f)
+                bounds.mn[index] >= bounds.mx[index] || std::abs(bounds.mn[index]) > 262144.0f ||
+                std::abs(bounds.mx[index]) > 262144.0f)
             {
                 throw std::runtime_error("invalid map bounds");
             }
@@ -1530,6 +2050,9 @@ int buildIw3(const Args &args)
     options.fastfile = args.positional[0];
     options.map = map;
     options.unlinker = args.unlinkerExecutable;
+    options.iw3ModeAssets = args.iw3ModeAssets;
+    options.style =
+        args.style == "iw8" ? iw3::MapStyle::iw8 : iw3::MapStyle::iw3;
     const auto requestedOutput = args.outputDirectory.empty()
                                      ? std::filesystem::path(args.positional[0]).parent_path() /
                                            (map + "_iw8")
@@ -1560,6 +2083,10 @@ int buildIw3(const Args &args)
         options.searchPaths.push_back(root / "main");
         options.searchPaths.push_back(root / "raw");
     }
+    // Per-asset IW3 ledger beside the package (the package itself may only
+    // hold the map's files): <output>.iw3-assets.tsv.
+    iw3::ledger::Clear();
+    iw3::ledger::SetReport(std::filesystem::absolute(requestedOutput).string() + ".iw3-assets.tsv");
     iw3::PreparedMap prepared = [&] {
         StageTimer timer("iw3 conversion");
         return iw3::PrepareFastfile(options);
@@ -1570,6 +2097,7 @@ int buildIw3(const Args &args)
     build.positional = {prepared.root.string(), map};
     build.collisionPath = prepared.collision.string();
     build.footstepsPath = prepared.footsteps.string();
+    metadata.ladderRungDistance = prepared.ladderRungDistance;
     if (!writeMetadata(prepared.root.string(), metadata))
     {
         return 1;
@@ -1621,6 +2149,24 @@ namespace zonetool::convert::iw3_iw8
 			args.sunIntensityScale = std::stof(scale);
 		}
 		args.navigation = option("navigation") != "0";
+		if (const auto style = option("style"); !style.empty())
+		{
+			if (style != "iw3" && style != "iw8")
+			{
+				throw std::runtime_error(std::format("--style must be iw3 or iw8, not \"{}\"", style));
+			}
+			args.style = style;
+		}
+		if (const auto mode = option("iw3_mode_assets"); !mode.empty())
+		{
+			args.iw3ModeAssets = mode != "off" && mode != "0";
+		}
+		args.actsExecutable = option("acts");
+		args.stockCache = option("stock_cache");
+		if (const auto search = option("search_path"); !search.empty())
+		{
+			args.searchPaths.push_back(search);
+		}
 
 		if (buildIw3(args) != 0)
 		{

@@ -57,8 +57,8 @@ std::string CompatText()
 const std::set<std::string> &DroppedBuiltins()
 {
     static const std::set<std::string> names{
-        "ambientplay",        "ambientstop",       "setexpfog",          "setculldist",
-        "visionsetnaked",     "visionsetnight",    "setdvar",            "setsaveddvar",
+        "setexpfog",          "setculldist",
+        "visionsetnaked",     "visionsetnight",    "setsaveddvar",
         "makedvarserverinfo", "setsunlight",       "resetsunlight",      "precacheshader",
         "precachestring",     "precacheitem",      "precacherumble",     "precacheturret",
         "precachevehicle",    "precachemenu",      "precacheheadicon",   "precachestatusicon",
@@ -82,6 +82,11 @@ std::string CompatBuiltin(const std::string &name)
         {"playsoundatpos", "iw3compat_playsoundatpos"},
         {"playsoundinspace", "iw3compat_playsoundinspace"},
         {"soundexists", "iw3compat_soundexists"},
+        {"ambientplay", "iw3compat_ambientplay"},
+        {"ambientstop", "iw3compat_ambientstop"},
+        // IW3 map dvars: those with a Replay counterpart are set, the rest
+        // (renderer settings the converter owns) are ignored.
+        {"setdvar", "iw3compat_setdvar"},
     };
     const auto found = names.find(name);
     return found != names.end() ? found->second : std::string{};
@@ -96,6 +101,35 @@ std::string CommonFunction(const std::string &file, const std::string &name)
         return "iw3compat_exploder";
     if (file == "maps/mp/_utility" && name == "playsoundinspace")
         return "iw3compat_playsoundinspace";
+    // createfx placement (maps\createfx\<map>_fx): IW3 defines these in both
+    // _utility and _createfx.
+    if (file == "maps/mp/_utility" || file == "maps/mp/_createfx")
+    {
+        for (const char *known :
+             {"createoneshoteffect", "createloopeffect", "createloopsound", "createexploder"})
+            if (name == known)
+                return "iw3compat_" + name;
+    }
+    // common_scripts\utility and maps\mp\_utility helpers (struct lookups read
+    // the converter's generated struct table, iw3compat_structs()).
+    if (file == "common_scripts/utility" || file == "maps/mp/_utility")
+    {
+        for (const char *known :
+             {"getstructarray", "array_thread", "array_levelthread", "play_sound_on_tag"})
+            if (name == known)
+                return "iw3compat_" + name;
+    }
+    // maps\mp\_fx: the deprecated placement calls IW3 still runs (loopfx is a
+    // createfx loop effect; IW3's OneShotfx is empty).
+    if (file == "maps/mp/_fx")
+    {
+        if (name == "loopfx" || name == "loopsound" || name == "soundfx")
+            return "iw3compat_" + name;
+        if (name == "oneshotfx")
+            return "iw3compat_noop";
+    }
+    if (file == "maps/mp/gametypes/_shellshock" && name == "barrel_earthquake")
+        return "iw3compat_barrel_earthquake";
     return {};
 }
 
@@ -354,7 +388,13 @@ class Translator
                 continue;
             File file;
             file.path = path;
-            const std::string stem = path.substr(path.rfind('/') + 1);
+            // maps/createfx/<map>_fx and maps/mp/<map>_fx share a stem.
+            std::string stem = path.substr(path.rfind('/') + 1);
+            if (!path.starts_with("maps/mp/"))
+            {
+                const auto directory = path.substr(0, path.rfind('/'));
+                stem = directory.substr(directory.rfind('/') + 1) + "_" + stem;
+            }
             file.prefix = "mw120r_" + stem + "_";
             file.lexed = Lex(available_.at(path)->text);
             file.functions = ParseFunctions(file.lexed.tokens, path);
@@ -618,6 +658,13 @@ class Translator
                     i += 4;
                     continue;
                 }
+                // loadfx( variable ) receives an IW3 name at runtime; Replay's
+                // loadfx only takes converted vfx/ names.
+                if (resolved == "loadfx")
+                {
+                    out.back().text = "iw3compat_loadfx";
+                    Note("non-literal loadfx -> iw3compat_loadfx");
+                }
                 ++i;
                 continue;
             }
@@ -670,10 +717,47 @@ std::string StockEffectFor(const std::string &iw3Effect)
     if (name.find("explo") != std::string::npos)
         return "vfx/iw8/veh/scriptables/vfx_veh_explosion_civ";
     if (name.find("fire") != std::string::npos || name.find("flame") != std::string::npos)
-        return "vfx/iw8/veh/scriptables/vfx_veh_fire_linger_med";
+        return "vfx/iw8/veh/scriptables/shared/vfx_veh_fire_linger_med";
     if (name.find("smoke") != std::string::npos || name.find("steam") != std::string::npos)
         return "vfx/iw8/veh/scriptables/vfx_smoke_light_ch";
     return "vfx/iw8_mp/equipment/flashbang/vfx_spark_crack_npop";
+}
+
+std::optional<std::string> Iw8StyleEffectFor(const std::string &iw3Effect)
+{
+    // Stock Replay effects in the always-loaded MP zones (common_mp,
+    // common_core_mp, common_base_mp; listed with ACTS 2026-10-14) that play the
+    // same role as the IW3 effect. Ambient map effects (dust, leaves, haze) have
+    // no counterpart there and stay converted. The stock vehicle fires burn for
+    // 15-130 s per play; iw3_compat.gsc plays them once (spawnfx) instead of on
+    // IW3's 0.4 s effect rhythm, which stacked dozens into a floating wall of
+    // fire beside the wreck (owner tests 2026-10-14, zt-28..zt-30).
+    static const std::map<std::string, std::string, std::less<>> exact{
+        {"explosions/small_vehicle_explosion", "vfx/iw8/veh/scriptables/vfx_veh_explosion_civ"},
+        {"explosions/grenadeexp_default", "vfx/core/expl/grenadeexp_default"},
+        {"smoke/car_damage_blacksmoke_fire", "vfx/iw8/veh/scriptables/vfx_veh_fire_linger"},
+        {"smoke/car_damage_blacksmoke", "vfx/iw8/veh/scriptables/vfx_smoke_heavy_ch"},
+        {"smoke/car_damage_whitesmoke", "vfx/iw8/veh/scriptables/vfx_smoke_light_ch"},
+        {"smoke/damaged_vehicle_smoke", "vfx/iw8/veh/scriptables/vfx_veh_hood_smoke"},
+        {"props/car_glass_large", "vfx/iw8/veh/scriptables/vfx_veh_glass_windshield"},
+        {"props/car_glass_med", "vfx/iw8/veh/scriptables/vfx_veh_glass_window_side"},
+        {"props/car_glass_headlight", "vfx/iw8/veh/scriptables/vfx_veh_glass_lamp"},
+        {"props/car_glass_brakelight", "vfx/iw8/veh/scriptables/vfx_veh_glass_lamp"},
+        {"fire/firelp_barrel_pm", "vfx/props/barrel_fire"},
+        {"misc/insects_carcass_flies", "vfx/misc/insects_carcass_flies"},
+        {"props/glow_latern", "vfx/props/glow_latern"},
+        {"misc/flare_ambient", "vfx/misc/flare_ambient"},
+    };
+    const std::string name = Lower(iw3Effect);
+    if (const auto found = exact.find(name); found != exact.end())
+        return found->second;
+    if (name.find("vehicle_explosion") != std::string::npos ||
+        name.find("car_explosion") != std::string::npos)
+        return "vfx/iw8/veh/scriptables/vfx_veh_explosion_civ";
+    // Map fires (fire/firelp_*) stay converted: createfx loopfx replays its
+    // effect every few tenths of a second for the whole match, and the stock
+    // vehicle fires burn 15-130 s per play.
+    return std::nullopt;
 }
 
 Translation Translate(const std::string &map, const std::vector<Source> &sources,

@@ -24,6 +24,14 @@ iw3compat_known_model( name )
     return undefined;
 }
 
+// The destroyed model of an IW3 destructible type (generated per map).
+iw3compat_destroyed_model( type )
+{
+    if ( isdefined( level.mw120r_destroyed ) && isdefined( level.mw120r_destroyed[type] ) )
+        return iw3compat_known_model( level.mw120r_destroyed[type] );
+    return iw3compat_known_model( type + "_destroyed" );
+}
+
 iw3compat_load_main()
 {
     if ( isdefined( level.mw120r_iw3_loaded ) )
@@ -33,9 +41,40 @@ iw3compat_load_main()
     iw3compat_precache();
     iw3compat_remove_gameobjects();
     iw3compat_exploders_init();
+    iw3compat_global_fx();
     level thread iw3compat_destructible_vehicles();
     level thread iw3compat_destructables();
     level thread iw3compat_interactive_tvs();
+    level thread iw3compat_out_of_bounds();
+}
+
+// IW8 maps kill players who leave the play space; converted IW3 maps had no
+// such volume, and far outside the map Replay's visibility pass crashed.
+iw3compat_out_of_bounds()
+{
+    if ( !isdefined( level.mw120r_playspace_min ) || !isdefined( level.mw120r_playspace_max ) )
+        return;
+
+    low = level.mw120r_playspace_min;
+    high = level.mw120r_playspace_max;
+    for ( ;; )
+    {
+        wait 0.25;
+        if ( !isdefined( level.players ) )
+            continue;
+
+        foreach ( player in level.players )
+        {
+            // Only builtins Replay registers (isalive/suicide compile with
+            // gsc-tool but are unknown to Replay's linker: "unknown function").
+            if ( !isdefined( player ) || !isdefined( player.health ) || player.health <= 0 )
+                continue;
+
+            origin = player.origin;
+            if ( origin[0] < low[0] || origin[1] < low[1] || origin[2] < low[2] || origin[0] > high[0] || origin[1] > high[1] || origin[2] > high[2] )
+                radiusdamage( origin, 32, 100000, 100000 );
+        }
+    }
 }
 
 iw3compat_precache()
@@ -59,13 +98,45 @@ iw3compat_precache()
     level.mw120r_fx["glass_shatter"] = iw3compat_fx( "impacts/small_glass", "vfx/code/glass/glass_shatter_32x32" );
     level.mw120r_fx["sparks"] = iw3compat_fx( "impacts/small_metalhit_1", "vfx/iw8_mp/equipment/flashbang/vfx_spark_crack_npop" );
     // IW3's own explosion carries its fire; only the stock stand-in needs one.
-    if ( !iw3compat_has_iw3fx( "explosions/small_vehicle_explosion" ) )
+    if ( iw3compat_slot_stock( "veh_explosion" ) )
         level.mw120r_fx["veh_fire_linger"] = loadfx( "vfx/iw8/veh/scriptables/vfx_veh_fire_linger_med" );
 }
 
 iw3compat_has_iw3fx( iw3name )
 {
     return isdefined( level.mw120r_iw3fx ) && isdefined( level.mw120r_iw3fx[iw3name] );
+}
+
+// A slot holds a stock Replay effect when the IW3 effect did not convert, or
+// when --style iw8 maps it to a stock one (level.mw120r_iw3fx_stock, generated).
+iw3compat_fx_is_stock( iw3name )
+{
+    if ( !iw3compat_has_iw3fx( iw3name ) )
+        return 1;
+    return isdefined( level.mw120r_iw3fx_stock ) && isdefined( level.mw120r_iw3fx_stock[iw3name] );
+}
+
+iw3compat_slot_stock( key )
+{
+    if ( key == "veh_smoke_light" )
+        return iw3compat_fx_is_stock( "smoke/car_damage_whitesmoke" );
+    if ( key == "veh_smoke_heavy" )
+        return iw3compat_fx_is_stock( "smoke/car_damage_blacksmoke" );
+    if ( key == "veh_fire" )
+        return iw3compat_fx_is_stock( "smoke/car_damage_blacksmoke_fire" );
+    if ( key == "veh_explosion" )
+        return iw3compat_fx_is_stock( "explosions/small_vehicle_explosion" );
+    return 1;
+}
+
+// IW3 loadfx( name ) with a runtime name: the converted effect when the map
+// scripts name it as a literal (loaded by iw3compat_iw3fx()), else a stock
+// stand-in so callers always get a valid effect.
+iw3compat_loadfx( iw3name )
+{
+    if ( isdefined( iw3name ) && iw3compat_has_iw3fx( tolower( iw3name ) ) )
+        return level.mw120r_iw3fx[tolower( iw3name )];
+    return loadfx( "vfx/iw8_mp/equipment/flashbang/vfx_spark_crack_npop" );
 }
 
 iw3compat_fx( iw3name, stock )
@@ -87,16 +158,25 @@ iw3compat_sound_kind( alias )
     return level.mw120r_sounds[alias];
 }
 
+// --style iw8 plays Replay's own alias for an IW3 sound role (generated
+// level.mw120r_sound_alias); otherwise the converted IW3 alias.
+iw3compat_sound_name( alias )
+{
+    if ( isdefined( level.mw120r_sound_alias ) && isdefined( level.mw120r_sound_alias[alias] ) )
+        return level.mw120r_sound_alias[alias];
+    return alias;
+}
+
 iw3compat_playsound( alias, unused1, unused2 )
 {
     if ( iw3compat_sound_kind( alias ) == 1 )
-        self playsound( alias );
+        self playsound( iw3compat_sound_name( alias ) );
 }
 
 iw3compat_playloopsound( alias, unused1 )
 {
     if ( iw3compat_sound_kind( alias ) == 2 )
-        self playloopsound( alias );
+        self playloopsound( iw3compat_sound_name( alias ) );
 }
 
 iw3compat_stoploopsound( unused1 )
@@ -107,7 +187,7 @@ iw3compat_stoploopsound( unused1 )
 iw3compat_playsoundatpos( origin, alias )
 {
     if ( isdefined( origin ) && iw3compat_sound_kind( alias ) == 1 )
-        playsoundatpos( origin, alias );
+        playsoundatpos( origin, iw3compat_sound_name( alias ) );
 }
 
 iw3compat_playsoundinspace( alias, origin, unused1 )
@@ -120,6 +200,61 @@ iw3compat_playsoundinspace( alias, origin, unused1 )
 iw3compat_soundexists( alias )
 {
     return iw3compat_sound_kind( alias ) != 0;
+}
+
+// IW3 map setdvar. compassMaxRange (the minimap's world range, IW3 default
+// 2500) is Replay's MKPRSSNNRO; in MP GScr_SetDvar_Internal sets it without a
+// script error (the read-only check is SP-only, game-mode feature 0xBC). Every
+// other IW3 map dvar is a renderer setting the converter owns (vision, glow,
+// specular scale) and is ignored.
+iw3compat_setdvar( name, value )
+{
+    if ( tolower( name ) == "compassmaxrange" )
+        setdvar( "MKPRSSNNRO", value );
+}
+
+// IW3 ambientPlay is a 2D loop for everyone. Each player carries the converted
+// loop, so it plays at the listener at full volume (players who connect later
+// get it too).
+iw3compat_ambientplay( alias, unused1 )
+{
+    if ( iw3compat_sound_kind( alias ) != 2 )
+        return;
+    level notify( "mw120r_ambient" );
+    level.mw120r_ambient = alias;
+    if ( isdefined( level.players ) )
+    {
+        foreach ( player in level.players )
+            player iw3compat_ambient_start();
+    }
+    level thread iw3compat_ambient_connect();
+}
+
+iw3compat_ambientstop( unused1 )
+{
+    level notify( "mw120r_ambient" );
+    level.mw120r_ambient = undefined;
+    if ( isdefined( level.players ) )
+    {
+        foreach ( player in level.players )
+            player stoploopsound();
+    }
+}
+
+iw3compat_ambient_connect()
+{
+    level endon( "mw120r_ambient" );
+    for ( ;; )
+    {
+        level waittill( "connected", player );
+        player iw3compat_ambient_start();
+    }
+}
+
+iw3compat_ambient_start()
+{
+    if ( isdefined( level.mw120r_ambient ) )
+        self playloopsound( level.mw120r_ambient );
 }
 
 // IW3 deleted every game object its gametype did not use. Replay's own
@@ -168,6 +303,283 @@ iw3compat_exploder( number )
         if ( isdefined( model.targetname ) && model.targetname == "mw120r_exploder" )
             continue;
         model delete();
+    }
+}
+
+// ---------------------------------------------------------------------------
+// createfx placement (maps\createfx\<map>_fx): IW3 _utility createEffect()
+// records, played as IW3 _fx did once the map's main has run. One-shots are
+// fx entities (looping effects keep playing), loop effects repeat every
+// v["delay"] seconds, loop sounds play converted looping aliases.
+// ---------------------------------------------------------------------------
+iw3compat_createfx_add( type, fxid, delay )
+{
+    if ( !isdefined( level.mw120r_createfx ) )
+    {
+        level.mw120r_createfx = [];
+        level thread iw3compat_createfx_start();
+    }
+    ent = spawnstruct();
+    ent.v = [];
+    ent.v["type"] = type;
+    if ( isdefined( fxid ) )
+        ent.v["fxid"] = fxid;
+    ent.v["angles"] = ( 0, 0, 0 );
+    ent.v["origin"] = ( 0, 0, 0 );
+    ent.v["delay"] = delay;
+    level.mw120r_createfx[level.mw120r_createfx.size] = ent;
+    return ent;
+}
+
+iw3compat_createoneshoteffect( fxid )
+{
+    return iw3compat_createfx_add( "oneshotfx", fxid, -15 );
+}
+
+iw3compat_createloopeffect( fxid )
+{
+    return iw3compat_createfx_add( "loopfx", fxid, 0.5 );
+}
+
+iw3compat_createloopsound()
+{
+    return iw3compat_createfx_add( "soundfx", undefined, 0 );
+}
+
+// Exploder effects only play with their exploder, which the converted
+// exploder() does not drive; they are recorded and not played.
+iw3compat_createexploder( fxid )
+{
+    return iw3compat_createfx_add( "exploder", fxid, 0 );
+}
+
+// One IW3 _global_fx placement (generated by the converter from the map's
+// script_structs): a createfx one-shot with IW3's random -20..-15 s offset.
+iw3compat_global_fx_one( iw3name, origin, angles, alias )
+{
+    if ( !iw3compat_has_iw3fx( iw3name ) )
+        return;
+    if ( !isdefined( level._effect ) )
+        level._effect = [];
+    level._effect[iw3name] = level.mw120r_iw3fx[iw3name];
+    ent = iw3compat_createfx_add( "oneshotfx", iw3name, randomfloatrange( -20, -15 ) );
+    ent.v["origin"] = origin;
+    ent.v["angles"] = angles;
+    if ( alias != "" )
+        ent.v["soundalias"] = alias;
+}
+
+// IW3 maps\mp\_fx::loopfx( fxId, fxPos, waittime, fxPos2 ): a createfx loop
+// effect facing fxPos2.
+iw3compat_loopfx( fxid, origin, delay, origin2, unused1, unused2, unused3 )
+{
+    ent = iw3compat_createloopeffect( fxid );
+    ent.v["origin"] = origin;
+    if ( isdefined( origin2 ) )
+        ent.v["angles"] = vectortoangles( origin2 - origin );
+    ent.v["delay"] = delay;
+}
+
+// IW3 maps\mp\_fx::loopSound / soundfx: a looping alias at a point.
+iw3compat_loopsound( alias, origin, unused1 )
+{
+    iw3compat_soundfx( alias, origin );
+}
+
+iw3compat_soundfx( alias, origin, endonnotify )
+{
+    if ( iw3compat_sound_kind( alias ) != 2 )
+        return;
+    org = spawn( "script_origin", origin );
+    org playloopsound( iw3compat_sound_name( alias ) );
+    if ( isdefined( endonnotify ) )
+        org thread iw3compat_soundfx_delete( endonnotify );
+}
+
+iw3compat_soundfx_delete( endonnotify )
+{
+    level waittill( endonnotify );
+    self delete();
+}
+
+// IW3 maps\mp\gametypes\_shellshock::barrel_earthQuake (self = the barrel).
+iw3compat_barrel_earthquake()
+{
+    earthquake( 0.4, 0.5, self.origin, 512 );
+}
+
+// ---------------------------------------------------------------------------
+// IW3 common_scripts\utility / maps\mp\_utility helpers.
+// ---------------------------------------------------------------------------
+iw3compat_array_thread( entities, process, var1, var2, var3 )
+{
+    keys = getarraykeys( entities );
+    for ( i = 0; i < keys.size; i++ )
+    {
+        if ( isdefined( var3 ) )
+            entities[keys[i]] thread [[ process ]]( var1, var2, var3 );
+        else if ( isdefined( var2 ) )
+            entities[keys[i]] thread [[ process ]]( var1, var2 );
+        else if ( isdefined( var1 ) )
+            entities[keys[i]] thread [[ process ]]( var1 );
+        else
+            entities[keys[i]] thread [[ process ]]();
+    }
+}
+
+iw3compat_array_levelthread( ents, process, var, excluders )
+{
+    for ( i = 0; i < ents.size; i++ )
+    {
+        excluded = 0;
+        if ( isdefined( excluders ) )
+        {
+            for ( p = 0; p < excluders.size; p++ )
+            {
+                if ( ents[i] == excluders[p] )
+                    excluded = 1;
+            }
+        }
+        if ( excluded )
+            continue;
+        if ( isdefined( var ) )
+            level thread [[ process ]]( ents[i], var );
+        else
+            level thread [[ process ]]( ents[i] );
+    }
+}
+
+// A missing tag plays at the entity instead of raising a script error.
+iw3compat_play_sound_on_tag( alias, tag )
+{
+    if ( iw3compat_sound_kind( alias ) != 1 )
+        return;
+    at = undefined;
+    if ( isdefined( tag ) )
+        at = self gettagorigin( tag, 1 );
+    if ( isdefined( at ) )
+    {
+        org = spawn( "script_origin", at );
+        org linkto( self, tag, ( 0, 0, 0 ), ( 0, 0, 0 ) );
+    }
+    else
+    {
+        org = spawn( "script_origin", self.origin );
+        org.angles = self.angles;
+        org linkto( self );
+    }
+    org playsound( iw3compat_sound_name( alias ) );
+    wait 5;
+    org delete();
+}
+
+// IW3 getstructarray( name, type ) over the map's keyed script_structs
+// (generated: iw3compat_structs()), indexed like IW3 struct_class_init.
+iw3compat_getstructarray( name, type )
+{
+    if ( !isdefined( level.mw120r_struct_names ) )
+    {
+        level.mw120r_struct_names = [];
+        level.mw120r_struct_names["targetname"] = [];
+        level.mw120r_struct_names["target"] = [];
+        level.mw120r_struct_names["script_noteworthy"] = [];
+        level.mw120r_struct_names["script_linkname"] = [];
+        iw3compat_structs();
+    }
+    if ( !isdefined( name ) || !isdefined( type ) || !isdefined( level.mw120r_struct_names[type] ) )
+        return [];
+    if ( !isdefined( level.mw120r_struct_names[type][name] ) )
+        return [];
+    return level.mw120r_struct_names[type][name];
+}
+
+iw3compat_struct_add( origin, angles, targetname, target, noteworthy, linkname )
+{
+    s = spawnstruct();
+    s.origin = origin;
+    s.angles = angles;
+    if ( targetname != "" )
+    {
+        s.targetname = targetname;
+        iw3compat_struct_index( "targetname", targetname, s );
+    }
+    if ( target != "" )
+    {
+        s.target = target;
+        iw3compat_struct_index( "target", target, s );
+    }
+    if ( noteworthy != "" )
+    {
+        s.script_noteworthy = noteworthy;
+        iw3compat_struct_index( "script_noteworthy", noteworthy, s );
+    }
+    if ( linkname != "" )
+    {
+        s.script_linkname = linkname;
+        iw3compat_struct_index( "script_linkname", linkname, s );
+    }
+}
+
+iw3compat_struct_index( type, name, s )
+{
+    if ( !isdefined( level.mw120r_struct_names[type][name] ) )
+        level.mw120r_struct_names[type][name] = [];
+    size = level.mw120r_struct_names[type][name].size;
+    level.mw120r_struct_names[type][name][size] = s;
+}
+
+iw3compat_createfx_start()
+{
+    wait 0.05;
+    foreach ( ent in level.mw120r_createfx )
+        ent thread iw3compat_createfx_play();
+}
+
+iw3compat_createfx_play()
+{
+    type = self.v["type"];
+    origin = self.v["origin"];
+    forward = anglestoforward( self.v["angles"] );
+    up = anglestoup( self.v["angles"] );
+    if ( type == "soundfx" )
+    {
+        alias = self.v["soundalias"];
+        if ( iw3compat_sound_kind( alias ) != 2 )
+            return;
+        self.looper = spawn( "script_origin", origin );
+        self.looper playloopsound( iw3compat_sound_name( alias ) );
+        return;
+    }
+    if ( !isdefined( self.v["fxid"] ) || !isdefined( level._effect ) || !isdefined( level._effect[self.v["fxid"]] ) )
+        return;
+    fx = level._effect[self.v["fxid"]];
+    delay = self.v["delay"];
+    // IW3 createfx one-shots and loop effects may carry a looping sound at
+    // their origin (_fx create_loopsound).
+    if ( ( type == "oneshotfx" || type == "loopfx" ) && isdefined( self.v["soundalias"] ) &&
+         iw3compat_sound_kind( self.v["soundalias"] ) == 2 )
+    {
+        self.sound = spawn( "script_origin", origin );
+        self.sound playloopsound( iw3compat_sound_name( self.v["soundalias"] ) );
+    }
+    if ( type == "oneshotfx" )
+    {
+        if ( delay > 0 )
+            wait delay;
+        self.looper = spawnfx( fx, origin, forward, up );
+        if ( delay > 0 )
+            delay = 0;
+        triggerfx( self.looper, delay );
+    }
+    else if ( type == "loopfx" )
+    {
+        if ( delay < 0.05 )
+            delay = 0.05;
+        for ( ;; )
+        {
+            playfx( fx, origin, forward, up );
+            wait delay;
+        }
     }
 }
 
@@ -243,7 +655,8 @@ iw3compat_vehicle_think()
     self endon( "death" );
     self iw3compat_make_damageable();
     self iw3compat_vehicle_parts_init();
-    self.mw120r_destroyed_model = iw3compat_known_model( self.destructible_type + "_destroyed" );
+    self iw3compat_vehicle_physics_parts();
+    self.mw120r_destroyed_model = iw3compat_destroyed_model( self.destructible_type );
     self.mw120r_stage = 0;
     self.mw120r_damage = 0;
     self.mw120r_attacker = undefined;
@@ -260,6 +673,7 @@ iw3compat_vehicle_think()
         kind = iw3compat_damage_kind( type );
         if ( isdefined( attacker ) )
             self.mw120r_attacker = attacker;
+        self.mw120r_hitpoint = point;
         if ( kind == "splash" )
         {
             self iw3compat_vehicle_parts_splash( amount, point );
@@ -320,6 +734,21 @@ iw3compat_vehicle_drain()
     }
 }
 
+// Stock Replay vehicle effects are authored in the vehicle's frame (X forward,
+// Z up) above a ground-level origin; IW3 effects keep IW3's tags and axes.
+iw3compat_vehicle_playfx( fx, origin )
+{
+    playfx( fx, origin, anglestoforward( self.angles ), anglestoup( self.angles ) );
+}
+
+// Stock vehicle effects add their own 20-30 units of height above the point
+// they play at (vfx_veh_fire_linger boxes at z 20..30), so they start at the
+// engine bay rather than on IW3's hood tag.
+iw3compat_vehicle_hood_stock()
+{
+    return self.origin + anglestoforward( self.angles ) * 45 + anglestoup( self.angles ) * 16;
+}
+
 iw3compat_vehicle_hood()
 {
     return self.origin + anglestoforward( self.angles ) * 64 + ( 0, 0, 40 );
@@ -331,8 +760,33 @@ iw3compat_vehicle_loopfx( name, stage, rate )
     self endon( "death" );
     self endon( "mw120r_exploded" );
     ontag = isdefined( self gettagorigin( "tag_hood_fx", 1 ) );
+    // The stock hood fire (vfx_veh_fire_linger) burns 20 s per play; replayed
+    // on IW3's 0.4 s rhythm it stacked into a wall of fire drifting off the car
+    // (owner tests 2026-10-14). It plays once, as an effect entity removed when
+    // the stage ends or the vehicle explodes.
+    if ( name == "veh_fire" && iw3compat_slot_stock( name ) )
+    {
+        fx = spawnfx( level.mw120r_fx[name], self iw3compat_vehicle_hood_stock(), anglestoforward( self.angles ), anglestoup( self.angles ) );
+        triggerfx( fx );
+        self.mw120r_stagefx = fx;
+        while ( self.mw120r_stage == stage )
+            wait 0.2;
+        self.mw120r_stagefx = undefined;
+        fx delete();
+        return;
+    }
     while ( self.mw120r_stage == stage )
     {
+        // Stock Replay effects rise along their Z axis; IW3's tag_hood_fx
+        // points X up, so they burned sideways on the tag.
+        if ( iw3compat_slot_stock( name ) )
+        {
+            // Stock smoke particles live 2.5-5 s; one burst a second keeps the
+            // plume without IW3's 0.4 s rhythm (frame-rate cost, owner 2026-10-14).
+            self iw3compat_vehicle_playfx( level.mw120r_fx[name], self iw3compat_vehicle_hood_stock() );
+            wait max( rate, 1 );
+            continue;
+        }
         if ( ontag )
             playfxontag( level.mw120r_fx[name], self, "tag_hood_fx" );
         else
@@ -344,6 +798,11 @@ iw3compat_vehicle_loopfx( name, stage, rate )
 iw3compat_vehicle_explode()
 {
     self notify( "mw120r_exploded" );
+    if ( isdefined( self.mw120r_stagefx ) )
+    {
+        self.mw120r_stagefx delete();
+        self.mw120r_stagefx = undefined;
+    }
     self setcandamage( 0 );
     self stoploopsound();
     self iw3compat_playsound( "car_explode" );
@@ -352,7 +811,13 @@ iw3compat_vehicle_explode()
     fxorigin = self gettagorigin( "tag_death_fx", 1 );
     if ( !isdefined( fxorigin ) )
         fxorigin = self.origin + ( 0, 0, 32 );
-    playfx( level.mw120r_fx["veh_explosion"], fxorigin, ( 0, 0, 1 ), ( 1, 0, 0 ) );
+    // Stock vehicle effects place their own heights above a ground-level vehicle
+    // origin (linger fire boxes at z -2..40); from IW3's raised tags they hovered
+    // over the wreck (owner test 2026-10-14).
+    if ( iw3compat_slot_stock( "veh_explosion" ) )
+        self iw3compat_vehicle_playfx( level.mw120r_fx["veh_explosion"], self.origin );
+    else
+        playfx( level.mw120r_fx["veh_explosion"], fxorigin, ( 0, 0, 1 ), ( 1, 0, 0 ) );
     center = self.origin + ( 0, 0, 80 );
 
     attacker = self.mw120r_attacker;
@@ -367,20 +832,46 @@ iw3compat_vehicle_explode()
     if ( isdefined( self.mw120r_destroyed_model ) )
         self setmodel( self.mw120r_destroyed_model );
 
+    // IW3 _destructible: the explode state plays the type's destroy anim
+    // (setanimknob %vehicle_80s_sedan1_destroy, converted XAnimParts) and
+    // explodeAnim()'s hop on the destroyed model.
+    if ( isdefined( level.mw120r_destroyanim ) && isdefined( self.destructible_type ) &&
+         isdefined( level.mw120r_destroyanim[self.destructible_type] ) )
+        self scriptmodelplayanim( level.mw120r_destroyanim[self.destructible_type] );
+    self thread iw3compat_vehicle_explode_hop();
+    self thread iw3compat_vehicle_explode_parts();
+
     // IW3's own explosion carries its fire; the stock stand-in needs a burn.
-    if ( !iw3compat_has_iw3fx( "explosions/small_vehicle_explosion" ) )
-        self thread iw3compat_vehicle_burn( 12 );
+    if ( iw3compat_slot_stock( "veh_explosion" ) )
+        self thread iw3compat_vehicle_burn( 15 );
 }
 
-iw3compat_vehicle_burn( seconds )
+// IW3 _destructible explodeAnim(): the wreck jumps 16 units and pitches 10
+// degrees over 0.3 s, then settles back.
+iw3compat_vehicle_explode_hop()
 {
     self endon( "death" );
-    end = gettime() + seconds * 1000;
-    while ( gettime() < end )
-    {
-        playfx( level.mw120r_fx["veh_fire_linger"], self.origin + ( 0, 0, 24 ) );
-        wait 0.5;
-    }
+    self movez( 16, 0.3, 0, 0.2 );
+    self rotatepitch( 10, 0.3, 0, 0.2 );
+    wait 0.3;
+    self movez( -16, 0.3, 0.15, 0 );
+    self rotatepitch( -10, 0.3, 0.15, 0 );
+}
+
+// The stock wreck fire (vfx_veh_fire_linger_med) burns 15-130 s per play on a
+// ground-level vehicle origin: one play, removed after the burn. Replaying it
+// every 0.5 s stacked 24 of them into the floating wall (owner tests).
+iw3compat_vehicle_burn( seconds )
+{
+    // Starting with the blast stacked the fire's opening bursts on the stock
+    // explosion's (frame drops as explosions start, owner test 2026-10-14).
+    wait 1;
+    if ( !isdefined( self ) )
+        return;
+    fx = spawnfx( level.mw120r_fx["veh_fire_linger"], self.origin, anglestoforward( self.angles ), anglestoup( self.angles ) );
+    triggerfx( fx );
+    wait seconds;
+    fx delete();
 }
 
 // ---------------------------------------------------------------------------
@@ -401,16 +892,16 @@ iw3compat_vehicle_parts_init()
         self.mw120r_part_min = level.mw120r_part_min[self.model];
         self.mw120r_part_max = level.mw120r_part_max[self.model];
     }
-    self iw3compat_vehicle_part( "tag_glass_front", 40, "tag_glass_front_d", 60, "tag_glass_front_fx", "props/car_glass_large", "veh_glass_break_large", undefined );
-    self iw3compat_vehicle_part( "tag_glass_back", 40, "tag_glass_back_d", 60, "tag_glass_back_fx", "props/car_glass_large", "veh_glass_break_large", undefined );
-    self iw3compat_vehicle_part( "tag_glass_left_front", 20, "tag_glass_left_front_d", 60, "tag_glass_left_front_fx", "props/car_glass_med", "veh_glass_break_large", undefined );
-    self iw3compat_vehicle_part( "tag_glass_right_front", 20, "tag_glass_right_front_d", 60, "tag_glass_right_front_fx", "props/car_glass_med", "veh_glass_break_large", undefined );
-    self iw3compat_vehicle_part( "tag_glass_left_back", 20, "tag_glass_left_back_d", 60, "tag_glass_left_back_fx", "props/car_glass_med", "veh_glass_break_large", undefined );
-    self iw3compat_vehicle_part( "tag_glass_right_back", 20, "tag_glass_right_back_d", 60, "tag_glass_right_back_fx", "props/car_glass_med", "veh_glass_break_large", undefined );
-    self iw3compat_vehicle_part( "tag_light_left_front", 20, "tag_light_left_front_d", undefined, "tag_light_left_front", "props/car_glass_headlight", "veh_glass_break_small", 0.5 );
-    self iw3compat_vehicle_part( "tag_light_right_front", 20, "tag_light_right_front_d", undefined, "tag_light_right_front", "props/car_glass_headlight", "veh_glass_break_small", 0.5 );
-    self iw3compat_vehicle_part( "tag_light_left_back", 20, "tag_light_left_back_d", undefined, "tag_light_left_back", "props/car_glass_brakelight", "veh_glass_break_small", undefined );
-    self iw3compat_vehicle_part( "tag_light_right_back", 20, "tag_light_right_back_d", undefined, "tag_light_right_back", "props/car_glass_brakelight", "veh_glass_break_small", undefined );
+    self iw3compat_vehicle_part( "tag_glass_front", 40, "tag_glass_front_d", 60, "tag_glass_front_fx", "props/car_glass_large", "window_entry_glass_med", undefined );
+    self iw3compat_vehicle_part( "tag_glass_back", 40, "tag_glass_back_d", 60, "tag_glass_back_fx", "props/car_glass_large", "window_entry_glass_med", undefined );
+    self iw3compat_vehicle_part( "tag_glass_left_front", 20, "tag_glass_left_front_d", 60, "tag_glass_left_front_fx", "props/car_glass_med", "window_entry_glass_med", undefined );
+    self iw3compat_vehicle_part( "tag_glass_right_front", 20, "tag_glass_right_front_d", 60, "tag_glass_right_front_fx", "props/car_glass_med", "window_entry_glass_med", undefined );
+    self iw3compat_vehicle_part( "tag_glass_left_back", 20, "tag_glass_left_back_d", 60, "tag_glass_left_back_fx", "props/car_glass_med", "window_entry_glass_med", undefined );
+    self iw3compat_vehicle_part( "tag_glass_right_back", 20, "tag_glass_right_back_d", 60, "tag_glass_right_back_fx", "props/car_glass_med", "window_entry_glass_med", undefined );
+    self iw3compat_vehicle_part( "tag_light_left_front", 20, "tag_light_left_front_d", undefined, "tag_light_left_front", "props/car_glass_headlight", "window_entry_glass_med", 0.5 );
+    self iw3compat_vehicle_part( "tag_light_right_front", 20, "tag_light_right_front_d", undefined, "tag_light_right_front", "props/car_glass_headlight", "window_entry_glass_med", 0.5 );
+    self iw3compat_vehicle_part( "tag_light_left_back", 20, "tag_light_left_back_d", undefined, "tag_light_left_back", "props/car_glass_brakelight", "window_entry_glass_med", undefined );
+    self iw3compat_vehicle_part( "tag_light_right_back", 20, "tag_light_right_back_d", undefined, "tag_light_right_back", "props/car_glass_brakelight", "window_entry_glass_med", undefined );
     self iw3compat_vehicle_part( "tag_mirror_left", 40, undefined, undefined, undefined, undefined, undefined, undefined );
     self iw3compat_vehicle_part( "tag_mirror_right", 40, undefined, undefined, undefined, undefined, undefined, undefined );
     self iw3compat_vehicle_part( "tag_hood", undefined, undefined, undefined, undefined, undefined, undefined, 1 );
@@ -534,6 +1025,7 @@ iw3compat_vehicle_break_part( part )
         part.visible = undefined;
     }
     part.stage = 2;
+    self iw3compat_vehicle_break_launch( part.tag );
     if ( isdefined( part.fx ) )
     {
         fx = level.mw120r_fx["glass_shatter"];
@@ -634,4 +1126,190 @@ iw3compat_tv_think()
     playfx( level.mw120r_fx["sparks"], point );
     if ( isdefined( self.mw120r_destroyed_model ) )
         self setmodel( self.mw120r_destroyed_model );
+}
+
+// ---------------------------------------------------------------------------
+// Vehicle physics parts (IW3 _destructible physics_launch). The converter
+// generates level.mw120r_vehicle_physics[destructible_type] from IW3's
+// _destructible_types: each part's tag, its own model, the explosion velocity
+// scale (physicsOnExplosion; 0 = it stays on the wreck), whether breaking the
+// part launches it (destructible_physics), and the mass and bulletForceScale
+// of the part model's physics preset.
+// ---------------------------------------------------------------------------
+iw3compat_physics_part( tag, model, scale, onbreak, mass, forcescale )
+{
+    part = spawnstruct();
+    part.tag = tag;
+    part.model = model;
+    part.scale = scale;
+    part.onbreak = onbreak;
+    part.mass = mass;
+    part.forcescale = forcescale;
+    return part;
+}
+
+// This vehicle's own copies, so a launched part stays launched per vehicle.
+iw3compat_vehicle_physics_parts()
+{
+    self.mw120r_physparts = [];
+    if ( !isdefined( level.mw120r_vehicle_physics ) || !isdefined( self.destructible_type ) ||
+         !isdefined( level.mw120r_vehicle_physics[self.destructible_type] ) )
+        return;
+    foreach ( source in level.mw120r_vehicle_physics[self.destructible_type] )
+        self.mw120r_physparts[self.mw120r_physparts.size] =
+            iw3compat_physics_part( source.tag, source.model, source.scale, source.onbreak, source.mass,
+                                    source.forcescale );
+}
+
+// IW3 physics_launch(): hide the tag and spawn the part model at its pose as a
+// physics prop, launched with IW3's impulse: the force times the preset's
+// bulletForceScale. (The wreck model binds all its geometry to tag_body, so on
+// the wreck the hide shows nothing, as in IW3: the clean part flies off it.)
+// The client-side launch (physicslaunchclient) left every part where it
+// spawned (owner test 2026-10-17), so the server simulates the parts: Replay's
+// G_ScrMoverCmd_PhysicsLaunchServer creates the part's Havok body and applies
+// the impulse in game units (velocity = impulse / mass, as in IW3). A part
+// that has not moved a quarter second later got no body; it flies IW3's arc
+// by script instead. At most 25 live at once (destructibleSpawnedEntsLimit);
+// the oldest is removed first.
+iw3compat_vehicle_launch_part( part, point, force )
+{
+    if ( isdefined( part.launched ) )
+        return;
+    part.launched = 1;
+    origin = self gettagorigin( part.tag, 1 );
+    if ( !isdefined( origin ) )
+        return;
+    angles = self gettagangles( part.tag );
+    self hidepart( part.tag );
+    prop = iw3compat_physics_prop( origin, angles, part.model );
+    impulse = force * part.forcescale;
+    prop thread iw3compat_part_physics( point, impulse );
+    prop thread iw3compat_part_flight( origin, impulse / part.mass );
+}
+
+iw3compat_physics_prop( origin, angles, model )
+{
+    kept = [];
+    if ( isdefined( level.mw120r_physics_props ) )
+    {
+        foreach ( prop in level.mw120r_physics_props )
+            if ( isdefined( prop ) )
+                kept[kept.size] = prop;
+    }
+    if ( kept.size >= 25 )
+    {
+        kept[0] delete();
+        rest = [];
+        for ( i = 1; i < kept.size; i++ )
+            rest[rest.size] = kept[i];
+        kept = rest;
+    }
+    prop = spawn( "script_model", origin );
+    prop.angles = angles;
+    prop setmodel( model );
+    kept[kept.size] = prop;
+    level.mw120r_physics_props = kept;
+    return prop;
+}
+
+// Its own thread: a launch that cannot create the body raises a script error,
+// which ends only this thread.
+iw3compat_part_physics( point, impulse )
+{
+    self endon( "death" );
+    self physicslaunchserver( point, impulse );
+}
+
+// The scripted stand-in for a part without a physics body: a fresh script
+// model on the launch arc (g 800, as g_gravity), tumbling, until the arc meets
+// geometry or 3 s pass. The first 0.2 s skip the trace so the part clears the
+// wreck it starts inside.
+iw3compat_part_flight( start, velocity )
+{
+    self endon( "death" );
+    wait 0.25;
+    if ( distancesquared( self.origin, start ) > 1 )
+        return;
+    prop = iw3compat_physics_prop( start, self.angles, self.model );
+    self delete();
+    gravity = 800;
+    time = 3;
+    landing = undefined;
+    previous = start;
+    for ( step = 1; step <= 60; step++ )
+    {
+        t = step * 0.05;
+        next = start + velocity * t - ( 0, 0, 0.5 * gravity * t * t );
+        if ( step > 4 )
+        {
+            stop = physicstrace( previous, next );
+            if ( distancesquared( stop, next ) > 0.01 )
+            {
+                landing = stop;
+                fraction = 1;
+                segment = distance( previous, next );
+                if ( segment > 0 )
+                    fraction = distance( previous, stop ) / segment;
+                time = ( step - 1 + fraction ) * 0.05;
+                break;
+            }
+        }
+        previous = next;
+    }
+    if ( !isdefined( landing ) )
+        landing = previous;
+    if ( time < 0.05 )
+        time = 0.05;
+    spin = ( randomfloatrange( 180, 540 ), randomfloatrange( -360, 360 ), randomfloatrange( 180, 540 ) );
+    prop movegravity( velocity, time );
+    prop rotatevelocity( spin, time );
+    wait time;
+    if ( isdefined( prop ) )
+        prop.origin = landing;
+}
+
+// IW3 destructible_update_part() with a physics state: the part leaves along
+// the shot, normalize( point - attacker origin ) * 200, from the hit point.
+iw3compat_vehicle_break_launch( tag )
+{
+    if ( !isdefined( self.mw120r_physparts ) )
+        return;
+    foreach ( part in self.mw120r_physparts )
+    {
+        if ( part.tag != tag || !part.onbreak )
+            continue;
+        point = self.mw120r_hitpoint;
+        if ( !isdefined( point ) )
+            point = self gettagorigin( tag, 1 );
+        if ( !isdefined( point ) )
+            return;
+        force = ( 0, 0, 0 );
+        if ( isdefined( self.mw120r_attacker ) )
+            force = vectornormalize( point - self.mw120r_attacker.origin ) * 200;
+        self iw3compat_vehicle_launch_part( part, point, force );
+        return;
+    }
+}
+
+// IW3 explode(): a frame after the wreck swap, every part with a velocity
+// scale flies off away from the explosion origin (the vehicle origin: the base
+// part has no tag) at randomfloatrange( 4000, 5000 ) * scale (every IW3 vehicle
+// uses destructible_explode( 4000, 5000, ... )).
+iw3compat_vehicle_explode_parts()
+{
+    self endon( "death" );
+    if ( !isdefined( self.mw120r_physparts ) || !self.mw120r_physparts.size )
+        return;
+    wait 0.05;
+    foreach ( part in self.mw120r_physparts )
+    {
+        if ( part.scale <= 0 )
+            continue;
+        point = self gettagorigin( part.tag, 1 );
+        if ( !isdefined( point ) )
+            continue;
+        force = vectornormalize( point - self.origin ) * ( randomfloatrange( 4000, 5000 ) * part.scale );
+        self iw3compat_vehicle_launch_part( part, point, force );
+    }
 }

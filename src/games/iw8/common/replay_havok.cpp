@@ -145,49 +145,13 @@ std::uint64_t ReadHavokVarUInt(const std::vector<std::uint8_t> &data, std::size_
 
 std::uint32_t ReplayTypeIndex(const std::string_view identity)
 {
-    static constexpr std::pair<std::string_view, std::uint32_t> indices[] = {
-        {"int", 5},
-        {"HavokPhysicsAsset", 7},
-        {"T*<hknpPhysicsSystemData>", 8},
-        {"hkArray<int, hkContainerHeapAllocator>", 9},
-        {"hkArray<hkStringPtr, hkContainerHeapAllocator>", 10},
-        {"hknpPhysicsSystemData", 13},
-        {"hkStringPtr", 15},
-        {"hkArray<hknpMaterial, hkContainerHeapAllocator>", 22},
-        {"hkArray<hknpMotionProperties, hkContainerHeapAllocator>", 23},
-        {"hkArray<hknpPhysicsSystemData::bodyCinfoWithAttachment, hkContainerHeapAllocator>", 24},
-        {"unsigned long long", 31},
-        {"hkUint16", 34},
-        {"hknpMaterial", 35},
-        {"hknpMotionProperties", 37},
-        {"hknpPhysicsSystemData::bodyCinfoWithAttachment", 39},
-        {"hkUint32", 50},
-        {"unsigned int", 59},
-        {"char", 163},
-        {"hkRefPtr<hknpShape>", 75},
-        {"hkRefPtr<hkReferencedObject>", 132},
-        {"hknpCompressedMeshShape", 602},
-        {"hkArray<hkUint32, hkContainerHeapAllocator>", 608},
-        {"hkArray<hkcdSimdTree::Node, hkContainerHeapAllocator>", 283},
-        {"hkcdSimdTree::Node", 285},
-        {"hknpCompressedMeshShapeData", 1466},
-        {"hkArray<unsigned int, hkContainerHeapAllocator>", 536},
-        {"hkArray<unsigned long long, hkContainerHeapAllocator>", 537},
-        {"hkArray<hkcdDefaultStaticMeshTree::PrimitiveDataRun, hkContainerHeapAllocator>", 538},
-        {"hkArray<hkcdStaticMeshTree::Section, hkContainerHeapAllocator>", 540},
-        {"hkArray<hkcdStaticMeshTree::Primitive, hkContainerHeapAllocator>", 541},
-        {"hkArray<hkUint16, hkContainerHeapAllocator>", 542},
-        {"hkcdDefaultStaticMeshTree::PrimitiveDataRun", 545},
-        {"hkcdStaticMeshTree::Section", 548},
-        {"hkcdStaticMeshTree::Primitive", 550},
-        {"hkcdCompressedAabbCodecs::Aabb5BytesCodec", 528},
-        {"hkArray<hkcdCompressedAabbCodecs::Aabb5BytesCodec, hkContainerHeapAllocator>", 553},
-        {"hkcdCompressedAabbCodecs::Aabb4BytesCodec", 524},
-        {"hkArray<hkcdCompressedAabbCodecs::Aabb4BytesCodec, hkContainerHeapAllocator>", 558},
+    // The complete Replay global type compendium, so any Havok type a baked
+    // asset uses (meshes, convex polytopes, mass properties) maps by identity.
+    static const std::unordered_map<std::string_view, std::uint32_t> indices{
+#include "replay_type_compendium.inc"
     };
-    const auto found = std::ranges::find_if(
-        indices, [identity](const auto &entry) { return entry.first == identity; });
-    if (found == std::end(indices))
+    const auto found = indices.find(identity);
+    if (found == indices.end())
         throw std::runtime_error("Replay global type compendium has no mapped type '" +
                                  std::string(identity) + "'");
     return found->second;
@@ -503,7 +467,7 @@ CollisionInput ReadCollision(const std::filesystem::path &path)
     }
 
     result.hulls.reserve(count);
-    constexpr std::uint32_t supportedContents = 0x33691;
+    constexpr std::uint32_t supportedContents = 0x33693; // + foliage 0x2
     for (std::uint32_t hullIndex = 0; hullIndex < count; ++hullIndex)
     {
         if (cursor + (hasLadderRungOffset ? 34u
@@ -567,7 +531,7 @@ CollisionInput ReadCollision(const std::filesystem::path &path)
             (hull.glassId ? hull.contents != kBreakableGlassContents
                           : (hull.contents & ~supportedContents) != 0) ||
             hull.materialOverride > 63 || !std::isfinite(hull.ladderRungOffset) ||
-            std::abs(hull.ladderRungOffset) > 6.0f ||
+            std::abs(hull.ladderRungOffset) > 16.0f ||
             slabCount > 252 || ladderPlaneCount > 8 || (hull.surfaceFlags & ~0x7FFFFu) != 0 ||
             cursor + std::size_t(vertexCount) * 12 + std::size_t(slabCount) * 20 +
                     std::size_t(ladderPlaneCount) * (hasLadderModelTangents ? 24 : 16) >
@@ -1586,7 +1550,15 @@ std::vector<std::uint8_t> BuildShapeList(ReplayHavok &havok, const std::vector<H
                                                   center[2] / 32.0f,
                                                   1};
             std::memcpy(instance, transform.data(), sizeof(transform));
-            Write(instance + 12, std::uint32_t{0x3F000040});
+            // hknpShapeInstance flags live in the low bits of column 0's w
+            // (0x3F000040 = 0.5 + flags). Shipped instances with a translation
+            // carry 0x2 (0x3F000042, 14 of 14 in mp_hideout). Without it the
+            // simulation's contact path placed every brush hull at the world
+            // origin while queries used the full transform: ragdolls, dropped
+            // weapons and clutter fell through brush floors and walls, terrain
+            // (triangles, no instance) held (owner test 2026-10-16).
+            const bool translated = center[0] != 0.0f || center[1] != 0.0f || center[2] != 0.0f;
+            Write(instance + 12, std::uint32_t{translated ? 0x3F000042u : 0x3F000040u});
             const std::array<float, 4> scale{1, 1, 1, 1};
             std::memcpy(instance + 64, scale.data(), sizeof(scale));
             Write(instance + 80, reinterpret_cast<std::uintptr_t>(shape));
@@ -1724,6 +1696,7 @@ std::vector<std::uint8_t> BuildShapeList(ReplayHavok &havok, const std::vector<H
 
     const auto restoredCompounds = Read<std::uintptr_t>(loaded);
     auto *queryBounds = havok.Allocate(32);
+    std::size_t shrunkShapes = 0;
     for (std::size_t groupIndex = 0; groupIndex < groups.size(); ++groupIndex)
     {
         const auto restored = Read<std::uintptr_t>(
@@ -1734,6 +1707,25 @@ std::vector<std::uint8_t> BuildShapeList(ReplayHavok &havok, const std::vector<H
             Read<std::uint32_t>(reinterpret_cast<void *>(restored + countOffset)) !=
                 shapeCounts[groupIndex])
             throw std::runtime_error("Native collision round trip lost child shapes");
+        {
+            // Simulation pairs bodies through the broadphase by the root
+            // shape's own AABB; queries walk the shape directly. Report it.
+            auto *identity = static_cast<float *>(havok.Allocate(64));
+            const std::array<float, 16> unit{1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1};
+            std::memcpy(identity, unit.data(), sizeof(unit));
+            const auto rootVtable = Read<std::uintptr_t>(reinterpret_cast<void *>(restored));
+            const auto rootAabb = Read<std::uintptr_t>(reinterpret_cast<void *>(rootVtable + 32));
+            havok.Function<void(void *, void *, void *)>(rootAabb - havok.Base())(
+                reinterpret_cast<void *>(restored), identity, queryBounds);
+            const auto *aabb = static_cast<const float *>(queryBounds);
+            zt::info("collision: shape list %zu root AABB %.1f %.1f %.1f .. %.1f %.1f %.1f "
+                     "(expected %.1f %.1f %.1f .. %.1f %.1f %.1f, game units)",
+                     groupIndex, aabb[0] * 32, aabb[1] * 32, aabb[2] * 32, aabb[4] * 32,
+                     aabb[5] * 32, aabb[6] * 32, bounds[groupIndex * 2][0] * 32,
+                     bounds[groupIndex * 2][1] * 32, bounds[groupIndex * 2][2] * 32,
+                     bounds[groupIndex * 2 + 1][0] * 32, bounds[groupIndex * 2 + 1][1] * 32,
+                     bounds[groupIndex * 2 + 1][2] * 32);
+        }
         const auto restoredChildren =
             Read<std::uintptr_t>(reinterpret_cast<void *>(restored + childrenOffset));
         const auto originalChildren = Read<std::uintptr_t>(
@@ -1763,13 +1755,41 @@ std::vector<std::uint8_t> BuildShapeList(ReplayHavok &havok, const std::vector<H
             const auto *actual = static_cast<const float *>(queryBounds);
             const std::array<float, 6> measured{actual[0], actual[1], actual[2],
                                                 actual[4], actual[5], actual[6]};
+            // Havok's convex builder may pull a face of a near-degenerate
+            // sliver inward (mp_aerodrome: 0.1 of a 0.125-thick plate). A
+            // small inward shrink is accepted; growth or a shift is an error.
+            bool shrunk = false;
+            for (std::size_t axis = 0; axis < measured.size(); ++axis)
+            {
+                const float inward = axis < 3 ? measured[axis] - check.bounds[axis]
+                                              : check.bounds[axis] - measured[axis];
+                if (std::isfinite(measured[axis]) && inward > 0.05f && inward <= 0.15f)
+                    shrunk = true;
+            }
+            if (shrunk)
+                ++shrunkShapes;
             for (std::size_t axis = 0; axis < measured.size(); ++axis)
                 if (!std::isfinite(measured[axis]) ||
-                    std::abs(measured[axis] - check.bounds[axis]) > 0.05f)
-                    throw std::runtime_error("Native bounds query disagrees at shape " +
-                                             std::to_string(check.localIndex));
+                    (std::abs(measured[axis] - check.bounds[axis]) > 0.05f &&
+                     !(shrunk && (axis < 3 ? measured[axis] - check.bounds[axis]
+                                           : check.bounds[axis] - measured[axis]) > 0.0f &&
+                       (axis < 3 ? measured[axis] - check.bounds[axis]
+                                 : check.bounds[axis] - measured[axis]) <= 0.15f)))
+                    throw std::runtime_error(
+                        "Native bounds query disagrees at shape " +
+                        std::to_string(check.localIndex) + " axis " + std::to_string(axis) +
+                        ": measured " + std::to_string(measured[axis]) + ", expected " +
+                        std::to_string(check.bounds[axis]) + " (bounds " +
+                        std::to_string(check.bounds[0]) + " " + std::to_string(check.bounds[1]) +
+                        " " + std::to_string(check.bounds[2]) + " .. " +
+                        std::to_string(check.bounds[3]) + " " + std::to_string(check.bounds[4]) +
+                        " " + std::to_string(check.bounds[5]) + ")");
         }
     }
+    if (shrunkShapes)
+        zt::warn("collision: Havok pulled a face of %zu near-degenerate hull(s) inward by at most "
+                 "0.15 (4.8 units)",
+                 shrunkShapes);
     zt::info("collision: baked %zu hulls and %zu mesh triangles in %zu shape lists and %zu tags "
              "into %zu bytes",
              builtHulls, builtMeshTriangles, groups.size(), tags.size(), output.size());
@@ -1888,8 +1908,12 @@ BakeResult BakeCollision(const BakeInput &input)
 
 PhysicsAsset BakePhysicsAsset(std::string name, const PhysicsMesh &source,
                                const std::uint32_t useCategory,
-                               const std::uint32_t simulationCategory, const bool keyframedBody)
+                               const std::uint32_t simulationCategory, const bool keyframedBody,
+                               const ClutterBody *clutter)
 {
+    if (clutter && (useCategory != 3 || keyframedBody || !std::isfinite(clutter->mass) ||
+                    clutter->mass <= 0.0f || clutter->mass > 10000.0f))
+        throw std::runtime_error("Native clutter physics input is invalid");
     if (!g_preparedHavok)
         throw std::runtime_error("PrepareCollisionBaker must be called before model physics");
     if (name.empty() || source.vertices.size() < 3 || source.triangles.empty() ||
@@ -1898,7 +1922,8 @@ PhysicsAsset BakePhysicsAsset(std::string name, const PhysicsMesh &source,
         source.surfaceType > 63 ||
         !((useCategory == 0 && simulationCategory == 0) ||
           (useCategory == 3 && simulationCategory == 1) ||
-          (useCategory == 7 && simulationCategory == 9)))
+          (useCategory == 7 && simulationCategory == 9) ||
+          (clutter && useCategory == 3 && (simulationCategory == 4 || simulationCategory == 5))))
         throw std::runtime_error("Native model physics input is invalid");
 
     Mesh mesh;
@@ -1936,10 +1961,44 @@ PhysicsAsset BakePhysicsAsset(std::string name, const PhysicsMesh &source,
     // the surface type in hknpShape::m_userData (+0x28), which the hit
     // surfaceFlags fall back to (16172E0).
     const std::vector<std::uint16_t> triangleTags(mesh.triangles.size(), 0xFFFF);
-    auto *shape = BuildCompressedMesh(havok, mesh, triangleTags);
-    if (!HasCompressedMeshTriangleTree(shape))
-        shape = BuildCompressedMesh(havok, mesh, triangleTags, nullptr, 0, true);
-    RequireCompressedMeshTriangleTree(shape, name, "build");
+    void *shape = nullptr;
+    if (clutter)
+    {
+        // Simulated bodies are convex polytopes (shipped clutter); the hull
+        // builder (hknpConvexShape::createFromVertices, 0x1E82060) reduces the
+        // points to at most 252 vertices. BuildConfig +0x11 makes it attach
+        // hknpShapeMassProperties (0x1E79C80); +0x38 is the mass (a negative
+        // value would be a density).
+        auto *config = static_cast<std::uint8_t *>(havok.Allocate(96));
+        havok.Function<void *(void *)>(0x1E81300)(config);
+        Write(config, 0.0f);
+        config[4] = 0;
+        config[16] = 1;
+        config[17] = 1;
+        Write(config + 0x38, clutter->mass);
+        auto *points = static_cast<std::uint8_t *>(havok.Allocate(mesh.vertices.size() * 16));
+        for (std::size_t index = 0; index < mesh.vertices.size(); ++index)
+        {
+            const std::array<float, 4> point{mesh.vertices[index][0] / 32.0f,
+                                             mesh.vertices[index][1] / 32.0f,
+                                             mesh.vertices[index][2] / 32.0f, 0.0f};
+            std::memcpy(points + index * 16, point.data(), 16);
+        }
+        auto *pointArray = static_cast<std::uint8_t *>(havok.Allocate(16));
+        Write(pointArray, reinterpret_cast<std::uintptr_t>(points));
+        Write(pointArray + 8, static_cast<std::uint32_t>(mesh.vertices.size()));
+        Write(pointArray + 12, std::uint32_t{16});
+        shape = havok.Function<void *(void *, float, void *)>(0x1E82060)(pointArray, 0.0f, config);
+        if (!shape)
+            throw std::runtime_error("Native clutter convex construction failed: " + name);
+    }
+    else
+    {
+        shape = BuildCompressedMesh(havok, mesh, triangleTags);
+        if (!HasCompressedMeshTriangleTree(shape))
+            shape = BuildCompressedMesh(havok, mesh, triangleTags, nullptr, 0, true);
+        RequireCompressedMeshTriangleTree(shape, name, "build");
+    }
     const std::uint64_t shapeUserData = std::uint64_t{source.surfaceType} << 19;
     Write(static_cast<std::uint8_t *>(shape) + 0x28, shapeUserData);
     auto setArray = [&](std::uint8_t *field, void *data, const std::uint32_t count) {
@@ -1966,12 +2025,23 @@ PhysicsAsset BakePhysicsAsset(std::string name, const PhysicsMesh &source,
         throw std::runtime_error("Keyframed model physics needs the entity categories");
     // Shipped KeyframedEntity assets (mp_backlot2 bike_frame_hook) keep the
     // dynamic-entity lookups but serialize the body like a static model.
-    const bool serializedBodyPolicy = glass || staticModel || keyframedBody;
+    const bool serializedBodyPolicy = glass || staticModel || keyframedBody || clutter;
+    // physicsbodyquality.hkx / physicsmaterial.hkx / physicsmotionproperties.hkx
+    // name CRCs: PBQ_Static D0452309, PBQ_Debris 98996C20, PBQ_Dynamic 7923E35C;
+    // PM_Glass F728E572, PM_Plastic 4B02BC9D; PMP_Static C356EC46, PMP_Debris
+    // 8B8AA36F, PMP_Dynamic 9F53AC92, PMP_Keyframed E9D0CCAF.
     const std::uint32_t bodyQualityNameCrc =
-        staticModel ? 0xD0452309u : glass ? 0x98996C20u : 0x7923E35Cu;
-    const std::uint32_t materialNameCrc = glass ? 0xF728E572u : 0x4B02BC9Du;
+        clutter ? (clutter->debris ? 0x98996C20u : 0x7923E35Cu)
+        : staticModel ? 0xD0452309u
+        : glass       ? 0x98996C20u
+                      : 0x7923E35Cu;
+    const std::uint32_t materialNameCrc =
+        clutter ? clutter->materialCrc : glass ? 0xF728E572u : 0x4B02BC9Du;
     const std::uint32_t motionPropertiesNameCrc =
-        staticModel ? 0xC356EC46u : glass ? 0x8B8AA36Fu : 0xE9D0CCAFu;
+        clutter ? (clutter->debris ? 0x8B8AA36Fu : 0x9F53AC92u)
+        : staticModel ? 0xC356EC46u
+        : glass       ? 0x8B8AA36Fu
+                      : 0xE9D0CCAFu;
     constexpr std::uint32_t kServerUsageDefault = 0;
     constexpr std::uint32_t kBodyDriverNone = 0;
 
@@ -1991,13 +2061,18 @@ PhysicsAsset BakePhysicsAsset(std::string name, const PhysicsMesh &source,
     havok.Function<void(void *, void *, int)>(0x1E617C0)(system, nullptr, 1);
     Write(root + 8, reinterpret_cast<std::uintptr_t>(system));
 
-    auto *material = static_cast<std::uint8_t *>(havok.Allocate(112));
-    havok.Function<void(void *, void *, int)>(0x1E70BB0)(material, nullptr, 1);
-    setArray(system + 24, material, 1);
+    // Shipped clutter leaves the system material and motion-properties arrays
+    // empty; its body takes them from the name-CRC lookups.
+    if (!clutter)
+    {
+        auto *material = static_cast<std::uint8_t *>(havok.Allocate(112));
+        havok.Function<void(void *, void *, int)>(0x1E70BB0)(material, nullptr, 1);
+        setArray(system + 24, material, 1);
 
-    auto *motion = static_cast<std::uint8_t *>(havok.Allocate(112));
-    havok.Function<void(void *, void *, int)>(0x1E5D790)(motion, nullptr, 1);
-    setArray(system + 40, motion, 1);
+        auto *motion = static_cast<std::uint8_t *>(havok.Allocate(112));
+        havok.Function<void(void *, void *, int)>(0x1E5D790)(motion, nullptr, 1);
+        setArray(system + 40, motion, 1);
+    }
 
     auto *body = static_cast<std::uint8_t *>(havok.Allocate(192));
     havok.Function<void(void *, void *, int)>(0x1E64350)(body, nullptr, 1);
@@ -2011,6 +2086,10 @@ PhysicsAsset BakePhysicsAsset(std::string name, const PhysicsMesh &source,
     Write(body + 0x14, std::uint16_t{0});
     Write(body + 0x16, std::uint8_t{0});
     Write(body + 0x88, std::uint16_t{0});
+    // bodyCinfo position (+0x30) is a point: every shipped body (400 of 400
+    // sampled, all motion types) stores w = 1. The constructor leaves 0, and
+    // converted clutter (Nuketown's tires) fell through the world once shot.
+    Write(body + 0x3C, 1.0f);
     if (serializedBodyPolicy)
     {
         // Shipped static-model, script-model and glass assets retain the body
@@ -2019,6 +2098,14 @@ PhysicsAsset BakePhysicsAsset(std::string name, const PhysicsMesh &source,
         Write(body + 0x14, std::uint16_t{0xFFFF});
         Write(body + 0x16, std::uint8_t{0xFF});
         Write(body + 0x88, std::uint16_t{0xFFFF});
+    }
+    if (clutter)
+    {
+        // bodyCinfoWithAttachment: motionType +0x28 (2 = dynamic), mass +0x70,
+        // activationPriority +0xA0, as the shipped clutter bodies.
+        Write(body + 0x28, std::uint8_t{2});
+        Write(body + 0x70, clutter->mass);
+        Write(body + 0xA0, std::int8_t{2});
     }
     setArray(system + 56, body, 1);
 
@@ -2039,9 +2126,21 @@ PhysicsAsset BakePhysicsAsset(std::string name, const PhysicsMesh &source,
     if (!loadedSystem || Read<std::uint32_t>(reinterpret_cast<void *>(loadedSystem + 64)) != 1 ||
         !loadedBodies || !Read<std::uintptr_t>(reinterpret_cast<void *>(loadedBodies)))
         throw std::runtime_error("Native model physics round trip lost its body or shape");
-    RequireCompressedMeshTriangleTree(
-        reinterpret_cast<const void *>(Read<std::uintptr_t>(reinterpret_cast<void *>(loadedBodies))),
-        result.name, "round trip");
+    if (clutter)
+    {
+        // hknpShape +0x30 is its hkRefCountedProperties (the mass properties).
+        const auto *loadedBody = reinterpret_cast<const std::uint8_t *>(loadedBodies);
+        const auto *loadedShape =
+            reinterpret_cast<const std::uint8_t *>(Read<std::uintptr_t>(loadedBody));
+        if (Read<std::uint8_t>(loadedBody + 0x28) != 2 ||
+            Read<float>(loadedBody + 0x70) != clutter->mass || !Read<std::uintptr_t>(loadedShape + 0x30))
+            throw std::runtime_error("Native clutter physics round trip lost its dynamic body");
+    }
+    else
+        RequireCompressedMeshTriangleTree(
+            reinterpret_cast<const void *>(
+                Read<std::uintptr_t>(reinterpret_cast<void *>(loadedBodies))),
+            result.name, "round trip");
     if (Read<std::uint64_t>(reinterpret_cast<std::uint8_t *>(
                                 Read<std::uintptr_t>(reinterpret_cast<void *>(loadedBodies))) +
                             0x28) != shapeUserData)

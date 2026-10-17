@@ -4,6 +4,7 @@
 #include "iw8_zone.h"
 #include "iw8_zonebuffer.h"
 #include "../common/physics_asset_serialization.h"
+#include "../assets/replay_dynentity.h"
 #include "../common/replay_havok.h"
 #include "replay_map_layout.h"
 #include "replay_netconst.h"
@@ -96,6 +97,15 @@ inline void emitPhysicsAssetReference(ZoneBuffer &zb,
     zb.pushStream(XFILE_BLOCK_VIRTUAL);
     zb.writeStr(name);
     zb.popStream();
+    zb.popStream();
+    // Map zones load through Preload_PhysicsAssetPtr (0xDFB170), which places this
+    // stub in stream 2 where Load_PhysicsAssetPtr (0xDF3A60) uses stream 1. Reserve
+    // it in both. Unreserved, Greenband's static-model collision stubs overran
+    // stream 2 into stream 6, which the preload allocator places right after it,
+    // and corrupted the map script's bytecode ("unknown function", owner 2026-10-15).
+    zb.pushStream(XFILE_BLOCK_TEMP_POSTLOAD);
+    zb.align(7);
+    zb.reserveCalc(sizeof(asset));
     zb.popStream();
 }
 
@@ -503,15 +513,26 @@ inline void emitMapEdgeListBody(ZoneBuffer &zb, const std::vector<havok::LadderF
 }
 
 // Emit one MapEnts asset body: struct(0x408)->TEMP_PRELOAD(1), then name + entityString ->
+// SpatialPartition_Population_Partition {float dist; u32 axis:2, rightChild:29}.
+// Stock leaves (mp_hideout dynent tree, ACTS 2026-10-16) are dist 0, axis 3,
+// rightChild 0; axis 0-2 is a split with left child i+1. An all-zero entry is an
+// X split at 0 whose children are out of range / itself, not a leaf.
+inline void writeSpatialLeaf(ZoneBuffer &zb)
+{
+    zb.writeT<float>(0.0f);
+    zb.writeT<uint32_t>(3u);
+}
+
 // VIRTUAL(8). Caller is responsible for the surrounding push/pop. `ents` is the IW8 numeric-keyId
 // entityString (NUL added here).
 inline void emitMapEntsBody(ZoneBuffer &zb, const char *assetName, const std::string &ents,
                             const ReplaySpawns *spawns = nullptr,
                             const havok::BakeResult *collision = nullptr,
                             const uint64_t edgeListAlias = PTR_NULL,
-                            const uint32_t dynamicModelCount = 0,
-                            const uint32_t dynamicBrushCount = 0)
+                            const DynamicEntityCounts &dynamic = {})
 {
+    const uint32_t dynamicModelCount = dynamic.models;
+    const uint32_t dynamicBrushCount = dynamic.brushes;
     uint8_t me[kSizeMapEnts];
     std::memset(me, 0, sizeof(me));
     stamp64(me, kME_name, PTR_FOLLOWS);
@@ -575,7 +596,8 @@ inline void emitMapEntsBody(ZoneBuffer &zb, const char *assetName, const std::st
         stamp64(me, kME_dynEntListIds, PTR_FOLLOWS);
         if (dynamicModelCount > UINT16_MAX || dynamicBrushCount > UINT16_MAX)
             throw std::runtime_error("Replay no-spatial dynamic-entity count exceeds 16 bits");
-        stamp16(me, kME_dynEntNoSpatialCount, static_cast<uint16_t>(dynamicModelCount));
+        // Model clutter is spatial (replay_dynentity.cpp); brushes are not.
+        stamp16(me, kME_dynEntNoSpatialCount, 0);
         stamp16(me, kME_dynEntNoSpatialCount + sizeof(uint16_t),
                 static_cast<uint16_t>(dynamicBrushCount));
         stamp16(me, kME_dynEntMaxClientHistoryCount, 10000);
@@ -646,12 +668,15 @@ inline void emitMapEntsBody(ZoneBuffer &zb, const char *assetName, const std::st
         stamp32(tree, 16, 1);
         zb.write(tree, sizeof(tree));
         zb.align(3);
-        zb.writeT<uint64_t>(0); // unsplit leaf partition
+        writeSpatialLeaf(zb);
         zb.align(3);
+        // Population 0 is the radial clutter population; its leaf bounds the
+        // clutter. Stock leaf extents are the entries' bounds.
+        const bool clutter = i == 0 && dynamicModelCount;
         for (unsigned k = 0; k < 3; ++k)
-            zb.writeT<float>(-100000.f);
+            zb.writeT<float>(clutter ? dynamic.modelMins[k] : -100000.f);
         for (unsigned k = 0; k < 3; ++k)
-            zb.writeT<float>(100000.f);
+            zb.writeT<float>(clutter ? dynamic.modelMaxs[k] : 100000.f);
         zb.align(3);
         zb.writeT<uint32_t>(0xFFFFFFFFu);
     }
@@ -663,7 +688,7 @@ inline void emitMapEntsBody(ZoneBuffer &zb, const char *assetName, const std::st
     stamp32(scriptableTree, 16, 1);
     zb.write(scriptableTree, sizeof(scriptableTree));
     zb.align(3);
-    zb.writeT<uint64_t>(0);
+    writeSpatialLeaf(zb);
     zb.align(3);
     for (unsigned k = 0; k < 3; ++k)
         zb.writeT<float>(-100000.f);
@@ -774,6 +799,7 @@ struct MapSun
         float cosHalfFovInner = 0.0f;
         float rotationLimit = 0.0f;
         float translationLimit = 0.0f;
+        float intensity = 1.0f; // ComPrimaryLight +0x10 (local lights: see main CalibrateLocalLights)
         std::string definition;
     };
 
@@ -782,6 +808,8 @@ struct MapSun
     float direction[3]{-0.5795004963874817f, 0.4210316836833954f, 0.6977904438972473f};
     float up[3]{};
     uint32_t sunPrimaryLightIndex = 1;
+    // Stock light units per IW3 unit (--style iw8, iw3::LightUnitScale); 1 for iw3.
+    float lightUnitScale = 1.0f;
     std::vector<PrimaryLight> primaryLights;
 };
 
@@ -831,7 +859,7 @@ inline void emitComWorldBody(ZoneBuffer &zb, const char *assetName, const MapSun
         {
             light[1] = source->type;
             light[2] = source->canUseShadowMap ? 1 : 0;
-            stampf(light, 0x10, index == 0 ? 0.0f : 1.0f);
+            stampf(light, 0x10, index == 0 ? 0.0f : source->intensity);
             for (unsigned component = 0; component < 3; ++component)
             {
                 stampf(light, 0x20 + 4 * component, source->color[component]);
@@ -842,8 +870,25 @@ inline void emitComWorldBody(ZoneBuffer &zb, const char *assetName, const MapSun
             stampf(light, 0x50, source->radius);
             stampf(light, 0x6C, source->cosHalfFovOuter);
             stampf(light, 0x70, source->cosHalfFovInner);
-            stampf(light, 0x80, source->type >= 2 ? 0.0018f : 0.0f);
-            stampf(light, 0x84, source->type >= 2 ? 0.2f : 0.0f);
+            if (source->type >= 2)
+            {
+                // needsDynamicShadows: shipped mp_hideout sets it on exactly the
+                // shadow-mapped spots, the lights GfxWorld lightAABB lists
+                // (replay_locallights NeedsDynamicShadows). IW3 spot shadow maps
+                // include entities, so its shadowed spots qualify.
+                light[3] = source->type == 2 && source->canUseShadowMap ? 1 : 0;
+                // Shipped local-light defaults (mp_hideout, 124 lights): IW3 lights
+                // are points (smallest shipped bulb 1), shadow near-plane bias 8,
+                // softness 0.55, bias 0.75, area 0.0018, distance falloff 0.2, and
+                // collimation cos(90 deg) = no collimation.
+                stampf(light, 0x5C, 1.0f);
+                stampf(light, 0x74, 8.0f);
+                stampf(light, 0x78, 0.55f);
+                stampf(light, 0x7C, 0.75f);
+                stampf(light, 0x80, 0.0018f);
+                stampf(light, 0x84, 0.2f);
+                stampf(light, 0x88, -4.371138828673793e-08f);
+            }
             stampf(light, 0x8C, source->rotationLimit);
             stampf(light, 0x90, source->translationLimit);
             stamp64(light, 0x98, source->definition.empty() ? PTR_NULL : PTR_FOLLOWS);
@@ -960,28 +1005,24 @@ inline void registerMapWorldAssets(ZoneWriter &writer, const MapWorldStrings &st
                                    const MapBounds &bounds, const MapSun &lighting,
                                    const havok::BakeResult &collision,
                                    const uint32_t glassInitCount, const uint32_t glassPieceLimit,
-                                   const uint32_t dynamicModelCount,
-                                   const uint32_t dynamicBrushCount, const bool lightDefInZone,
+                                   const DynamicEntityCounts &dynamic, const bool lightDefInZone,
                                    const LevelNetConstStrings &levelStrings = {})
 {
     const auto spawns = strings.spawns;
     const auto staticCollisionPlan = strings.staticCollisionPlan;
     const bool hasLadders = !collision.ladders.empty();
     const bool hasLinearLightDef = strings.hasLinearLightDef;
-    const uint32_t lightDefNameStringIndex = strings.lightDefNameStringIndex;
 
     if (hasLadders)
         writer.add(ASSET_TYPE_EDGELIST, assetName, [&collision](ZoneWriter &output) {
             emitMapEdgeListBody(output.buffer(), collision.ladders);
         });
     writer.add(ASSET_TYPE_MAP_ENTS, assetName,
-               [assetName, ents, spawns, &collision, hasLadders, dynamicModelCount,
-                dynamicBrushCount](ZoneWriter &output) {
+               [assetName, ents, spawns, &collision, hasLadders, dynamic](ZoneWriter &output) {
                    const uint64_t edgeListAlias =
                        hasLadders ? output.assetAlias(ASSET_TYPE_EDGELIST, assetName) : PTR_NULL;
                    emitMapEntsBody(output.buffer(), assetName.c_str(), ents, spawns.get(),
-                                   &collision, edgeListAlias, dynamicModelCount,
-                                   dynamicBrushCount);
+                                   &collision, edgeListAlias, dynamic);
                });
 
     // col_map(23): clipMap struct -> TEMP_PRELOAD, variable data -> VIRTUAL.
@@ -992,7 +1033,8 @@ inline void registerMapWorldAssets(ZoneWriter &writer, const MapWorldStrings &st
                    uint8_t cm[kSizeClipMap];
                    std::memset(cm, 0, sizeof(cm));
                    stamp64(cm, kCM_name, PTR_FOLLOWS);
-                   stamp32(cm, kCM_isInUse, 1);
+                   // Shipped clip maps store isInUse 0; the loader marks the live asset.
+                   stamp32(cm, kCM_isInUse, 0);
                    stamp32(cm, 0x0C, staticCollisionPlan->models.empty() ? 0u : 1u);
                    stamp64(cm, 0x10, staticCollisionPlan->models.empty() ? PTR_NULL : PTR_FOLLOWS);
                    stamp64(cm, kCM_mapEnts, output.assetAlias(ASSET_TYPE_MAP_ENTS, assetName));
@@ -1000,8 +1042,16 @@ inline void registerMapWorldAssets(ZoneWriter &writer, const MapWorldStrings &st
                    cm[0x28] = 1; // R_UpdateActiveStage 19864E0 always copies stage zero.
                    for (int k = 0; k < 3; ++k)
                    {
-                       stampf(cm, kCM_bpMin + (size_t)k * 4, bounds.valid ? bounds.mn[k] : -100000.f);
-                       stampf(cm, kCM_bpMax + (size_t)k * 4, bounds.valid ? bounds.mx[k] : 100000.f);
+                   {
+                       // q_HavokPhysics_CreateWorld sizes every physics world's broadphase
+                       // from these bounds, and a body that leaves it is frozen in place
+                       // (q_HavokPhysics_OnBodyExitedBroadphase). Shipped maps pad far past
+                       // the playable area (mp_hideout -53152..77920, z -3584..29184), so
+                       // flung ragdolls and props keep simulating; pad likewise.
+                       const float pad = k < 2 ? 16384.f : 8192.f;
+                       stampf(cm, kCM_bpMin + (size_t)k * 4, bounds.valid ? bounds.mn[k] - pad : -100000.f);
+                       stampf(cm, kCM_bpMax + (size_t)k * 4, bounds.valid ? bounds.mx[k] + pad : 100000.f);
+                   }
                    }
                    stamp32(cm, kCM_havokSize, static_cast<uint32_t>(collision.world.size()));
                    stamp64(cm, kCM_havokData, collision.world.empty() ? PTR_NULL : PTR_FOLLOWS);
@@ -1026,6 +1076,11 @@ inline void registerMapWorldAssets(ZoneWriter &writer, const MapWorldStrings &st
                        throw std::runtime_error("sun primary-light index exceeds Replay stage range");
                    stage[offsetof(iw8::maps::Stage, sunPrimaryLightIndex)] =
                        static_cast<uint8_t>(lighting.sunPrimaryLightIndex);
+                   // Stage 0 is the fallback R_UpdateActiveStage (19864E0) never tests
+                   // against a trigger; shipped maps mark it 1024 (no trigger).
+                   const uint16_t noTrigger = 1024;
+                   std::memcpy(stage + offsetof(iw8::maps::Stage, triggerIndex), &noTrigger,
+                               sizeof(noTrigger));
                    zb.write(stage, sizeof(stage));
                    zb.writeStr("default");
                    if (!collision.world.empty())
@@ -1038,20 +1093,20 @@ inline void registerMapWorldAssets(ZoneWriter &writer, const MapWorldStrings &st
                });
 
     // Shipped Replay Rust carries this definition beside its ComWorld. The target
-    // type-34 loader reads a 0x20 body in stream 1; its name is the script string
-    // already written at the start of the VIRTUAL stream.
+    // type-34 loader reads a 0x20 body in stream 1. Its name follows inline: an
+    // alias into the zone's script-string block went stale once other assets
+    // interned strings (Discovery's read "ry_8/smodel_330").
     if (hasLinearLightDef && !lightDefInZone)
     {
-        uint64_t offset = spawns->strings.size() * sizeof(uint64_t);
-        for (uint32_t index = 1; index < lightDefNameStringIndex; ++index)
-            offset += spawns->strings[index].size() + 1;
-        const uint64_t nameAlias = packOffset(XFILE_BLOCK_VIRTUAL, offset);
-        writer.add(ASSET_TYPE_LIGHTDEF, "light_point_linear", [nameAlias](ZoneWriter &output) {
+        writer.add(ASSET_TYPE_LIGHTDEF, "light_point_linear", [](ZoneWriter &output) {
             uint8_t lightDef[iw8sz::LIGHTDEF]{};
-            stamp64(lightDef, 0x00, nameAlias);
+            stamp64(lightDef, 0x00, PTR_FOLLOWS);
             output.pushStream(XFILE_BLOCK_TEMP_PRELOAD);
             output.align(7);
             output.write(lightDef, sizeof(lightDef));
+            output.pushStream(XFILE_BLOCK_VIRTUAL);
+            output.writeStr("light_point_linear");
+            output.popStream();
             output.popStream();
         });
     }

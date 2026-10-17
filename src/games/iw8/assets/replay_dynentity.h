@@ -20,6 +20,10 @@ struct DynamicEntity
     std::array<float, 4> quaternion{};
     std::array<float, 3> origin{};
     bool noPhysics{true};
+    // Simulated clutter: physics-asset rigid-body count and collision flags
+    // (shipped DynEnt clutter: one body per model bone, collisionFlags 2).
+    std::uint8_t rigidBodies{};
+    std::uint8_t collisionFlags{};
     DynamicEntityBasis basis{DynamicEntityBasis::model};
     std::uint16_t brushModel{};
 };
@@ -28,6 +32,11 @@ struct DynamicEntityCounts
 {
     std::uint32_t models{};
     std::uint32_t brushes{};
+    // Model clutter sits in the radial spatial population like stock clutter:
+    // one leaf partition bounding every model origin (padded). Brush dynents
+    // stay on the no-spatial list.
+    std::array<float, 3> modelMins{};
+    std::array<float, 3> modelMaxs{};
 };
 
 DynamicEntityCounts CountDynamicEntities(const std::vector<DynamicEntity> &entities);
