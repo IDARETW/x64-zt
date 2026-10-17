@@ -2,6 +2,8 @@
 
 #include <game.hpp>
 
+#include "structs.hpp"
+
 namespace zonetool::iw8
 {
 	namespace
