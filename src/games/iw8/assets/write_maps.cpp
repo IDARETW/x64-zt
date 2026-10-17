@@ -2,6 +2,7 @@
 #include "../iw8_structs.h"
 #include "../zone/iw8_zone.h"
 #include "../zone/maps_write.h"
+#include "replay_ies.h"
 #include "../common/replay_lightgrid.h"
 #include "../common/replay_render.h"
 
@@ -307,13 +308,23 @@ void emitGfxMapBody(ZoneWriter &zw, const char *assetName, const std::string &me
                     const uint32_t primaryLightCount, const uint32_t sunPrimaryLightIndex,
                     const replayrender::StaticModels &staticModels,
                     const uint32_t dynamicModelCount, const uint32_t dynamicBrushCount,
-                    const replaysunshadow::Data &sunShadow)
+                    const replaysunshadow::Data &sunShadow,
+                    const std::array<float, 3> &sunDirection,
+                    const iw8::heightfield::Data *heightfield,
+                    const iw8::locallights::Data *localLights)
 {
     if (primaryLightCount < 2 || sunPrimaryLightIndex >= primaryLightCount)
         throw std::runtime_error("invalid primary-light table for GfxWorld");
 
     const auto lightGrid = replaylightgrid::Load(meshPath);
-    const auto umbraTome = replayrender::BuildUmbraTome(mesh, staticModels);
+    static const iw8::locallights::Data noLocalLights;
+    const auto &lights = localLights ? *localLights : noLocalLights;
+    if (!lights.Empty() && lights.lightCount != primaryLightCount)
+        throw std::runtime_error("GfxWorld local-light data does not match the primary lights");
+    // Draw-table probe instances: the authored probes plus one fallback.
+    const auto umbraTome = replayrender::BuildUmbraTome(
+        mesh, staticModels, lights.umbraLights,
+        static_cast<uint32_t>(mesh.reflectionProbes.size() + 1));
     const auto cellCount = static_cast<uint32_t>(mesh.cells.size());
     const auto cellWordCount = (cellCount + 31u) >> 5;
     std::vector<uint8_t> gw(kSizeGfxWorld, 0);
@@ -351,6 +362,33 @@ void emitGfxMapBody(ZoneWriter &zw, const char *assetName, const std::string &me
     for (size_t index = 0; index < sortKeys.size(); ++index)
         stamp32(gw.data(), 0x3C + index * sizeof(uint32_t), sortKeys[index]);
     stamp64(gw.data(), 0x3D68, PTR_FOLLOWS);     // runtime GfxLight[], zero-fill stream 4
+    if (heightfield)
+        iw8::heightfield::Stamp(gw, *heightfield, zw);
+    iw8::locallights::Stamp(gw, lights, dynamicModelCount, dynamicBrushCount);
+    // sunflare_t at +0x3E28 (Load_sunflare_t 0xE41700): hasValidData, sprite and
+    // flare materials (stock ",sun" / ",sun_flare", as shipped mp_rust), the
+    // converted sizes, cosines and fade times, and sunFxPosition (the direction
+    // to the sun).
+    constexpr size_t kSunFlare = 0x3E28;
+    if (mesh.sunFlare.size() == 18)
+    {
+        gw[kSunFlare] = 1;
+        stamp64(gw.data(), kSunFlare + 0x08, PTR_FOLLOWS);
+        stamp64(gw.data(), kSunFlare + 0x10, PTR_FOLLOWS);
+        constexpr std::array<bool, 18> isInteger{false, false, false, false, false, false,
+                                                 true,  true,  false, false, false, true,
+                                                 true,  false, false, false, true,  true};
+        for (size_t index = 0; index < mesh.sunFlare.size(); ++index)
+        {
+            const size_t offset = kSunFlare + 0x18 + index * 4;
+            if (isInteger[index])
+                stamp32(gw.data(), offset, static_cast<uint32_t>(std::lround(mesh.sunFlare[index])));
+            else
+                stampf(gw.data(), offset, static_cast<float>(mesh.sunFlare[index]));
+        }
+        for (size_t axis = 0; axis < 3; ++axis)
+            stampf(gw.data(), kSunFlare + 0x60 + axis * 4, sunDirection[axis]);
+    }
     // Native Load_GfxBrushModelArray DD1750 consumes 96 bytes per model;
     // allocator DCF750 uses alignment mask 3. Entity model indices refer to
     // this array directly, so preserve every authored IW3 brush-model slot.
@@ -398,7 +436,8 @@ void emitGfxMapBody(ZoneWriter &zw, const char *assetName, const std::string &me
     // R_SetLightScaleInfo (197CB93) multiplies secondary diffuse by this value.
     // Zero-initializing it disables indirect light, even with a valid grid.
     stampf(gw.data(), 0x37F0, 1.0f);
-    stamp64(gw.data(), 0x648 + 0xF0, PTR_FOLLOWS); // mandatory IES lookup image
+    // Mandatory IES lookup image: the map's own strip (iw8::ies::Register).
+    stamp64(gw.data(), 0x648 + 0xF0, zw.assetAlias(ASSET_TYPE_IMAGE, iw8::ies::kLookupName));
     stamp64(gw.data(), kGW_cellVisBits,
             PTR_FOLLOWS); // REQUIRED non-null (cellCount-gated memset, no own count)
     stamp64(gw.data(), 0x3EF8, PTR_FOLLOWS); // cellHasSunLitSurfsBits[cellWordCount]
@@ -536,18 +575,8 @@ void emitGfxMapBody(ZoneWriter &zw, const char *assetName, const std::string &me
                                              lightmap.images[0].height};
         zw.write(packed.data(), sizeof(packed));
     }
-    // Load_GfxWorldDraw D96710 loads iesLookupTexture before transient zones.
-    // With no authored local lights, native white gives a neutral IES lookup.
-    // Reference the existing image; no pixels or stock image data are copied.
-    zw.pushStream(XFILE_BLOCK_TEMP_PRELOAD);
-    zw.align(15);
-    uint8_t iesImage[0xE8]{};
-    stamp64(iesImage, 0, PTR_FOLLOWS);
-    zw.write(iesImage, sizeof(iesImage));
-    zw.pushStream(XFILE_BLOCK_VIRTUAL);
-    zw.writeStr(",$white");
-    zw.popStream();
-    zw.popStream();
+    // Load_GfxWorldDraw D96710 loads iesLookupTexture before transient zones;
+    // it aliases the "*ieslookup" image registered ahead of the world.
     // Load_GfxWorldDraw D96710 visits its 1536 inline asset pointers.
     // Load_GfxWorldTransientZonePtr D970B0: stream 1, alignment 7;
     // Load_GfxWorldTransientZone D96E90: 0x148 bytes, name in VIRTUAL.
@@ -622,6 +651,13 @@ void emitGfxMapBody(ZoneWriter &zw, const char *assetName, const std::string &me
     // follows lightmapTransientIndex and precedes the brush-model array.
     if (!sunShadow.bytes.empty())
         zw.write(sunShadow.bytes.data(), sunShadow.bytes.size());
+    // Load_GfxWorld then visits frustumLights (+0x3CA0, Load_GfxFrustumLights
+    // 0xD91900), lightViewFrustums (+0x3D60) and the heightfields (+0x3D88)
+    // before the brush models.
+    iw8::locallights::EmitFrustumLights(zw, lights);
+    iw8::locallights::EmitViewFrustums(zw, lights);
+    if (heightfield)
+        iw8::heightfield::Emit(zw, *heightfield);
     zw.align(3);
     for (const auto &model : mesh.brushModels)
     {
@@ -635,6 +671,28 @@ void emitGfxMapBody(ZoneWriter &zw, const char *assetName, const std::string &me
         stamp32(brushModel, 0x5C, UINT32_MAX);
         zw.write(brushModel, sizeof(brushModel));
     }
+    // Load_GfxWorld visits sun.spriteMaterial and sun.flareMaterial after the
+    // brush models (the sky-illumination and +0x3E08/+0x3E18 arrays between
+    // them are null here): two Material references.
+    if (mesh.sunFlare.size() == 18)
+    {
+        for (const char *name : {",sun", ",sun_flare"})
+        {
+            zw.pushStream(XFILE_BLOCK_TEMP_PRELOAD);
+            zw.align(7);
+            uint8_t material[0x78]{};
+            stamp64(material, 0, PTR_FOLLOWS);
+            zw.write(material, sizeof(material));
+            zw.pushStream(XFILE_BLOCK_VIRTUAL);
+            zw.writeStr(name);
+            zw.popStream();
+            zw.popStream();
+        }
+    }
+    // After the stream-4 bitsets: shadowGeomOptimized (+0x3F78) and lightAABB
+    // (+0x3F80) precede the static DPVS.
+    iw8::locallights::EmitShadowGeometry(zw, lights);
+    iw8::locallights::EmitLightAABB(zw, lights);
     replayrender::EmitSortedSurfaces(zw, mesh, staticModels);
     zw.align(15);
     zw.write(umbraTome.data(), umbraTome.size());
@@ -682,7 +740,13 @@ void emitGfxMapBody(ZoneWriter &zw, const char *assetName, const std::string &me
                     additionalPrimaryLights + additionalPrimaryLightVis + reflectionProbeVis +
                     additionalSmodelVis +
                    dynEntCellBitsBytes + dynEntViewBitsBytes + dynEntSceneBytes +
-                   dynEntMotionBytes);
+                   dynEntMotionBytes +
+                   // Light shadow/motion bitsets, plus slack for the realignment
+                   // they cause to later 128-byte-aligned allocations.
+                   (lights.Empty() ? 0
+                                   : iw8::locallights::ZeroFillBytes(lights, dynamicModelCount,
+                                                                     dynamicBrushCount) +
+                                         256));
     zw.popStream();
 }
 

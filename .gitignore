@@ -7,3 +7,6 @@ generate_custom.bat
 docs/
 re_reference/
 dump/
+
+# iw8 dump-source readers and converters (sources, not zonetool output)
+!src/games/iw8/dump/

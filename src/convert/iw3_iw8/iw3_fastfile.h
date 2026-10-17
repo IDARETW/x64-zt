@@ -10,7 +10,9 @@
 #include <iw8/assets/replay_sound.h>
 #include <iw8/common/replay_static_model_collision.h>
 #include <iw8/common/replay_sunshadow.h>
+#include "iw3_vision.h"
 #include <iw8/assets/replay_vfx.h>
+#include <iw8/assets/replay_xanim.h>
 
 #include <array>
 #include <cstdint>
@@ -30,10 +32,17 @@ struct ImportOptions
     std::filesystem::path unlinker;
     std::filesystem::path scratchRoot;
     std::vector<std::filesystem::path> searchPaths;
+    // Convert IW3 gametype visuals (flag props, headquarters radios).
+    bool iw3ModeAssets{true};
+    // IW3's look, or Replay's native fog/atmosphere/volumetrics (iw3_vision.h).
+    MapStyle style{MapStyle::iw3};
 };
 
 struct PreparedXModel
 {
+    // IW3 source model and the conversion role it took (smodel, dynmodel,
+    // entitymodel, fxmodel, partmodel), for the output ledger.
+    std::string source, role;
     convert::xmodel::Iw8XModelRecord model;
     std::vector<conv_xsurf::Iw8Surfs> lods;
     iw8::havok::PhysicsAsset physicsAsset;
@@ -146,6 +155,8 @@ struct PreparedFxVisual
 struct PreparedFxElement
 {
     std::int32_t flags{};
+    // Drawn with an IW3 distortion material (stock Replay refraction state).
+    bool distortion{};
     PreparedFxSpawn spawn{};
     PreparedFxFloatRange spawnRange{};
     PreparedFxFloatRange fadeInRange{};
@@ -204,13 +215,20 @@ struct PreparedRawFile
 struct PreparedMap
 {
     std::filesystem::path root;
+    // Rung spacing of the map's ladder models; 0 keeps Replay's 12 (map.json
+    // ladderRungDistance, applied by the DW client).
+    float ladderRungDistance{};
     std::filesystem::path collision;
     std::filesystem::path footsteps;
     std::filesystem::path scratch;
     std::vector<PreparedXModel> xmodels;
     std::vector<PreparedRawFile> rawFiles;
+    // IW3 animations the converted scripts play (vehicle destroy anims).
+    std::vector<iw8::xanim::Anim> xanims;
     std::vector<PreparedFx> fxEffects;
     std::unordered_map<std::string, std::string> fxMaterialAliases;
+    // Replay Particle_MaterialData per IW3 FX material (feather, falloff, eye offset).
+    std::unordered_map<std::string, std::array<std::uint8_t, 192>> fxParticleMaterialData;
     std::vector<iw8::vfx::Effect> vfxEffects;
     std::string vfxLightDef;
     std::string smallGlassEffect;
@@ -229,6 +247,11 @@ struct PreparedMap
     std::vector<std::uint8_t> gradingClutPixels;
     // Converted IW3 sound aliases (always-loaded map bank), when any convert.
     std::optional<iw8::sound::Bank> soundBank;
+    // Map-intro chyron (localize mp_chyron/<map>_<team>_<1..4> in eng_<map>):
+    // line 2's clock, which the game follows with the running seconds
+    // ("Day 1 10:30:"), and each team's unit (allies, axis; stock IW8 names).
+    std::string chyronClock;
+    std::array<std::string, 2> chyronUnits;
 
     PreparedMap() = default;
     PreparedMap(const PreparedMap &) = delete;

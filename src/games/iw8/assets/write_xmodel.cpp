@@ -48,8 +48,17 @@ iw8_focus::XModel buildStruct(const cx::Iw8XModelRecord &rec)
     xm.bounds.midPoint = {rec.boundsMid[0], rec.boundsMid[1], rec.boundsMid[2]};
     xm.bounds.halfSize = {rec.boundsHalf[0], rec.boundsHalf[1], rec.boundsHalf[2]};
     xm.physicsUseCategory = rec.physicsAssetName.empty() ? 0 : 1;
+    // CharCollBoundsType_Human (game-test PDB enum): the model compiler's default,
+    // carried by 98% of shipped Replay XModels (mp_hideout); read only when the
+    // model is used as a character. flags stay as the source sets them: shipped
+    // 0x40 (SELF_VISIBILITY) and 0x2000000 (HAS_ANY_STREAMED_IMAGES) describe data
+    // converted models do not carry.
+    xm.characterCollBoundsType = 1;
+    // lgvData (light-grid-volume packing): 0x4008040 on all 1902 shipped mp_hideout
+    // XModels; the value is tool-baked (absent from the exe), so every model gets it.
+    xm.lgvData = 0x4008040;
     // numAimAssistBones / numClothAssets / mdaoVolumeCount / physicsUseCategory / impactType /
-    // mdaoType / characterCollBoundsType / edgeLength / lgvData / physicsUsageCounter /
+    // mdaoType / edgeLength / physicsUsageCounter /
     // noScalePartBits: 0 (no IW5 source) -> all their //PTR/CNT pairs are null/zero (load-safe).
 
     // ---- pointer fields -> sentinels ----
@@ -195,8 +204,10 @@ void writeXModel(ZoneWriter &zw, const cx::Iw8XModelRecord &rec)
         rec.himipRadiusInvSq.size() != rec.numsurfs ||
         rec.numLods > 6 || rec.lods.size() != rec.numLods)
         throw std::runtime_error("writeXModel: inconsistent model counts for " + rec.name);
+    // An in-range collision LOD must exist; stock models also name out-of-range
+    // values (fx_rifle_shell: 8 with two LODs) besides 255.
     if (!std::isfinite(rec.scale) || rec.scale <= 0 || !std::isfinite(rec.radius) ||
-        rec.radius < 0 || (rec.collLod != UINT8_MAX && rec.collLod >= rec.numLods) ||
+        rec.radius < 0 || (rec.collLod < 6 && rec.collLod >= rec.numLods) ||
         rec.shadowCutoffLod > 6)
         throw std::runtime_error("writeXModel: invalid model scalars for " + rec.name);
     float previousDistance = 0;

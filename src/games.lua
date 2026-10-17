@@ -28,6 +28,8 @@ games = {
 			resincludedirs {"src/convert/iw3_iw8"}
 			-- The Havok baker maps the Replay executable at its own image base until native Havok replaces it.
 			linkoptions {"/BASE:0x180000000", "/DYNAMICBASE:NO"}
+			-- Media Foundation decodes IW3 compressed (MP3) loaded sounds.
+			links {"mfplat", "mfreadwrite", "mfuuid", "shlwapi"}
 		end,
 	},
 	converter_dependencies = {
