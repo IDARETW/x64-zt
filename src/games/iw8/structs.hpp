@@ -89,8 +89,12 @@ namespace zonetool::iw8
 	struct ID3D12DeviceChild;
 	struct ID3D12Pageable;
 	struct ID3D12Resource;
+	struct GfxBufferResource;
 	struct GfxShaderBufferView;
 	struct XSurfaceSubdivLevel;
+	struct GfxWrappedBaseBuffer;
+	struct GfxWrappedBuffer;
+	struct GfxShaderBufferRWView;
 	struct GfxWrappedRWBuffer;
 	struct GfxSubdivCache;
 	struct XSurfaceSubdivInfo;
@@ -139,7 +143,6 @@ namespace zonetool::iw8
 	struct Packed128;
 	union GfxDrawSurf;
 	struct TechniqueMask;
-	struct MaterialSerializedShader;
 	struct t_5A147756DA7E26A533E5CEAFC83E9B25;
 	union B6BF760B1B6C4BDF850B40018B947AD1;
 	struct D3D12XBOX_DESCRIPTOR_PIPELINE_STATE;
@@ -147,6 +150,10 @@ namespace zonetool::iw8
 	union ID3D12PipelineState_unnamed_type_m_Packet;
 	struct ID3D12PipelineState;
 	struct MaterialPipelineState;
+	struct GfxComputeShaderLoadDef;
+	struct ComputeShaderProgram;
+	struct ComputeShader;
+	struct Replay_MaterialTechniqueStateBits;
 	struct MaterialRenderTargetFormat;
 	struct GfxStateBits;
 	struct MaterialShaderArgument;
@@ -396,7 +403,6 @@ namespace zonetool::iw8
 	struct AttBurst;
 	struct AttHitmarker;
 	struct AttAdsMovement;
-	struct HyperBurstInfo;
 	struct AttDlcOverrides;
 	struct AttDlcScalars;
 	struct WeaponAttachment;
@@ -412,7 +418,6 @@ namespace zonetool::iw8
 	struct ScriptableEventPartDamageDef;
 	struct MayhemModel;
 	struct MayhemTransBounds;
-	struct GfxWrappedBaseBuffer;
 	struct MayhemAnimFramesSplineCompressed;
 	struct MayhemAnimFramesUncompressed;
 	union MayhemFramesUnion;
@@ -520,9 +525,6 @@ namespace zonetool::iw8
 	struct XModelDecalVolume;
 	struct XModelDecalVolumesInfo;
 	struct XModel;
-	struct GfxComputeShaderLoadDef;
-	struct ComputeShaderProgram;
-	struct ComputeShader;
 	struct snd_volmod_info_t;
 	struct snd_entchannel_info_t;
 	struct SndContext;
@@ -701,7 +703,6 @@ namespace zonetool::iw8
 	struct Replay_SurfaceBoundsExtra;
 	struct GfxSurfaceBounds;
 	struct GfxWorldSurfData;
-	struct GfxWrappedBuffer;
 	struct GfxWorldSurfaces;
 	struct GfxClutterInstancePool;
 	struct GfxStaticModelSurface;
@@ -743,6 +744,7 @@ namespace zonetool::iw8
 	struct GfxStaticDecalVolumeMaterial;
 	struct GfxStaticDecalVolumeMask;
 	struct GfxDecalVolumeCollection;
+	struct GfxIndexBuffer;
 	struct GfxWorldDrawVerts;
 	struct GfxCellTreeCount;
 	struct GfxAabbTree;
@@ -998,7 +1000,7 @@ namespace zonetool::iw8
 	struct StreamTreeOverride;
 	struct KeyValuePair;
 	struct KeyValuePairs;
-	struct Replay_GfxIndexBuffer;
+	struct GfxVertexBuffer;
 	struct StVertexData0;
 	struct StMeshLayerMaskData;
 	struct t_1E3A702398B9A63E216E94324D15DBDE;
@@ -1769,10 +1771,18 @@ namespace zonetool::iw8
 		ID3D12Pageable unnamed;
 	};
 
-	// Native GPU runtime record; loader copies bytes without serialized pointer fixups
+	struct GfxBufferResource
+	{
+		ID3D12Resource* resource;
+		std::uint64_t gpuAddress;
+		std::uint64_t allocation;
+		std::uint32_t size;
+	};
+
 	struct GfxShaderBufferView
 	{
-		std::uint8_t data[24];
+		ID3D12Resource* resource;
+		std::uint32_t view;
 	};
 
 	struct XSurfaceSubdivLevel
@@ -1804,8 +1814,8 @@ namespace zonetool::iw8
 		std::uint32_t* normals;
 		std::uint32_t* transitionPoints;
 		float* regularPatchCones;
-		ID3D12Resource* regularPatchIndexBuffer;
-		ID3D12Resource* faceIndexBuffer;
+		GfxBufferResource regularPatchIndexBuffer;
+		GfxBufferResource faceIndexBuffer;
 		GfxShaderBufferView regularPatchIndexBufferView;
 		GfxShaderBufferView regularPatchFlagsView;
 		GfxShaderBufferView facePointsView;
@@ -1814,18 +1824,45 @@ namespace zonetool::iw8
 		GfxShaderBufferView normalsView;
 		GfxShaderBufferView transitionPointsView;
 		GfxShaderBufferView regularPatchConesView;
+		GfxBufferResource regularPatchFlagsBuffer;
+		GfxBufferResource regularPatchConesBuffer;
+		GfxBufferResource facePointsBuffer;
+		GfxBufferResource edgePointsBuffer;
+		GfxBufferResource vertexPointsBuffer;
+		GfxBufferResource normalsBuffer;
+		GfxBufferResource transitionPointsBuffer;
 	};
 
-	// Native GPU runtime record; loader copies bytes without serialized pointer fixups
+	struct GfxWrappedBaseBuffer
+	{
+		GfxBufferResource buffer;
+		GfxShaderBufferView view;
+	};
+
+	struct GfxWrappedBuffer
+	{
+		GfxWrappedBaseBuffer base;
+		void* data;
+		std::uint8_t flags;
+	};
+
+	struct GfxShaderBufferRWView
+	{
+		ID3D12Resource* resource;
+		std::uint64_t gpuAddress;
+		std::uint64_t allocation;
+		std::uint32_t view;
+	};
+
 	struct GfxWrappedRWBuffer
 	{
-		std::uint8_t data[96];
+		GfxWrappedBuffer buffer;
+		GfxShaderBufferRWView rwView;
 	};
 
 	struct GfxSubdivCache
 	{
 		std::uint32_t size;
-		std::uint8_t* vertexData;
 		GfxWrappedRWBuffer vertexBuffer;
 	};
 
@@ -2758,17 +2795,6 @@ namespace zonetool::iw8
 		TECHNIQUE_NONE = 196,
 	};
 
-	struct MaterialSerializedShader
-	{
-		const char* name;
-		const char* debugName;
-		std::uint8_t* program;
-		std::uint8_t* metaData;
-		std::uint32_t programSize;
-		std::uint32_t metaDataSize;
-		std::uint32_t microCodeCrc;
-	};
-
 	struct t_5A147756DA7E26A533E5CEAFC83E9B25
 	{
 		std::uint32_t Header;
@@ -2818,14 +2844,32 @@ namespace zonetool::iw8
 
 	struct MaterialPipelineState
 	{
-		std::uint32_t packetSize;
-		std::uint32_t metaDataSize;
-		std::uint8_t* packet;
-		std::uint8_t* metaData;
-		MaterialSerializedShader* serializedShaders[4];
-		void* sourceShaders[4];
-		ID3D12PipelineState* derivedPso;
+		std::uint64_t hash;
 		ID3D12PipelineState* pso;
+	};
+
+	struct GfxComputeShaderLoadDef
+	{
+		std::uint8_t* program;
+		std::uint32_t programSize;
+	};
+
+	struct ComputeShaderProgram
+	{
+		ID3D12PipelineState* cs;
+		GfxComputeShaderLoadDef loadDef;
+	};
+
+	struct ComputeShader
+	{
+		const char* name;
+		const char* debugName;
+		ComputeShaderProgram prog;
+	};
+
+	struct Replay_MaterialTechniqueStateBits
+	{
+		std::uint8_t bits[5];
 	};
 
 	struct MaterialRenderTargetFormat
@@ -3144,8 +3188,14 @@ namespace zonetool::iw8
 		MaterialTechniqueType type;
 		std::uint16_t flags;
 		std::uint8_t pipelineStateInputLayoutCount;
-		std::uint8_t pipelineStateMap[26];
+		std::uint8_t pipelineStateMap[25];
 		MaterialPipelineState* pipelineStates;
+		std::uint64_t customBufferFlags[4];
+		std::uint8_t* rootParameterMap;
+		ComputeShader* vertexShader;
+		ComputeShader* hullShader;
+		ComputeShader* domainShader;
+		ComputeShader* pixelShader;
 		std::uint8_t perPrimArgCount;
 		std::uint8_t perObjArgCount;
 		std::uint8_t stableArgCount;
@@ -3154,12 +3204,13 @@ namespace zonetool::iw8
 		std::uint16_t perObjArgSize;
 		std::uint16_t stableArgSize;
 		std::uint8_t colorRtCount;
+		std::uint8_t pipelineStateCount;
+		Replay_MaterialTechniqueStateBits* stateBits;
 		MaterialRenderTargetFormat renderTargetFormats;
-		std::uint64_t customBufferFlags;
 		std::uint32_t customSamplerFlags;
 		MaterialConstantLayout precompiledIndex;
 		MaterialStageConfig stageConfig;
-		GfxStateBits stateBits;
+		GfxStateBits defaultStateBits;
 		MaterialShaderArgument* args;
 	};
 
@@ -3434,8 +3485,9 @@ namespace zonetool::iw8
 
 	struct GfxConstantBuffer
 	{
-		GfxConstantBufferDesc unnamed;
-		ID3D12Resource* buffer;
+		GfxConstantBufferDesc desc;
+		GfxBufferResource buffer;
+		std::uint64_t view;
 	};
 
 	struct MaterialConstantBufferDef
@@ -5687,13 +5739,6 @@ namespace zonetool::iw8
 		std::int32_t stopFadeBeats;
 		std::int32_t startOffsetFrames;
 		std::int32_t meter;
-		std::uint32_t sampleRate;
-	};
-
-	enum SndMusicStateStatus : std::uint32_t
-	{
-		SND_MUSIC_STATE_INACTIVE = 0,
-		SND_MUSIC_STATE_ACTIVE = 1,
 	};
 
 	struct SndMusicState
@@ -5711,8 +5756,6 @@ namespace zonetool::iw8
 		bool isSequential;
 		bool skipPreviousExit;
 		bool wallClockSync;
-		std::uint32_t refCount;
-		SndMusicStateStatus status;
 	};
 
 	struct SndMusicSet
@@ -8111,12 +8154,6 @@ namespace zonetool::iw8
 		std::int32_t explosionInnerDamage;
 		std::int32_t explosionOuterDamage;
 		float damageConeAngle;
-		std::int32_t iExplosionSteppedRadiusInner;
-		std::int32_t iExplosionSteppedRadiusMid;
-		std::int32_t iExplosionSteppedRadiusOuter;
-		std::int32_t iExplosionSteppedDamageInner;
-		std::int32_t iExplosionSteppedDamageMid;
-		std::int32_t iExplosionSteppedDamageOuter;
 		std::int32_t projectileSpeed;
 		std::int32_t projectileSpeedUp;
 		std::int32_t projectileActivateDist;
@@ -8251,13 +8288,6 @@ namespace zonetool::iw8
 		bool isOverride;
 	};
 
-	struct HyperBurstInfo
-	{
-		float fireTimeFraction;
-		std::int32_t coolDownMs;
-		bool enabled;
-	};
-
 	struct AttDlcOverrides
 	{
 		bool useFloatOverride[8];
@@ -8349,8 +8379,8 @@ namespace zonetool::iw8
 		AttHitmarker* hitmarker;
 		AttAdsMovement* adsMovement;
 		BallisticInfo* ballisticInfo;
-		HyperBurstInfo* hyperBurstInfo;
 		SwaySettings* swaySettings;
+		WeaponOffsetPatternScaleInfo* weaponOffsetPatternScales;
 		float* locationDamage;
 		float ammunitionScale;
 		float ballisticMuzzleVelocityScale;
@@ -8626,12 +8656,6 @@ namespace zonetool::iw8
 	{
 		vec3_t mins;
 		vec3_t size;
-	};
-
-	struct GfxWrappedBaseBuffer
-	{
-		ID3D12Resource* buffer;
-		GfxShaderBufferView view;
 	};
 
 	struct MayhemAnimFramesSplineCompressed
@@ -9759,6 +9783,7 @@ namespace zonetool::iw8
 		std::uint8_t numParts;
 		ReactiveMotionModelFlags flags;
 		std::uint8_t pad[2];
+		std::uint8_t runtime_0x54[12];
 	};
 
 	enum XModelLodInfoFlags : std::uint8_t
@@ -9980,25 +10005,6 @@ namespace zonetool::iw8
 		Replay_XModelRuntimeWord runtime_0x298;
 		MdaoVolume* mdaoVolumes;
 		XModelDecalVolumesInfo* decalVolumesInfo;
-	};
-
-	struct GfxComputeShaderLoadDef
-	{
-		std::uint8_t* program;
-		std::uint32_t programSize;
-	};
-
-	struct ComputeShaderProgram
-	{
-		ID3D12PipelineState* cs;
-		GfxComputeShaderLoadDef loadDef;
-	};
-
-	struct ComputeShader
-	{
-		const char* name;
-		const char* debugName;
-		ComputeShaderProgram prog;
 	};
 
 	struct snd_volmod_info_t
@@ -12017,12 +12023,6 @@ namespace zonetool::iw8
 		std::uint32_t displacementOffset[8];
 	};
 
-	// Native GPU runtime record; loader copies bytes without serialized pointer fixups
-	struct GfxWrappedBuffer
-	{
-		std::uint8_t data[64];
-	};
-
 	struct GfxWorldSurfaces
 	{
 		std::uint32_t count;
@@ -12442,6 +12442,14 @@ namespace zonetool::iw8
 		GFX_LIGHTMAP_TYPE_COUNT = 3,
 	};
 
+	struct GfxIndexBuffer
+	{
+		ID3D12Resource* resource;
+		std::uint64_t gpuAddress;
+		std::uint64_t allocation;
+		std::uint32_t size;
+	};
+
 	struct GfxWorldDrawVerts
 	{
 		std::uint32_t posDataSize;
@@ -12452,8 +12460,7 @@ namespace zonetool::iw8
 		GfxWrappedBuffer auxBuffer;
 		std::uint32_t indexCount;
 		std::uint16_t* indices;
-		ID3D12Resource* indexBuffer;
-		GfxShaderBufferView indexBufferView;
+		GfxIndexBuffer indexBuffer;
 	};
 
 	struct GfxCellTreeCount
@@ -13537,7 +13544,7 @@ namespace zonetool::iw8
 		std::uint64_t flags;
 		std::uint64_t animIndex;
 		std::uint64_t shadowAnimIndex;
-		std::uint32_t movetype[8];
+		std::uint32_t movetype[4];
 		float moveSpeed;
 		float moveSpeedAdjust;
 		std::int16_t initialLerp;
@@ -15015,7 +15022,7 @@ namespace zonetool::iw8
 
 	struct TransientCosts
 	{
-		StreamingContentSet streamContents[3];
+		StreamingContentSet streamContents;
 		StreamingItemCost* streamingCosts;
 		std::uint16_t* residentPageSizes;
 		std::uint16_t* tempPageSizes;
@@ -15475,7 +15482,7 @@ namespace zonetool::iw8
 		float duration;
 		float rate;
 		std::uint64_t flags;
-		std::uint32_t moveTypes[8];
+		std::uint32_t moveTypes[4];
 		scr_string_t aimState;
 		scr_string_t aimAlias;
 		scr_string_t moveTurnState;
@@ -16467,22 +16474,24 @@ namespace zonetool::iw8
 		KeyValuePair* keyValuePairs;
 	};
 
-	// Native index buffer runtime record, Load_Stream at RVA 0xDD1770
-	struct Replay_GfxIndexBuffer
+	struct GfxVertexBuffer
 	{
-		std::uint8_t data[32];
+		ID3D12Resource* resource;
+		std::uint64_t gpuAddress;
+		std::uint64_t allocation;
+		std::uint32_t size;
 	};
 
 	struct StVertexData0
 	{
 		std::uint8_t* data;
-		ID3D12Resource* vb;
+		GfxVertexBuffer vb;
 	};
 
 	struct StMeshLayerMaskData
 	{
 		std::uint8_t* data;
-		ID3D12Resource* buffer;
+		GfxWrappedBuffer buffer;
 	};
 
 	struct t_1E3A702398B9A63E216E94324D15DBDE
@@ -16504,12 +16513,12 @@ namespace zonetool::iw8
 	{
 		StVertexData0 vd0;
 		StMeshLayerMaskData layerMask;
-		ID3D12Resource* indexBuffer;
+		GfxIndexBuffer indexBuffer;
 		std::uint16_t* indices;
 		StreamKey* streamKey;
-		ID3D12Resource* vertexBufferToRelease;
-		ID3D12Resource* indexBufferToRelease;
-		ID3D12Resource* layerMaskBufferToRelease;
+		GfxVertexBuffer vertexBufferToRelease;
+		GfxIndexBuffer indexBufferToRelease;
+		GfxWrappedBuffer layerMaskBufferToRelease;
 		std::uint16_t vertexCount;
 		std::uint16_t triCount;
 		std::uint16_t cutoutTriCount;
@@ -16627,7 +16636,7 @@ namespace zonetool::iw8
 	{
 		std::uint32_t highLODIndexCount;
 		std::uint16_t* highLODIndices;
-		Replay_GfxIndexBuffer highLODIndexBuffer;
+		GfxIndexBuffer highLODIndexBuffer;
 		StTerrainGrid grid;
 		GfxPlacement objToWld;
 		Bounds wldBounds;
@@ -17365,8 +17374,15 @@ namespace zonetool::iw8
 	static_assert(offsetof(ID3D12Pageable, unnamed) == 0x0);
 	static_assert(sizeof(ID3D12Resource) == 16);
 	static_assert(offsetof(ID3D12Resource, unnamed) == 0x0);
-	static_assert(sizeof(GfxShaderBufferView) == 24);
-	static_assert(sizeof(XSurfaceSubdivLevel) == 360);
+	static_assert(sizeof(GfxBufferResource) == 32);
+	static_assert(offsetof(GfxBufferResource, resource) == 0x0);
+	static_assert(offsetof(GfxBufferResource, gpuAddress) == 0x8);
+	static_assert(offsetof(GfxBufferResource, allocation) == 0x10);
+	static_assert(offsetof(GfxBufferResource, size) == 0x18);
+	static_assert(sizeof(GfxShaderBufferView) == 16);
+	static_assert(offsetof(GfxShaderBufferView, resource) == 0x0);
+	static_assert(offsetof(GfxShaderBufferView, view) == 0x8);
+	static_assert(sizeof(XSurfaceSubdivLevel) == 568);
 	static_assert(offsetof(XSurfaceSubdivLevel, rigidVertLists) == 0x0);
 	static_assert(offsetof(XSurfaceSubdivLevel, faceCount) == 0x8);
 	static_assert(offsetof(XSurfaceSubdivLevel, regularPatchCount) == 0xC);
@@ -17395,21 +17411,41 @@ namespace zonetool::iw8
 	static_assert(offsetof(XSurfaceSubdivLevel, transitionPoints) == 0x88);
 	static_assert(offsetof(XSurfaceSubdivLevel, regularPatchCones) == 0x90);
 	static_assert(offsetof(XSurfaceSubdivLevel, regularPatchIndexBuffer) == 0x98);
-	static_assert(offsetof(XSurfaceSubdivLevel, faceIndexBuffer) == 0xA0);
-	static_assert(offsetof(XSurfaceSubdivLevel, regularPatchIndexBufferView) == 0xA8);
-	static_assert(offsetof(XSurfaceSubdivLevel, regularPatchFlagsView) == 0xC0);
-	static_assert(offsetof(XSurfaceSubdivLevel, facePointsView) == 0xD8);
-	static_assert(offsetof(XSurfaceSubdivLevel, edgePointsView) == 0xF0);
-	static_assert(offsetof(XSurfaceSubdivLevel, vertexPointsView) == 0x108);
-	static_assert(offsetof(XSurfaceSubdivLevel, normalsView) == 0x120);
+	static_assert(offsetof(XSurfaceSubdivLevel, faceIndexBuffer) == 0xB8);
+	static_assert(offsetof(XSurfaceSubdivLevel, regularPatchIndexBufferView) == 0xD8);
+	static_assert(offsetof(XSurfaceSubdivLevel, regularPatchFlagsView) == 0xE8);
+	static_assert(offsetof(XSurfaceSubdivLevel, facePointsView) == 0xF8);
+	static_assert(offsetof(XSurfaceSubdivLevel, edgePointsView) == 0x108);
+	static_assert(offsetof(XSurfaceSubdivLevel, vertexPointsView) == 0x118);
+	static_assert(offsetof(XSurfaceSubdivLevel, normalsView) == 0x128);
 	static_assert(offsetof(XSurfaceSubdivLevel, transitionPointsView) == 0x138);
-	static_assert(offsetof(XSurfaceSubdivLevel, regularPatchConesView) == 0x150);
+	static_assert(offsetof(XSurfaceSubdivLevel, regularPatchConesView) == 0x148);
+	static_assert(offsetof(XSurfaceSubdivLevel, regularPatchFlagsBuffer) == 0x158);
+	static_assert(offsetof(XSurfaceSubdivLevel, regularPatchConesBuffer) == 0x178);
+	static_assert(offsetof(XSurfaceSubdivLevel, facePointsBuffer) == 0x198);
+	static_assert(offsetof(XSurfaceSubdivLevel, edgePointsBuffer) == 0x1B8);
+	static_assert(offsetof(XSurfaceSubdivLevel, vertexPointsBuffer) == 0x1D8);
+	static_assert(offsetof(XSurfaceSubdivLevel, normalsBuffer) == 0x1F8);
+	static_assert(offsetof(XSurfaceSubdivLevel, transitionPointsBuffer) == 0x218);
+	static_assert(sizeof(GfxWrappedBaseBuffer) == 48);
+	static_assert(offsetof(GfxWrappedBaseBuffer, buffer) == 0x0);
+	static_assert(offsetof(GfxWrappedBaseBuffer, view) == 0x20);
+	static_assert(sizeof(GfxWrappedBuffer) == 64);
+	static_assert(offsetof(GfxWrappedBuffer, base) == 0x0);
+	static_assert(offsetof(GfxWrappedBuffer, data) == 0x30);
+	static_assert(offsetof(GfxWrappedBuffer, flags) == 0x38);
+	static_assert(sizeof(GfxShaderBufferRWView) == 32);
+	static_assert(offsetof(GfxShaderBufferRWView, resource) == 0x0);
+	static_assert(offsetof(GfxShaderBufferRWView, gpuAddress) == 0x8);
+	static_assert(offsetof(GfxShaderBufferRWView, allocation) == 0x10);
+	static_assert(offsetof(GfxShaderBufferRWView, view) == 0x18);
 	static_assert(sizeof(GfxWrappedRWBuffer) == 96);
-	static_assert(sizeof(GfxSubdivCache) == 112);
+	static_assert(offsetof(GfxWrappedRWBuffer, buffer) == 0x0);
+	static_assert(offsetof(GfxWrappedRWBuffer, rwView) == 0x40);
+	static_assert(sizeof(GfxSubdivCache) == 104);
 	static_assert(offsetof(GfxSubdivCache, size) == 0x0);
-	static_assert(offsetof(GfxSubdivCache, vertexData) == 0x8);
-	static_assert(offsetof(GfxSubdivCache, vertexBuffer) == 0x10);
-	static_assert(sizeof(XSurfaceSubdivInfo) == 136);
+	static_assert(offsetof(GfxSubdivCache, vertexBuffer) == 0x8);
+	static_assert(sizeof(XSurfaceSubdivInfo) == 128);
 	static_assert(offsetof(XSurfaceSubdivInfo, levels) == 0x0);
 	static_assert(offsetof(XSurfaceSubdivInfo, flags) == 0x8);
 	static_assert(offsetof(XSurfaceSubdivInfo, totalVertCount) == 0xC);
@@ -17660,14 +17696,6 @@ namespace zonetool::iw8
 	static_assert(sizeof(TechniqueMask) == 32);
 	static_assert(offsetof(TechniqueMask, mask) == 0x0);
 	static_assert(sizeof(MaterialTechniqueType) == 4);
-	static_assert(sizeof(MaterialSerializedShader) == 48);
-	static_assert(offsetof(MaterialSerializedShader, name) == 0x0);
-	static_assert(offsetof(MaterialSerializedShader, debugName) == 0x8);
-	static_assert(offsetof(MaterialSerializedShader, program) == 0x10);
-	static_assert(offsetof(MaterialSerializedShader, metaData) == 0x18);
-	static_assert(offsetof(MaterialSerializedShader, programSize) == 0x20);
-	static_assert(offsetof(MaterialSerializedShader, metaDataSize) == 0x24);
-	static_assert(offsetof(MaterialSerializedShader, microCodeCrc) == 0x28);
 	static_assert(sizeof(t_5A147756DA7E26A533E5CEAFC83E9B25) == 24);
 	static_assert(offsetof(t_5A147756DA7E26A533E5CEAFC83E9B25, Header) == 0x0);
 	static_assert(offsetof(t_5A147756DA7E26A533E5CEAFC83E9B25, ContextHash) == 0x4);
@@ -17683,15 +17711,21 @@ namespace zonetool::iw8
 	static_assert(sizeof(ID3D12PipelineState) == 48);
 	static_assert(offsetof(ID3D12PipelineState, unnamed) == 0x0);
 	static_assert(offsetof(ID3D12PipelineState, m_Packet) == 0x10);
-	static_assert(sizeof(MaterialPipelineState) == 104);
-	static_assert(offsetof(MaterialPipelineState, packetSize) == 0x0);
-	static_assert(offsetof(MaterialPipelineState, metaDataSize) == 0x4);
-	static_assert(offsetof(MaterialPipelineState, packet) == 0x8);
-	static_assert(offsetof(MaterialPipelineState, metaData) == 0x10);
-	static_assert(offsetof(MaterialPipelineState, serializedShaders) == 0x18);
-	static_assert(offsetof(MaterialPipelineState, sourceShaders) == 0x38);
-	static_assert(offsetof(MaterialPipelineState, derivedPso) == 0x58);
-	static_assert(offsetof(MaterialPipelineState, pso) == 0x60);
+	static_assert(sizeof(MaterialPipelineState) == 16);
+	static_assert(offsetof(MaterialPipelineState, hash) == 0x0);
+	static_assert(offsetof(MaterialPipelineState, pso) == 0x8);
+	static_assert(sizeof(GfxComputeShaderLoadDef) == 16);
+	static_assert(offsetof(GfxComputeShaderLoadDef, program) == 0x0);
+	static_assert(offsetof(GfxComputeShaderLoadDef, programSize) == 0x8);
+	static_assert(sizeof(ComputeShaderProgram) == 24);
+	static_assert(offsetof(ComputeShaderProgram, cs) == 0x0);
+	static_assert(offsetof(ComputeShaderProgram, loadDef) == 0x8);
+	static_assert(sizeof(ComputeShader) == 40);
+	static_assert(offsetof(ComputeShader, name) == 0x0);
+	static_assert(offsetof(ComputeShader, debugName) == 0x8);
+	static_assert(offsetof(ComputeShader, prog) == 0x10);
+	static_assert(sizeof(Replay_MaterialTechniqueStateBits) == 5);
+	static_assert(offsetof(Replay_MaterialTechniqueStateBits, bits) == 0x0);
 	static_assert(sizeof(MaterialRenderTargetFormat) == 5);
 	static_assert(offsetof(MaterialRenderTargetFormat, dsFormat) == 0x0);
 	static_assert(offsetof(MaterialRenderTargetFormat, colorRtFormats) == 0x1);
@@ -17708,28 +17742,35 @@ namespace zonetool::iw8
 	static_assert(offsetof(MaterialShaderArgument, shader) == 0x1);
 	static_assert(offsetof(MaterialShaderArgument, dest) == 0x2);
 	static_assert(offsetof(MaterialShaderArgument, index) == 0x4);
-	static_assert(sizeof(MaterialTechnique) == 112);
+	static_assert(sizeof(MaterialTechnique) == 184);
 	static_assert(offsetof(MaterialTechnique, name) == 0x0);
 	static_assert(offsetof(MaterialTechnique, type) == 0x8);
 	static_assert(offsetof(MaterialTechnique, flags) == 0xC);
 	static_assert(offsetof(MaterialTechnique, pipelineStateInputLayoutCount) == 0xE);
 	static_assert(offsetof(MaterialTechnique, pipelineStateMap) == 0xF);
-	static_assert(offsetof(MaterialTechnique, pipelineStates) == 0x30);
-	static_assert(offsetof(MaterialTechnique, perPrimArgCount) == 0x38);
-	static_assert(offsetof(MaterialTechnique, perObjArgCount) == 0x39);
-	static_assert(offsetof(MaterialTechnique, stableArgCount) == 0x3A);
-	static_assert(offsetof(MaterialTechnique, neverArgCount) == 0x3B);
-	static_assert(offsetof(MaterialTechnique, perPrimArgSize) == 0x3C);
-	static_assert(offsetof(MaterialTechnique, perObjArgSize) == 0x3E);
-	static_assert(offsetof(MaterialTechnique, stableArgSize) == 0x40);
-	static_assert(offsetof(MaterialTechnique, colorRtCount) == 0x42);
-	static_assert(offsetof(MaterialTechnique, renderTargetFormats) == 0x43);
-	static_assert(offsetof(MaterialTechnique, customBufferFlags) == 0x48);
-	static_assert(offsetof(MaterialTechnique, customSamplerFlags) == 0x50);
-	static_assert(offsetof(MaterialTechnique, precompiledIndex) == 0x54);
-	static_assert(offsetof(MaterialTechnique, stageConfig) == 0x55);
-	static_assert(offsetof(MaterialTechnique, stateBits) == 0x58);
-	static_assert(offsetof(MaterialTechnique, args) == 0x68);
+	static_assert(offsetof(MaterialTechnique, pipelineStates) == 0x28);
+	static_assert(offsetof(MaterialTechnique, customBufferFlags) == 0x30);
+	static_assert(offsetof(MaterialTechnique, rootParameterMap) == 0x50);
+	static_assert(offsetof(MaterialTechnique, vertexShader) == 0x58);
+	static_assert(offsetof(MaterialTechnique, hullShader) == 0x60);
+	static_assert(offsetof(MaterialTechnique, domainShader) == 0x68);
+	static_assert(offsetof(MaterialTechnique, pixelShader) == 0x70);
+	static_assert(offsetof(MaterialTechnique, perPrimArgCount) == 0x78);
+	static_assert(offsetof(MaterialTechnique, perObjArgCount) == 0x79);
+	static_assert(offsetof(MaterialTechnique, stableArgCount) == 0x7A);
+	static_assert(offsetof(MaterialTechnique, neverArgCount) == 0x7B);
+	static_assert(offsetof(MaterialTechnique, perPrimArgSize) == 0x7C);
+	static_assert(offsetof(MaterialTechnique, perObjArgSize) == 0x7E);
+	static_assert(offsetof(MaterialTechnique, stableArgSize) == 0x80);
+	static_assert(offsetof(MaterialTechnique, colorRtCount) == 0x82);
+	static_assert(offsetof(MaterialTechnique, pipelineStateCount) == 0x83);
+	static_assert(offsetof(MaterialTechnique, stateBits) == 0x88);
+	static_assert(offsetof(MaterialTechnique, renderTargetFormats) == 0x90);
+	static_assert(offsetof(MaterialTechnique, customSamplerFlags) == 0x98);
+	static_assert(offsetof(MaterialTechnique, precompiledIndex) == 0x9C);
+	static_assert(offsetof(MaterialTechnique, stageConfig) == 0x9D);
+	static_assert(offsetof(MaterialTechnique, defaultStateBits) == 0xA0);
+	static_assert(offsetof(MaterialTechnique, args) == 0xB0);
 	static_assert(sizeof(MaterialTechniqueSet) == 64);
 	static_assert(offsetof(MaterialTechniqueSet, name) == 0x0);
 	static_assert(offsetof(MaterialTechniqueSet, flags) == 0x8);
@@ -17814,10 +17855,11 @@ namespace zonetool::iw8
 	static_assert(sizeof(GfxConstantBufferDesc) == 16);
 	static_assert(offsetof(GfxConstantBufferDesc, bufferData) == 0x0);
 	static_assert(offsetof(GfxConstantBufferDesc, bufferSize) == 0x8);
-	static_assert(sizeof(GfxConstantBuffer) == 24);
-	static_assert(offsetof(GfxConstantBuffer, unnamed) == 0x0);
+	static_assert(sizeof(GfxConstantBuffer) == 56);
+	static_assert(offsetof(GfxConstantBuffer, desc) == 0x0);
 	static_assert(offsetof(GfxConstantBuffer, buffer) == 0x10);
-	static_assert(sizeof(MaterialConstantBufferDef) == 144);
+	static_assert(offsetof(GfxConstantBuffer, view) == 0x30);
+	static_assert(sizeof(MaterialConstantBufferDef) == 272);
 	static_assert(offsetof(MaterialConstantBufferDef, vsDataSize) == 0x0);
 	static_assert(offsetof(MaterialConstantBufferDef, hsDataSize) == 0x4);
 	static_assert(offsetof(MaterialConstantBufferDef, dsDataSize) == 0x8);
@@ -17827,9 +17869,9 @@ namespace zonetool::iw8
 	static_assert(offsetof(MaterialConstantBufferDef, dsData) == 0x20);
 	static_assert(offsetof(MaterialConstantBufferDef, psData) == 0x28);
 	static_assert(offsetof(MaterialConstantBufferDef, vsConstantBuffer) == 0x30);
-	static_assert(offsetof(MaterialConstantBufferDef, hsConstantBuffer) == 0x48);
-	static_assert(offsetof(MaterialConstantBufferDef, dsConstantBuffer) == 0x60);
-	static_assert(offsetof(MaterialConstantBufferDef, psConstantBuffer) == 0x78);
+	static_assert(offsetof(MaterialConstantBufferDef, hsConstantBuffer) == 0x68);
+	static_assert(offsetof(MaterialConstantBufferDef, dsConstantBuffer) == 0xA0);
+	static_assert(offsetof(MaterialConstantBufferDef, psConstantBuffer) == 0xD8);
 	static_assert(sizeof(Material) == 120);
 	static_assert(offsetof(Material, name) == 0x0);
 	static_assert(offsetof(Material, contents) == 0x8);
@@ -19215,7 +19257,7 @@ namespace zonetool::iw8
 	static_assert(offsetof(SndDuck, aliasHpf) == 0x98);
 	static_assert(offsetof(SndDuck, aliasLpf) == 0x9C);
 	static_assert(offsetof(SndDuck, duckAlias) == 0xA0);
-	static_assert(sizeof(SndMusicAsset) == 124);
+	static_assert(sizeof(SndMusicAsset) == 120);
 	static_assert(offsetof(SndMusicAsset, alias) == 0x0);
 	static_assert(offsetof(SndMusicAsset, aliasId) == 0x40);
 	static_assert(offsetof(SndMusicAsset, inactive) == 0x44);
@@ -19236,24 +19278,20 @@ namespace zonetool::iw8
 	static_assert(offsetof(SndMusicAsset, stopFadeBeats) == 0x6C);
 	static_assert(offsetof(SndMusicAsset, startOffsetFrames) == 0x70);
 	static_assert(offsetof(SndMusicAsset, meter) == 0x74);
-	static_assert(offsetof(SndMusicAsset, sampleRate) == 0x78);
-	static_assert(sizeof(SndMusicStateStatus) == 4);
-	static_assert(sizeof(SndMusicState) == 352);
+	static_assert(sizeof(SndMusicState) == 336);
 	static_assert(offsetof(SndMusicState, name) == 0x0);
 	static_assert(offsetof(SndMusicState, id) == 0x40);
 	static_assert(offsetof(SndMusicState, intro) == 0x44);
-	static_assert(offsetof(SndMusicState, exit) == 0xC0);
-	static_assert(offsetof(SndMusicState, loopCount) == 0x13C);
-	static_assert(offsetof(SndMusicState, loops) == 0x140);
-	static_assert(offsetof(SndMusicState, order) == 0x148);
-	static_assert(offsetof(SndMusicState, interruptPriority) == 0x14C);
-	static_assert(offsetof(SndMusicState, persistPriority) == 0x150);
-	static_assert(offsetof(SndMusicState, isRandom) == 0x154);
-	static_assert(offsetof(SndMusicState, isSequential) == 0x155);
-	static_assert(offsetof(SndMusicState, skipPreviousExit) == 0x156);
-	static_assert(offsetof(SndMusicState, wallClockSync) == 0x157);
-	static_assert(offsetof(SndMusicState, refCount) == 0x158);
-	static_assert(offsetof(SndMusicState, status) == 0x15C);
+	static_assert(offsetof(SndMusicState, exit) == 0xBC);
+	static_assert(offsetof(SndMusicState, loopCount) == 0x134);
+	static_assert(offsetof(SndMusicState, loops) == 0x138);
+	static_assert(offsetof(SndMusicState, order) == 0x140);
+	static_assert(offsetof(SndMusicState, interruptPriority) == 0x144);
+	static_assert(offsetof(SndMusicState, persistPriority) == 0x148);
+	static_assert(offsetof(SndMusicState, isRandom) == 0x14C);
+	static_assert(offsetof(SndMusicState, isSequential) == 0x14D);
+	static_assert(offsetof(SndMusicState, skipPreviousExit) == 0x14E);
+	static_assert(offsetof(SndMusicState, wallClockSync) == 0x14F);
 	static_assert(sizeof(SndMusicSet) == 80);
 	static_assert(offsetof(SndMusicSet, name) == 0x0);
 	static_assert(offsetof(SndMusicSet, id) == 0x40);
@@ -21057,63 +21095,57 @@ namespace zonetool::iw8
 	static_assert(sizeof(AttRumbles) == 16);
 	static_assert(offsetof(AttRumbles, fireRumble) == 0x0);
 	static_assert(offsetof(AttRumbles, meleeImpactRumble) == 0x8);
-	static_assert(sizeof(AttProjectile) == 264);
+	static_assert(sizeof(AttProjectile) == 240);
 	static_assert(offsetof(AttProjectile, explosionRadius) == 0x0);
 	static_assert(offsetof(AttProjectile, explosionForceRadius) == 0x4);
 	static_assert(offsetof(AttProjectile, explosionInnerDamage) == 0x8);
 	static_assert(offsetof(AttProjectile, explosionOuterDamage) == 0xC);
 	static_assert(offsetof(AttProjectile, damageConeAngle) == 0x10);
-	static_assert(offsetof(AttProjectile, iExplosionSteppedRadiusInner) == 0x14);
-	static_assert(offsetof(AttProjectile, iExplosionSteppedRadiusMid) == 0x18);
-	static_assert(offsetof(AttProjectile, iExplosionSteppedRadiusOuter) == 0x1C);
-	static_assert(offsetof(AttProjectile, iExplosionSteppedDamageInner) == 0x20);
-	static_assert(offsetof(AttProjectile, iExplosionSteppedDamageMid) == 0x24);
-	static_assert(offsetof(AttProjectile, iExplosionSteppedDamageOuter) == 0x28);
-	static_assert(offsetof(AttProjectile, projectileSpeed) == 0x2C);
-	static_assert(offsetof(AttProjectile, projectileSpeedUp) == 0x30);
-	static_assert(offsetof(AttProjectile, projectileActivateDist) == 0x34);
-	static_assert(offsetof(AttProjectile, projectileLifetime) == 0x38);
-	static_assert(offsetof(AttProjectile, projectileLifetimeStdDeviation) == 0x3C);
-	static_assert(offsetof(AttProjectile, projectileModel) == 0x40);
-	static_assert(offsetof(AttProjectile, projExplosionType) == 0x48);
-	static_assert(offsetof(AttProjectile, projExplosionEffect) == 0x50);
-	static_assert(offsetof(AttProjectile, projExplosionEffectForceNormalUp) == 0x58);
-	static_assert(offsetof(AttProjectile, projExplosionSound) == 0x60);
-	static_assert(offsetof(AttProjectile, projExplosionReflClass) == 0x68);
-	static_assert(offsetof(AttProjectile, projDudEffect) == 0x70);
-	static_assert(offsetof(AttProjectile, projTimeoutEffect) == 0x78);
-	static_assert(offsetof(AttProjectile, projDudSound) == 0x80);
-	static_assert(offsetof(AttProjectile, projTimeoutSound) == 0x88);
-	static_assert(offsetof(AttProjectile, disableFxOnTimeout) == 0x90);
-	static_assert(offsetof(AttProjectile, projImpactExplode) == 0x91);
-	static_assert(offsetof(AttProjectile, disableProjectileCrumpleCheck) == 0x92);
-	static_assert(offsetof(AttProjectile, destabilizationRateTime) == 0x94);
-	static_assert(offsetof(AttProjectile, destabilizationCurvatureMax) == 0x98);
-	static_assert(offsetof(AttProjectile, destabilizeDistance) == 0x9C);
-	static_assert(offsetof(AttProjectile, vmProjBodyEffect) == 0xA0);
-	static_assert(offsetof(AttProjectile, projBodyEffect) == 0xA8);
-	static_assert(offsetof(AttProjectile, projTrailEffect) == 0xB0);
-	static_assert(offsetof(AttProjectile, projBeaconEffect) == 0xB8);
-	static_assert(offsetof(AttProjectile, projIgnitionDelay) == 0xC0);
-	static_assert(offsetof(AttProjectile, projIgnitionEffect) == 0xC8);
-	static_assert(offsetof(AttProjectile, projIgnitionSound) == 0xD0);
-	static_assert(offsetof(AttProjectile, stickiness) == 0xD8);
-	static_assert(offsetof(AttProjectile, fuseTime) == 0xDC);
-	static_assert(offsetof(AttProjectile, aiFuseTime) == 0xE0);
-	static_assert(offsetof(AttProjectile, stickToPlayers) == 0xE4);
-	static_assert(offsetof(AttProjectile, stickToVehicles) == 0xE5);
-	static_assert(offsetof(AttProjectile, stickToTurrets) == 0xE6);
-	static_assert(offsetof(AttProjectile, stickToNonStick) == 0xE7);
-	static_assert(offsetof(AttProjectile, timedDetonation) == 0xE8);
-	static_assert(offsetof(AttProjectile, isPredictedProjectile) == 0xE9);
-	static_assert(offsetof(AttProjectile, useSteppedExplosionDamage) == 0xEA);
-	static_assert(offsetof(AttProjectile, clientTrajectoryBlendOutTime) == 0xEC);
-	static_assert(offsetof(AttProjectile, serverTrajectoryBlendInTime) == 0xF0);
-	static_assert(offsetof(AttProjectile, reactiveMotionRadiusScale) == 0xF4);
-	static_assert(offsetof(AttProjectile, reactiveMotionFrequencyScale) == 0xF8);
-	static_assert(offsetof(AttProjectile, reactiveMotionAmplitudeScale) == 0xFC);
-	static_assert(offsetof(AttProjectile, reactiveMotionFalloff) == 0x100);
-	static_assert(offsetof(AttProjectile, reactiveMotionLifetime) == 0x104);
+	static_assert(offsetof(AttProjectile, projectileSpeed) == 0x14);
+	static_assert(offsetof(AttProjectile, projectileSpeedUp) == 0x18);
+	static_assert(offsetof(AttProjectile, projectileActivateDist) == 0x1C);
+	static_assert(offsetof(AttProjectile, projectileLifetime) == 0x20);
+	static_assert(offsetof(AttProjectile, projectileLifetimeStdDeviation) == 0x24);
+	static_assert(offsetof(AttProjectile, projectileModel) == 0x28);
+	static_assert(offsetof(AttProjectile, projExplosionType) == 0x30);
+	static_assert(offsetof(AttProjectile, projExplosionEffect) == 0x38);
+	static_assert(offsetof(AttProjectile, projExplosionEffectForceNormalUp) == 0x40);
+	static_assert(offsetof(AttProjectile, projExplosionSound) == 0x48);
+	static_assert(offsetof(AttProjectile, projExplosionReflClass) == 0x50);
+	static_assert(offsetof(AttProjectile, projDudEffect) == 0x58);
+	static_assert(offsetof(AttProjectile, projTimeoutEffect) == 0x60);
+	static_assert(offsetof(AttProjectile, projDudSound) == 0x68);
+	static_assert(offsetof(AttProjectile, projTimeoutSound) == 0x70);
+	static_assert(offsetof(AttProjectile, disableFxOnTimeout) == 0x78);
+	static_assert(offsetof(AttProjectile, projImpactExplode) == 0x79);
+	static_assert(offsetof(AttProjectile, disableProjectileCrumpleCheck) == 0x7A);
+	static_assert(offsetof(AttProjectile, destabilizationRateTime) == 0x7C);
+	static_assert(offsetof(AttProjectile, destabilizationCurvatureMax) == 0x80);
+	static_assert(offsetof(AttProjectile, destabilizeDistance) == 0x84);
+	static_assert(offsetof(AttProjectile, vmProjBodyEffect) == 0x88);
+	static_assert(offsetof(AttProjectile, projBodyEffect) == 0x90);
+	static_assert(offsetof(AttProjectile, projTrailEffect) == 0x98);
+	static_assert(offsetof(AttProjectile, projBeaconEffect) == 0xA0);
+	static_assert(offsetof(AttProjectile, projIgnitionDelay) == 0xA8);
+	static_assert(offsetof(AttProjectile, projIgnitionEffect) == 0xB0);
+	static_assert(offsetof(AttProjectile, projIgnitionSound) == 0xB8);
+	static_assert(offsetof(AttProjectile, stickiness) == 0xC0);
+	static_assert(offsetof(AttProjectile, fuseTime) == 0xC4);
+	static_assert(offsetof(AttProjectile, aiFuseTime) == 0xC8);
+	static_assert(offsetof(AttProjectile, stickToPlayers) == 0xCC);
+	static_assert(offsetof(AttProjectile, stickToVehicles) == 0xCD);
+	static_assert(offsetof(AttProjectile, stickToTurrets) == 0xCE);
+	static_assert(offsetof(AttProjectile, stickToNonStick) == 0xCF);
+	static_assert(offsetof(AttProjectile, timedDetonation) == 0xD0);
+	static_assert(offsetof(AttProjectile, isPredictedProjectile) == 0xD1);
+	static_assert(offsetof(AttProjectile, useSteppedExplosionDamage) == 0xD2);
+	static_assert(offsetof(AttProjectile, clientTrajectoryBlendOutTime) == 0xD4);
+	static_assert(offsetof(AttProjectile, serverTrajectoryBlendInTime) == 0xD8);
+	static_assert(offsetof(AttProjectile, reactiveMotionRadiusScale) == 0xDC);
+	static_assert(offsetof(AttProjectile, reactiveMotionFrequencyScale) == 0xE0);
+	static_assert(offsetof(AttProjectile, reactiveMotionAmplitudeScale) == 0xE4);
+	static_assert(offsetof(AttProjectile, reactiveMotionFalloff) == 0xE8);
+	static_assert(offsetof(AttProjectile, reactiveMotionLifetime) == 0xEC);
 	static_assert(sizeof(AttCharged) == 136);
 	static_assert(offsetof(AttCharged, chargeType) == 0x0);
 	static_assert(offsetof(AttCharged, chargeGain) == 0x4);
@@ -21170,10 +21202,6 @@ namespace zonetool::iw8
 	static_assert(offsetof(AttAdsMovement, forwardOffset) == 0x0);
 	static_assert(offsetof(AttAdsMovement, roll) == 0x4);
 	static_assert(offsetof(AttAdsMovement, isOverride) == 0x8);
-	static_assert(sizeof(HyperBurstInfo) == 12);
-	static_assert(offsetof(HyperBurstInfo, fireTimeFraction) == 0x0);
-	static_assert(offsetof(HyperBurstInfo, coolDownMs) == 0x4);
-	static_assert(offsetof(HyperBurstInfo, enabled) == 0x8);
 	static_assert(sizeof(AttDlcOverrides) == 40);
 	static_assert(offsetof(AttDlcOverrides, useFloatOverride) == 0x0);
 	static_assert(offsetof(AttDlcOverrides, floatOverride) == 0x8);
@@ -21258,8 +21286,8 @@ namespace zonetool::iw8
 	static_assert(offsetof(WeaponAttachment, hitmarker) == 0x228);
 	static_assert(offsetof(WeaponAttachment, adsMovement) == 0x230);
 	static_assert(offsetof(WeaponAttachment, ballisticInfo) == 0x238);
-	static_assert(offsetof(WeaponAttachment, hyperBurstInfo) == 0x240);
-	static_assert(offsetof(WeaponAttachment, swaySettings) == 0x248);
+	static_assert(offsetof(WeaponAttachment, swaySettings) == 0x240);
+	static_assert(offsetof(WeaponAttachment, weaponOffsetPatternScales) == 0x248);
 	static_assert(offsetof(WeaponAttachment, locationDamage) == 0x250);
 	static_assert(offsetof(WeaponAttachment, ammunitionScale) == 0x258);
 	static_assert(offsetof(WeaponAttachment, ballisticMuzzleVelocityScale) == 0x25C);
@@ -21490,10 +21518,7 @@ namespace zonetool::iw8
 	static_assert(sizeof(MayhemTransBounds) == 24);
 	static_assert(offsetof(MayhemTransBounds, mins) == 0x0);
 	static_assert(offsetof(MayhemTransBounds, size) == 0xC);
-	static_assert(sizeof(GfxWrappedBaseBuffer) == 32);
-	static_assert(offsetof(GfxWrappedBaseBuffer, buffer) == 0x0);
-	static_assert(offsetof(GfxWrappedBaseBuffer, view) == 0x8);
-	static_assert(sizeof(MayhemAnimFramesSplineCompressed) == 136);
+	static_assert(sizeof(MayhemAnimFramesSplineCompressed) == 168);
 	static_assert(offsetof(MayhemAnimFramesSplineCompressed, diskQuat) == 0x0);
 	static_assert(offsetof(MayhemAnimFramesSplineCompressed, diskPos) == 0x8);
 	static_assert(offsetof(MayhemAnimFramesSplineCompressed, diskQuatFrames) == 0x10);
@@ -21502,19 +21527,19 @@ namespace zonetool::iw8
 	static_assert(offsetof(MayhemAnimFramesSplineCompressed, numDiskPosFrames) == 0x28);
 	static_assert(offsetof(MayhemAnimFramesSplineCompressed, transBounds) == 0x30);
 	static_assert(offsetof(MayhemAnimFramesSplineCompressed, quat) == 0x38);
-	static_assert(offsetof(MayhemAnimFramesSplineCompressed, pos) == 0x58);
-	static_assert(offsetof(MayhemAnimFramesSplineCompressed, quatStride) == 0x78);
-	static_assert(offsetof(MayhemAnimFramesSplineCompressed, posStride) == 0x7C);
-	static_assert(offsetof(MayhemAnimFramesSplineCompressed, totalCompressedQuatFrames) == 0x80);
-	static_assert(offsetof(MayhemAnimFramesSplineCompressed, totalCompressedPosFrames) == 0x84);
-	static_assert(sizeof(MayhemAnimFramesUncompressed) == 96);
+	static_assert(offsetof(MayhemAnimFramesSplineCompressed, pos) == 0x68);
+	static_assert(offsetof(MayhemAnimFramesSplineCompressed, quatStride) == 0x98);
+	static_assert(offsetof(MayhemAnimFramesSplineCompressed, posStride) == 0x9C);
+	static_assert(offsetof(MayhemAnimFramesSplineCompressed, totalCompressedQuatFrames) == 0xA0);
+	static_assert(offsetof(MayhemAnimFramesSplineCompressed, totalCompressedPosFrames) == 0xA4);
+	static_assert(sizeof(MayhemAnimFramesUncompressed) == 128);
 	static_assert(offsetof(MayhemAnimFramesUncompressed, diskQuat) == 0x0);
 	static_assert(offsetof(MayhemAnimFramesUncompressed, diskPos) == 0x8);
 	static_assert(offsetof(MayhemAnimFramesUncompressed, transBounds) == 0x10);
 	static_assert(offsetof(MayhemAnimFramesUncompressed, quat) == 0x18);
-	static_assert(offsetof(MayhemAnimFramesUncompressed, pos) == 0x38);
-	static_assert(offsetof(MayhemAnimFramesUncompressed, quatStride) == 0x58);
-	static_assert(offsetof(MayhemAnimFramesUncompressed, posStride) == 0x5C);
+	static_assert(offsetof(MayhemAnimFramesUncompressed, pos) == 0x48);
+	static_assert(offsetof(MayhemAnimFramesUncompressed, quatStride) == 0x78);
+	static_assert(offsetof(MayhemAnimFramesUncompressed, posStride) == 0x7C);
 	static_assert(sizeof(MayhemFramesUnion) == 8);
 	static_assert(sizeof(MayhemDataKeysSplineCompressed) == 40);
 	static_assert(offsetof(MayhemDataKeysSplineCompressed, keys) == 0x0);
@@ -22086,14 +22111,15 @@ namespace zonetool::iw8
 	static_assert(offsetof(ReactiveMotionModelPart, pivotPosMS) == 0x10);
 	static_assert(offsetof(ReactiveMotionModelPart, pivotQuatMS) == 0x1C);
 	static_assert(sizeof(ReactiveMotionModelFlags) == 1);
-	static_assert(sizeof(ReactiveMotionModelInfo) == 72);
+	static_assert(sizeof(ReactiveMotionModelInfo) == 96);
 	static_assert(offsetof(ReactiveMotionModelInfo, windParams) == 0x0);
 	static_assert(offsetof(ReactiveMotionModelInfo, modelPartTweaks) == 0x10);
 	static_assert(offsetof(ReactiveMotionModelInfo, modelParts) == 0x18);
 	static_assert(offsetof(ReactiveMotionModelInfo, modelPartsBuffer) == 0x20);
-	static_assert(offsetof(ReactiveMotionModelInfo, numParts) == 0x40);
-	static_assert(offsetof(ReactiveMotionModelInfo, flags) == 0x41);
-	static_assert(offsetof(ReactiveMotionModelInfo, pad) == 0x42);
+	static_assert(offsetof(ReactiveMotionModelInfo, numParts) == 0x50);
+	static_assert(offsetof(ReactiveMotionModelInfo, flags) == 0x51);
+	static_assert(offsetof(ReactiveMotionModelInfo, pad) == 0x52);
+	static_assert(offsetof(ReactiveMotionModelInfo, runtime_0x54) == 0x54);
 	static_assert(sizeof(XModelLodInfoFlags) == 1);
 	static_assert(sizeof(XModelLodInfo) == 64);
 	static_assert(offsetof(XModelLodInfo, modelSurfsStaging) == 0x0);
@@ -22243,16 +22269,6 @@ namespace zonetool::iw8
 	static_assert(offsetof(XModel, runtime_0x298) == 0x298);
 	static_assert(offsetof(XModel, mdaoVolumes) == 0x2A0);
 	static_assert(offsetof(XModel, decalVolumesInfo) == 0x2A8);
-	static_assert(sizeof(GfxComputeShaderLoadDef) == 16);
-	static_assert(offsetof(GfxComputeShaderLoadDef, program) == 0x0);
-	static_assert(offsetof(GfxComputeShaderLoadDef, programSize) == 0x8);
-	static_assert(sizeof(ComputeShaderProgram) == 24);
-	static_assert(offsetof(ComputeShaderProgram, cs) == 0x0);
-	static_assert(offsetof(ComputeShaderProgram, loadDef) == 0x8);
-	static_assert(sizeof(ComputeShader) == 40);
-	static_assert(offsetof(ComputeShader, name) == 0x0);
-	static_assert(offsetof(ComputeShader, debugName) == 0x8);
-	static_assert(offsetof(ComputeShader, prog) == 0x10);
 	static_assert(sizeof(snd_volmod_info_t) == 72);
 	static_assert(offsetof(snd_volmod_info_t, name) == 0x0);
 	static_assert(offsetof(snd_volmod_info_t, id) == 0x40);
@@ -23487,7 +23503,6 @@ namespace zonetool::iw8
 	static_assert(offsetof(GfxWorldSurfData, texCoordOffset) == 0x18);
 	static_assert(offsetof(GfxWorldSurfData, normalTransformOffset) == 0x1C);
 	static_assert(offsetof(GfxWorldSurfData, displacementOffset) == 0x38);
-	static_assert(sizeof(GfxWrappedBuffer) == 64);
 	static_assert(sizeof(GfxWorldSurfaces) == 136);
 	static_assert(offsetof(GfxWorldSurfaces, count) == 0x0);
 	static_assert(offsetof(GfxWorldSurfaces, surfDataCount) == 0x4);
@@ -23738,6 +23753,11 @@ namespace zonetool::iw8
 	static_assert(offsetof(GfxDecalVolumeCollection, firstZoneDecal) == 0x4);
 	static_assert(sizeof(GfxLightGridType) == 1);
 	static_assert(sizeof(GfxLightmapType) == 4);
+	static_assert(sizeof(GfxIndexBuffer) == 32);
+	static_assert(offsetof(GfxIndexBuffer, resource) == 0x0);
+	static_assert(offsetof(GfxIndexBuffer, gpuAddress) == 0x8);
+	static_assert(offsetof(GfxIndexBuffer, allocation) == 0x10);
+	static_assert(offsetof(GfxIndexBuffer, size) == 0x18);
 	static_assert(sizeof(GfxWorldDrawVerts) == 200);
 	static_assert(offsetof(GfxWorldDrawVerts, posDataSize) == 0x0);
 	static_assert(offsetof(GfxWorldDrawVerts, auxDataSize) == 0x4);
@@ -23748,7 +23768,6 @@ namespace zonetool::iw8
 	static_assert(offsetof(GfxWorldDrawVerts, indexCount) == 0x98);
 	static_assert(offsetof(GfxWorldDrawVerts, indices) == 0xA0);
 	static_assert(offsetof(GfxWorldDrawVerts, indexBuffer) == 0xA8);
-	static_assert(offsetof(GfxWorldDrawVerts, indexBufferView) == 0xB0);
 	static_assert(sizeof(GfxCellTreeCount) == 4);
 	static_assert(offsetof(GfxCellTreeCount, aabbTreeCount) == 0x0);
 	static_assert(sizeof(GfxAabbTree) == 48);
@@ -24489,7 +24508,7 @@ namespace zonetool::iw8
 	static_assert(offsetof(AnimationClass, effectNotes) == 0x38);
 	static_assert(offsetof(AnimationClass, effectDefs) == 0x40);
 	static_assert(offsetof(AnimationClass, effectTags) == 0x48);
-	static_assert(sizeof(PlayerAnimEntry) == 104);
+	static_assert(sizeof(PlayerAnimEntry) == 88);
 	static_assert(offsetof(PlayerAnimEntry, entryName) == 0x0);
 	static_assert(offsetof(PlayerAnimEntry, animName) == 0x4);
 	static_assert(offsetof(PlayerAnimEntry, shadowAnimName) == 0x8);
@@ -24497,23 +24516,23 @@ namespace zonetool::iw8
 	static_assert(offsetof(PlayerAnimEntry, animIndex) == 0x18);
 	static_assert(offsetof(PlayerAnimEntry, shadowAnimIndex) == 0x20);
 	static_assert(offsetof(PlayerAnimEntry, movetype) == 0x28);
-	static_assert(offsetof(PlayerAnimEntry, moveSpeed) == 0x48);
-	static_assert(offsetof(PlayerAnimEntry, moveSpeedAdjust) == 0x4C);
-	static_assert(offsetof(PlayerAnimEntry, initialLerp) == 0x50);
-	static_assert(offsetof(PlayerAnimEntry, additiveAdjustBlendout) == 0x52);
-	static_assert(offsetof(PlayerAnimEntry, duration) == 0x54);
-	static_assert(offsetof(PlayerAnimEntry, fastDuration) == 0x56);
-	static_assert(offsetof(PlayerAnimEntry, additiveAdjustAnim) == 0x58);
-	static_assert(offsetof(PlayerAnimEntry, slowAnimIndex) == 0x5A);
-	static_assert(offsetof(PlayerAnimEntry, bodyPart) == 0x5C);
-	static_assert(offsetof(PlayerAnimEntry, serverNoteType) == 0x5D);
-	static_assert(offsetof(PlayerAnimEntry, clientNoteType) == 0x5E);
-	static_assert(offsetof(PlayerAnimEntry, aimSet) == 0x5F);
-	static_assert(offsetof(PlayerAnimEntry, mantleSet) == 0x60);
-	static_assert(offsetof(PlayerAnimEntry, leanSet) == 0x61);
-	static_assert(offsetof(PlayerAnimEntry, turns) == 0x62);
-	static_assert(offsetof(PlayerAnimEntry, twitches) == 0x63);
-	static_assert(offsetof(PlayerAnimEntry, syncGroup) == 0x64);
+	static_assert(offsetof(PlayerAnimEntry, moveSpeed) == 0x38);
+	static_assert(offsetof(PlayerAnimEntry, moveSpeedAdjust) == 0x3C);
+	static_assert(offsetof(PlayerAnimEntry, initialLerp) == 0x40);
+	static_assert(offsetof(PlayerAnimEntry, additiveAdjustBlendout) == 0x42);
+	static_assert(offsetof(PlayerAnimEntry, duration) == 0x44);
+	static_assert(offsetof(PlayerAnimEntry, fastDuration) == 0x46);
+	static_assert(offsetof(PlayerAnimEntry, additiveAdjustAnim) == 0x48);
+	static_assert(offsetof(PlayerAnimEntry, slowAnimIndex) == 0x4A);
+	static_assert(offsetof(PlayerAnimEntry, bodyPart) == 0x4C);
+	static_assert(offsetof(PlayerAnimEntry, serverNoteType) == 0x4D);
+	static_assert(offsetof(PlayerAnimEntry, clientNoteType) == 0x4E);
+	static_assert(offsetof(PlayerAnimEntry, aimSet) == 0x4F);
+	static_assert(offsetof(PlayerAnimEntry, mantleSet) == 0x50);
+	static_assert(offsetof(PlayerAnimEntry, leanSet) == 0x51);
+	static_assert(offsetof(PlayerAnimEntry, turns) == 0x52);
+	static_assert(offsetof(PlayerAnimEntry, twitches) == 0x53);
+	static_assert(offsetof(PlayerAnimEntry, syncGroup) == 0x54);
 	static_assert(sizeof(PlayerAnimScriptEntry) == 32);
 	static_assert(offsetof(PlayerAnimScriptEntry, flags) == 0x0);
 	static_assert(offsetof(PlayerAnimScriptEntry, itemCount) == 0x4);
@@ -25491,13 +25510,13 @@ namespace zonetool::iw8
 	static_assert(offsetof(StreamingContentSet, contents) == 0x8);
 	static_assert(sizeof(StreamingItemCost) == 4);
 	static_assert(offsetof(StreamingItemCost, costInBytes) == 0x0);
-	static_assert(sizeof(TransientCosts) == 80);
+	static_assert(sizeof(TransientCosts) == 48);
 	static_assert(offsetof(TransientCosts, streamContents) == 0x0);
-	static_assert(offsetof(TransientCosts, streamingCosts) == 0x30);
-	static_assert(offsetof(TransientCosts, residentPageSizes) == 0x38);
-	static_assert(offsetof(TransientCosts, tempPageSizes) == 0x40);
-	static_assert(offsetof(TransientCosts, streamingItemCount) == 0x48);
-	static_assert(offsetof(TransientCosts, transientCostCount) == 0x4C);
+	static_assert(offsetof(TransientCosts, streamingCosts) == 0x10);
+	static_assert(offsetof(TransientCosts, residentPageSizes) == 0x18);
+	static_assert(offsetof(TransientCosts, tempPageSizes) == 0x20);
+	static_assert(offsetof(TransientCosts, streamingItemCount) == 0x28);
+	static_assert(offsetof(TransientCosts, transientCostCount) == 0x2C);
 	static_assert(sizeof(ForcedStubAssetReference) == 16);
 	static_assert(offsetof(ForcedStubAssetReference, name) == 0x0);
 	static_assert(offsetof(ForcedStubAssetReference, type) == 0x8);
@@ -25519,27 +25538,27 @@ namespace zonetool::iw8
 	static_assert(offsetof(TransientWorldGridTileMap, minX) == 0x20);
 	static_assert(offsetof(TransientWorldGridTileMap, minY) == 0x24);
 	static_assert(sizeof(TransientInfoFlags) == 1);
-	static_assert(sizeof(TransientInfo) == 216);
+	static_assert(sizeof(TransientInfo) == 184);
 	static_assert(offsetof(TransientInfo, transientSets) == 0x0);
 	static_assert(offsetof(TransientInfo, transientCosts) == 0x18);
-	static_assert(offsetof(TransientInfo, forcedStubAssets) == 0x68);
-	static_assert(offsetof(TransientInfo, transientFiles) == 0x70);
-	static_assert(offsetof(TransientInfo, transientAssets) == 0x78);
-	static_assert(offsetof(TransientInfo, transientWorldGridTileMaps) == 0x80);
-	static_assert(offsetof(TransientInfo, transientWorldGridSpatial) == 0x88);
-	static_assert(offsetof(TransientInfo, transientWorldGridBounds) == 0x90);
-	static_assert(offsetof(TransientInfo, transientWorldGridHighLodLookup) == 0x98);
-	static_assert(offsetof(TransientInfo, transientWorldGridBoundsCount) == 0xA0);
-	static_assert(offsetof(TransientInfo, transientWorldGridHighLodCount) == 0xA4);
-	static_assert(offsetof(TransientInfo, transientWorldGridHighLodLookupCount) == 0xA8);
-	static_assert(offsetof(TransientInfo, transientInfoFlags) == 0xAC);
-	static_assert(offsetof(TransientInfo, transientSkipLoading) == 0xB0);
-	static_assert(offsetof(TransientInfo, forcedStubAssetCount) == 0xC0);
-	static_assert(offsetof(TransientInfo, transientFileCount) == 0xC4);
-	static_assert(offsetof(TransientInfo, transientAssetCount) == 0xC8);
-	static_assert(offsetof(TransientInfo, transientWorldGridTileMapCount) == 0xCC);
-	static_assert(offsetof(TransientInfo, transientCollisionTileCount) == 0xD0);
-	static_assert(offsetof(TransientInfo, transientMPCommonCount) == 0xD4);
+	static_assert(offsetof(TransientInfo, forcedStubAssets) == 0x48);
+	static_assert(offsetof(TransientInfo, transientFiles) == 0x50);
+	static_assert(offsetof(TransientInfo, transientAssets) == 0x58);
+	static_assert(offsetof(TransientInfo, transientWorldGridTileMaps) == 0x60);
+	static_assert(offsetof(TransientInfo, transientWorldGridSpatial) == 0x68);
+	static_assert(offsetof(TransientInfo, transientWorldGridBounds) == 0x70);
+	static_assert(offsetof(TransientInfo, transientWorldGridHighLodLookup) == 0x78);
+	static_assert(offsetof(TransientInfo, transientWorldGridBoundsCount) == 0x80);
+	static_assert(offsetof(TransientInfo, transientWorldGridHighLodCount) == 0x84);
+	static_assert(offsetof(TransientInfo, transientWorldGridHighLodLookupCount) == 0x88);
+	static_assert(offsetof(TransientInfo, transientInfoFlags) == 0x8C);
+	static_assert(offsetof(TransientInfo, transientSkipLoading) == 0x90);
+	static_assert(offsetof(TransientInfo, forcedStubAssetCount) == 0xA0);
+	static_assert(offsetof(TransientInfo, transientFileCount) == 0xA4);
+	static_assert(offsetof(TransientInfo, transientAssetCount) == 0xA8);
+	static_assert(offsetof(TransientInfo, transientWorldGridTileMapCount) == 0xAC);
+	static_assert(offsetof(TransientInfo, transientCollisionTileCount) == 0xB0);
+	static_assert(offsetof(TransientInfo, transientMPCommonCount) == 0xB4);
 	static_assert(sizeof(StreamingInfo) == 72);
 	static_assert(offsetof(StreamingInfo, name) == 0x0);
 	static_assert(offsetof(StreamingInfo, alwaysloadedFlagSets) == 0x8);
@@ -25723,25 +25742,25 @@ namespace zonetool::iw8
 	static_assert(offsetof(PlayerAnimsetAliasPatch, numStrings) == 0x10);
 	static_assert(offsetof(PlayerAnimsetAliasPatch, padding) == 0x14);
 	static_assert(sizeof(PlayerFingerPoseSlot) == 1);
-	static_assert(sizeof(PlayerAnimsetAlias) == 152);
+	static_assert(sizeof(PlayerAnimsetAlias) == 136);
 	static_assert(offsetof(PlayerAnimsetAlias, duration) == 0x0);
 	static_assert(offsetof(PlayerAnimsetAlias, rate) == 0x4);
 	static_assert(offsetof(PlayerAnimsetAlias, flags) == 0x8);
 	static_assert(offsetof(PlayerAnimsetAlias, moveTypes) == 0x10);
-	static_assert(offsetof(PlayerAnimsetAlias, aimState) == 0x30);
-	static_assert(offsetof(PlayerAnimsetAlias, aimAlias) == 0x34);
-	static_assert(offsetof(PlayerAnimsetAlias, moveTurnState) == 0x38);
-	static_assert(offsetof(PlayerAnimsetAlias, moveTurnAlias) == 0x3C);
-	static_assert(offsetof(PlayerAnimsetAlias, aimBlendTime) == 0x40);
-	static_assert(offsetof(PlayerAnimsetAlias, moveTurnBlendTime) == 0x44);
-	static_assert(offsetof(PlayerAnimsetAlias, lerpStrengthMin) == 0x48);
-	static_assert(offsetof(PlayerAnimsetAlias, lerpStrengthMax) == 0x4C);
-	static_assert(offsetof(PlayerAnimsetAlias, customAnimHandlerType) == 0x50);
-	static_assert(offsetof(PlayerAnimsetAlias, aliasAddons) == 0x58);
-	static_assert(offsetof(PlayerAnimsetAlias, numAliasAddons) == 0x60);
-	static_assert(offsetof(PlayerAnimsetAlias, patchInfo) == 0x68);
-	static_assert(offsetof(PlayerAnimsetAlias, fingerPoseSlot) == 0x88);
-	static_assert(offsetof(PlayerAnimsetAlias, padding) == 0x89);
+	static_assert(offsetof(PlayerAnimsetAlias, aimState) == 0x20);
+	static_assert(offsetof(PlayerAnimsetAlias, aimAlias) == 0x24);
+	static_assert(offsetof(PlayerAnimsetAlias, moveTurnState) == 0x28);
+	static_assert(offsetof(PlayerAnimsetAlias, moveTurnAlias) == 0x2C);
+	static_assert(offsetof(PlayerAnimsetAlias, aimBlendTime) == 0x30);
+	static_assert(offsetof(PlayerAnimsetAlias, moveTurnBlendTime) == 0x34);
+	static_assert(offsetof(PlayerAnimsetAlias, lerpStrengthMin) == 0x38);
+	static_assert(offsetof(PlayerAnimsetAlias, lerpStrengthMax) == 0x3C);
+	static_assert(offsetof(PlayerAnimsetAlias, customAnimHandlerType) == 0x40);
+	static_assert(offsetof(PlayerAnimsetAlias, aliasAddons) == 0x48);
+	static_assert(offsetof(PlayerAnimsetAlias, numAliasAddons) == 0x50);
+	static_assert(offsetof(PlayerAnimsetAlias, patchInfo) == 0x58);
+	static_assert(offsetof(PlayerAnimsetAlias, fingerPoseSlot) == 0x78);
+	static_assert(offsetof(PlayerAnimsetAlias, padding) == 0x79);
 	static_assert(sizeof(AnimsetAlias_Union) == 8);
 	static_assert(sizeof(AnimsetAlias) == 80);
 	static_assert(offsetof(AnimsetAlias, name) == 0x0);
@@ -26485,36 +26504,40 @@ namespace zonetool::iw8
 	static_assert(offsetof(KeyValuePairs, name) == 0x0);
 	static_assert(offsetof(KeyValuePairs, numVariables) == 0x8);
 	static_assert(offsetof(KeyValuePairs, keyValuePairs) == 0x10);
-	static_assert(sizeof(Replay_GfxIndexBuffer) == 32);
-	static_assert(sizeof(StVertexData0) == 16);
+	static_assert(sizeof(GfxVertexBuffer) == 32);
+	static_assert(offsetof(GfxVertexBuffer, resource) == 0x0);
+	static_assert(offsetof(GfxVertexBuffer, gpuAddress) == 0x8);
+	static_assert(offsetof(GfxVertexBuffer, allocation) == 0x10);
+	static_assert(offsetof(GfxVertexBuffer, size) == 0x18);
+	static_assert(sizeof(StVertexData0) == 40);
 	static_assert(offsetof(StVertexData0, data) == 0x0);
 	static_assert(offsetof(StVertexData0, vb) == 0x8);
-	static_assert(sizeof(StMeshLayerMaskData) == 16);
+	static_assert(sizeof(StMeshLayerMaskData) == 72);
 	static_assert(offsetof(StMeshLayerMaskData, data) == 0x0);
 	static_assert(offsetof(StMeshLayerMaskData, buffer) == 0x8);
 	static_assert(sizeof(t_1E3A702398B9A63E216E94324D15DBDE) == 1);
 	static_assert(sizeof(StMeshFlags) == 1);
-	static_assert(sizeof(StMesh) == 88);
+	static_assert(sizeof(StMesh) == 296);
 	static_assert(offsetof(StMesh, vd0) == 0x0);
-	static_assert(offsetof(StMesh, layerMask) == 0x10);
-	static_assert(offsetof(StMesh, indexBuffer) == 0x20);
-	static_assert(offsetof(StMesh, indices) == 0x28);
-	static_assert(offsetof(StMesh, streamKey) == 0x30);
-	static_assert(offsetof(StMesh, vertexBufferToRelease) == 0x38);
-	static_assert(offsetof(StMesh, indexBufferToRelease) == 0x40);
-	static_assert(offsetof(StMesh, layerMaskBufferToRelease) == 0x48);
-	static_assert(offsetof(StMesh, vertexCount) == 0x50);
-	static_assert(offsetof(StMesh, triCount) == 0x52);
-	static_assert(offsetof(StMesh, cutoutTriCount) == 0x54);
-	static_assert(offsetof(StMesh, flags) == 0x56);
-	static_assert(sizeof(StTerrainNode) == 136);
+	static_assert(offsetof(StMesh, layerMask) == 0x28);
+	static_assert(offsetof(StMesh, indexBuffer) == 0x70);
+	static_assert(offsetof(StMesh, indices) == 0x90);
+	static_assert(offsetof(StMesh, streamKey) == 0x98);
+	static_assert(offsetof(StMesh, vertexBufferToRelease) == 0xA0);
+	static_assert(offsetof(StMesh, indexBufferToRelease) == 0xC0);
+	static_assert(offsetof(StMesh, layerMaskBufferToRelease) == 0xE0);
+	static_assert(offsetof(StMesh, vertexCount) == 0x120);
+	static_assert(offsetof(StMesh, triCount) == 0x122);
+	static_assert(offsetof(StMesh, cutoutTriCount) == 0x124);
+	static_assert(offsetof(StMesh, flags) == 0x126);
+	static_assert(sizeof(StTerrainNode) == 344);
 	static_assert(offsetof(StTerrainNode, mesh) == 0x0);
-	static_assert(offsetof(StTerrainNode, wldBounds) == 0x58);
-	static_assert(offsetof(StTerrainNode, compressBase) == 0x70);
-	static_assert(offsetof(StTerrainNode, compressScale) == 0x78);
-	static_assert(offsetof(StTerrainNode, layerMask) == 0x80);
-	static_assert(offsetof(StTerrainNode, xIndex) == 0x84);
-	static_assert(offsetof(StTerrainNode, yIndex) == 0x86);
+	static_assert(offsetof(StTerrainNode, wldBounds) == 0x128);
+	static_assert(offsetof(StTerrainNode, compressBase) == 0x140);
+	static_assert(offsetof(StTerrainNode, compressScale) == 0x148);
+	static_assert(offsetof(StTerrainNode, layerMask) == 0x150);
+	static_assert(offsetof(StTerrainNode, xIndex) == 0x154);
+	static_assert(offsetof(StTerrainNode, yIndex) == 0x156);
 	static_assert(sizeof(StTerrainGridLevel) == 16);
 	static_assert(offsetof(StTerrainGridLevel, width) == 0x0);
 	static_assert(offsetof(StTerrainGridLevel, height) == 0x4);

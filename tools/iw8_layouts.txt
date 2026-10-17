@@ -1,0 +1,467 @@
+# Replay 1.20 layout corrections for tools/gen_iw8_structs.py.
+#
+# The ACTS schema takes most layouts from the game-test build. Replay changed some of them. Each
+# correction below matches the Replay loader code (the member that each Load_* routine reads, the
+# size that it loads) or the runtime code that fills the member. A correction replaces the whole
+# schema entry.
+#
+# Format:
+#   struct <name> <size>          a record; members follow, one per line: <offset> <name> : <type>
+#   union <name> <size>           as struct, all members at offset 0
+#   alias <base name> <name>      use <name> wherever the schema uses <base name>
+# Comments start with '#'.
+
+# GPU buffer records. The loaders copy them as bytes (no pointer fixups); the renderer fills them.
+# Load_GfxWrappedBaseBuffer loads 0x30, Load_GfxWrappedBuffer 0x40, Load_GfxWrappedRWBuffer 0x60,
+# Load_GfxIndexBuffer 0x20.
+
+# Null record: q_R_AssignNullShaderBufferView (RVA 0x18BC9B0) clears qwords 0, 8, 16 and dword 24.
+struct Replay::GfxBufferResource 32
+  0 resource : ID3D12Resource *
+  8 gpuAddress : unsigned __int64
+  16 allocation : unsigned __int64
+  24 size : unsigned int
+
+# Null view: R_AssignNullShaderBufferView (RVA 0x18BCA00) writes {0, 1}.
+struct Replay::GfxShaderBufferView 16
+  0 resource : ID3D12Resource *
+  8 view : unsigned int
+
+struct Replay::GfxShaderBufferRWView 32
+  0 resource : ID3D12Resource *
+  8 gpuAddress : unsigned __int64
+  16 allocation : unsigned __int64
+  24 view : unsigned int
+
+struct Replay::GfxWrappedBaseBuffer 48
+  0 buffer : Replay::GfxBufferResource
+  32 view : Replay::GfxShaderBufferView
+
+# R_CreateGfxWrappedBuffer (RVA 0x18DABF0) stores the created resource at +0x30, flags at +0x38 and
+# builds the read-write view at +0x40.
+struct Replay::GfxWrappedBuffer 64
+  0 base : Replay::GfxWrappedBaseBuffer
+  48 data : void *
+  56 flags : unsigned __int8
+
+struct Replay::GfxWrappedRWBuffer 96
+  0 buffer : Replay::GfxWrappedBuffer
+  64 rwView : Replay::GfxShaderBufferRWView
+
+alias GfxBufferResource Replay::GfxBufferResource
+alias GfxShaderBufferRWView Replay::GfxShaderBufferRWView
+
+# R_AllocSubdivCache (RVA 0x18C7D90) reads the size at +0 and creates the buffer at +8.
+struct Replay::GfxSubdivCache 104
+  0 size : unsigned int
+  8 vertexBuffer : Replay::GfxWrappedRWBuffer
+
+# q_Load_XSurfaceSubdivInfo loads 0x80; R_AllocSubdivCache binds the cache at +24.
+struct Replay::XSurfaceSubdivInfo 128
+  0 levels : XSurfaceSubdivLevel *
+  8 flags : unsigned int
+  12 totalVertCount : unsigned int
+  16 totalRegularPatchCount : unsigned int
+  24 cache : Replay::GfxSubdivCache
+
+# q_Load_XSurfaceSubdivLevelArray strides 0x238. q_R_AllocSurfaceSubdivLevels (RVA 0x18C8170)
+# creates the index buffers at +0x98 and +0xB8, the views at +0xD8..+0x148 and the data buffers
+# at +0x158..+0x228.
+struct Replay::XSurfaceSubdivLevel 568
+  0 rigidVertLists : XSubdivRigidVertList *
+  8 faceCount : unsigned int
+  12 regularPatchCount : unsigned int
+  16 regularPatchOffset : unsigned int
+  20 facePointCount : unsigned int
+  24 facePointValence4Count : unsigned int
+  28 facePointBufferSize : unsigned int
+  32 edgePointCount : unsigned int
+  36 edgePointSmoothEnd : unsigned int
+  40 edgePointUVBorderEnd : unsigned int
+  44 vertexPointCount : unsigned int
+  48 vertexPointValence4Count : unsigned int
+  52 vertexPointBufferSize : unsigned int
+  56 normalCount : unsigned int
+  60 normalBufferSize : unsigned int
+  64 transitionPointCount : unsigned int
+  68 vertCount : unsigned int
+  72 vertOffset : unsigned int
+  80 faceIndices : unsigned __int16 *
+  88 regularPatchIndices : unsigned __int16 *
+  96 regularPatchFlags : unsigned int *
+  104 facePoints : unsigned int *
+  112 edgePoints : unsigned int *
+  120 vertexPoints : unsigned int *
+  128 normals : unsigned int *
+  136 transitionPoints : unsigned int *
+  144 regularPatchCones : float *
+  152 regularPatchIndexBuffer : Replay::GfxBufferResource
+  184 faceIndexBuffer : Replay::GfxBufferResource
+  216 regularPatchIndexBufferView : Replay::GfxShaderBufferView
+  232 regularPatchFlagsView : Replay::GfxShaderBufferView
+  248 facePointsView : Replay::GfxShaderBufferView
+  264 edgePointsView : Replay::GfxShaderBufferView
+  280 vertexPointsView : Replay::GfxShaderBufferView
+  296 normalsView : Replay::GfxShaderBufferView
+  312 transitionPointsView : Replay::GfxShaderBufferView
+  328 regularPatchConesView : Replay::GfxShaderBufferView
+  344 regularPatchFlagsBuffer : Replay::GfxBufferResource
+  376 regularPatchConesBuffer : Replay::GfxBufferResource
+  408 facePointsBuffer : Replay::GfxBufferResource
+  440 edgePointsBuffer : Replay::GfxBufferResource
+  472 vertexPointsBuffer : Replay::GfxBufferResource
+  504 normalsBuffer : Replay::GfxBufferResource
+  536 transitionPointsBuffer : Replay::GfxBufferResource
+
+# Load_GfxIndexBuffer (RVA 0xDD1770) and the vertex buffer loader (RVA 0xDD1790) load 0x20.
+# q_Load_IndexBufferView (RVA 0x18D9F10) clears a null record with the 32-byte null routine.
+struct Replay::GfxIndexBuffer 32
+  0 resource : ID3D12Resource *
+  8 gpuAddress : unsigned __int64
+  16 allocation : unsigned __int64
+  24 size : unsigned int
+
+struct Replay::GfxVertexBuffer 32
+  0 resource : ID3D12Resource *
+  8 gpuAddress : unsigned __int64
+  16 allocation : unsigned __int64
+  24 size : unsigned int
+
+alias GfxIndexBuffer Replay::GfxIndexBuffer
+alias GfxVertexBuffer Replay::GfxVertexBuffer
+
+# Load_GfxWorldDrawVerts loads 0xC8: the index buffer at +0xA8 is one 32-byte record.
+struct Replay::GfxWorldDrawVerts 200
+  0 posDataSize : unsigned int
+  4 auxDataSize : unsigned int
+  8 posData : unsigned __int8 *
+  16 auxData : unsigned __int8 *
+  24 posBuffer : Replay::GfxWrappedBuffer
+  88 auxBuffer : Replay::GfxWrappedBuffer
+  152 indexCount : unsigned int
+  160 indices : unsigned __int16 *
+  168 indexBuffer : Replay::GfxIndexBuffer
+
+# Load_StVertexData0 loads 0x28, Load_StMeshLayerMaskData 0x48, Load_StMesh 0x128.
+# Load_StMesh reads the triangle count at +0x122; Load_StVertexData0 reads the vertex count at
+# +0x120. The loaders do not touch +0xA0..+0x11F; the release copies there are inferred from the
+# game-test member order and the Replay record sizes.
+struct Replay::StVertexData0 40
+  0 data : unsigned __int8 *
+  8 vb : Replay::GfxVertexBuffer
+
+struct Replay::StMeshLayerMaskData 72
+  0 data : unsigned __int8 *
+  8 buffer : Replay::GfxWrappedBuffer
+
+struct Replay::StMesh 296
+  0 vd0 : Replay::StVertexData0
+  40 layerMask : Replay::StMeshLayerMaskData
+  112 indexBuffer : Replay::GfxIndexBuffer
+  144 indices : unsigned __int16 *
+  152 streamKey : StreamKey *
+  160 vertexBufferToRelease : Replay::GfxVertexBuffer
+  192 indexBufferToRelease : Replay::GfxIndexBuffer
+  224 layerMaskBufferToRelease : Replay::GfxWrappedBuffer
+  288 vertexCount : unsigned __int16
+  290 triCount : unsigned __int16
+  292 cutoutTriCount : unsigned __int16
+  294 flags : StMeshFlags
+
+alias StVertexData0 Replay::StVertexData0
+alias StMeshLayerMaskData Replay::StMeshLayerMaskData
+alias StMesh Replay::StMesh
+
+# Load_ReactiveMotionModelInfo loads 0x60 and reads the part count at +0x50. The loader does not
+# touch +0x54..+0x5F.
+struct Replay::ReactiveMotionModelInfo 96
+  0 windParams : ReactiveMotionWindParams
+  16 modelPartTweaks : ReactiveMotionModelPartTweaks *
+  24 modelParts : ReactiveMotionModelPart *
+  32 modelPartsBuffer : Replay::GfxWrappedBaseBuffer
+  80 numParts : unsigned __int8
+  81 flags : ReactiveMotionModelFlags
+  82 pad : unsigned __int8[2]
+  84 runtime_0x54 : unsigned __int8[12]
+
+# Load_MayhemAnimFramesUncompressed loads 0x80: the buffers at +0x18 and +0x48, the strides at
+# +0x78 and +0x7C.
+struct Replay::MayhemAnimFramesUncompressed 128
+  0 diskQuat : unsigned __int8 *
+  8 diskPos : unsigned __int8 *
+  16 transBounds : MayhemTransBounds *
+  24 quat : Replay::GfxWrappedBaseBuffer
+  72 pos : Replay::GfxWrappedBaseBuffer
+  120 quatStride : unsigned int
+  124 posStride : unsigned int
+
+# Load_MaterialTechnique (RVA 0xE0CED0) loads 0xB8. Serialized members: the name, the pipeline
+# state records at +0x28 (count = +0x83 * +0x0E, 16 bytes each), a 16-byte map at +0x50, the four
+# stage shaders at +0x58..+0x70 (vertex, hull, domain, pixel shader pools), the state bits at +0x88
+# (+0x83 records of 5 bytes) and the shader arguments at +0xB0 (sum of the four counts at
+# +0x78..+0x7B). The 16-byte record at +0xA0 is loaded in place. Stock headers hold the stable
+# argument size at +0x80 and the layout index at +0x9C. Names of members the loader does not use
+# follow the game-test order (inferred).
+struct Replay::MaterialPipelineState 16
+  0 hash : unsigned __int64
+  8 pso : ID3D12PipelineState *
+
+struct Replay::MaterialTechniqueStateBits 5
+  0 bits : unsigned __int8[5]
+
+struct Replay::MaterialTechnique 184
+  0 name : const char *
+  8 type : MaterialTechniqueType
+  12 flags : unsigned __int16
+  14 pipelineStateInputLayoutCount : unsigned __int8
+  15 pipelineStateMap : unsigned __int8[25]
+  40 pipelineStates : Replay::MaterialPipelineState *
+  48 customBufferFlags : unsigned __int64[4]
+  80 rootParameterMap : unsigned __int8 *
+  88 vertexShader : ComputeShader *
+  96 hullShader : ComputeShader *
+  104 domainShader : ComputeShader *
+  112 pixelShader : ComputeShader *
+  120 perPrimArgCount : unsigned __int8
+  121 perObjArgCount : unsigned __int8
+  122 stableArgCount : unsigned __int8
+  123 neverArgCount : unsigned __int8
+  124 perPrimArgSize : unsigned __int16
+  126 perObjArgSize : unsigned __int16
+  128 stableArgSize : unsigned __int16
+  130 colorRtCount : unsigned __int8
+  131 pipelineStateCount : unsigned __int8
+  136 stateBits : Replay::MaterialTechniqueStateBits *
+  144 renderTargetFormats : MaterialRenderTargetFormat
+  152 customSamplerFlags : unsigned int
+  156 precompiledIndex : MaterialConstantLayout
+  157 stageConfig : MaterialStageConfig
+  160 defaultStateBits : GfxStateBits
+  176 args : MaterialShaderArgument *
+
+alias MaterialTechnique Replay::MaterialTechnique
+alias MaterialPipelineState Replay::MaterialPipelineState
+
+# Load_TransientCosts (RVA 0xE30B70) loads 0x30: one content set at +0, the cost array at +0x10
+# (+0x28 records of 4 bytes), page sizes at +0x18 (+0x2C entries) and +0x20 (+0x28 entries).
+struct Replay::TransientCosts 48
+  0 streamContents : StreamingContentSet
+  16 streamingCosts : StreamingItemCost *
+  24 residentPageSizes : unsigned __int16 *
+  32 tempPageSizes : unsigned __int16 *
+  40 streamingItemCount : unsigned int
+  44 transientCostCount : unsigned int
+
+# q_Load_TransientInfo (RVA 0xE30CA0) loads 0xB8. The reference arrays at +0x48/+0x50/+0x58 take
+# their counts from +0xA0/+0xA4/+0xA8, the tile maps at +0x60 from +0xAC, the grid bounds at +0x70
+# from +0x80, the lookup at +0x78 from +0x88; the skip-loading bits sit at +0x90. The loader does
+# not touch +0x84, +0x8C, +0xB0 and +0xB4 (names from the game-test order, inferred).
+struct Replay::TransientInfo 184
+  0 transientSets : TransientSets
+  24 transientCosts : Replay::TransientCosts
+  72 forcedStubAssets : ForcedStubAssetReference *
+  80 transientFiles : TransientFileReference *
+  88 transientAssets : TransientAssetReference *
+  96 transientWorldGridTileMaps : TransientWorldGridTileMap *
+  104 transientWorldGridSpatial : SpatialPartition_Tree *
+  112 transientWorldGridBounds : Bounds *
+  120 transientWorldGridHighLodLookup : unsigned __int16 *
+  128 transientWorldGridBoundsCount : unsigned int
+  132 transientWorldGridHighLodCount : unsigned int
+  136 transientWorldGridHighLodLookupCount : unsigned int
+  140 transientInfoFlags : TransientInfoFlags
+  144 transientSkipLoading : bitarray_dynamic
+  160 forcedStubAssetCount : unsigned int
+  164 transientFileCount : unsigned int
+  168 transientAssetCount : unsigned int
+  172 transientWorldGridTileMapCount : unsigned int
+  176 transientCollisionTileCount : unsigned int
+  180 transientMPCommonCount : unsigned int
+
+alias TransientCosts Replay::TransientCosts
+alias TransientInfo Replay::TransientInfo
+
+# Load_WeaponAttachment (RVA 0xE0E480): the record at +0x240 is loaded by the 0x100-byte sway
+# settings loader (RVA 0xE1F6F0, rumble graphs at +0x68/+0xA0), the record at +0x248 by the
+# offset pattern scale loader (RVA 0xE20BC0, 0x10 bytes).
+patch Replay::WeaponAttachment
+  576 swaySettings : SwaySettings *
+  584 weaponOffsetPatternScales : WeaponOffsetPatternScaleInfo *
+
+# q_Load_AttProjectile (RVA 0xE1EDB0) loads 0xF0: the model at +0x28 and every effect and sound
+# 24 bytes before its game-test offset. The ten leading values (not read by the loader) keep the
+# game-test order without the six stepped explosion values (inferred).
+struct Replay::AttProjectile 240
+  0 explosionRadius : int
+  4 explosionForceRadius : int
+  8 explosionInnerDamage : int
+  12 explosionOuterDamage : int
+  16 damageConeAngle : float
+  20 projectileSpeed : int
+  24 projectileSpeedUp : int
+  28 projectileActivateDist : int
+  32 projectileLifetime : float
+  36 projectileLifetimeStdDeviation : float
+  40 projectileModel : XModel *
+  48 projExplosionType : weapProjExposion_t
+  56 projExplosionEffect : FxCombinedDef
+  64 projExplosionEffectForceNormalUp : bool
+  72 projExplosionSound : SndAliasLookup
+  80 projExplosionReflClass : unsigned int
+  88 projDudEffect : FxCombinedDef
+  96 projTimeoutEffect : FxCombinedDef
+  104 projDudSound : SndAliasLookup
+  112 projTimeoutSound : SndAliasLookup
+  120 disableFxOnTimeout : bool
+  121 projImpactExplode : bool
+  122 disableProjectileCrumpleCheck : bool
+  124 destabilizationRateTime : float
+  128 destabilizationCurvatureMax : float
+  132 destabilizeDistance : int
+  136 vmProjBodyEffect : FxCombinedDef
+  144 projBodyEffect : FxCombinedDef
+  152 projTrailEffect : FxCombinedDef
+  160 projBeaconEffect : FxCombinedDef
+  168 projIgnitionDelay : int
+  176 projIgnitionEffect : FxCombinedDef
+  184 projIgnitionSound : SndAliasLookup
+  192 stickiness : WeapStickinessType
+  196 fuseTime : int
+  200 aiFuseTime : int
+  204 stickToPlayers : bool
+  205 stickToVehicles : bool
+  206 stickToTurrets : bool
+  207 stickToNonStick : bool
+  208 timedDetonation : bool
+  209 isPredictedProjectile : bool
+  210 useSteppedExplosionDamage : bool
+  212 clientTrajectoryBlendOutTime : int
+  216 serverTrajectoryBlendInTime : int
+  220 reactiveMotionRadiusScale : float
+  224 reactiveMotionFrequencyScale : float
+  228 reactiveMotionAmplitudeScale : float
+  232 reactiveMotionFalloff : float
+  236 reactiveMotionLifetime : float
+
+alias AttProjectile Replay::AttProjectile
+
+# q_Load_MaterialConstantBufferDef (RVA 0xE0C5F0) loads 0x110; q_Load_MaterialConstantBufferTable
+# (RVA 0x194B9D0) creates the four stage buffers at +0x30, +0x68, +0xA0 and +0xD8 (0x38 apart).
+# The members after the game-test descriptor are runtime only (inferred).
+struct Replay::GfxConstantBuffer 56
+  0 desc : GfxConstantBufferDesc
+  16 buffer : Replay::GfxBufferResource
+  48 view : unsigned __int64
+
+struct Replay::MaterialConstantBufferDef 272
+  0 vsDataSize : unsigned int
+  4 hsDataSize : unsigned int
+  8 dsDataSize : unsigned int
+  12 psDataSize : unsigned int
+  16 vsData : unsigned __int8 *
+  24 hsData : unsigned __int8 *
+  32 dsData : unsigned __int8 *
+  40 psData : unsigned __int8 *
+  48 vsConstantBuffer : Replay::GfxConstantBuffer
+  104 hsConstantBuffer : Replay::GfxConstantBuffer
+  160 dsConstantBuffer : Replay::GfxConstantBuffer
+  216 psConstantBuffer : Replay::GfxConstantBuffer
+
+alias GfxConstantBuffer Replay::GfxConstantBuffer
+alias MaterialConstantBufferDef Replay::MaterialConstantBufferDef
+
+# Load_PlayerAnimsetAlias (RVA 0xDD1A40) loads 0x88 and maps the script strings at +0x20..+0x2C;
+# the add-on array sits at +0x48 (count +0x50), the patch record at +0x58. Replay keeps four move
+# type words instead of eight.
+struct Replay::PlayerAnimsetAlias 136
+  0 duration : float
+  4 rate : float
+  8 flags : unsigned __int64
+  16 moveTypes : unsigned int[4]
+  32 aimState : scr_string_t
+  36 aimAlias : scr_string_t
+  40 moveTurnState : scr_string_t
+  44 moveTurnAlias : scr_string_t
+  48 aimBlendTime : float
+  52 moveTurnBlendTime : float
+  56 lerpStrengthMin : float
+  60 lerpStrengthMax : float
+  64 customAnimHandlerType : PlayerCustomAnimHandlerType
+  72 aliasAddons : PlayerAnimsetAddonEntry *
+  80 numAliasAddons : unsigned int
+  88 patchInfo : PlayerAnimsetAliasPatch
+  120 fingerPoseSlot : PlayerFingerPoseSlot
+  121 padding : unsigned __int8[12]
+
+# The player animation script loader (RVA 0xDDEAB0) strides the entries 0x58 and maps the script
+# strings at +0, +4 and +8. Four move type words, as in PlayerAnimsetAlias (inferred).
+struct Replay::PlayerAnimEntry 88
+  0 entryName : scr_string_t
+  4 animName : scr_string_t
+  8 shadowAnimName : scr_string_t
+  16 flags : unsigned __int64
+  24 animIndex : unsigned __int64
+  32 shadowAnimIndex : unsigned __int64
+  40 movetype : unsigned int[4]
+  56 moveSpeed : float
+  60 moveSpeedAdjust : float
+  64 initialLerp : __int16
+  66 additiveAdjustBlendout : __int16
+  68 duration : unsigned __int16
+  70 fastDuration : unsigned __int16
+  72 additiveAdjustAnim : unsigned __int16
+  74 slowAnimIndex : unsigned __int16
+  76 bodyPart : unsigned __int8
+  77 serverNoteType : unsigned __int8
+  78 clientNoteType : unsigned __int8
+  79 aimSet : unsigned __int8
+  80 mantleSet : unsigned __int8
+  81 leanSet : unsigned __int8
+  82 turns : unsigned __int8
+  83 twitches : unsigned __int8
+  84 syncGroup : unsigned __int8
+
+# The music set loader (RVA 0xDF46F0) strides the states 0x150 and loads the loop assets at
+# +0x138 (count +0x134, 0x78 bytes each). The asset drops one 4-byte value (the last one,
+# inferred); the state drops the runtime reference count and status.
+struct Replay::SndMusicAsset 120
+  0 alias : char[64]
+  64 aliasId : unsigned int
+  68 inactive : bool
+  69 completeLoop : bool
+  70 removeAfterPlay : bool
+  71 firstRandom : bool
+  72 startSync : bool
+  73 stopSync : bool
+  74 completeOnStop : bool
+  76 loopStartOffset : unsigned int
+  80 bpm : int
+  84 assetType : int
+  88 loopNumber : int
+  92 sampleCount : unsigned int
+  96 startDelayBeats : int
+  100 startFadeBeats : int
+  104 stopDelayBeats : int
+  108 stopFadeBeats : int
+  112 startOffsetFrames : int
+  116 meter : int
+
+struct Replay::SndMusicState 336
+  0 name : char[64]
+  64 id : unsigned int
+  68 intro : Replay::SndMusicAsset
+  188 exit : Replay::SndMusicAsset
+  308 loopCount : unsigned int
+  312 loops : Replay::SndMusicAsset *
+  320 order : int
+  324 interruptPriority : int
+  328 persistPriority : int
+  332 isRandom : bool
+  333 isSequential : bool
+  334 skipPreviousExit : bool
+  335 wallClockSync : bool
+
+alias PlayerAnimsetAlias Replay::PlayerAnimsetAlias
+alias PlayerAnimEntry Replay::PlayerAnimEntry
+alias SndMusicAsset Replay::SndMusicAsset
+alias SndMusicState Replay::SndMusicState
