@@ -30,10 +30,10 @@ namespace zonetool::iw8
 			.display_name = "Call of Duty: Modern Warfare (Replay 1.20)",
 			.format =
 			{
-				.container = xfile::container::unsupported,
+				.container = xfile::container::iw8,
 				.unsigned_magic = "IWffc100",
 				.signed_magic = "IWffa100",
-				.version = 0xFF7,
+				.version = 11,
 				.block_count = 11,
 			},
 			.dump_zone = dump_zone,

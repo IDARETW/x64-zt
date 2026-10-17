@@ -5,6 +5,7 @@
 
 #include <zlib.h>
 #include <lz4.h>
+#include <zstd.h>
 
 namespace zonetool::xfile
 {
@@ -392,6 +393,279 @@ namespace zonetool::xfile
 		}
 	}
 
+	namespace
+	{
+		constexpr std::size_t iw8_block_count = 11;
+		constexpr std::uint32_t iw8_xfile_version = 0xFF7;
+		constexpr std::size_t iw8_signature_size = 0x8000;
+		constexpr std::size_t iw8_signed_chunk_size = 0x800000;
+		constexpr std::size_t iw8_rsa_block_size = 0x4000;
+
+#pragma pack(push, 1)
+		struct iw8_file_header
+		{
+			char magic[8];
+			std::uint32_t version;
+			std::uint32_t xfile_version;
+			std::uint8_t compressed;
+			std::uint8_t encrypted;
+			std::uint8_t transient;
+			std::uint8_t pad;
+			std::uint32_t resident_size;
+			std::uint32_t resident_hash;
+			std::uint32_t always_loaded_size;
+			std::uint64_t size;
+			std::uint64_t preload_walk_size;
+			std::uint64_t block_sizes[iw8_block_count];
+		};
+
+		struct iw8_compressed_block
+		{
+			std::uint32_t compressed_size;
+			std::uint32_t decompressed_size;
+			std::uint32_t encryption_counter;
+		};
+#pragma pack(pop)
+
+		static_assert(sizeof(iw8_file_header) == 0x88);
+		static_assert(sizeof(iw8_compressed_block) == 0xC);
+
+		enum iw8_codec : std::uint8_t
+		{
+			iw8_codec_none = 1,
+			iw8_codec_zlib_size = 2,
+			iw8_codec_zlib_speed = 3,
+			iw8_codec_lz4hc = 4,
+			iw8_codec_lz4 = 5,
+			iw8_codec_kraken_size = 6,
+			iw8_codec_kraken_speed = 7,
+			iw8_codec_leviathan_size = 0xC,
+			iw8_codec_leviathan_speed = 0xD,
+			iw8_codec_mermaid_size = 0xE,
+			iw8_codec_mermaid_speed = 0xF,
+			iw8_codec_selkie_size = 0x10,
+			iw8_codec_selkie_speed = 0x11,
+			iw8_codec_zstd_size = 0x12,
+			iw8_codec_zstd_speed = 0x13,
+		};
+
+		using oodle_decompress_t = std::intptr_t(*)(const void*, std::intptr_t, void*, std::intptr_t, int, int, int, void*,
+			std::intptr_t, void*, void*, void*, std::intptr_t, int);
+
+		// Oodle is not redistributable: use the oo2core library of the game install that holds the zone.
+		oodle_decompress_t load_oodle(const std::filesystem::path& zone_path)
+		{
+			static std::mutex mutex;
+			static oodle_decompress_t decompress{};
+
+			std::lock_guard _(mutex);
+			if (decompress)
+			{
+				return decompress;
+			}
+
+			auto folder = std::filesystem::absolute(zone_path).parent_path();
+			for (auto depth = 0; depth < 4 && !folder.empty(); depth++, folder = folder.parent_path())
+			{
+				std::error_code error;
+				for (const auto& entry : std::filesystem::directory_iterator(folder, error))
+				{
+					const auto name = entry.path().filename().string();
+					if (!name.starts_with("oo2core_") || !name.ends_with("_win64.dll"))
+					{
+						continue;
+					}
+
+					if (const auto library = LoadLibraryW(entry.path().c_str()))
+					{
+						decompress = reinterpret_cast<oodle_decompress_t>(GetProcAddress(library, "OodleLZ_Decompress"));
+						if (decompress)
+						{
+							return decompress;
+						}
+					}
+				}
+
+				if (folder == folder.root_path())
+				{
+					break;
+				}
+			}
+
+			throw std::runtime_error("the zone needs Oodle: no oo2core_*_win64.dll in the game folder");
+		}
+
+		void decompress_iw8_block(const std::filesystem::path& zone_path, const std::uint8_t codec, const std::string_view block,
+			char* destination, const std::size_t size)
+		{
+			switch (codec)
+			{
+			case iw8_codec_none:
+				if (block.size() != size)
+				{
+					throw std::runtime_error("uncompressed block has the wrong size");
+				}
+
+				std::memcpy(destination, block.data(), size);
+				return;
+			case iw8_codec_zlib_size:
+			case iw8_codec_zlib_speed:
+			{
+				const auto inflated = inflate_zlib(block, MAX_WBITS, size);
+				if (inflated.size() != size)
+				{
+					throw std::runtime_error("zlib block has the wrong size");
+				}
+
+				std::memcpy(destination, inflated.data(), size);
+				return;
+			}
+			case iw8_codec_lz4hc:
+			case iw8_codec_lz4:
+				if (LZ4_decompress_safe(block.data(), destination, static_cast<int>(block.size()), static_cast<int>(size)) != static_cast<int>(size))
+				{
+					throw std::runtime_error("lz4 block failed");
+				}
+				return;
+			case iw8_codec_zstd_size:
+			case iw8_codec_zstd_speed:
+				if (ZSTD_decompress(destination, size, block.data(), block.size()) != size)
+				{
+					throw std::runtime_error("zstd block failed");
+				}
+				return;
+			case iw8_codec_kraken_size:
+			case iw8_codec_kraken_speed:
+			case iw8_codec_leviathan_size:
+			case iw8_codec_leviathan_speed:
+			case iw8_codec_mermaid_size:
+			case iw8_codec_mermaid_speed:
+			case iw8_codec_selkie_size:
+			case iw8_codec_selkie_speed:
+			{
+				const auto decompress = load_oodle(zone_path);
+				const auto written = decompress(block.data(), static_cast<std::intptr_t>(block.size()), destination,
+					static_cast<std::intptr_t>(size), 1, 0, 0, nullptr, 0, nullptr, nullptr, nullptr, 0, 3);
+				if (written != static_cast<std::intptr_t>(size))
+				{
+					throw std::runtime_error("oodle block failed");
+				}
+				return;
+			}
+			}
+
+			throw std::runtime_error(std::format("unknown block codec {}", codec));
+		}
+
+		// Signed zones hold one RSA hash block after every 8 MiB of data, counted from the IWC frame.
+		std::string strip_iw8_rsa_blocks(const std::string_view data)
+		{
+			std::string result;
+			result.reserve(data.size());
+
+			byte_reader reader(data);
+			while (reader.remaining())
+			{
+				const auto chunk = std::min(iw8_signed_chunk_size, reader.remaining());
+				result.append(reader.read_view(chunk));
+				if (chunk == iw8_signed_chunk_size && reader.remaining())
+				{
+					reader.skip(std::min(iw8_rsa_block_size, reader.remaining()));
+				}
+			}
+
+			return result;
+		}
+
+		std::string decompress_iw8_frame(const std::filesystem::path& zone_path, const std::string_view data, const std::uint64_t size)
+		{
+			byte_reader reader(data);
+
+			const auto type = reader.read<std::uint8_t>();
+			if (reader.read_view(3) != "IWC")
+			{
+				throw std::runtime_error("compressor header has no IWC magic");
+			}
+
+			if (type == 1)
+			{
+				if (reader.remaining() != size)
+				{
+					throw std::runtime_error(std::format("stored zone holds 0x{:X} bytes, not 0x{:X}", reader.remaining(), size));
+				}
+
+				return std::string(reader.rest());
+			}
+
+			if (type != 2)
+			{
+				throw std::runtime_error(std::format("unknown compressor {}", type));
+			}
+
+			reader.skip(sizeof(std::uint32_t) + 3);
+			const auto codec = reader.read<std::uint8_t>();
+
+			std::string result;
+			result.resize(size);
+
+			std::size_t written = 0;
+			while (written < size)
+			{
+				const auto block = reader.read<iw8_compressed_block>();
+				if (!block.compressed_size || written + block.decompressed_size > size)
+				{
+					throw std::runtime_error(std::format("compressed block at output offset 0x{:X} is not valid", written));
+				}
+
+				const auto stored = reader.read_view(block.compressed_size);
+				reader.skip(std::min(((block.compressed_size + 3) & ~std::size_t(3)) - block.compressed_size, reader.remaining()));
+
+				try
+				{
+					decompress_iw8_block(zone_path, codec, stored, result.data() + written, block.decompressed_size);
+				}
+				catch (const std::exception& e)
+				{
+					throw std::runtime_error(std::format("{} at output offset 0x{:X}", e.what(), written));
+				}
+
+				written += block.decompressed_size;
+			}
+
+			return result;
+		}
+
+		void read_iw8(byte_reader& reader, const std::filesystem::path& path, const format& format, fastfile& file)
+		{
+			if (format.block_count != iw8_block_count)
+			{
+				throw std::runtime_error(std::format("IW8 zones have {} blocks", iw8_block_count));
+			}
+
+			const auto header = reader.read<iw8_file_header>();
+			if (header.xfile_version != iw8_xfile_version)
+			{
+				throw std::runtime_error(std::format("xfile version 0x{:X} is not 0x{:X}", header.xfile_version, iw8_xfile_version));
+			}
+
+			file.block_sizes.assign(std::begin(header.block_sizes), std::end(header.block_sizes));
+
+			if (!file.is_signed)
+			{
+				file.payload = decompress_iw8_frame(path, reader.rest(), header.size);
+				return;
+			}
+
+			if (reader.remaining() < iw8_signature_size || reader.read_view(8) != "IWffs100")
+			{
+				throw std::runtime_error("signed zone has no IWffs100 signature header");
+			}
+
+			reader.skip(iw8_signature_size - 8);
+			file.payload = decompress_iw8_frame(path, strip_iw8_rsa_blocks(reader.rest()), header.size);
+		}
+	}
+
 	fastfile read(const std::filesystem::path& path, const format& format)
 	{
 		std::string data;
@@ -433,6 +707,9 @@ namespace zonetool::xfile
 			break;
 		case container::iw7:
 			read_iw7(reader, format, file);
+			break;
+		case container::iw8:
+			read_iw8(reader, path, format, file);
 			break;
 		case container::unsupported:
 			throw std::runtime_error(std::format("the {} container has no v2 reader", format.unsigned_magic));
