@@ -4,7 +4,7 @@ Usage: python tools/gen_iw8_structs.py <acts data/mw19/schema.json> [output]
 
 The output holds every type that the 117 asset pools reach, with the Replay
 type overrides applied. static_asserts prove each size and member offset."""
-import json, re, sys, collections
+import json, os, re, sys, collections
 
 if len(sys.argv) < 2:
     sys.exit(__doc__)
@@ -14,7 +14,10 @@ OUT = sys.argv[2] if len(sys.argv) > 2 else 'src/games/iw8/structs.hpp'
 schema = json.load(open(SCHEMA, encoding='utf-8'))
 types = schema['types']
 profile = schema['profiles']['replay-1.20']
-overrides = profile['type_overrides']  # base name -> Replay name
+overrides = dict(profile['type_overrides'])  # base name -> Replay name
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import iw8_layouts  # noqa: E402
+iw8_layouts.merge(types, overrides, os.path.join(os.path.dirname(os.path.abspath(__file__)), 'iw8_layouts.txt'))
 replay_to_base = {v: k for k, v in overrides.items()}
 
 SCALARS = {
