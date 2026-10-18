@@ -14,12 +14,19 @@ namespace zonetool
 		std::optional<std::uint8_t> pop_aligned_block;
 		// IW7 zones place the data of this block at its end, so offsets count from (block size - data size).
 		std::optional<std::uint8_t> end_anchored_block;
+		// The block that pop_stream rewinds and that asset pointers load into.
+		std::uint8_t temp_block = 0;
+		std::size_t pop_alignment = 15;
+		// IW8 offsets with bit 36 set count from the start of the outermost asset.
+		bool relative_offsets = false;
 	};
 
 	class zone_reader
 	{
 	public:
 		using inline_asset_loader = std::function<void(std::int32_t type, void** field, void** insert_slot)>;
+		// Called for every read from the zone data: input offset, size, block and block position.
+		using read_trace = std::function<void(std::size_t input, std::size_t size, std::uint8_t block, std::size_t position)>;
 
 		zone_reader(std::string_view data, std::span<const std::uint64_t> block_sizes, const zone_layout& layout);
 		~zone_reader();
@@ -30,6 +37,7 @@ namespace zonetool
 		game::game_mode mode = game::h1;
 
 		void set_inline_asset_loader(inline_asset_loader loader);
+		void set_read_trace(read_trace trace);
 		void set_script_strings(std::vector<std::uint32_t> ids);
 		void set_zone_index(std::uint16_t index);
 		std::uint16_t zone_index() const;
@@ -40,6 +48,21 @@ namespace zonetool
 		void push_stream(std::uint8_t block);
 		void pop_stream();
 		void align(std::size_t alignment);
+
+		void begin_asset();
+		void end_asset();
+		void unsupported(const char* reader) const;
+
+		template <typename T>
+		T read_temp(const std::size_t alignment)
+		{
+			this->push_stream(this->layout_.temp_block);
+			this->align(alignment);
+			T value{};
+			std::memcpy(&value, this->read_bytes(sizeof(T)), sizeof(T));
+			this->pop_stream();
+			return value;
+		}
 
 		std::uint8_t current_stream() const;
 		std::size_t remaining() const;
@@ -295,11 +318,13 @@ namespace zonetool
 		std::vector<std::uint32_t> script_strings_;
 		std::uint16_t zone_index_{};
 		inline_asset_loader inline_asset_loader_;
+		read_trace read_trace_;
 
 		std::vector<std::unique_ptr<std::uint8_t[]>> allocations_;
 		std::map<std::pair<std::type_index, std::string_view>, void*> reference_stubs_;
 		std::vector<deferred_offset> deferred_offsets_;
 		std::vector<std::size_t> string_positions_;
+		std::vector<std::vector<std::size_t>> asset_starts_;
 
 		template <typename T>
 		static void** field_address(T*& field)

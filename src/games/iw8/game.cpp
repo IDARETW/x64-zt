@@ -1,8 +1,9 @@
 #include <std_include.hpp>
 
-#include <game.hpp>
+#include "iw8.hpp"
+#include "zone/loader.hpp"
 
-#include "structs.hpp"
+#include <game.hpp>
 
 namespace zonetool::iw8
 {
@@ -13,9 +14,24 @@ namespace zonetool::iw8
 			throw std::runtime_error("iw8 zones cannot be dumped yet");
 		}
 
-		void verify_zone(const std::filesystem::path&, const std::filesystem::path&)
+		void verify_zone(const std::filesystem::path&, const std::filesystem::path& zone_path)
 		{
-			throw std::runtime_error("iw8 zones cannot be verified yet");
+			const auto _ = gsl::finally(db_clear);
+
+			const auto zone = load_zone(zone_path);
+			std::map<std::string, std::size_t> counts;
+			for (const auto& asset : zone->assets)
+			{
+				const auto reader = find_asset_reader(asset.type);
+				++counts[reader ? reader->name : std::to_string(asset.type)];
+			}
+
+			ZONETOOL_INFO("%s: %zu assets, %zu script strings, all bytes read", zone->name.data(), zone->assets.size(),
+				zone->script_string_count);
+			for (const auto& [name, count] : counts)
+			{
+				ZONETOOL_INFO("  %s: %zu", name.data(), count);
+			}
 		}
 
 		void build_zone(const std::filesystem::path&, const std::string&)
