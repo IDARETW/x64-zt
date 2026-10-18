@@ -67,14 +67,19 @@ Without a command, `zonetool.exe` opens an interactive console.
   (`extracted/vfx/<name>.json`: the records in Replay's layout, which `export_effects.cpp` converts module by module,
   with their curves and the assets they link by source name), which the pipeline resolves and registers; their
   materials become IW3 effect materials. The zones of the common effect materials (`techsets_common`,
-  `techsets_common_core_mp`, `techsets_common_mp`, `techsets_global_core_mp`) must be in the zone folder too. Sound,
+  `techsets_common_core_mp`, `techsets_common_mp`, `techsets_global_core_mp`) and the global zones (`global_core_mp`,
+  `global_mp`) must be in the zone folder too: a map zone holds some shared images without their pixels (format 0),
+  and an image of the same name with its pixels in another loaded zone replaces such an image. Sound,
   cloud, physics light and emissive graph modules do not convert yet. The map's scriptables become script models of
   each instance's model at its initial placement (their states, animations and events do not convert; the game
   modes' own, such as Hardpoint's chevrons, are left out), which the pipeline makes static when no script uses them.
   The map's own script (`scripts\mp\maps\<map>\<map>`) becomes the IW3 map script: the functions that its main
   reaches, with IW7's utilities replaced by IW3 ones or their IW3 versions, the names that gsc-tool writes as IW7
   token ids (`_id_XXXX`) renamed, and the effects that it plays on the tags of converted models (which have one bone)
-  on `tag_origin`; its sounds, animations, cinematics and scriptable states do nothing. It does not have sounds.
+  on `tag_origin`; its animations, cinematics and scriptable states do nothing. The loop sounds that the map's sound
+  script places become IW3 createfx loop sounds, and the aliases of the map's sound bank (`<map>.all`) that the
+  scripts name become IW3 alias definitions (`extracted/soundaliases/<alias>.iw3.json`) with their sounds as wave
+  files, decoded from the FLAC frames of the bank's `.sabl`, which must be in the zone folder.
   `IW7_EXPORT_ONLY=1` stops after the extraction, and `IW7_REUSE_EXTRACTION=1` converts the complete extraction of
   an earlier run again.
 - IW7 materials: a colour map of `TS_COLOR_SPECULAR_MAP` (`*_packed_cs`) holds the specular reflectance in its alpha;
@@ -82,11 +87,24 @@ Without a command, `zonetool.exe` opens an interactive console.
   `_r`: its channels in the order of the letters). The extraction writes the colour with that alpha
   (`<colour>_a<hash>`), or opaque. Layered world materials (`..._b1..._b2...`) blend each layer by a vertex colour
   channel (green, blue, alpha) and that alpha. A premultiplied (`blendadd`) material blends by its alpha when its
-  colour holds one, else adds. Unlit materials keep the hue of their tint; one that emits above the sun gets an
-  `emissionScale` constant, which the pipeline gives the world shader (`MAP_EMISSION`, flag bit 20) and the model
+  colour holds one, else adds. IW7 normal maps keep x in alpha and y in green (packed ones keep the gloss in red and
+  the occlusion in blue). Unlit materials emit their tint in the units of the converted lights: below the sun's
+  level the tint itself, above it the hue of their tint and an `emissionScale` constant, which the pipeline gives the world shader (`MAP_EMISSION`, flag bit 20) and the model
   shaders (a technique set variant for each gain, `MAP_MODEL_EMISSION`). The sky and the models that it draws (planets) take the units of the converted lights.
-- The pipeline keeps shadow maps for the 32 most important shadowed spot lights of a map (`limitShadowedSpotLights`):
-  Replay picks at most 64 shadowed spots a frame from the view cone, and a converted world lets all of them compete.
+- The pipeline keeps shadow maps for the 40 most important shadowed spot lights of a map (`limitShadowedSpotLights`,
+  about the 37 dynamic-shadow spots of stock mp_hideout): Replay shadows at most 64 spots of the view cone a frame
+  and renders at most 16 of their shadows again, and a converted world lets every spot in the view cone compete. A
+  spot left out of a frame keeps its light without a shadow.
+- Light volumes (GfxWorld `frustumLights`, which the forward+ light binning rasterizes) stay as small as stock ones:
+  spots of 8 sides with cap rings of at most 30 degrees (26 vertices at most), omnis a sphere of 6 sides and 6 bands
+  (32 vertices, like stock). A spot's volume starts at the apex of the shader's cone, which lies the bulb radius
+  divided by the tangent of the outer angle behind the light. Volumes of up to 114 vertices left lit floors ending
+  on screen-tile steps that changed with the view.
+- The compressed mesh writer leaves out the triangles that its vertex grids collapse (a large mesh packs with a
+  coarser tolerance) and builds again without them: Replay's trees hold only primitives with an area. With more than
+  one section, keys keep 8 bits for the primitive and its triangle (Replay takes the section from above bit 8, as
+  every stock multi-section mesh does; narrower keys crashed the shape-tag lookup at 0x141E30200).
+- An IW7 effect material without its colour map (an image in a pak that is not in the zone folder) adds nothing.
 
 ## Build cache
 

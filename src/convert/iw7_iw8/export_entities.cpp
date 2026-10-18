@@ -393,7 +393,8 @@ namespace zonetool::convert::iw7_iw8
 			const auto name = model ? asset_name(iw7::get_asset_name(iw7::ASSET_TYPE_XMODEL, model)) : std::string_view{};
 			const auto finite = std::ranges::all_of(context.initialOrigin, [](const float v) { return std::isfinite(v); }) &&
 				std::ranges::all_of(context.initialAngles, [](const float v) { return std::isfinite(v); });
-			// The game modes' scriptables (Hardpoint's zone chevrons) show only while their mode runs them.
+			// The game modes' scriptables (Hardpoint's zone chevrons) show only while their mode runs them. The ops table's
+			// scriptable is its solar system (opsmap_solar_system_large), which shows without a script.
 			const std::string_view def_name = def && def->name ? asset_name(def->name) : std::string_view{};
 			if (name.empty() || !finite || def_name.find("hardpoint") != std::string_view::npos)
 			{
