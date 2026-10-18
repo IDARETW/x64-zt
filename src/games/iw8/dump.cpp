@@ -1,5 +1,6 @@
 #include <std_include.hpp>
 #include "iw8.hpp"
+#include "havok/tagfile.hpp"
 #include "zone/asset_files.hpp"
 #include "zone/loader.hpp"
 #include "zone/writer.hpp"
@@ -242,6 +243,179 @@ namespace zonetool::iw8
 				original.size(), offset, asset, bytes_at(written.data), bytes_at(original), blocks.empty() ? " equal" : blocks));
 		}
 
+		// The Replay global Havok type compendium: the code_post_gfx physics library physicsglobaltypecompendium.
+		const havok::type_table& replay_compendium(const std::filesystem::path& zone_folder)
+		{
+			static const auto compendium = [&zone_folder]
+			{
+				const auto zone = load_zone(zone_folder / "code_post_gfx.ff");
+				for (const auto& asset : zone->assets)
+				{
+					const auto& library = *static_cast<const PhysicsLibrary*>(asset.header);
+					if (asset.type == ASSET_TYPE_PHYSICSLIBRARY && !asset.referenced && library.isGlobalTypeCompendium)
+					{
+						return havok::type_table::read({reinterpret_cast<const std::uint8_t*>(library.havokData), library.havokDataSize});
+					}
+				}
+
+				throw std::runtime_error("code_post_gfx has no Havok type compendium");
+			}();
+
+			return compendium;
+		}
+
+		// The Havok tagfiles in the data records of an asset dump.
+		std::vector<std::string_view> tagfile_records(const std::string_view dump)
+		{
+			const auto read = [&dump](const std::size_t offset, auto& value)
+			{
+				if (offset + sizeof(value) > dump.size())
+				{
+					throw std::runtime_error("the asset dump is truncated");
+				}
+
+				std::memcpy(&value, dump.data() + offset, sizeof(value));
+			};
+
+			std::uint32_t count{};
+			read(12, count);
+			std::size_t offset = 16;
+			std::vector<std::string_view> tagfiles;
+			for (std::uint32_t i = 0; i < count; i++)
+			{
+				std::uint8_t kind{};
+				read(offset++, kind);
+				switch (static_cast<dump_record>(kind))
+				{
+				case dump_record::data:
+				case dump_record::string:
+				case dump_record::asset:
+				case dump_record::script_string:
+				{
+					std::uint64_t size{};
+					read(offset + 8, size);
+					const auto bytes = dump.substr(offset + 16, size);
+					if (static_cast<dump_record>(kind) == dump_record::data && bytes.size() > 8 && bytes.substr(4, 4) == "TAG0")
+					{
+						tagfiles.push_back(bytes);
+					}
+
+					offset += 16 + size;
+					break;
+				}
+				case dump_record::runtime:
+				case dump_record::temp:
+					offset += 8;
+					break;
+				case dump_record::offset:
+					offset += 16;
+					break;
+				default:
+					break;
+				}
+			}
+
+			return tagfiles;
+		}
+
+		// IW8_REWRITE=havok reads the Havok tagfiles of each asset and writes them again. Compact tagfiles must give the
+		// same bytes, and self-describing ones the same items when they are read again.
+		void verify_havok(const std::filesystem::path& zone_folder, const loaded_zone& zone)
+		{
+			const auto& compendium = replay_compendium(zone_folder);
+			std::set<asset_key> seen;
+			std::size_t compact{};
+			std::size_t self_describing{};
+			std::size_t other{};
+			for (const auto& asset : zone.assets)
+			{
+				const asset_key key{asset.type, asset_name(asset.type, asset.header)};
+				if (asset.referenced || !seen.emplace(key).second)
+				{
+					continue;
+				}
+
+				// The compendium holds types, not objects.
+				if (asset.type == ASSET_TYPE_PHYSICSLIBRARY && static_cast<const PhysicsLibrary*>(asset.header)->isGlobalTypeCompendium)
+				{
+					continue;
+				}
+
+				const auto dump = dump_asset_data(asset.type, asset.header);
+				for (const auto record : tagfile_records(dump))
+				{
+					const std::span bytes(reinterpret_cast<const std::uint8_t*>(record.data()), record.size());
+					const auto format = find_asset_format(asset.type);
+					const auto fail = [&](const std::string& what, const std::span<const std::uint8_t> written = {})
+					{
+						char debug[MAX_PATH]{};
+						if (GetEnvironmentVariableA("IW8_DUMP_DEBUG", debug, sizeof(debug)))
+						{
+							std::ofstream(std::filesystem::path(debug) / "havok_first.hkx", std::ios::binary).write(record.data(), static_cast<std::streamsize>(record.size()));
+							std::ofstream(std::filesystem::path(debug) / "havok_again.hkx", std::ios::binary).write(reinterpret_cast<const char*>(written.data()), static_cast<std::streamsize>(written.size()));
+						}
+
+						return std::runtime_error(std::format("{} \"{}\": {}", format ? format->name : "?", key.second, what));
+					};
+
+					// Tagfiles of other type compendiums (cloth) name types that this compendium does not have.
+					if (const auto reference = havok::compendium_reference(bytes); reference && *reference != havok::replay_compendium_signature)
+					{
+						other++;
+						continue;
+					}
+
+					havok::tagfile file;
+					try
+					{
+						file = havok::read_tagfile(bytes, &compendium);
+					}
+					catch (const havok::unknown_type&)
+					{
+						other++;
+						continue;
+					}
+					catch (const std::exception& e)
+					{
+						throw fail(e.what());
+					}
+
+					if (file.compendium)
+					{
+						const auto written = havok::write_compact_tagfile(file, compendium);
+						if (!std::ranges::equal(written, bytes))
+						{
+							throw fail("the compact tagfile is written differently", written);
+						}
+
+						compact++;
+						continue;
+					}
+
+					const auto written = havok::write_self_describing_tagfile(file, compendium);
+					const auto again = havok::read_tagfile(written, &compendium);
+					const auto same_items = std::ranges::equal(again.items, file.items, [](const havok::item& a, const havok::item& b)
+					{
+						return a.type == b.type && a.flags == b.flags && a.count == b.count && a.data == b.data &&
+							std::ranges::equal(a.pointers, b.pointers, [](const havok::pointer_field& x, const havok::pointer_field& y)
+							{
+								return x.offset == y.offset && x.pointer_type == y.pointer_type && x.target == y.target;
+							});
+					});
+
+					if (!same_items)
+					{
+						throw fail("the self-describing tagfile reads back with other items", written);
+					}
+
+					self_describing++;
+				}
+			}
+
+			ZONETOOL_INFO("%s: %zu compact and %zu self-describing Havok tagfiles write again (%zu with other types)", zone.name.data(),
+				compact, self_describing, other);
+		}
+
 		// The asset list of the zone: <pool>,<name> for an asset, <pool>,,<name> for a reference.
 		void write_asset_csv(const loaded_zone& zone)
 		{
@@ -300,7 +474,7 @@ namespace zonetool::iw8
 		ZONETOOL_INFO("Zone \"%s\" dumped to %s", zone->name.data(), filesystem::get_dump_path().data());
 	}
 
-	void verify_zone(const std::filesystem::path&, const std::filesystem::path& zone_path)
+	void verify_zone(const std::filesystem::path& zone_folder, const std::filesystem::path& zone_path)
 	{
 		const auto _ = gsl::finally(db_clear);
 
@@ -330,6 +504,10 @@ namespace zonetool::iw8
 			else if (std::string_view(rewrite) == "dump")
 			{
 				verify_dump_round_trip(*zone);
+			}
+			else if (std::string_view(rewrite) == "havok")
+			{
+				verify_havok(zone_folder, *zone);
 			}
 			else
 			{
