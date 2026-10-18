@@ -20,18 +20,25 @@ namespace zonetool::cli
 			XAssetList asset_list;
 		};
 
+		// IW8 asset lists have no globals pointer.
+		std::size_t asset_list_size(const game& game)
+		{
+			return game.format.container == xfile::container::iw8 ? offsetof(XAssetList, globals) : sizeof(XAssetList);
+		}
+
 		zone_summary summarize(const game& game, const std::filesystem::path& path)
 		{
 			zone_summary summary{};
 			summary.file = xfile::read(path, game.format);
 
 			const auto& payload = summary.file.payload;
-			if (payload.size() < sizeof(XAssetList))
+			const auto list_size = asset_list_size(game);
+			if (payload.size() < list_size)
 			{
 				throw std::runtime_error("zone is smaller than its asset list");
 			}
 
-			std::memcpy(&summary.asset_list, payload.data(), sizeof(XAssetList));
+			std::memcpy(&summary.asset_list, payload.data(), list_size);
 			return summary;
 		}
 
