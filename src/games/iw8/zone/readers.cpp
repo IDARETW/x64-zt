@@ -38,13 +38,16 @@ namespace zonetool::iw8
 		void read_physicsworldmeshdebugdata(zone_reader& reader, PhysicsWorldMeshDebugData& data);
 		void read_physicsdebugdata(zone_reader& reader, PhysicsDebugData& data);
 		void read_xanimnotifyinfo_array(zone_reader& reader, XAnimNotifyInfo* data, const std::size_t count);
-		void read_xanimparttransframes(zone_reader& reader, XAnimPartTransFrames& data);
-		void read_xanimparttrans(zone_reader& reader, XAnimPartTrans& data);
-		void read_xanimdeltapartquatdataframes2(zone_reader& reader, XAnimDeltaPartQuatDataFrames2& data);
-		void read_xanimdeltapartquat2(zone_reader& reader, XAnimDeltaPartQuat2& data);
-		void read_xanimdeltapartquatdataframes(zone_reader& reader, XAnimDeltaPartQuatDataFrames& data);
-		void read_xanimdeltapartquat(zone_reader& reader, XAnimDeltaPartQuat& data);
-		void read_xanimdeltapart(zone_reader& reader, XAnimDeltaPart& data);
+		void read_xanimdynamicindices(zone_reader& reader, XAnimDynamicIndices& data, [[maybe_unused]] const XAnimPartTrans& outer_xanimparttrans, [[maybe_unused]] const XAnimParts& outer_xanimparts);
+		void read_xanimparttransframes(zone_reader& reader, XAnimPartTransFrames& data, [[maybe_unused]] const XAnimPartTrans& outer_xanimparttrans, [[maybe_unused]] const XAnimParts& outer_xanimparts);
+		void read_xanimparttrans(zone_reader& reader, XAnimPartTrans& data, [[maybe_unused]] const XAnimParts& outer_xanimparts);
+		void read_xanimdynamicindices_2(zone_reader& reader, XAnimDynamicIndices& data, [[maybe_unused]] const XAnimDeltaPartQuat2& outer_xanimdeltapartquat2, [[maybe_unused]] const XAnimParts& outer_xanimparts);
+		void read_xanimdeltapartquatdataframes2(zone_reader& reader, XAnimDeltaPartQuatDataFrames2& data, [[maybe_unused]] const XAnimDeltaPartQuat2& outer_xanimdeltapartquat2, [[maybe_unused]] const XAnimParts& outer_xanimparts);
+		void read_xanimdeltapartquat2(zone_reader& reader, XAnimDeltaPartQuat2& data, [[maybe_unused]] const XAnimParts& outer_xanimparts);
+		void read_xanimdynamicindices_3(zone_reader& reader, XAnimDynamicIndices& data, [[maybe_unused]] const XAnimDeltaPartQuat& outer_xanimdeltapartquat, [[maybe_unused]] const XAnimParts& outer_xanimparts);
+		void read_xanimdeltapartquatdataframes(zone_reader& reader, XAnimDeltaPartQuatDataFrames& data, [[maybe_unused]] const XAnimDeltaPartQuat& outer_xanimdeltapartquat, [[maybe_unused]] const XAnimParts& outer_xanimparts);
+		void read_xanimdeltapartquat(zone_reader& reader, XAnimDeltaPartQuat& data, [[maybe_unused]] const XAnimParts& outer_xanimparts);
+		void read_xanimdeltapart(zone_reader& reader, XAnimDeltaPart& data, [[maybe_unused]] const XAnimParts& outer_xanimparts);
 		void read_xanimparts(zone_reader& reader, XAnimParts& data);
 		void read_streamer_handle_t(zone_reader& reader, streamer_handle_t& data);
 		void read_xsurfacesubdivlevel_array(zone_reader& reader, XSurfaceSubdivLevel* data, const std::size_t count, [[maybe_unused]] const XSurface& outer_xsurface);
@@ -1025,12 +1028,33 @@ namespace zonetool::iw8
 			}
 		}
 
-		void read_xanimparttransframes(zone_reader& reader, XAnimPartTransFrames& data)
+		void read_xanimdynamicindices(zone_reader& reader, XAnimDynamicIndices& data, [[maybe_unused]] const XAnimPartTrans& outer_xanimparttrans, [[maybe_unused]] const XAnimParts& outer_xanimparts)
 		{
-			reader.unsupported("Load_XAnimPartTransFrames: load of an untyped callee Load_XAnimDynamicIndicesTrans");
+			if (static_cast<std::uint16_t>(outer_xanimparts.numframes) >= static_cast<std::uint16_t>(256))
+			{
+				reader.align(1);
+				reader.read_bytes(((*reinterpret_cast<const std::uint16_t*>(&outer_xanimparttrans) + 1) + (*reinterpret_cast<const std::uint16_t*>(&outer_xanimparttrans) + 1)));
+			}
+			else
+			{
+				reader.read_bytes((*reinterpret_cast<const std::uint16_t*>(&outer_xanimparttrans) + 1));
+			}
 		}
 
-		void read_xanimparttrans(zone_reader& reader, XAnimPartTrans& data)
+		void read_xanimparttransframes(zone_reader& reader, XAnimPartTransFrames& data, [[maybe_unused]] const XAnimPartTrans& outer_xanimparttrans, [[maybe_unused]] const XAnimParts& outer_xanimparts)
+		{
+			read_xanimdynamicindices(reader, data.indices, outer_xanimparttrans, outer_xanimparts);
+			if (outer_xanimparttrans.smallTrans == 0)
+			{
+				reader.read_array(data.frames._2, 1, (*reinterpret_cast<const std::uint16_t*>(&outer_xanimparttrans) == 0 ? 0 : (3 + (*reinterpret_cast<const std::uint16_t*>(&outer_xanimparttrans) * 3))));
+			}
+			else
+			{
+				reader.read_array(data.frames._1, 0, (*reinterpret_cast<const std::uint16_t*>(&outer_xanimparttrans) == 0 ? 0 : (3 + (*reinterpret_cast<const std::uint16_t*>(&outer_xanimparttrans) * 3))));
+			}
+		}
+
+		void read_xanimparttrans(zone_reader& reader, XAnimPartTrans& data, [[maybe_unused]] const XAnimParts& outer_xanimparts)
 		{
 			if (*reinterpret_cast<const std::uint16_t*>(&data) == 0)
 			{
@@ -1039,16 +1063,30 @@ namespace zonetool::iw8
 			else
 			{
 				reader.read_bytes(32);
-				read_xanimparttransframes(reader, data.u.frames);
+				read_xanimparttransframes(reader, data.u.frames, data, outer_xanimparts);
 			}
 		}
 
-		void read_xanimdeltapartquatdataframes2(zone_reader& reader, XAnimDeltaPartQuatDataFrames2& data)
+		void read_xanimdynamicindices_2(zone_reader& reader, XAnimDynamicIndices& data, [[maybe_unused]] const XAnimDeltaPartQuat2& outer_xanimdeltapartquat2, [[maybe_unused]] const XAnimParts& outer_xanimparts)
 		{
-			reader.unsupported("Load_XAnimDeltaPartQuatDataFrames2: load of an untyped callee Load_XAnimDynamicIndicesDeltaQuat2");
+			if (static_cast<std::uint16_t>(outer_xanimparts.numframes) >= static_cast<std::uint16_t>(256))
+			{
+				reader.align(1);
+				reader.read_bytes(((*reinterpret_cast<const std::uint16_t*>(&outer_xanimdeltapartquat2) + 1) + (*reinterpret_cast<const std::uint16_t*>(&outer_xanimdeltapartquat2) + 1)));
+			}
+			else
+			{
+				reader.read_bytes((*reinterpret_cast<const std::uint16_t*>(&outer_xanimdeltapartquat2) + 1));
+			}
 		}
 
-		void read_xanimdeltapartquat2(zone_reader& reader, XAnimDeltaPartQuat2& data)
+		void read_xanimdeltapartquatdataframes2(zone_reader& reader, XAnimDeltaPartQuatDataFrames2& data, [[maybe_unused]] const XAnimDeltaPartQuat2& outer_xanimdeltapartquat2, [[maybe_unused]] const XAnimParts& outer_xanimparts)
+		{
+			read_xanimdynamicindices_2(reader, data.indices, outer_xanimdeltapartquat2, outer_xanimparts);
+			reinterpret_cast<std::int16_t*>(reader.read_stream(data.frames, 1, 4, (*reinterpret_cast<const std::uint16_t*>(&outer_xanimdeltapartquat2) == 0 ? 0 : (*reinterpret_cast<const std::uint16_t*>(&outer_xanimdeltapartquat2) + 1))));
+		}
+
+		void read_xanimdeltapartquat2(zone_reader& reader, XAnimDeltaPartQuat2& data, [[maybe_unused]] const XAnimParts& outer_xanimparts)
 		{
 			if (*reinterpret_cast<const std::uint16_t*>(&data) == 0)
 			{
@@ -1057,16 +1095,30 @@ namespace zonetool::iw8
 			else
 			{
 				reader.read_bytes(8);
-				read_xanimdeltapartquatdataframes2(reader, data.u.frames);
+				read_xanimdeltapartquatdataframes2(reader, data.u.frames, data, outer_xanimparts);
 			}
 		}
 
-		void read_xanimdeltapartquatdataframes(zone_reader& reader, XAnimDeltaPartQuatDataFrames& data)
+		void read_xanimdynamicindices_3(zone_reader& reader, XAnimDynamicIndices& data, [[maybe_unused]] const XAnimDeltaPartQuat& outer_xanimdeltapartquat, [[maybe_unused]] const XAnimParts& outer_xanimparts)
 		{
-			reader.unsupported("Load_XAnimDeltaPartQuatDataFrames: load of an untyped callee Load_XAnimDynamicIndicesDeltaQuat");
+			if (static_cast<std::uint16_t>(outer_xanimparts.numframes) >= static_cast<std::uint16_t>(256))
+			{
+				reader.align(1);
+				reader.read_bytes(((*reinterpret_cast<const std::uint16_t*>(&outer_xanimdeltapartquat) + 1) + (*reinterpret_cast<const std::uint16_t*>(&outer_xanimdeltapartquat) + 1)));
+			}
+			else
+			{
+				reader.read_bytes((*reinterpret_cast<const std::uint16_t*>(&outer_xanimdeltapartquat) + 1));
+			}
 		}
 
-		void read_xanimdeltapartquat(zone_reader& reader, XAnimDeltaPartQuat& data)
+		void read_xanimdeltapartquatdataframes(zone_reader& reader, XAnimDeltaPartQuatDataFrames& data, [[maybe_unused]] const XAnimDeltaPartQuat& outer_xanimdeltapartquat, [[maybe_unused]] const XAnimParts& outer_xanimparts)
+		{
+			read_xanimdynamicindices_3(reader, data.indices, outer_xanimdeltapartquat, outer_xanimparts);
+			reinterpret_cast<std::int16_t*>(reader.read_stream(data.frames, 1, 8, (*reinterpret_cast<const std::uint16_t*>(&outer_xanimdeltapartquat) == 0 ? 0 : (*reinterpret_cast<const std::uint16_t*>(&outer_xanimdeltapartquat) + 1))));
+		}
+
+		void read_xanimdeltapartquat(zone_reader& reader, XAnimDeltaPartQuat& data, [[maybe_unused]] const XAnimParts& outer_xanimparts)
 		{
 			if (*reinterpret_cast<const std::uint16_t*>(&data) == 0)
 			{
@@ -1075,23 +1127,23 @@ namespace zonetool::iw8
 			else
 			{
 				reader.read_bytes(8);
-				read_xanimdeltapartquatdataframes(reader, data.u.frames);
+				read_xanimdeltapartquatdataframes(reader, data.u.frames, data, outer_xanimparts);
 			}
 		}
 
-		void read_xanimdeltapart(zone_reader& reader, XAnimDeltaPart& data)
+		void read_xanimdeltapart(zone_reader& reader, XAnimDeltaPart& data, [[maybe_unused]] const XAnimParts& outer_xanimparts)
 		{
 			if (const auto items_0 = reinterpret_cast<XAnimPartTrans*>(reader.read_stream(data.trans, 7, 8, 1)))
 			{
-				read_xanimparttrans(reader, *items_0);
+				read_xanimparttrans(reader, *items_0, outer_xanimparts);
 			}
 			if (const auto items_4 = reinterpret_cast<XAnimDeltaPartQuat2*>(reader.read_stream(data.quat2, 7, 8, 1)))
 			{
-				read_xanimdeltapartquat2(reader, *items_4);
+				read_xanimdeltapartquat2(reader, *items_4, outer_xanimparts);
 			}
 			if (const auto items_8 = reinterpret_cast<XAnimDeltaPartQuat*>(reader.read_stream(data.quat, 7, 8, 1)))
 			{
-				read_xanimdeltapartquat(reader, *items_8);
+				read_xanimdeltapartquat(reader, *items_8, outer_xanimparts);
 			}
 		}
 
@@ -1110,7 +1162,7 @@ namespace zonetool::iw8
 			}
 			if (const auto items_11 = reader.read_array(data.deltaPart, 7, 1))
 			{
-				read_xanimdeltapart(reader, *items_11);
+				read_xanimdeltapart(reader, *items_11, data);
 			}
 			reader.read_array(data.dataByte, 0, data.dataByteCount);
 			reader.read_array(data.dataShort, 1, data.dataShortCount);
@@ -2340,7 +2392,15 @@ namespace zonetool::iw8
 
 		void read_sndbanktransient_ptr_array(zone_reader& reader, SndBankTransient** data, const std::size_t count)
 		{
-			reader.unsupported("q_Load_SndBankTransientPtrArray: reference root pointee");
+			if (!(count == 0))
+			{
+				for (std::size_t i1 = 0; i1 < count; i1++)
+				{
+					reader.push_stream(1);
+					reader.read_asset(ASSET_TYPE_SOUND_BANK_TRANSIENT, data[i1]);
+					reader.pop_stream();
+				}
+			}
 		}
 
 		void read_cliententitylinktodef_ptr(zone_reader& reader, ClientEntityLinkToDef*& data)
@@ -7284,7 +7344,17 @@ namespace zonetool::iw8
 
 		void read_alwaysloadedflags(zone_reader& reader, AlwaysloadedFlags& data)
 		{
-			reader.unsupported("Load_AlwaysloadedFlags: expression {'opaque': 'ret(14218496,1634,7)'}");
+			if (const auto items_0 = reader.read_array(data.images, 7, data.imageCount))
+			{
+				if (!(data.imageCount == 0))
+				{
+					for (std::size_t i1 = 0; i1 < data.imageCount; i1++)
+					{
+						reader.read_asset(ASSET_TYPE_IMAGE, items_0[i1]);
+					}
+				}
+			}
+			reader.read_array(data.imageFlags, 3, (((data.imageCount * 4) + 31) >> 5));
 		}
 
 		void read_xmodelsurfs_ptr_array(zone_reader& reader, XModelSurfs** data, const std::size_t count)
@@ -7337,7 +7407,17 @@ namespace zonetool::iw8
 
 		void read_streamingcontentset(zone_reader& reader, StreamingContentSet& data, [[maybe_unused]] const TransientCosts& outer_transientcosts)
 		{
-			reader.unsupported("q_Load_StreamingContentSet: expression {'opaque': 'ret(14219568,1646,12)'}");
+			reader.read_array(data.contentCounts, 1, outer_transientcosts.transientCostCount);
+			if (const auto items_1 = reader.read_array(data.contents, 7, outer_transientcosts.transientCostCount))
+			{
+				if (!(outer_transientcosts.transientCostCount == 0))
+				{
+					for (std::size_t i1 = 0; i1 < outer_transientcosts.transientCostCount; i1++)
+					{
+						reader.read_array(items_1[i1].contents, 1, data.contentCounts[i1]);
+					}
+				}
+			}
 		}
 
 		void read_transientcosts(zone_reader& reader, TransientCosts& data)
@@ -8435,7 +8515,13 @@ namespace zonetool::iw8
 
 		void read_scriptbundle(zone_reader& reader, ScriptBundle& data)
 		{
-			reader.unsupported("sub_140DFE170: no union arm of $EE658B4838C130B7503228AEB3560558 for None");
+			reader.begin_asset();
+			reader.push_stream(5);
+			reader.read_string(data.name);
+			reader.read_array(data.strPool, 0, data.strPoolSize);
+			reader.read_array(data.___u4.root, 3, data.rootSize);
+			reader.pop_stream();
+			reader.end_asset();
 		}
 
 		void read_xcamtargetmodel(zone_reader& reader, XCamTargetModel& data)
