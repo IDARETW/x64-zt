@@ -1247,6 +1247,11 @@ float4 main(Input input) : SV_TARGET0 {
     if (!sky && (flags & 1048576) != 0 && (flags & 512) == 0)
         light = input.materialParameters.w;
 #endif
+#ifdef MAP_MODEL_EMISSION
+    // The same gain for the model materials of this technique set (model vertices carry no bit 20).
+    if (unlit && !sky && (flags & 512) == 0)
+        light = MAP_MODEL_EMISSION;
+#endif
     // Build-time diagnostics keep depth coverage and native postprocessing.
 #if MAP_DEBUG_MODE == 1
     light = 1;

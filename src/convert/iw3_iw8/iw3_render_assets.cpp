@@ -2728,7 +2728,8 @@ Json BuildTechset(const std::string &map, const unsigned columns, const unsigned
                   const std::string &lightVolumeDefines = {},
                   const std::string &lightmapDefines = {}, const bool bakedSun = false,
                   const std::string &modelVertexDefines = {},
-                  const std::string &detailDefines = {})
+                  const std::string &detailDefines = {},
+                  const std::string &pixelDefines = {})
 {
     const bool staticModel = geometry == TechniqueGeometry::staticModel;
     const bool entity = geometry == TechniqueGeometry::entity;
@@ -2756,6 +2757,7 @@ Json BuildTechset(const std::string &map, const unsigned columns, const unsigned
     const bool detailTexture = model && !detailDefines.empty();
     const bool waterTexture = !model && detailDefines.find("#define MAP_WATER ") != std::string::npos;
     pixelSource += detailDefines;
+    pixelSource += pixelDefines;
     pixelSource += ResourceText(IDR_IW3_PIXEL_SHADER);
     ReplaceAtlasTokens(pixelSource, columns, atlasSize);
     // Model coverage passes bind no view mip bias; sample with the gradients alone.
@@ -5177,7 +5179,37 @@ RenderPlan PrepareRenderAssets(const std::filesystem::path &exportRoot, const Js
             }
             return flagTechsets[kind];
         };
-        std::map<std::tuple<unsigned, unsigned, int, bool>, std::pair<std::string, std::string>>
+        // Unlit model materials that emit above 1 (kEmissionFlag; model vertices carry no flag
+        // bit 20): one variant per gain and surface kind, whose pixel shader applies the gain.
+        std::map<std::pair<float, unsigned>, std::pair<unsigned, Json>> emissionTechsets;
+        const auto emissionVariant = [&](const SourceMaterial &source, const unsigned kind)
+            -> const std::pair<unsigned, Json> & {
+            const std::pair key{source.emission, kind};
+            auto found = emissionTechsets.find(key);
+            if (found == emissionTechsets.end())
+            {
+                char defines[96];
+                std::snprintf(defines, sizeof(defines), "#define MAP_MODEL_EMISSION %.9g\n",
+                              source.emission);
+                Json opaque = BuildTechset(
+                    map, columns, plan.atlasSize, geometry, plan.glassEnvironment,
+                    instanceLighting, volumeLighting ? entityLightVolume->defines : std::string{},
+                    {}, true, plan.modelFalloffDefines, {}, defines);
+                const unsigned index = static_cast<unsigned>(emissionTechsets.size());
+                Json techset =
+                    kind == static_cast<unsigned>(SurfaceKind::opaque)
+                        ? std::move(opaque)
+                        : std::move(CreateVariant(opaque, modelMaterialTemplate, stem, map,
+                                                  usage + "_emit" + std::to_string(index) +
+                                                      (kind == static_cast<unsigned>(SurfaceKind::cutout)
+                                                           ? "_foliage"
+                                                           : "_glass"))
+                                        .at("techset"));
+                found = emissionTechsets.emplace(key, std::pair{index, std::move(techset)}).first;
+            }
+            return found->second;
+        };
+        std::map<std::tuple<unsigned, unsigned, int, bool, int>, std::pair<std::string, std::string>>
             techsetFiles;
         for (const SourceMaterial &source : materials)
         {
@@ -5193,18 +5225,23 @@ RenderPlan PrepareRenderAssets(const std::filesystem::path &exportRoot, const Js
                               source.kind != SurfaceKind::glass;
             if (source.flagWave && !flag && geometry == TechniqueGeometry::staticModel)
                 zt::warn("iw3: flag material %s keeps a static surface", source.name.c_str());
+            const bool emissive = (source.flags & kEmissionFlag) != 0 && !detailed && !flag;
+            const int emissionIndex =
+                emissive ? static_cast<int>(emissionVariant(source, kind).first) : -1;
             auto [techsetEntry, inserted] = techsetFiles.try_emplace(
                 {kind, source.cullMode | (source.depthBias ? 4u : 0u) | (blend << 3), detailIndex,
-                 flag});
+                 flag, emissionIndex});
             if (inserted)
             {
-                Json variant = detailed ? detailVariant(source).second
-                               : flag   ? flagVariant(kind)
-                                        : modelTechsets[kind];
+                Json variant = detailed   ? detailVariant(source).second
+                               : flag     ? flagVariant(kind)
+                               : emissive ? emissionVariant(source, kind).second
+                                          : modelTechsets[kind];
                 const std::string suffix =
                     "_cull" + std::to_string(source.cullMode) + (source.depthBias ? "_bias" : "") +
                     (blend ? "_b" + std::to_string(blend) : "") +
-                    (detailed ? "_d" + std::to_string(detailIndex) : "") + (flag ? "_flag" : "");
+                    (detailed ? "_d" + std::to_string(detailIndex) : "") + (flag ? "_flag" : "") +
+                    (emissive ? "_e" + std::to_string(emissionIndex) : "");
                 variant["name"] = variant.at("name").get<std::string>() + suffix;
                 for (auto &technique : variant.at("techniques"))
                 {

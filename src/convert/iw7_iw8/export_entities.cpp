@@ -375,6 +375,48 @@ namespace zonetool::convert::iw7_iw8
 			entities += "}\n";
 		}
 
+		// IW7's scriptables (screens, displays, lamps and props with states): an IW3 script model of each instance's
+		// model at its initial placement (the first model of its definition when the instance names none). Their
+		// states, animations and events (effects, lights, sounds) do not convert.
+		const auto& scriptables = map_ents->scriptableMapEnts;
+		std::size_t placed{};
+		for (auto i = 0u; scriptables.instances && i < scriptables.totalInstanceCount; i++)
+		{
+			const auto& context = scriptables.instances[i].contextHeader.context;
+			const auto def = source.resolve(iw7::ASSET_TYPE_SCRIPTABLE, context.def);
+			auto model = source.resolve(iw7::ASSET_TYPE_XMODEL, context.modelData.model);
+			if (!model && def && def->numXModels && def->models)
+			{
+				model = source.resolve(iw7::ASSET_TYPE_XMODEL, def->models[0]);
+			}
+
+			const auto name = model ? asset_name(iw7::get_asset_name(iw7::ASSET_TYPE_XMODEL, model)) : std::string_view{};
+			const auto finite = std::ranges::all_of(context.initialOrigin, [](const float v) { return std::isfinite(v); }) &&
+				std::ranges::all_of(context.initialAngles, [](const float v) { return std::isfinite(v); });
+			// The game modes' scriptables (Hardpoint's zone chevrons) show only while their mode runs them.
+			const std::string_view def_name = def && def->name ? asset_name(def->name) : std::string_view{};
+			if (name.empty() || !finite || def_name.find("hardpoint") != std::string_view::npos)
+			{
+				continue;
+			}
+
+			entities += "{\n\"classname\" \"script_model\"\n";
+			entities += std::format("\"model\" \"{}\"\n", name);
+			entities += std::format("\"origin\" \"{}\"\n", vector_text(context.initialOrigin));
+			entities += std::format("\"angles\" \"{}\"\n", vector_text(context.initialAngles));
+			if (const auto targetname = script_string(scriptables.instances[i].targetname); !targetname.empty())
+			{
+				entities += std::format("\"targetname\" \"{}\"\n", targetname);
+			}
+
+			entities += "}\n";
+			output.models.try_emplace(file_name(name), model);
+			placed++;
+		}
+
+		ZONETOOL_INFO("iw7: placed %zu of %u scriptables (%u runtime, %u reserved) as script models", placed,
+			scriptables.totalInstanceCount, scriptables.runtimeInstanceCount, scriptables.reservedInstanceCount);
+
 		// IW7's breakable glass: an IW3 glass entity for each pane.
 		const auto panes = glass_panes(source);
 		for (auto i = 0u; i < panes.size(); i++)
