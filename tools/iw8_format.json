@@ -24308,183 +24308,189 @@
       -1,
       0
      ],
-     "body": []
-    },
-    {
-     "op": "loop",
-     "id": 1,
-     "count": {
-      "const": 4
-     },
-     "elements": [
-      {
-       "start": {
-        "root": "unknown",
-        "what": "0",
-        "path": []
-       },
-       "stride": 1,
-       "reg": "rax"
-      }
-     ],
-     "body": []
-    },
-    {
-     "op": "data",
-     "target": {
-      "root": "pointee",
-      "value": [
-       "cursor",
-       514,
-       4
-      ],
-      "path": []
-     },
-     "size": {
-      "op": "*",
-      "args": [
-       {
-        "reduce": 1,
-        "start": {
-         "const": 0
-        },
-        "step": {
-         "op": "popcnt",
-         "args": [
-          {
-           "field": {
-            "root": "unknown",
-            "what": "((g5d44028 + (elem((514, 1),('const', 0),1,rax) * 8)) + 0x18)",
-            "path": []
-           },
-           "width": 8,
-           "signed": false
-          }
-         ]
-        }
-       },
-       {
-        "const": 8
-       }
-      ]
-     },
-     "at_start": {
-      "const": 0
-     }
-    },
-    {
-     "op": "if",
-     "cond": {
-      "test": "e",
-      "args": [
-       {
-        "reduce": 1,
-        "start": {
-         "const": 0
-        },
-        "step": {
-         "op": "popcnt",
-         "args": [
-          {
-           "field": {
-            "root": "unknown",
-            "what": "((g5d44028 + (elem((514, 1),('const', 0),1,rax) * 8)) + 0x18)",
-            "path": []
-           },
-           "width": 8,
-           "signed": false
-          }
-         ]
-        }
-       },
-       {
-        "reduce": 1,
-        "start": {
-         "const": 0
-        },
-        "step": {
-         "op": "popcnt",
-         "args": [
-          {
-           "field": {
-            "root": "unknown",
-            "what": "((g5d44028 + (elem((514, 1),('const', 0),1,rax) * 8)) + 0x18)",
-            "path": []
-           },
-           "width": 8,
-           "signed": false
-          }
-         ]
-        }
-       }
-      ]
-     },
-     "then": [],
-     "else": [
+     "body": [
       {
        "op": "loop",
-       "id": 2,
+       "id": 1,
        "count": {
-        "reduce": 1,
-        "start": {
-         "const": 0
-        },
-        "step": {
-         "op": "popcnt",
-         "args": [
-          {
-           "field": {
-            "root": "unknown",
-            "what": "((g5d44028 + (elem((514, 1),('const', 0),1,rax) * 8)) + 0x18)",
-            "path": []
-           },
-           "width": 8,
-           "signed": false
-          }
-         ]
-        }
+        "const": 4
        },
        "elements": [
         {
          "start": {
-          "root": "pointee",
-          "value": [
-           "cursor",
-           514,
-           4
-          ],
+          "root": "unknown",
+          "what": "0",
           "path": []
          },
-         "stride": 8,
-         "reg": "rbx"
+         "stride": 1,
+         "reg": "rax"
         }
        ],
-       "body": [
+       "body": []
+      },
+      {
+       "op": "data",
+       "target": {
+        "root": "item",
+        "path": []
+       },
+       "size": {
+        "op": "*",
+        "args": [
+         {
+          "reduce": 1,
+          "start": {
+           "const": 0
+          },
+          "step": {
+           "op": "popcnt",
+           "args": [
+            {
+             "field": {
+              "root": "self",
+              "path": [
+               "techniqueMask",
+               {
+                "index": 1,
+                "stride": 8
+               }
+              ]
+             },
+             "width": 8,
+             "signed": false
+            }
+           ]
+          }
+         },
+         {
+          "const": 8
+         }
+        ]
+       },
+       "at_start": {
+        "const": 0
+       }
+      },
+      {
+       "op": "if",
+       "cond": {
+        "test": "e",
+        "args": [
+         {
+          "reduce": 1,
+          "start": {
+           "const": 0
+          },
+          "step": {
+           "op": "popcnt",
+           "args": [
+            {
+             "field": {
+              "root": "self",
+              "path": [
+               "techniqueMask",
+               {
+                "index": 1,
+                "stride": 8
+               }
+              ]
+             },
+             "width": 8,
+             "signed": false
+            }
+           ]
+          }
+         },
+         {
+          "reduce": 1,
+          "start": {
+           "const": 0
+          },
+          "step": {
+           "op": "popcnt",
+           "args": [
+            {
+             "field": {
+              "root": "self",
+              "path": [
+               "techniqueMask",
+               {
+                "index": 1,
+                "stride": 8
+               }
+              ]
+             },
+             "width": 8,
+             "signed": false
+            }
+           ]
+          }
+         }
+        ]
+       },
+       "then": [],
+       "else": [
         {
-         "op": "load",
-         "name": "Load_MaterialTechniquePtr",
-         "target": {
-          "root": "pointee",
-          "value": [
-           "cursor",
-           514,
-           4
-          ],
-          "path": [
-           {
-            "index": 2,
-            "stride": 8
-           }
-          ]
-         },
-         "at_start": {
-          "const": 1
-         },
+         "op": "loop",
+         "id": 2,
          "count": {
-          "opaque": "unknown(rdx)"
+          "reduce": 1,
+          "start": {
+           "const": 0
+          },
+          "step": {
+           "op": "popcnt",
+           "args": [
+            {
+             "field": {
+              "root": "self",
+              "path": [
+               "techniqueMask",
+               {
+                "index": 1,
+                "stride": 8
+               }
+              ]
+             },
+             "width": 8,
+             "signed": false
+            }
+           ]
+          }
          },
-         "type": "MaterialTechnique *",
-         "fn": "Load_MaterialTechniquePtr@MaterialTechnique *"
+         "elements": [
+          {
+           "start": {
+            "root": "item",
+            "path": []
+           },
+           "stride": 8,
+           "reg": "rbx"
+          }
+         ],
+         "body": [
+          {
+           "op": "load",
+           "name": "Load_MaterialTechniquePtr",
+           "target": {
+            "root": "item",
+            "path": [
+             {
+              "index": 2,
+              "stride": 8
+             }
+            ]
+           },
+           "at_start": {
+            "const": 1
+           },
+           "count": {
+            "opaque": "unknown(rdx)"
+           },
+           "type": "MaterialTechnique *",
+           "fn": "Load_MaterialTechniquePtr@MaterialTechnique *"
+          }
+         ]
         }
        ]
       }

@@ -494,7 +494,7 @@ namespace zonetool::iw8
 		{
 			if (const auto items_0 = reader.read_array(data.entries, 7, *reinterpret_cast<const std::int32_t*>(&data)))
 			{
-				if (!(*reinterpret_cast<const std::int32_t*>(&data) == 0))
+				if (*reinterpret_cast<const std::int32_t*>(&data) != 0)
 				{
 					for (std::size_t i1 = 0; i1 < *reinterpret_cast<const std::int32_t*>(&data); i1++)
 					{
@@ -508,7 +508,7 @@ namespace zonetool::iw8
 		{
 			if (const auto items_0 = reader.read_array(data.entries, 7, *reinterpret_cast<const std::int32_t*>(&data)))
 			{
-				if (!(*reinterpret_cast<const std::int32_t*>(&data) == 0))
+				if (*reinterpret_cast<const std::int32_t*>(&data) != 0)
 				{
 					for (std::size_t i1 = 0; i1 < *reinterpret_cast<const std::int32_t*>(&data); i1++)
 					{
@@ -522,7 +522,7 @@ namespace zonetool::iw8
 		{
 			if (const auto items_0 = reader.read_array(data.entries, 7, *reinterpret_cast<const std::int32_t*>(&data)))
 			{
-				if (!(*reinterpret_cast<const std::int32_t*>(&data) == 0))
+				if (*reinterpret_cast<const std::int32_t*>(&data) != 0)
 				{
 					for (std::size_t i1 = 0; i1 < *reinterpret_cast<const std::int32_t*>(&data); i1++)
 					{
@@ -536,7 +536,7 @@ namespace zonetool::iw8
 		{
 			if (const auto items_0 = reader.read_array(data.entries, 7, *reinterpret_cast<const std::int32_t*>(&data)))
 			{
-				if (!(*reinterpret_cast<const std::int32_t*>(&data) == 0))
+				if (*reinterpret_cast<const std::int32_t*>(&data) != 0)
 				{
 					for (std::size_t i1 = 0; i1 < *reinterpret_cast<const std::int32_t*>(&data); i1++)
 					{
@@ -550,7 +550,7 @@ namespace zonetool::iw8
 		{
 			if (const auto items_0 = reader.read_array(data.entries, 7, *reinterpret_cast<const std::int32_t*>(&data)))
 			{
-				if (!(*reinterpret_cast<const std::int32_t*>(&data) == 0))
+				if (*reinterpret_cast<const std::int32_t*>(&data) != 0)
 				{
 					for (std::size_t i1 = 0; i1 < *reinterpret_cast<const std::int32_t*>(&data); i1++)
 					{
@@ -564,7 +564,7 @@ namespace zonetool::iw8
 		{
 			if (const auto items_0 = reader.read_array(data.entries, 7, *reinterpret_cast<const std::int32_t*>(&data)))
 			{
-				if (!(*reinterpret_cast<const std::int32_t*>(&data) == 0))
+				if (*reinterpret_cast<const std::int32_t*>(&data) != 0)
 				{
 					for (std::size_t i1 = 0; i1 < *reinterpret_cast<const std::int32_t*>(&data); i1++)
 					{
@@ -578,7 +578,7 @@ namespace zonetool::iw8
 		{
 			if (const auto items_0 = reader.read_array(data.entries, 7, *reinterpret_cast<const std::int32_t*>(&data)))
 			{
-				if (!(*reinterpret_cast<const std::int32_t*>(&data) == 0))
+				if (*reinterpret_cast<const std::int32_t*>(&data) != 0)
 				{
 					for (std::size_t i1 = 0; i1 < *reinterpret_cast<const std::int32_t*>(&data); i1++)
 					{
@@ -592,7 +592,7 @@ namespace zonetool::iw8
 		{
 			if (const auto items_0 = reader.read_array(data.entries, 7, *reinterpret_cast<const std::int32_t*>(&data)))
 			{
-				if (!(*reinterpret_cast<const std::int32_t*>(&data) == 0))
+				if (*reinterpret_cast<const std::int32_t*>(&data) != 0)
 				{
 					for (std::size_t i1 = 0; i1 < *reinterpret_cast<const std::int32_t*>(&data); i1++)
 					{
@@ -612,7 +612,7 @@ namespace zonetool::iw8
 		{
 			if (const auto items_0 = reader.read_array(data.rules, 7, *reinterpret_cast<const std::int32_t*>(&data)))
 			{
-				if (!(*reinterpret_cast<const std::int32_t*>(&data) == 0))
+				if (*reinterpret_cast<const std::int32_t*>(&data) != 0)
 				{
 					for (std::size_t i1 = 0; i1 < *reinterpret_cast<const std::int32_t*>(&data); i1++)
 					{
@@ -632,7 +632,7 @@ namespace zonetool::iw8
 												{
 													if (*reinterpret_cast<const std::uint32_t*>(&items_0[i1]) != 8)
 													{
-														if (!(*reinterpret_cast<const std::uint32_t*>(&items_0[i1]) != 9))
+														if (*reinterpret_cast<const std::uint32_t*>(&items_0[i1]) == 9)
 														{
 															read_physicssfxeventassetfrequencyrule(reader, items_0[i1].u.frequencyRule);
 														}
@@ -695,7 +695,7 @@ namespace zonetool::iw8
 		{
 			if (const auto items_0 = reader.read_array(data.entries, 7, *reinterpret_cast<const std::int32_t*>(&data)))
 			{
-				if (!(*reinterpret_cast<const std::int32_t*>(&data) == 0))
+				if (*reinterpret_cast<const std::int32_t*>(&data) != 0)
 				{
 					for (std::size_t i1 = 0; i1 < *reinterpret_cast<const std::int32_t*>(&data); i1++)
 					{
@@ -709,7 +709,7 @@ namespace zonetool::iw8
 		{
 			if (const auto items_0 = reader.read_array(data.entries, 7, *reinterpret_cast<const std::int32_t*>(&data)))
 			{
-				if (!(*reinterpret_cast<const std::int32_t*>(&data) == 0))
+				if (*reinterpret_cast<const std::int32_t*>(&data) != 0)
 				{
 					for (std::size_t i1 = 0; i1 < *reinterpret_cast<const std::int32_t*>(&data); i1++)
 					{
@@ -723,7 +723,7 @@ namespace zonetool::iw8
 		{
 			if (const auto items_0 = reader.read_array(data.entries, 7, *reinterpret_cast<const std::int32_t*>(&data)))
 			{
-				if (!(*reinterpret_cast<const std::int32_t*>(&data) == 0))
+				if (*reinterpret_cast<const std::int32_t*>(&data) != 0)
 				{
 					for (std::size_t i1 = 0; i1 < *reinterpret_cast<const std::int32_t*>(&data); i1++)
 					{
@@ -737,7 +737,7 @@ namespace zonetool::iw8
 		{
 			if (const auto items_0 = reader.read_array(data.entries, 7, *reinterpret_cast<const std::int32_t*>(&data)))
 			{
-				if (!(*reinterpret_cast<const std::int32_t*>(&data) == 0))
+				if (*reinterpret_cast<const std::int32_t*>(&data) != 0)
 				{
 					for (std::size_t i1 = 0; i1 < *reinterpret_cast<const std::int32_t*>(&data); i1++)
 					{
@@ -751,7 +751,7 @@ namespace zonetool::iw8
 		{
 			if (const auto items_0 = reader.read_array(data.entries, 7, *reinterpret_cast<const std::int32_t*>(&data)))
 			{
-				if (!(*reinterpret_cast<const std::int32_t*>(&data) == 0))
+				if (*reinterpret_cast<const std::int32_t*>(&data) != 0)
 				{
 					for (std::size_t i1 = 0; i1 < *reinterpret_cast<const std::int32_t*>(&data); i1++)
 					{
@@ -765,7 +765,7 @@ namespace zonetool::iw8
 		{
 			if (const auto items_0 = reader.read_array(data.entries, 7, *reinterpret_cast<const std::int32_t*>(&data)))
 			{
-				if (!(*reinterpret_cast<const std::int32_t*>(&data) == 0))
+				if (*reinterpret_cast<const std::int32_t*>(&data) != 0)
 				{
 					for (std::size_t i1 = 0; i1 < *reinterpret_cast<const std::int32_t*>(&data); i1++)
 					{
@@ -779,7 +779,7 @@ namespace zonetool::iw8
 		{
 			if (const auto items_0 = reader.read_array(data.entries, 7, *reinterpret_cast<const std::int32_t*>(&data)))
 			{
-				if (!(*reinterpret_cast<const std::int32_t*>(&data) == 0))
+				if (*reinterpret_cast<const std::int32_t*>(&data) != 0)
 				{
 					for (std::size_t i1 = 0; i1 < *reinterpret_cast<const std::int32_t*>(&data); i1++)
 					{
@@ -793,7 +793,7 @@ namespace zonetool::iw8
 		{
 			if (const auto items_0 = reader.read_array(data.entries, 7, *reinterpret_cast<const std::int32_t*>(&data)))
 			{
-				if (!(*reinterpret_cast<const std::int32_t*>(&data) == 0))
+				if (*reinterpret_cast<const std::int32_t*>(&data) != 0)
 				{
 					for (std::size_t i1 = 0; i1 < *reinterpret_cast<const std::int32_t*>(&data); i1++)
 					{
@@ -813,7 +813,7 @@ namespace zonetool::iw8
 		{
 			if (const auto items_0 = reader.read_array(data.rules, 7, *reinterpret_cast<const std::int32_t*>(&data)))
 			{
-				if (!(*reinterpret_cast<const std::int32_t*>(&data) == 0))
+				if (*reinterpret_cast<const std::int32_t*>(&data) != 0)
 				{
 					for (std::size_t i1 = 0; i1 < *reinterpret_cast<const std::int32_t*>(&data); i1++)
 					{
@@ -833,7 +833,7 @@ namespace zonetool::iw8
 												{
 													if (*reinterpret_cast<const std::uint32_t*>(&items_0[i1]) != 8)
 													{
-														if (!(*reinterpret_cast<const std::uint32_t*>(&items_0[i1]) != 9))
+														if (*reinterpret_cast<const std::uint32_t*>(&items_0[i1]) == 9)
 														{
 															read_physicsvfxeventassetfrequencyrule(reader, items_0[i1].u.frequencyRule);
 														}
@@ -894,7 +894,7 @@ namespace zonetool::iw8
 
 		void read_physicssfxeventasset_ptr_array(zone_reader& reader, PhysicsSFXEventAsset** data, const std::size_t count)
 		{
-			if (!(count == 0))
+			if (count != 0)
 			{
 				for (std::size_t i1 = 0; i1 < count; i1++)
 				{
@@ -910,7 +910,7 @@ namespace zonetool::iw8
 
 		void read_physicsvfxeventasset_ptr_array(zone_reader& reader, PhysicsVFXEventAsset** data, const std::size_t count)
 		{
-			if (!(count == 0))
+			if (count != 0)
 			{
 				for (std::size_t i1 = 0; i1 < count; i1++)
 				{
@@ -966,7 +966,7 @@ namespace zonetool::iw8
 
 		void read_physicsworldmeshdebugdrawbuffer_array(zone_reader& reader, PhysicsWorldMeshDebugDrawBuffer* data, const std::size_t count)
 		{
-			if (!(count == 0))
+			if (count != 0)
 			{
 				for (std::size_t i1 = 0; i1 < count; i1++)
 				{
@@ -1019,7 +1019,7 @@ namespace zonetool::iw8
 
 		void read_xanimnotifyinfo_array(zone_reader& reader, XAnimNotifyInfo* data, const std::size_t count)
 		{
-			if (!(count == 0))
+			if (count != 0)
 			{
 				for (std::size_t i1 = 0; i1 < count; i1++)
 				{
@@ -1193,7 +1193,7 @@ namespace zonetool::iw8
 
 		void read_xsurfacesubdivlevel_array(zone_reader& reader, XSurfaceSubdivLevel* data, const std::size_t count, [[maybe_unused]] const XSurface& outer_xsurface)
 		{
-			if (!(count == 0))
+			if (count != 0)
 			{
 				for (std::size_t i1 = 0; i1 < count; i1++)
 				{
@@ -1268,7 +1268,7 @@ namespace zonetool::iw8
 			reader.read_string(data.name);
 			if (const auto items_3 = reader.read_array(data.surfs, 15, data.numsurfs))
 			{
-				if (!(data.numsurfs == 0))
+				if (data.numsurfs != 0)
 				{
 					for (std::size_t i1 = 0; i1 < data.numsurfs; i1++)
 					{
@@ -1314,7 +1314,7 @@ namespace zonetool::iw8
 			reader.read_asset(ASSET_TYPE_TECHNIQUE_SET, data.techniqueSet);
 			if (const auto items_5 = reader.read_array(data.textureTable, 7, data.textureCount))
 			{
-				if (!(data.textureCount == 0))
+				if (data.textureCount != 0)
 				{
 					for (std::size_t i1 = 0; i1 < data.textureCount; i1++)
 					{
@@ -1327,7 +1327,7 @@ namespace zonetool::iw8
 			reader.read_array(data.constantBufferIndex, 0, 195);
 			if (const auto items_18 = reader.read_array(data.constantBufferTable, 15, data.constantBufferCount))
 			{
-				if (!(data.constantBufferCount == 0))
+				if (data.constantBufferCount != 0)
 				{
 					for (std::size_t i2 = 0; i2 < data.constantBufferCount; i2++)
 					{
@@ -1348,7 +1348,7 @@ namespace zonetool::iw8
 
 		void read_material_ptr_array(zone_reader& reader, Material** data, const std::size_t count)
 		{
-			if (!(count == 0))
+			if (count != 0)
 			{
 				for (std::size_t i1 = 0; i1 < count; i1++)
 				{
@@ -1374,7 +1374,7 @@ namespace zonetool::iw8
 		{
 			if (const auto items_0 = reader.read_array(data.boneMappings, 7, data.boneMappingCount))
 			{
-				if (!(data.boneMappingCount == 0))
+				if (data.boneMappingCount != 0)
 				{
 					for (std::size_t i1 = 0; i1 < data.boneMappingCount; i1++)
 					{
@@ -1392,7 +1392,7 @@ namespace zonetool::iw8
 			reader.read_array(data.havokData, 15, data.havokDataSize);
 			if (const auto items_4 = reader.read_array(data.boneMappingSets, 7, data.boneMappingSetCount))
 			{
-				if (!(data.boneMappingSetCount == 0))
+				if (data.boneMappingSetCount != 0)
 				{
 					for (std::size_t i1 = 0; i1 < data.boneMappingSetCount; i1++)
 					{
@@ -1403,7 +1403,7 @@ namespace zonetool::iw8
 			reader.read_string(data.animationStateName);
 			if (const auto items_15 = reader.read_array(data.simulationLods, 7, data.simulationLodCount))
 			{
-				if (!(data.simulationLodCount == 0))
+				if (data.simulationLodCount != 0)
 				{
 					for (std::size_t i2 = 0; i2 < data.simulationLodCount; i2++)
 					{
@@ -1413,7 +1413,7 @@ namespace zonetool::iw8
 			}
 			if (const auto items_25 = reader.read_array(data.sounds, 7, data.soundCount))
 			{
-				if (!(data.soundCount == 0))
+				if (data.soundCount != 0)
 				{
 					for (std::size_t i3 = 0; i3 < data.soundCount; i3++)
 					{
@@ -1427,7 +1427,7 @@ namespace zonetool::iw8
 
 		void read_clothasset_ptr_array(zone_reader& reader, ClothAsset** data, const std::size_t count)
 		{
-			if (!(count == 0))
+			if (count != 0)
 			{
 				for (std::size_t i1 = 0; i1 < count; i1++)
 				{
@@ -1454,7 +1454,7 @@ namespace zonetool::iw8
 		{
 			if (const auto items_0 = reader.read_array(data.decalVolumes, 7, data.numDecalVolumes))
 			{
-				if (!(data.numDecalVolumes == 0))
+				if (data.numDecalVolumes != 0)
 				{
 					for (std::size_t i1 = 0; i1 < data.numDecalVolumes; i1++)
 					{
@@ -1514,7 +1514,7 @@ namespace zonetool::iw8
 			}
 			if (const auto items_45 = reader.read_array(data.mdaoVolumes, 7, data.mdaoVolumeCount))
 			{
-				if (!(data.mdaoVolumeCount == 0))
+				if (data.mdaoVolumeCount != 0)
 				{
 					for (std::size_t i2 = 0; i2 < data.mdaoVolumeCount; i2++)
 					{
@@ -1562,7 +1562,7 @@ namespace zonetool::iw8
 
 		void read_mayhemanim_array(zone_reader& reader, MayhemAnim* data, const std::size_t count)
 		{
-			if (!(count == 0))
+			if (count != 0)
 			{
 				for (std::size_t i1 = 0; i1 < count; i1++)
 				{
@@ -1611,7 +1611,7 @@ namespace zonetool::iw8
 			reader.read_asset(ASSET_TYPE_XMODEL, data.postModel);
 			if (const auto items_5 = reader.read_array(data.models, 7, data.numModels))
 			{
-				if (!(data.numModels == 0))
+				if (data.numModels != 0)
 				{
 					for (std::size_t i1 = 0; i1 < data.numModels; i1++)
 					{
@@ -1647,9 +1647,7 @@ namespace zonetool::iw8
 		void read_materialtechnique(zone_reader& reader, MaterialTechnique& data)
 		{
 			reader.read_string(data.name);
-			if (const auto items_1 = reader.read_array(data.pipelineStates, 7, (data.pipelineStateCount * data.pipelineStateInputLayoutCount)))
-			{
-			}
+			reader.read_array(data.pipelineStates, 7, (data.pipelineStateCount * data.pipelineStateInputLayoutCount));
 			reader.read_array(data.rootParameterMap, 0, 16);
 			reader.read_asset(ASSET_TYPE_VERTEXSHADER, data.vertexShader);
 			reader.read_asset(ASSET_TYPE_HULLSHADER, data.hullShader);
@@ -1669,7 +1667,26 @@ namespace zonetool::iw8
 
 		void read_materialtechniqueset(zone_reader& reader, MaterialTechniqueSet& data)
 		{
-			reader.unsupported("Load_MaterialTechniqueSet: reference root unknown");
+			reader.begin_asset();
+			reader.push_stream(5);
+			reader.read_string(data.name);
+			std::size_t sum_1 = 0;
+			for (std::size_t i1 = 0; i1 < 4; i1++)
+			{
+				sum_1 += std::popcount(static_cast<std::uint64_t>(data.techniqueMask.mask[i1]));
+			}
+			if (const auto items_3 = reader.read_array(data.maskedTechniques, 7, sum_1))
+			{
+				if (sum_1 != 0)
+				{
+					for (std::size_t i2 = 0; i2 < sum_1; i2++)
+					{
+						read_materialtechnique_ptr(reader, items_3[i2]);
+					}
+				}
+			}
+			reader.pop_stream();
+			reader.end_asset();
 		}
 
 		void read_unsigned_int8_ptr(zone_reader& reader, std::uint8_t*& data, [[maybe_unused]] const GfxImage& outer_gfximage)
@@ -1720,7 +1737,7 @@ namespace zonetool::iw8
 			reader.read_array(data.entchannelInfo, 3, data.entchannelCount);
 			if (const auto items_5 = reader.read_array(data.contexts, 7, data.contextCount))
 			{
-				if (!(data.contextCount == 0))
+				if (data.contextCount != 0)
 				{
 					for (std::size_t i1 = 0; i1 < data.contextCount; i1++)
 					{
@@ -1730,7 +1747,7 @@ namespace zonetool::iw8
 			}
 			if (const auto items_15 = reader.read_array(data.contextValues, 7, data.contextValueCount))
 			{
-				if (!(data.contextValueCount == 0))
+				if (data.contextValueCount != 0)
 				{
 					for (std::size_t i2 = 0; i2 < data.contextValueCount; i2++)
 					{
@@ -1755,14 +1772,14 @@ namespace zonetool::iw8
 
 		void read_sndaliaslist_array(zone_reader& reader, SndAliasList* data, const std::size_t count)
 		{
-			if (!(count == 0))
+			if (count != 0)
 			{
 				for (std::size_t i1 = 0; i1 < count; i1++)
 				{
 					reader.read_string(data[i1].aliasName);
 					if (const auto items_3 = reader.read_array(data[i1].head, 7, data[i1].count))
 					{
-						if (!(data[i1].count == 0))
+						if (data[i1].count != 0)
 						{
 							for (std::size_t i2 = 0; i2 < data[i1].count; i2++)
 							{
@@ -1776,7 +1793,7 @@ namespace zonetool::iw8
 
 		void read_adsrzoneentry_array(zone_reader& reader, AdsrZoneEntry* data, const std::size_t count)
 		{
-			if (!(count == 0))
+			if (count != 0)
 			{
 				for (std::size_t i1 = 0; i1 < count; i1++)
 				{
@@ -1807,7 +1824,7 @@ namespace zonetool::iw8
 		{
 			if (const auto items_0 = reader.read_array(data.adsrSettings, 7, data.adsrCount))
 			{
-				if (!(data.adsrCount == 0))
+				if (data.adsrCount != 0)
 				{
 					for (std::size_t i1 = 0; i1 < data.adsrCount; i1++)
 					{
@@ -1817,7 +1834,7 @@ namespace zonetool::iw8
 			}
 			if (const auto items_10 = reader.read_array(data.ambientDefs, 7, data.ambientDefCount))
 			{
-				if (!(data.ambientDefCount == 0))
+				if (data.ambientDefCount != 0)
 				{
 					for (std::size_t i2 = 0; i2 < data.ambientDefCount; i2++)
 					{
@@ -1828,7 +1845,7 @@ namespace zonetool::iw8
 			reader.read_array(data.ambientEvents, 3, data.ambientEventCount);
 			if (const auto items_21 = reader.read_array(data.ambientElements, 7, data.ambientElementsCount))
 			{
-				if (!(data.ambientElementsCount == 0))
+				if (data.ambientElementsCount != 0)
 				{
 					for (std::size_t i3 = 0; i3 < data.ambientElementsCount; i3++)
 					{
@@ -1851,7 +1868,7 @@ namespace zonetool::iw8
 			reader.read_array(data.timeScaleSettings, 3, data.timeScaleSettingCount);
 			if (const auto items_44 = reader.read_array(data.zones, 7, data.zoneCount))
 			{
-				if (!(data.zoneCount == 0))
+				if (data.zoneCount != 0)
 				{
 					for (std::size_t i4 = 0; i4 < data.zoneCount; i4++)
 					{
@@ -1862,7 +1879,7 @@ namespace zonetool::iw8
 			reader.read_array(data.fullOcclusionDefs, 3, data.fullOcclusionDefCount);
 			if (const auto items_55 = reader.read_array(data.plrBreathStateDefs, 7, data.plrBreathStateDefCount))
 			{
-				if (!(data.plrBreathStateDefCount == 0))
+				if (data.plrBreathStateDefCount != 0)
 				{
 					for (std::size_t i5 = 0; i5 < data.plrBreathStateDefCount; i5++)
 					{
@@ -1875,7 +1892,7 @@ namespace zonetool::iw8
 
 		void read_sndduck_array(zone_reader& reader, SndDuck* data, const std::size_t count)
 		{
-			if (!(count == 0))
+			if (count != 0)
 			{
 				for (std::size_t i1 = 0; i1 < count; i1++)
 				{
@@ -1890,13 +1907,13 @@ namespace zonetool::iw8
 
 		void read_sndmusicset_array(zone_reader& reader, SndMusicSet* data, const std::size_t count)
 		{
-			if (!(count == 0))
+			if (count != 0)
 			{
 				for (std::size_t i1 = 0; i1 < count; i1++)
 				{
 					if (const auto items_2 = reader.read_array(data[i1].states, 7, data[i1].stateCount))
 					{
-						if (!(data[i1].stateCount == 0))
+						if (data[i1].stateCount != 0)
 						{
 							for (std::size_t i2 = 0; i2 < data[i1].stateCount; i2++)
 							{
@@ -1910,7 +1927,7 @@ namespace zonetool::iw8
 
 		void read_weaponreflectiondef_array(zone_reader& reader, WeaponReflectionDef* data, const std::size_t count)
 		{
-			if (!(count == 0))
+			if (count != 0)
 			{
 				for (std::size_t i1 = 0; i1 < count; i1++)
 				{
@@ -1988,7 +2005,7 @@ namespace zonetool::iw8
 		{
 			if (const auto items_0 = reader.read_array(data.models, 7, *reinterpret_cast<const std::uint32_t*>(&data)))
 			{
-				if (!(*reinterpret_cast<const std::uint32_t*>(&data) == 0))
+				if (*reinterpret_cast<const std::uint32_t*>(&data) != 0)
 				{
 					for (std::size_t i1 = 0; i1 < *reinterpret_cast<const std::uint32_t*>(&data); i1++)
 					{
@@ -2000,7 +2017,7 @@ namespace zonetool::iw8
 
 		void read_stage_array(zone_reader& reader, Stage* data, const std::size_t count)
 		{
-			if (!(count == 0))
+			if (count != 0)
 			{
 				for (std::size_t i1 = 0; i1 < count; i1++)
 				{
@@ -2013,7 +2030,7 @@ namespace zonetool::iw8
 		{
 			if (const auto items_0 = reader.read_array(data.models, 7, *reinterpret_cast<const std::uint32_t*>(&data)))
 			{
-				if (!(*reinterpret_cast<const std::uint32_t*>(&data) == 0))
+				if (*reinterpret_cast<const std::uint32_t*>(&data) != 0)
 				{
 					for (std::size_t i1 = 0; i1 < *reinterpret_cast<const std::uint32_t*>(&data); i1++)
 					{
@@ -2034,7 +2051,7 @@ namespace zonetool::iw8
 			reader.read_string(data.name);
 			if (const auto items_3 = reader.read_array(data.staticModelCollisionModelLists, 7, data.numStaticModelCollisionModelLists))
 			{
-				if (!(data.numStaticModelCollisionModelLists == 0))
+				if (data.numStaticModelCollisionModelLists != 0)
 				{
 					for (std::size_t i1 = 0; i1 < data.numStaticModelCollisionModelLists; i1++)
 					{
@@ -2063,7 +2080,7 @@ namespace zonetool::iw8
 			reader.read_string(data.name);
 			if (const auto items_3 = reader.read_array(data.primaryLights, 7, data.primaryLightCount))
 			{
-				if (!(data.primaryLightCount == 0))
+				if (data.primaryLightCount != 0)
 				{
 					for (std::size_t i1 = 0; i1 < data.primaryLightCount; i1++)
 					{
@@ -2102,7 +2119,7 @@ namespace zonetool::iw8
 			reader.read_array(data.glassPieces, 3, data.pieceCount);
 			if (const auto items_1 = reader.read_array(data.glassNames, 7, data.glassNameCount))
 			{
-				if (!(data.glassNameCount == 0))
+				if (data.glassNameCount != 0)
 				{
 					for (std::size_t i1 = 0; i1 < data.glassNameCount; i1++)
 					{
@@ -2166,7 +2183,7 @@ namespace zonetool::iw8
 
 		void read_pathnode_tree_t_array(zone_reader& reader, pathnode_tree_t* data, const std::size_t count)
 		{
-			if (!(count == 0))
+			if (count != 0)
 			{
 				for (std::size_t i1 = 0; i1 < count; i1++)
 				{
@@ -2192,7 +2209,7 @@ namespace zonetool::iw8
 			reader.read_string(data.name);
 			if (const auto items_3 = reader.read_array(data.nodes, 7, data.nodeCount))
 			{
-				if (!(data.nodeCount == 0))
+				if (data.nodeCount != 0)
 				{
 					for (std::size_t i1 = 0; i1 < data.nodeCount; i1++)
 					{
@@ -2207,7 +2224,7 @@ namespace zonetool::iw8
 			}
 			if (const auto items_18 = reader.read_array(data.dynamicNodeGroups, 7, data.dynamicNodeGroupCount))
 			{
-				if (!(data.dynamicNodeGroupCount == 0))
+				if (data.dynamicNodeGroupCount != 0)
 				{
 					for (std::size_t i2 = 0; i2 < data.dynamicNodeGroupCount; i2++)
 					{
@@ -2237,7 +2254,7 @@ namespace zonetool::iw8
 		{
 			if (const auto items_0 = reader.read_array(data.m_Hulls, 7, data.m_NumHulls))
 			{
-				if (!(data.m_NumHulls == 0))
+				if (data.m_NumHulls != 0)
 				{
 					for (std::size_t i1 = 0; i1 < data.m_NumHulls; i1++)
 					{
@@ -2263,7 +2280,7 @@ namespace zonetool::iw8
 			reader.read_string(data.name);
 			if (const auto items_3 = reader.read_array(data.navResources, 7, data.numNavResources))
 			{
-				if (!(data.numNavResources == 0))
+				if (data.numNavResources != 0)
 				{
 					for (std::size_t i1 = 0; i1 < data.numNavResources; i1++)
 					{
@@ -2273,7 +2290,7 @@ namespace zonetool::iw8
 			}
 			if (const auto items_13 = reader.read_array(data.obstacleBounds, 7, data.numObstacleBounds))
 			{
-				if (!(data.numObstacleBounds == 0))
+				if (data.numObstacleBounds != 0)
 				{
 					for (std::size_t i2 = 0; i2 < data.numObstacleBounds; i2++)
 					{
@@ -2283,7 +2300,7 @@ namespace zonetool::iw8
 			}
 			if (const auto items_23 = reader.read_array(data.glassBounds, 7, data.numGlassBounds))
 			{
-				if (!(data.numGlassBounds == 0))
+				if (data.numGlassBounds != 0)
 				{
 					for (std::size_t i3 = 0; i3 < data.numGlassBounds; i3++)
 					{
@@ -2293,7 +2310,7 @@ namespace zonetool::iw8
 			}
 			if (const auto items_33 = reader.read_array(data.modifiers, 7, data.numModifiers))
 			{
-				if (!(data.numModifiers == 0))
+				if (data.numModifiers != 0)
 				{
 					for (std::size_t i4 = 0; i4 < data.numModifiers; i4++)
 					{
@@ -2303,7 +2320,7 @@ namespace zonetool::iw8
 			}
 			if (const auto items_43 = reader.read_array(data.linkCreationData, 3, data.numLinkCreationData))
 			{
-				if (!(data.numLinkCreationData == 0))
+				if (data.numLinkCreationData != 0)
 				{
 					for (std::size_t i5 = 0; i5 < data.numLinkCreationData; i5++)
 					{
@@ -2317,7 +2334,7 @@ namespace zonetool::iw8
 			reader.read_array(data.rawVolumes, 3, data.numRawVolumes);
 			if (const auto items_57 = reader.read_array(data.rawCustomVolumes, 7, data.numRawCustomVolumes))
 			{
-				if (!(data.numRawCustomVolumes == 0))
+				if (data.numRawCustomVolumes != 0)
 				{
 					for (std::size_t i6 = 0; i6 < data.numRawCustomVolumes; i6++)
 					{
@@ -2353,7 +2370,7 @@ namespace zonetool::iw8
 			reader.read_array(data.m_Points, 3, data.m_NumPoints);
 			if (const auto items_1 = reader.read_array(data.m_VisGraph, 7, ((-1) + data.m_NumPoints)))
 			{
-				if (!((data.m_NumPoints + (-1)) == 0))
+				if ((data.m_NumPoints + (-1)) != 0)
 				{
 					for (std::size_t i1 = 0; i1 < (data.m_NumPoints + (-1)); i1++)
 					{
@@ -2371,7 +2388,7 @@ namespace zonetool::iw8
 			reader.read_string(data.m_Name);
 			if (const auto items_3 = reader.read_array(data.m_TacGraphs, 7, data.m_NumTacGraphs))
 			{
-				if (!(data.m_NumTacGraphs == 0))
+				if (data.m_NumTacGraphs != 0)
 				{
 					for (std::size_t i1 = 0; i1 < data.m_NumTacGraphs; i1++)
 					{
@@ -2392,7 +2409,7 @@ namespace zonetool::iw8
 
 		void read_sndbanktransient_ptr_array(zone_reader& reader, SndBankTransient** data, const std::size_t count)
 		{
-			if (!(count == 0))
+			if (count != 0)
 			{
 				for (std::size_t i1 = 0; i1 < count; i1++)
 				{
@@ -2429,7 +2446,7 @@ namespace zonetool::iw8
 			reader.read_array(data.parent, 1, *reinterpret_cast<const std::uint32_t*>(&data));
 			if (const auto items_17 = reader.read_array(data.linkTo, 7, *reinterpret_cast<const std::uint32_t*>(&data)))
 			{
-				if (!(*reinterpret_cast<const std::uint32_t*>(&data) == 0))
+				if (*reinterpret_cast<const std::uint32_t*>(&data) != 0)
 				{
 					for (std::size_t i1 = 0; i1 < *reinterpret_cast<const std::uint32_t*>(&data); i1++)
 					{
@@ -2452,7 +2469,7 @@ namespace zonetool::iw8
 		{
 			if (const auto items_0 = reader.read_array(data.spawns, 3, *reinterpret_cast<const std::uint16_t*>(&data)))
 			{
-				if (!(*reinterpret_cast<const std::uint16_t*>(&data) == 0))
+				if (*reinterpret_cast<const std::uint16_t*>(&data) != 0)
 				{
 					for (std::size_t i1 = 0; i1 < *reinterpret_cast<const std::uint16_t*>(&data); i1++)
 					{
@@ -2476,7 +2493,7 @@ namespace zonetool::iw8
 		{
 			if (const auto items_0 = reader.read_array(data.splinePoints, 3, *reinterpret_cast<const std::uint16_t*>(&data)))
 			{
-				if (!(*reinterpret_cast<const std::uint16_t*>(&data) == 0))
+				if (*reinterpret_cast<const std::uint16_t*>(&data) != 0)
 				{
 					for (std::size_t i1 = 0; i1 < *reinterpret_cast<const std::uint16_t*>(&data); i1++)
 					{
@@ -2490,7 +2507,7 @@ namespace zonetool::iw8
 		{
 			if (const auto items_0 = reader.read_array(data.splines, 7, *reinterpret_cast<const std::uint16_t*>(&data)))
 			{
-				if (!(*reinterpret_cast<const std::uint16_t*>(&data) == 0))
+				if (*reinterpret_cast<const std::uint16_t*>(&data) != 0)
 				{
 					for (std::size_t i1 = 0; i1 < *reinterpret_cast<const std::uint16_t*>(&data); i1++)
 					{
@@ -2502,7 +2519,7 @@ namespace zonetool::iw8
 
 		void read_cmodel_t_array(zone_reader& reader, cmodel_t* data, const std::size_t count)
 		{
-			if (!(count == 0))
+			if (count != 0)
 			{
 				for (std::size_t i1 = 0; i1 < count; i1++)
 				{
@@ -2513,7 +2530,7 @@ namespace zonetool::iw8
 
 		void read_cm_clientmodel_array(zone_reader& reader, CM_ClientModel* data, const std::size_t count)
 		{
-			if (!(count == 0))
+			if (count != 0)
 			{
 				for (std::size_t i1 = 0; i1 < count; i1++)
 				{
@@ -2542,7 +2559,7 @@ namespace zonetool::iw8
 
 		void read_spatialpartition_population_ptr_array(zone_reader& reader, SpatialPartition_Population** data, const std::size_t count)
 		{
-			if (!(count == 0))
+			if (count != 0)
 			{
 				for (std::size_t i1 = 0; i1 < count; i1++)
 				{
@@ -2556,7 +2573,7 @@ namespace zonetool::iw8
 
 		void read_bitarray_dynamic_array(zone_reader& reader, bitarray_dynamic* data, const std::size_t count)
 		{
-			if (!(count == 0))
+			if (count != 0)
 			{
 				for (std::size_t i1 = 0; i1 < count; i1++)
 				{
@@ -2575,7 +2592,7 @@ namespace zonetool::iw8
 
 		void read_spatialpartition_population_transientmap_ptr_array(zone_reader& reader, SpatialPartition_Population_TransientMap** data, const std::size_t count)
 		{
-			if (!(count == 0))
+			if (count != 0)
 			{
 				for (std::size_t i1 = 0; i1 < count; i1++)
 				{
@@ -2607,7 +2624,7 @@ namespace zonetool::iw8
 		{
 			if (const auto items_0 = reader.read_array(data.mapInstances, 7, data.mapInstanceCount))
 			{
-				if (!(data.mapInstanceCount == 0))
+				if (data.mapInstanceCount != 0)
 				{
 					for (std::size_t i1 = 0; i1 < data.mapInstanceCount; i1++)
 					{
@@ -2635,7 +2652,7 @@ namespace zonetool::iw8
 			reader.read_array(data.points, 3, *reinterpret_cast<const std::uint16_t*>(&data));
 			if (const auto items_1 = reader.read_array(data.clusters, 7, data.clusterCount))
 			{
-				if (!(data.clusterCount == 0))
+				if (data.clusterCount != 0)
 				{
 					for (std::size_t i1 = 0; i1 < data.clusterCount; i1++)
 					{
@@ -2645,7 +2662,7 @@ namespace zonetool::iw8
 			}
 			if (const auto items_11 = reader.read_array(data.zones, 7, data.zoneCount))
 			{
-				if (!(data.zoneCount == 0))
+				if (data.zoneCount != 0)
 				{
 					for (std::size_t i2 = 0; i2 < data.zoneCount; i2++)
 					{
@@ -2670,7 +2687,7 @@ namespace zonetool::iw8
 			reader.read_string(data.aliasName);
 			if (const auto items_1 = reader.read_array(data.head, 7, data.count))
 			{
-				if (!(data.count == 0))
+				if (data.count != 0)
 				{
 					for (std::size_t i1 = 0; i1 < data.count; i1++)
 					{
@@ -2705,7 +2722,7 @@ namespace zonetool::iw8
 		{
 			if (const auto items_0 = reader.read_array(data.oneshotEffects, 7, *reinterpret_cast<const std::uint32_t*>(&data)))
 			{
-				if (!(*reinterpret_cast<const std::uint32_t*>(&data) == 0))
+				if (*reinterpret_cast<const std::uint32_t*>(&data) != 0)
 				{
 					for (std::size_t i1 = 0; i1 < *reinterpret_cast<const std::uint32_t*>(&data); i1++)
 					{
@@ -2721,7 +2738,7 @@ namespace zonetool::iw8
 			reader.read_array(data.oneshotSoundIndices, 3, data.oneshotSoundCount);
 			if (const auto items_16 = reader.read_array(data.exploders, 7, data.exploderCount))
 			{
-				if (!(data.exploderCount == 0))
+				if (data.exploderCount != 0)
 				{
 					for (std::size_t i2 = 0; i2 < data.exploderCount; i2++)
 					{
@@ -2731,7 +2748,7 @@ namespace zonetool::iw8
 			}
 			if (const auto items_26 = reader.read_array(data.intervalSounds, 7, data.intervalSoundCount))
 			{
-				if (!(data.intervalSoundCount == 0))
+				if (data.intervalSoundCount != 0)
 				{
 					for (std::size_t i3 = 0; i3 < data.intervalSoundCount; i3++)
 					{
@@ -2745,7 +2762,7 @@ namespace zonetool::iw8
 			}
 			if (const auto items_40 = reader.read_array(data.loopSounds, 7, data.loopSoundCount))
 			{
-				if (!(data.loopSoundCount == 0))
+				if (data.loopSoundCount != 0)
 				{
 					for (std::size_t i4 = 0; i4 < data.loopSoundCount; i4++)
 					{
@@ -2763,7 +2780,7 @@ namespace zonetool::iw8
 			}
 			if (const auto items_58 = reader.read_array(data.reactiveEnts, 7, data.reactiveEntCount))
 			{
-				if (!(data.reactiveEntCount == 0))
+				if (data.reactiveEntCount != 0)
 				{
 					for (std::size_t i5 = 0; i5 < data.reactiveEntCount; i5++)
 					{
@@ -2781,7 +2798,7 @@ namespace zonetool::iw8
 		{
 			if (const auto items_0 = reader.read_array(data.fxPalette, 3, *reinterpret_cast<const std::uint16_t*>(&data)))
 			{
-				if (!(*reinterpret_cast<const std::uint16_t*>(&data) == 0))
+				if (*reinterpret_cast<const std::uint16_t*>(&data) != 0)
 				{
 					for (std::size_t i1 = 0; i1 < *reinterpret_cast<const std::uint16_t*>(&data); i1++)
 					{
@@ -2796,7 +2813,7 @@ namespace zonetool::iw8
 		{
 			if (const auto items_0 = reader.read_array(data.exploders, 3, *reinterpret_cast<const std::uint16_t*>(&data)))
 			{
-				if (!(*reinterpret_cast<const std::uint16_t*>(&data) == 0))
+				if (*reinterpret_cast<const std::uint16_t*>(&data) != 0)
 				{
 					for (std::size_t i1 = 0; i1 < *reinterpret_cast<const std::uint16_t*>(&data); i1++)
 					{
@@ -2810,7 +2827,7 @@ namespace zonetool::iw8
 
 		void read_mayheminstance_array(zone_reader& reader, MayhemInstance* data, const std::size_t count)
 		{
-			if (!(count == 0))
+			if (count != 0)
 			{
 				for (std::size_t i1 = 0; i1 < count; i1++)
 				{
@@ -2825,7 +2842,7 @@ namespace zonetool::iw8
 		{
 			if (const auto items_0 = reader.read_array(data.fields, 3, data.numFields))
 			{
-				if (!(data.numFields == 0))
+				if (data.numFields != 0)
 				{
 					for (std::size_t i1 = 0; i1 < data.numFields; i1++)
 					{
@@ -2842,7 +2859,7 @@ namespace zonetool::iw8
 		{
 			if (const auto items_0 = reader.read_array(data.spanwerList, 7, *reinterpret_cast<const std::uint32_t*>(&data)))
 			{
-				if (!(*reinterpret_cast<const std::uint32_t*>(&data) == 0))
+				if (*reinterpret_cast<const std::uint32_t*>(&data) != 0)
 				{
 					for (std::size_t i1 = 0; i1 < *reinterpret_cast<const std::uint32_t*>(&data); i1++)
 					{
@@ -2870,7 +2887,7 @@ namespace zonetool::iw8
 			}
 			if (const auto items_14 = reader.read_array(data.edgeLists, 7, data.numEdgeLists))
 			{
-				if (!(data.numEdgeLists == 0))
+				if (data.numEdgeLists != 0)
 				{
 					for (std::size_t i1 = 0; i1 < data.numEdgeLists; i1++)
 					{
@@ -2891,7 +2908,7 @@ namespace zonetool::iw8
 			read_spatialpartition_population_transientmap_ptr_array(reader, &data.dynEntSpatialTransientMap[0], 2);
 			if (const auto items_35 = reader.read_array(data.clientEntAnchors, 3, data.clientEntAnchorCount))
 			{
-				if (!(data.clientEntAnchorCount == 0))
+				if (data.clientEntAnchorCount != 0)
 				{
 					for (std::size_t i2 = 0; i2 < data.clientEntAnchorCount; i2++)
 					{
@@ -2918,7 +2935,7 @@ namespace zonetool::iw8
 			reader.read_array(data.audioPropEdges, 1, data.numAudioPropEdges);
 			if (const auto items_62 = reader.read_array(data.collmapLookups, 7, data.numCollmaps))
 			{
-				if (!(data.numCollmaps == 0))
+				if (data.numCollmaps != 0)
 				{
 					for (std::size_t i3 = 0; i3 < data.numCollmaps; i3++)
 					{
@@ -2948,7 +2965,7 @@ namespace zonetool::iw8
 		{
 			if (const auto items_0 = reader.read_array(data.defs, 7, *reinterpret_cast<const std::uint32_t*>(&data)))
 			{
-				if (!(*reinterpret_cast<const std::uint32_t*>(&data) == 0))
+				if (*reinterpret_cast<const std::uint32_t*>(&data) != 0)
 				{
 					for (std::size_t i1 = 0; i1 < *reinterpret_cast<const std::uint32_t*>(&data); i1++)
 					{
@@ -3023,7 +3040,7 @@ namespace zonetool::iw8
 		{
 			if (const auto items_0 = reader.read_array(data.portals, 7, data.portalCount))
 			{
-				if (!(data.portalCount == 0))
+				if (data.portalCount != 0)
 				{
 					for (std::size_t i1 = 0; i1 < data.portalCount; i1++)
 					{
@@ -3037,7 +3054,7 @@ namespace zonetool::iw8
 		{
 			if (const auto items_0 = reader.read_array(data.surfaces, 7, *reinterpret_cast<const std::uint32_t*>(&data)))
 			{
-				if (!(*reinterpret_cast<const std::uint32_t*>(&data) == 0))
+				if (*reinterpret_cast<const std::uint32_t*>(&data) != 0)
 				{
 					for (std::size_t i1 = 0; i1 < *reinterpret_cast<const std::uint32_t*>(&data); i1++)
 					{
@@ -3055,7 +3072,7 @@ namespace zonetool::iw8
 			reader.read_array(data.surfaces, 1, *reinterpret_cast<const std::uint32_t*>(&data));
 			if (const auto items_1 = reader.read_array(data.models, 7, data.modelCount))
 			{
-				if (!(data.modelCount == 0))
+				if (data.modelCount != 0)
 				{
 					for (std::size_t i1 = 0; i1 < data.modelCount; i1++)
 					{
@@ -3091,7 +3108,7 @@ namespace zonetool::iw8
 
 		void read_gfximage_ptr_array(zone_reader& reader, GfxImage** data, const std::size_t count)
 		{
-			if (!(count == 0))
+			if (count != 0)
 			{
 				for (std::size_t i1 = 0; i1 < count; i1++)
 				{
@@ -3123,7 +3140,7 @@ namespace zonetool::iw8
 			}
 			if (const auto items_8 = reader.read_array(data.reflectionProbes, 7, *reinterpret_cast<const std::uint32_t*>(&data)))
 			{
-				if (!(*reinterpret_cast<const std::uint32_t*>(&data) == 0))
+				if (*reinterpret_cast<const std::uint32_t*>(&data) != 0)
 				{
 					for (std::size_t i1 = 0; i1 < *reinterpret_cast<const std::uint32_t*>(&data); i1++)
 					{
@@ -3135,7 +3152,7 @@ namespace zonetool::iw8
 			reader.read_asset(ASSET_TYPE_IMAGE, data.reflectionProbeArrayImage_octahedron);
 			if (const auto items_20 = reader.read_array(data.probeRelightingData, 7, data.probeRelightingCount))
 			{
-				if (!(data.probeRelightingCount == 0))
+				if (data.probeRelightingCount != 0)
 				{
 					for (std::size_t i2 = 0; i2 < data.probeRelightingCount; i2++)
 					{
@@ -3153,7 +3170,7 @@ namespace zonetool::iw8
 			}
 			if (const auto items_38 = reader.read_array(data.reflectionProbeInstances, 7, data.reflectionProbeInstanceCount))
 			{
-				if (!(data.reflectionProbeInstanceCount == 0))
+				if (data.reflectionProbeInstanceCount != 0)
 				{
 					for (std::size_t i3 = 0; i3 < data.reflectionProbeInstanceCount; i3++)
 					{
@@ -3183,7 +3200,7 @@ namespace zonetool::iw8
 		{
 			if (const auto items_0 = reader.read_array(data.volumetrics, 7, *reinterpret_cast<const std::uint32_t*>(&data)))
 			{
-				if (!(*reinterpret_cast<const std::uint32_t*>(&data) == 0))
+				if (*reinterpret_cast<const std::uint32_t*>(&data) != 0)
 				{
 					for (std::size_t i1 = 0; i1 < *reinterpret_cast<const std::uint32_t*>(&data); i1++)
 					{
@@ -3201,7 +3218,7 @@ namespace zonetool::iw8
 			reader.read_asset(ASSET_TYPE_IMAGE, data.iesLookupTexture);
 			if (const auto items_3 = reader.read_array(data.decalVolumeMaterials, 7, data.decalVolumeMaterialCount))
 			{
-				if (!(data.decalVolumeMaterialCount == 0))
+				if (data.decalVolumeMaterialCount != 0)
 				{
 					for (std::size_t i1 = 0; i1 < data.decalVolumeMaterialCount; i1++)
 					{
@@ -3211,7 +3228,7 @@ namespace zonetool::iw8
 			}
 			if (const auto items_13 = reader.read_array(data.decalVolumeMasks, 7, data.decalVolumeMaskCount))
 			{
-				if (!(data.decalVolumeMaskCount == 0))
+				if (data.decalVolumeMaskCount != 0)
 				{
 					for (std::size_t i2 = 0; i2 < data.decalVolumeMaskCount; i2++)
 					{
@@ -3266,7 +3283,7 @@ namespace zonetool::iw8
 
 		void read_gfxvoxeltree_array(zone_reader& reader, GfxVoxelTree* data, const std::size_t count)
 		{
-			if (!(count == 0))
+			if (count != 0)
 			{
 				for (std::size_t i1 = 0; i1 < count; i1++)
 				{
@@ -3750,7 +3767,7 @@ namespace zonetool::iw8
 
 		void read_mdaovolume_array(zone_reader& reader, MdaoVolume* data, const std::size_t count)
 		{
-			if (!(count == 0))
+			if (count != 0)
 			{
 				for (std::size_t i1 = 0; i1 < count; i1++)
 				{
@@ -3775,7 +3792,7 @@ namespace zonetool::iw8
 		{
 			if (const auto items_0 = reader.read_array(data.nodes, 7, data.nodeCount))
 			{
-				if (!(data.nodeCount == 0))
+				if (data.nodeCount != 0)
 				{
 					for (std::size_t i1 = 0; i1 < data.nodeCount; i1++)
 					{
@@ -3796,7 +3813,7 @@ namespace zonetool::iw8
 
 		void read_xmodel_ptr_array(zone_reader& reader, XModel** data, const std::size_t count)
 		{
-			if (!(count == 0))
+			if (count != 0)
 			{
 				for (std::size_t i1 = 0; i1 < count; i1++)
 				{
@@ -3814,7 +3831,7 @@ namespace zonetool::iw8
 		{
 			if (const auto items_0 = reader.read_array(data.cellKeys, 7, (data.columnCount * data.rowCount)))
 			{
-				if (!((data.columnCount * data.rowCount) == 0))
+				if ((data.columnCount * data.rowCount) != 0)
 				{
 					for (std::size_t i1 = 0; i1 < (data.columnCount * data.rowCount); i1++)
 					{
@@ -3847,7 +3864,7 @@ namespace zonetool::iw8
 			reader.read_array(data.cellTransientInfos, 1, *reinterpret_cast<const std::uint32_t*>(&data.dpvsPlanes));
 			if (const auto items_6 = reader.read_array(data.cells, 7, *reinterpret_cast<const std::uint32_t*>(&data.dpvsPlanes)))
 			{
-				if (!(*reinterpret_cast<const std::uint32_t*>(&data.dpvsPlanes) == 0))
+				if (*reinterpret_cast<const std::uint32_t*>(&data.dpvsPlanes) != 0)
 				{
 					for (std::size_t i1 = 0; i1 < *reinterpret_cast<const std::uint32_t*>(&data.dpvsPlanes); i1++)
 					{
@@ -3870,7 +3887,7 @@ namespace zonetool::iw8
 			reader.pop_stream();
 			if (const auto items_29 = reader.read_array(data.lightViewFrustums, 7, data.primaryLightCount))
 			{
-				if (!(data.primaryLightCount == 0))
+				if (data.primaryLightCount != 0)
 				{
 					for (std::size_t i2 = 0; i2 < data.primaryLightCount; i2++)
 					{
@@ -3880,7 +3897,7 @@ namespace zonetool::iw8
 			}
 			if (const auto items_39 = reader.read_array(data.heightfields, 7, data.heightfieldCount))
 			{
-				if (!(data.heightfieldCount == 0))
+				if (data.heightfieldCount != 0)
 				{
 					for (std::size_t i3 = 0; i3 < data.heightfieldCount; i3++)
 					{
@@ -3930,7 +3947,7 @@ namespace zonetool::iw8
 			reader.pop_stream();
 			if (const auto items_89 = reader.read_array(data.shadowGeomOptimized, 7, data.primaryLightCount))
 			{
-				if (!(data.primaryLightCount == 0))
+				if (data.primaryLightCount != 0)
 				{
 					for (std::size_t i4 = 0; i4 < data.primaryLightCount; i4++)
 					{
@@ -3971,7 +3988,7 @@ namespace zonetool::iw8
 			const auto temp_3 = reader.read_temp<std::uint32_t>(3);
 			if (const auto items_1 = reader.read_array(data.aabbTree, 7, temp_3))
 			{
-				if (!(temp_3 == 0))
+				if (temp_3 != 0)
 				{
 					for (std::size_t i1 = 0; i1 < temp_3; i1++)
 					{
@@ -3986,7 +4003,7 @@ namespace zonetool::iw8
 			reader.read_array(data.aabbTreeCounts, 3, *reinterpret_cast<const std::uint32_t*>(&data));
 			if (const auto items_1 = reader.read_array(data.aabbTrees, 7, *reinterpret_cast<const std::uint32_t*>(&data)))
 			{
-				if (!(*reinterpret_cast<const std::uint32_t*>(&data) == 0))
+				if (*reinterpret_cast<const std::uint32_t*>(&data) != 0)
 				{
 					for (std::size_t i1 = 0; i1 < *reinterpret_cast<const std::uint32_t*>(&data); i1++)
 					{
@@ -3998,7 +4015,7 @@ namespace zonetool::iw8
 
 		void read_gfximageraw_array(zone_reader& reader, GfxImageRaw* data, const std::size_t count)
 		{
-			if (!(count == 0))
+			if (count != 0)
 			{
 				for (std::size_t i1 = 0; i1 < count; i1++)
 				{
@@ -4027,7 +4044,7 @@ namespace zonetool::iw8
 
 		void read_gfxgpulightgridvoxeltree_array(zone_reader& reader, GfxGpuLightGridVoxelTree* data, const std::size_t count)
 		{
-			if (!(count == 0))
+			if (count != 0)
 			{
 				for (std::size_t i1 = 0; i1 < count; i1++)
 				{
@@ -4097,7 +4114,7 @@ namespace zonetool::iw8
 			reader.read_array(data.reflectionProbeInstances, 1, *reinterpret_cast<const std::uint16_t*>(&data));
 			if (const auto items_1 = reader.read_array(data.exclusiveProbeBuckets, 7, data.exclusiveProbeBucketCount))
 			{
-				if (!(data.exclusiveProbeBucketCount == 0))
+				if (data.exclusiveProbeBucketCount != 0)
 				{
 					for (std::size_t i1 = 0; i1 < data.exclusiveProbeBucketCount; i1++)
 					{
@@ -4194,7 +4211,7 @@ namespace zonetool::iw8
 
 		void read_animationstate_array(zone_reader& reader, AnimationState* data, const std::size_t count)
 		{
-			if (!(count == 0))
+			if (count != 0)
 			{
 				for (std::size_t i1 = 0; i1 < count; i1++)
 				{
@@ -4202,7 +4219,7 @@ namespace zonetool::iw8
 					reader.read_script_string(data[i1].notify);
 					if (const auto items_4 = reader.read_array(data[i1].animEntries, 3, data[i1].entryCount))
 					{
-						if (!(data[i1].entryCount == 0))
+						if (data[i1].entryCount != 0)
 						{
 							for (std::size_t i2 = 0; i2 < data[i1].entryCount; i2++)
 							{
@@ -4215,7 +4232,7 @@ namespace zonetool::iw8
 					reader.pop_stream();
 					if (const auto items_17 = reader.read_array(data[i1].aliasList, 7, data[i1].aliasCount))
 					{
-						if (!(data[i1].aliasCount == 0))
+						if (data[i1].aliasCount != 0)
 						{
 							for (std::size_t i3 = 0; i3 < data[i1].aliasCount; i3++)
 							{
@@ -4252,7 +4269,7 @@ namespace zonetool::iw8
 			}
 			if (const auto items_5 = reader.read_array(data.aimSets, 7, data.aimSetCount))
 			{
-				if (!(data.aimSetCount == 0))
+				if (data.aimSetCount != 0)
 				{
 					for (std::size_t i1 = 0; i1 < data.aimSetCount; i1++)
 					{
@@ -4264,7 +4281,7 @@ namespace zonetool::iw8
 
 		void read_fxcombineddef_array(zone_reader& reader, FxCombinedDef* data, const std::size_t count)
 		{
-			if (!(count == 0))
+			if (count != 0)
 			{
 				for (std::size_t i1 = 0; i1 < count; i1++)
 				{
@@ -4313,7 +4330,7 @@ namespace zonetool::iw8
 
 		void read_playeranimscriptentry_array(zone_reader& reader, PlayerAnimScriptEntry* data, const std::size_t count)
 		{
-			if (!(count == 0))
+			if (count != 0)
 			{
 				for (std::size_t i1 = 0; i1 < count; i1++)
 				{
@@ -4336,7 +4353,7 @@ namespace zonetool::iw8
 			reader.read_string(data.scriptName);
 			if (const auto items_3 = reader.read_array(data.animations, 7, data.animationCount))
 			{
-				if (!(data.animationCount == 0))
+				if (data.animationCount != 0)
 				{
 					for (std::size_t i1 = 0; i1 < data.animationCount; i1++)
 					{
@@ -4356,7 +4373,7 @@ namespace zonetool::iw8
 			}
 			if (const auto items_23 = reader.read_array(data.scriptItems, 7, data.scriptItemCount))
 			{
-				if (!(data.scriptItemCount == 0))
+				if (data.scriptItemCount != 0)
 				{
 					for (std::size_t i2 = 0; i2 < data.scriptItemCount; i2++)
 					{
@@ -4368,7 +4385,7 @@ namespace zonetool::iw8
 			reader.read_array(data.scriptIdleTurns, 1, data.scriptIdleTurnCount);
 			if (const auto items_35 = reader.read_array(data.scriptIdleTwitches, 7, data.scriptIdleTwitchCount))
 			{
-				if (!(data.scriptIdleTwitchCount == 0))
+				if (data.scriptIdleTwitchCount != 0)
 				{
 					for (std::size_t i3 = 0; i3 < data.scriptIdleTwitchCount; i3++)
 					{
@@ -4384,7 +4401,7 @@ namespace zonetool::iw8
 			reader.read_array(data.legsAnimUnpackMap, 1, data.legsAnimCount);
 			if (const auto items_51 = reader.read_array(data.xAnims, 7, data.xAnimCount))
 			{
-				if (!(data.xAnimCount == 0))
+				if (data.xAnimCount != 0)
 				{
 					for (std::size_t i4 = 0; i4 < data.xAnimCount; i4++)
 					{
@@ -4398,7 +4415,7 @@ namespace zonetool::iw8
 
 		void read_xanimparts_ptr_array(zone_reader& reader, XAnimParts** data, const std::size_t count)
 		{
-			if (!(count == 0))
+			if (count != 0)
 			{
 				for (std::size_t i1 = 0; i1 < count; i1++)
 				{
@@ -4449,7 +4466,7 @@ namespace zonetool::iw8
 
 		void read_reticledef_ptr_array(zone_reader& reader, ReticleDef** data, const std::size_t count)
 		{
-			if (!(count == 0))
+			if (count != 0)
 			{
 				for (std::size_t i1 = 0; i1 < count; i1++)
 				{
@@ -4483,7 +4500,7 @@ namespace zonetool::iw8
 		{
 			if (const auto items_0 = reader.read_array(data.patternScales, 3, *reinterpret_cast<const std::int32_t*>(&data)))
 			{
-				if (!(*reinterpret_cast<const std::int32_t*>(&data) == 0))
+				if (*reinterpret_cast<const std::int32_t*>(&data) != 0)
 				{
 					for (std::size_t i1 = 0; i1 < *reinterpret_cast<const std::int32_t*>(&data); i1++)
 					{
@@ -4742,7 +4759,7 @@ namespace zonetool::iw8
 
 		void read_sndaliaslookup_array(zone_reader& reader, SndAliasLookup* data, const std::size_t count)
 		{
-			if (!(count == 0))
+			if (count != 0)
 			{
 				for (std::size_t i1 = 0; i1 < count; i1++)
 				{
@@ -4753,7 +4770,7 @@ namespace zonetool::iw8
 
 		void read_overridebinding_array(zone_reader& reader, OverrideBinding* data, const std::size_t count)
 		{
-			if (!(count == 0))
+			if (count != 0)
 			{
 				for (std::size_t i1 = 0; i1 < count; i1++)
 				{
@@ -4874,7 +4891,7 @@ namespace zonetool::iw8
 			read_fxcombineddef(reader, data.projIgnitionEffect);
 			if (const auto items_73 = reader.read_array(data.weaponOffsetPatterns, 3, data.numWeaponOffsetPatterns))
 			{
-				if (!(data.numWeaponOffsetPatterns == 0))
+				if (data.numWeaponOffsetPatterns != 0)
 				{
 					for (std::size_t i1 = 0; i1 < data.numWeaponOffsetPatterns; i1++)
 					{
@@ -4884,7 +4901,7 @@ namespace zonetool::iw8
 			}
 			if (const auto items_83 = reader.read_array(data.weaponOffsetPatternsKickOrSnapDecay, 7, data.numWeaponOffsetPatternsKickOrSnapDecay))
 			{
-				if (!(data.numWeaponOffsetPatternsKickOrSnapDecay == 0))
+				if (data.numWeaponOffsetPatternsKickOrSnapDecay != 0)
 				{
 					for (std::size_t i2 = 0; i2 < data.numWeaponOffsetPatternsKickOrSnapDecay; i2++)
 					{
@@ -4952,7 +4969,7 @@ namespace zonetool::iw8
 			read_fxcombineddef(reader, data.deployEffect);
 			if (const auto items_151 = reader.read_array(data.animOverrides, 7, data.numAnimOverrides))
 			{
-				if (!(data.numAnimOverrides == 0))
+				if (data.numAnimOverrides != 0)
 				{
 					for (std::size_t i3 = 0; i3 < data.numAnimOverrides; i3++)
 					{
@@ -4967,7 +4984,7 @@ namespace zonetool::iw8
 			}
 			if (const auto items_166 = reader.read_array(data.sfxOverrides, 7, data.numSfxOverrides))
 			{
-				if (!(data.numSfxOverrides == 0))
+				if (data.numSfxOverrides != 0)
 				{
 					for (std::size_t i5 = 0; i5 < data.numSfxOverrides; i5++)
 					{
@@ -4977,7 +4994,7 @@ namespace zonetool::iw8
 			}
 			if (const auto items_176 = reader.read_array(data.vfxOverrides, 7, data.numVfxOverrides))
 			{
-				if (!(data.numVfxOverrides == 0))
+				if (data.numVfxOverrides != 0)
 				{
 					for (std::size_t i6 = 0; i6 < data.numVfxOverrides; i6++)
 					{
@@ -4998,7 +5015,7 @@ namespace zonetool::iw8
 
 		void read_weaponattachment_ptr_array(zone_reader& reader, WeaponAttachment** data, const std::size_t count)
 		{
-			if (!(count == 0))
+			if (count != 0)
 			{
 				for (std::size_t i1 = 0; i1 < count; i1++)
 				{
@@ -5074,7 +5091,7 @@ namespace zonetool::iw8
 			}
 			if (const auto items_25 = reader.read_array(data.notetrackOverrides, 7, data.numNotetrackOverrides))
 			{
-				if (!(data.numNotetrackOverrides == 0))
+				if (data.numNotetrackOverrides != 0)
 				{
 					for (std::size_t i2 = 0; i2 < data.numNotetrackOverrides; i2++)
 					{
@@ -5084,7 +5101,7 @@ namespace zonetool::iw8
 			}
 			if (const auto items_35 = reader.read_array(data.notetrackSuitEntries, 7, data.numNotetrackSuitEntries))
 			{
-				if (!(data.numNotetrackSuitEntries == 0))
+				if (data.numNotetrackSuitEntries != 0)
 				{
 					for (std::size_t i3 = 0; i3 < data.numNotetrackSuitEntries; i3++)
 					{
@@ -5124,7 +5141,7 @@ namespace zonetool::iw8
 		{
 			if (const auto items_0 = reader.read_array(data.assetList, 7, data.numAssets))
 			{
-				if (!(data.numAssets == 0))
+				if (data.numAssets != 0)
 				{
 					for (std::size_t i1 = 0; i1 < data.numAssets; i1++)
 					{
@@ -5170,7 +5187,7 @@ namespace zonetool::iw8
 																}
 																else
 																{
-																	if (!(static_cast<std::uint16_t>((*reinterpret_cast<const std::uint16_t*>(&outer_particlemoduledef) - 55)) > static_cast<std::uint16_t>(6)))
+																	if (static_cast<std::uint16_t>((*reinterpret_cast<const std::uint16_t*>(&outer_particlemoduledef) - 55)) <= static_cast<std::uint16_t>(6))
 																	{
 																		reader.read_asset(ASSET_TYPE_VFX, items_0[i1].particleSystem);
 																	}
@@ -5251,7 +5268,7 @@ namespace zonetool::iw8
 
 		void read_particlecurvedef_array(zone_reader& reader, ParticleCurveDef* data, const std::size_t count)
 		{
-			if (!(count == 0))
+			if (count != 0)
 			{
 				for (std::size_t i1 = 0; i1 < count; i1++)
 				{
@@ -5431,7 +5448,7 @@ namespace zonetool::iw8
 		{
 			if (const auto items_0 = reader.read_array(data.moduleDefs, 15, data.numModules))
 			{
-				if (!(data.numModules == 0))
+				if (data.numModules != 0)
 				{
 					for (std::size_t i1 = 0; i1 < data.numModules; i1++)
 					{
@@ -5557,7 +5574,7 @@ namespace zonetool::iw8
 																																																																	{
 																																																																		if (*reinterpret_cast<const std::uint16_t*>(&items_0[i1]) != 60)
 																																																																		{
-																																																																			if (!(*reinterpret_cast<const std::uint16_t*>(&items_0[i1]) != 61))
+																																																																			if (*reinterpret_cast<const std::uint16_t*>(&items_0[i1]) == 61)
 																																																																			{
 																																																																				read_particlemoduletesttimeinstate(reader, items_0[i1].moduleData.testTimeInState, items_0[i1]);
 																																																																			}
@@ -5807,7 +5824,7 @@ namespace zonetool::iw8
 		{
 			if (const auto items_0 = reader.read_array(data.stateDefs, 15, data.numStates))
 			{
-				if (!(data.numStates == 0))
+				if (data.numStates != 0)
 				{
 					for (std::size_t i1 = 0; i1 < data.numStates; i1++)
 					{
@@ -5825,7 +5842,7 @@ namespace zonetool::iw8
 			reader.read_string(data.name);
 			if (const auto items_3 = reader.read_array(data.emitterDefs, 15, data.numEmitters))
 			{
-				if (!(data.numEmitters == 0))
+				if (data.numEmitters != 0)
 				{
 					for (std::size_t i1 = 0; i1 < data.numEmitters; i1++)
 					{
@@ -5840,7 +5857,7 @@ namespace zonetool::iw8
 
 		void read_fximpactpack_array(zone_reader& reader, FxImpactPack* data, const std::size_t count)
 		{
-			if (!(count == 0))
+			if (count != 0)
 			{
 				for (std::size_t i1 = 0; i1 < count; i1++)
 				{
@@ -5869,7 +5886,7 @@ namespace zonetool::iw8
 			reader.read_string(data.name);
 			if (const auto items_3 = reader.read_array(data.table, 7, data.impactTypeCount))
 			{
-				if (!(data.impactTypeCount == 0))
+				if (data.impactTypeCount != 0)
 				{
 					for (std::size_t i1 = 0; i1 < data.impactTypeCount; i1++)
 					{
@@ -5890,7 +5907,7 @@ namespace zonetool::iw8
 			reader.read_string(data.name);
 			if (const auto items_3 = reader.read_array(data.table, 7, data.numTableEntry))
 			{
-				if (!(data.numTableEntry == 0))
+				if (data.numTableEntry != 0)
 				{
 					for (std::size_t i1 = 0; i1 < data.numTableEntry; i1++)
 					{
@@ -5938,7 +5955,7 @@ namespace zonetool::iw8
 			reader.read_string(data.name);
 			if (const auto items_3 = reader.read_array(data.profileStrings, 7, data.profileStringCount))
 			{
-				if (!(data.profileStringCount == 0))
+				if (data.profileStringCount != 0)
 				{
 					for (std::size_t i1 = 0; i1 < data.profileStringCount; i1++)
 					{
@@ -5975,7 +5992,7 @@ namespace zonetool::iw8
 			reader.read_string(data.name);
 			if (const auto items_3 = reader.read_array(data.columns, 7, data.columnCount))
 			{
-				if (!(data.columnCount == 0))
+				if (data.columnCount != 0)
 				{
 					for (std::size_t i1 = 0; i1 < data.columnCount; i1++)
 					{
@@ -5996,7 +6013,7 @@ namespace zonetool::iw8
 			reader.read_string(data.sourceName);
 			if (const auto items_4 = reader.read_array(data.columns, 7, data.columnCount))
 			{
-				if (!(data.columnCount == 0))
+				if (data.columnCount != 0)
 				{
 					for (std::size_t i1 = 0; i1 < data.columnCount; i1++)
 					{
@@ -6024,7 +6041,7 @@ namespace zonetool::iw8
 			reader.read_string(data.name);
 			if (const auto items_1 = reader.read_array(data.members, 7, data.memberCount))
 			{
-				if (!(data.memberCount == 0))
+				if (data.memberCount != 0)
 				{
 					for (std::size_t i1 = 0; i1 < data.memberCount; i1++)
 					{
@@ -6054,7 +6071,7 @@ namespace zonetool::iw8
 			reader.read_string(data.name);
 			if (const auto items_1 = reader.read_array(data.structList, 7, data.structCount))
 			{
-				if (!(data.structCount == 0))
+				if (data.structCount != 0)
 				{
 					for (std::size_t i1 = 0; i1 < data.structCount; i1++)
 					{
@@ -6064,7 +6081,7 @@ namespace zonetool::iw8
 			}
 			if (const auto items_11 = reader.read_array(data.enumList, 7, data.enumCount))
 			{
-				if (!(data.enumCount == 0))
+				if (data.enumCount != 0)
 				{
 					for (std::size_t i2 = 0; i2 < data.enumCount; i2++)
 					{
@@ -6630,7 +6647,7 @@ namespace zonetool::iw8
 			}
 			if (const auto items_4 = reader.read_array(data.noteTracks, 7, data.noteTrackCount))
 			{
-				if (!(data.noteTrackCount == 0))
+				if (data.noteTrackCount != 0)
 				{
 					for (std::size_t i1 = 0; i1 < data.noteTrackCount; i1++)
 					{
@@ -6690,7 +6707,7 @@ namespace zonetool::iw8
 			}
 			if (static_cast<std::uint8_t>(data.dataType) != 2)
 			{
-				if (!(static_cast<std::uint8_t>(data.dataType) != 1))
+				if (static_cast<std::uint8_t>(data.dataType) == 1)
 				{
 					reader.read_asset(ASSET_TYPE_XMODEL, data.data.model);
 				}
@@ -6737,7 +6754,7 @@ namespace zonetool::iw8
 
 		void read_scriptableeventdef_array(zone_reader& reader, ScriptableEventDef* data, const std::size_t count)
 		{
-			if (!(count == 0))
+			if (count != 0)
 			{
 				for (std::size_t i1 = 0; i1 < count; i1++)
 				{
@@ -6826,7 +6843,7 @@ namespace zonetool::iw8
 																																													{
 																																														if (static_cast<std::uint32_t>(data[i1].type) != 41)
 																																														{
-																																															if (!(static_cast<std::uint32_t>(data[i1].type) != 42))
+																																															if (static_cast<std::uint32_t>(data[i1].type) == 42)
 																																															{
 																																																read_scriptableeventdlc1def(reader, data[i1].data.dlc1);
 																																															}
@@ -7080,7 +7097,7 @@ namespace zonetool::iw8
 
 		void read_weaponcompletedef_ptr_array(zone_reader& reader, WeaponCompleteDef** data, const std::size_t count)
 		{
-			if (!(count == 0))
+			if (count != 0)
 			{
 				for (std::size_t i1 = 0; i1 < count; i1++)
 				{
@@ -7125,7 +7142,7 @@ namespace zonetool::iw8
 			reader.read_script_string(data.scrTagName);
 			if (const auto items_4 = reader.read_array(data.states, 7, data.numStates))
 			{
-				if (!(data.numStates == 0))
+				if (data.numStates != 0)
 				{
 					for (std::size_t i1 = 0; i1 < data.numStates; i1++)
 					{
@@ -7136,7 +7153,7 @@ namespace zonetool::iw8
 							{
 								if (static_cast<std::uint32_t>(items_4[i1].type) != 2)
 								{
-									if (!(static_cast<std::uint32_t>(items_4[i1].type) != 3))
+									if (static_cast<std::uint32_t>(items_4[i1].type) == 3)
 									{
 										read_scriptablestateusabledef(reader, items_4[i1].data.usable);
 									}
@@ -7160,7 +7177,7 @@ namespace zonetool::iw8
 			}
 			if (const auto items_39 = reader.read_array(data.childParts, 7, data.numChildParts))
 			{
-				if (!(data.numChildParts == 0))
+				if (data.numChildParts != 0)
 				{
 					for (std::size_t i2 = 0; i2 < data.numChildParts; i2++)
 					{
@@ -7170,7 +7187,7 @@ namespace zonetool::iw8
 			}
 			if (const auto items_49 = reader.read_array(data.damageTagOverrides, 7, data.numDamageTagOverrides))
 			{
-				if (!(data.numDamageTagOverrides == 0))
+				if (data.numDamageTagOverrides != 0)
 				{
 					for (std::size_t i3 = 0; i3 < data.numDamageTagOverrides; i3++)
 					{
@@ -7189,7 +7206,7 @@ namespace zonetool::iw8
 			reader.read_asset(ASSET_TYPE_SCRIPTABLE, data.nextScriptableDef);
 			if (const auto items_4 = reader.read_array(data.parts, 7, data.numParts))
 			{
-				if (!(data.numParts == 0))
+				if (data.numParts != 0)
 				{
 					for (std::size_t i1 = 0; i1 < data.numParts; i1++)
 					{
@@ -7208,13 +7225,13 @@ namespace zonetool::iw8
 
 		void read_equipmentchancerattletypes_array(zone_reader& reader, EquipmentChanceRattleTypes* data, const std::size_t count, [[maybe_unused]] const EquipmentSoundTable& outer_equipmentsoundtable)
 		{
-			if (!(count == 0))
+			if (count != 0)
 			{
 				for (std::size_t i1 = 0; i1 < count; i1++)
 				{
 					if (const auto items_2 = reader.read_array(data[i1].chances, 7, outer_equipmentsoundtable.numWeaponRattleTypes))
 					{
-						if (!(outer_equipmentsoundtable.numWeaponRattleTypes == 0))
+						if (outer_equipmentsoundtable.numWeaponRattleTypes != 0)
 						{
 							for (std::size_t i2 = 0; i2 < outer_equipmentsoundtable.numWeaponRattleTypes; i2++)
 							{
@@ -7244,7 +7261,7 @@ namespace zonetool::iw8
 			reader.read_string(data.szName);
 			if (const auto items_3 = reader.read_array(data.clothTypes, 7, data.numClothTypes))
 			{
-				if (!(data.numClothTypes == 0))
+				if (data.numClothTypes != 0)
 				{
 					for (std::size_t i1 = 0; i1 < data.numClothTypes; i1++)
 					{
@@ -7255,7 +7272,7 @@ namespace zonetool::iw8
 			}
 			if (const auto items_14 = reader.read_array(data.weaponRattleTypes, 7, data.numWeaponRattleTypes))
 			{
-				if (!(data.numWeaponRattleTypes == 0))
+				if (data.numWeaponRattleTypes != 0)
 				{
 					for (std::size_t i2 = 0; i2 < data.numWeaponRattleTypes; i2++)
 					{
@@ -7275,7 +7292,7 @@ namespace zonetool::iw8
 			reader.read_array(data.mvmtClothFootstepCeilingSoundSets, 7, data.numClothTypes);
 			if (const auto items_34 = reader.read_array(data.mvmtClothFoleySoundSets, 7, data.numClothTypes))
 			{
-				if (!(data.numClothTypes == 0))
+				if (data.numClothTypes != 0)
 				{
 					for (std::size_t i3 = 0; i3 < data.numClothTypes; i3++)
 					{
@@ -7285,7 +7302,7 @@ namespace zonetool::iw8
 			}
 			if (const auto items_44 = reader.read_array(data.mvmtRattleSoundSets, 7, data.numWeaponRattleTypes))
 			{
-				if (!(data.numWeaponRattleTypes == 0))
+				if (data.numWeaponRattleTypes != 0)
 				{
 					for (std::size_t i4 = 0; i4 < data.numWeaponRattleTypes; i4++)
 					{
@@ -7315,7 +7332,7 @@ namespace zonetool::iw8
 			reader.read_string(data.name);
 			if (const auto items_3 = reader.read_array(data.subFields, 15, data.numSubFields))
 			{
-				if (!(data.numSubFields == 0))
+				if (data.numSubFields != 0)
 				{
 					for (std::size_t i1 = 0; i1 < data.numSubFields; i1++)
 					{
@@ -7346,7 +7363,7 @@ namespace zonetool::iw8
 		{
 			if (const auto items_0 = reader.read_array(data.images, 7, data.imageCount))
 			{
-				if (!(data.imageCount == 0))
+				if (data.imageCount != 0)
 				{
 					for (std::size_t i1 = 0; i1 < data.imageCount; i1++)
 					{
@@ -7359,7 +7376,7 @@ namespace zonetool::iw8
 
 		void read_xmodelsurfs_ptr_array(zone_reader& reader, XModelSurfs** data, const std::size_t count)
 		{
-			if (!(count == 0))
+			if (count != 0)
 			{
 				for (std::size_t i1 = 0; i1 < count; i1++)
 				{
@@ -7378,7 +7395,7 @@ namespace zonetool::iw8
 			read_alwaysloadedflags(reader, data.globalFlags);
 			if (const auto items_1 = reader.read_array(data.perModelFlags, 7, data.modelCount))
 			{
-				if (!(data.modelCount == 0))
+				if (data.modelCount != 0)
 				{
 					for (std::size_t i1 = 0; i1 < data.modelCount; i1++)
 					{
@@ -7410,7 +7427,7 @@ namespace zonetool::iw8
 			reader.read_array(data.contentCounts, 1, outer_transientcosts.transientCostCount);
 			if (const auto items_1 = reader.read_array(data.contents, 7, outer_transientcosts.transientCostCount))
 			{
-				if (!(outer_transientcosts.transientCostCount == 0))
+				if (outer_transientcosts.transientCostCount != 0)
 				{
 					for (std::size_t i1 = 0; i1 < outer_transientcosts.transientCostCount; i1++)
 					{
@@ -7434,7 +7451,7 @@ namespace zonetool::iw8
 			read_transientcosts(reader, data.transientCosts);
 			if (const auto items_2 = reader.read_array(data.forcedStubAssets, 7, data.forcedStubAssetCount))
 			{
-				if (!(data.forcedStubAssetCount == 0))
+				if (data.forcedStubAssetCount != 0)
 				{
 					for (std::size_t i1 = 0; i1 < data.forcedStubAssetCount; i1++)
 					{
@@ -7444,7 +7461,7 @@ namespace zonetool::iw8
 			}
 			if (const auto items_12 = reader.read_array(data.transientFiles, 7, data.transientFileCount))
 			{
-				if (!(data.transientFileCount == 0))
+				if (data.transientFileCount != 0)
 				{
 					for (std::size_t i2 = 0; i2 < data.transientFileCount; i2++)
 					{
@@ -7454,7 +7471,7 @@ namespace zonetool::iw8
 			}
 			if (const auto items_22 = reader.read_array(data.transientAssets, 7, data.transientAssetCount))
 			{
-				if (!(data.transientAssetCount == 0))
+				if (data.transientAssetCount != 0)
 				{
 					for (std::size_t i3 = 0; i3 < data.transientAssetCount; i3++)
 					{
@@ -7464,7 +7481,7 @@ namespace zonetool::iw8
 			}
 			if (const auto items_32 = reader.read_array(data.transientWorldGridTileMaps, 7, data.transientWorldGridTileMapCount))
 			{
-				if (!(data.transientWorldGridTileMapCount == 0))
+				if (data.transientWorldGridTileMapCount != 0)
 				{
 					for (std::size_t i4 = 0; i4 < data.transientWorldGridTileMapCount; i4++)
 					{
@@ -7598,13 +7615,13 @@ namespace zonetool::iw8
 
 		void read_suitanimperweapclass_array(zone_reader& reader, SuitAnimPerWeapClass* data, const std::size_t count)
 		{
-			if (!(count == 0))
+			if (count != 0)
 			{
 				for (std::size_t i1 = 0; i1 < count; i1++)
 				{
 					if (const auto items_2 = reader.read_array(data[i1].anims, 7, data[i1].numAnims))
 					{
-						if (!(data[i1].numAnims == 0))
+						if (data[i1].numAnims != 0)
 						{
 							for (std::size_t i2 = 0; i2 < data[i1].numAnims; i2++)
 							{
@@ -7614,7 +7631,7 @@ namespace zonetool::iw8
 					}
 					if (const auto items_12 = reader.read_array(data[i1].gestures, 7, data[i1].numGestures))
 					{
-						if (!(data[i1].numGestures == 0))
+						if (data[i1].numGestures != 0)
 						{
 							for (std::size_t i3 = 0; i3 < data[i1].numGestures; i3++)
 							{
@@ -7697,7 +7714,7 @@ namespace zonetool::iw8
 			reader.read_string(data.name);
 			if (const auto items_3 = reader.read_array(data.animEntries, 7, data.numAnimEntries))
 			{
-				if (!(data.numAnimEntries == 0))
+				if (data.numAnimEntries != 0)
 				{
 					for (std::size_t i1 = 0; i1 < data.numAnimEntries; i1++)
 					{
@@ -7712,7 +7729,7 @@ namespace zonetool::iw8
 
 		void read_blendspace2ddef_ptr_array(zone_reader& reader, BlendSpace2DDef** data, const std::size_t count)
 		{
-			if (!(count == 0))
+			if (count != 0)
 			{
 				for (std::size_t i1 = 0; i1 < count; i1++)
 				{
@@ -7931,7 +7948,7 @@ namespace zonetool::iw8
 			reader.read_string(data.name);
 			if (const auto items_3 = reader.read_array(data.nodes, 7, data.nodeCount))
 			{
-				if (!(data.nodeCount == 0))
+				if (data.nodeCount != 0)
 				{
 					for (std::size_t i1 = 0; i1 < data.nodeCount; i1++)
 					{
@@ -7947,7 +7964,7 @@ namespace zonetool::iw8
 
 		void read_animsetanim_array(zone_reader& reader, AnimsetAnim* data, const std::size_t count)
 		{
-			if (!(count == 0))
+			if (count != 0)
 			{
 				for (std::size_t i1 = 0; i1 < count; i1++)
 				{
@@ -7959,11 +7976,11 @@ namespace zonetool::iw8
 
 		void read_asm_function_param_array(zone_reader& reader, ASM_Function_Param* data, const std::size_t count)
 		{
-			if (!(count == 0))
+			if (count != 0)
 			{
 				for (std::size_t i1 = 0; i1 < count; i1++)
 				{
-					if (!(static_cast<std::uint32_t>(data[i1].m_Type) != 2))
+					if (static_cast<std::uint32_t>(data[i1].m_Type) == 2)
 					{
 						reader.read_script_string(data[i1].u.m_String);
 					}
@@ -7973,7 +7990,7 @@ namespace zonetool::iw8
 
 		void read_asm_function_array(zone_reader& reader, ASM_Function* data, const std::size_t count)
 		{
-			if (!(count == 0))
+			if (count != 0)
 			{
 				for (std::size_t i1 = 0; i1 < count; i1++)
 				{
@@ -8008,7 +8025,7 @@ namespace zonetool::iw8
 			reader.read_script_string(data.moveTurnAlias);
 			if (const auto items_4 = reader.read_array(data.aliasAddons, 3, data.numAliasAddons))
 			{
-				if (!(data.numAliasAddons == 0))
+				if (data.numAliasAddons != 0)
 				{
 					for (std::size_t i1 = 0; i1 < data.numAliasAddons; i1++)
 					{
@@ -8029,7 +8046,7 @@ namespace zonetool::iw8
 
 		void read_animsetalias_array(zone_reader& reader, AnimsetAlias* data, const std::size_t count, [[maybe_unused]] const Animset& outer_animset)
 		{
-			if (!(count == 0))
+			if (count != 0)
 			{
 				for (std::size_t i1 = 0; i1 < count; i1++)
 				{
@@ -8044,7 +8061,7 @@ namespace zonetool::iw8
 					}
 					if (const auto items_11 = reader.read_array(data[i1].addons, 3, data[i1].numAddons))
 					{
-						if (!(data[i1].numAddons == 0))
+						if (data[i1].numAddons != 0)
 						{
 							for (std::size_t i2 = 0; i2 < data[i1].numAddons; i2++)
 							{
@@ -8056,7 +8073,7 @@ namespace zonetool::iw8
 					reader.read_script_string(data[i1].curveName);
 					if (static_cast<std::uint32_t>(outer_animset.mode) != 0)
 					{
-						if (!(static_cast<std::uint32_t>(outer_animset.mode) != 1))
+						if (static_cast<std::uint32_t>(outer_animset.mode) == 1)
 						{
 							if (const auto items_0 = reader.read_array(data[i1].u.m_PlayerAnimsetAlias, 7, 1))
 							{
@@ -8090,7 +8107,7 @@ namespace zonetool::iw8
 		{
 			if (const auto items_0 = reader.read_array(data.aliases, 7, data.numConditionValues))
 			{
-				if (!(data.numConditionValues == 0))
+				if (data.numConditionValues != 0)
 				{
 					for (std::size_t i1 = 0; i1 < data.numConditionValues; i1++)
 					{
@@ -8104,7 +8121,7 @@ namespace zonetool::iw8
 		{
 			if (const auto items_0 = reader.read_array(data.aliasesPerConditionType, 7, data.numConditionTypes))
 			{
-				if (!(data.numConditionTypes == 0))
+				if (data.numConditionTypes != 0)
 				{
 					for (std::size_t i1 = 0; i1 < data.numConditionTypes; i1++)
 					{
@@ -8116,7 +8133,7 @@ namespace zonetool::iw8
 
 		void read_animsetstate_array(zone_reader& reader, AnimsetState* data, const std::size_t count, [[maybe_unused]] const Animset& outer_animset)
 		{
-			if (!(count == 0))
+			if (count != 0)
 			{
 				for (std::size_t i1 = 0; i1 < count; i1++)
 				{
@@ -8127,7 +8144,7 @@ namespace zonetool::iw8
 					}
 					if (const auto items_7 = reader.read_array(data[i1].blendtreeAliases, 7, data[i1].numBlendtreeAliases))
 					{
-						if (!(data[i1].numBlendtreeAliases == 0))
+						if (data[i1].numBlendtreeAliases != 0)
 						{
 							for (std::size_t i2 = 0; i2 < data[i1].numBlendtreeAliases; i2++)
 							{
@@ -8141,7 +8158,7 @@ namespace zonetool::iw8
 					reader.read_array(data[i1].animEntryMap, 1, data[i1].numAnims);
 					if (static_cast<std::uint32_t>(outer_animset.mode) != 0)
 					{
-						if (!(static_cast<std::uint32_t>(outer_animset.mode) != 1))
+						if (static_cast<std::uint32_t>(outer_animset.mode) == 1)
 						{
 							if (const auto items_0 = reader.read_array(data[i1].u.m_PlayerAnimsetState, 7, 1))
 							{
@@ -8182,7 +8199,7 @@ namespace zonetool::iw8
 			reader.read_script_string(data.alwaysOnStateName);
 			if (static_cast<std::uint32_t>(data.mode) != 0)
 			{
-				if (!(static_cast<std::uint32_t>(data.mode) != 1))
+				if (static_cast<std::uint32_t>(data.mode) == 1)
 				{
 					if (const auto items_0 = reader.read_array(data.u.m_PlayerAnimset, 7, 1))
 					{
@@ -8231,7 +8248,7 @@ namespace zonetool::iw8
 		{
 			if (const auto items_0 = reader.read_array(data.m_Transitions, 7, data.m_NumTransitions))
 			{
-				if (!(data.m_NumTransitions == 0))
+				if (data.m_NumTransitions != 0)
 				{
 					for (std::size_t i1 = 0; i1 < data.m_NumTransitions; i1++)
 					{
@@ -8267,7 +8284,7 @@ namespace zonetool::iw8
 			}
 			if (static_cast<std::uint32_t>(outer_asm.m_Mode) != 0)
 			{
-				if (!(static_cast<std::uint32_t>(outer_asm.m_Mode) != 1))
+				if (static_cast<std::uint32_t>(outer_asm.m_Mode) == 1)
 				{
 					if (const auto items_0 = reader.read_array(data.u.m_PlayerState, 7, 1))
 					{
@@ -8297,7 +8314,7 @@ namespace zonetool::iw8
 			reader.read_script_string(data.m_Name);
 			if (const auto items_4 = reader.read_array(data.m_States, 7, data.m_NumStates))
 			{
-				if (!(data.m_NumStates == 0))
+				if (data.m_NumStates != 0)
 				{
 					for (std::size_t i1 = 0; i1 < data.m_NumStates; i1++)
 					{
@@ -8307,7 +8324,7 @@ namespace zonetool::iw8
 			}
 			if (const auto items_14 = reader.read_array(data.m_LogicGroups, 7, data.m_NumLogicGroups))
 			{
-				if (!(data.m_NumLogicGroups == 0))
+				if (data.m_NumLogicGroups != 0)
 				{
 					for (std::size_t i2 = 0; i2 < data.m_NumLogicGroups; i2++)
 					{
@@ -8325,7 +8342,7 @@ namespace zonetool::iw8
 			reader.read_array(data.m_FuncIDs, 3, data.m_NumFuncIDs);
 			if (static_cast<std::uint32_t>(data.m_Mode) != 0)
 			{
-				if (!(static_cast<std::uint32_t>(data.m_Mode) != 1))
+				if (static_cast<std::uint32_t>(data.m_Mode) == 1)
 				{
 					reader.read_array(data.u.m_PlayerASM, 0, 1);
 				}
@@ -8356,7 +8373,7 @@ namespace zonetool::iw8
 			reader.read_string(data.name);
 			if (const auto items_3 = reader.read_array(data.constraints, 3, data.numConstraints))
 			{
-				if (!(data.numConstraints == 0))
+				if (data.numConstraints != 0)
 				{
 					for (std::size_t i1 = 0; i1 < data.numConstraints; i1++)
 					{
@@ -8396,7 +8413,7 @@ namespace zonetool::iw8
 			reader.read_string(data.name);
 			if (const auto items_3 = reader.read_array(data.dynamicBoneProperties, 7, data.numDynamicBones))
 			{
-				if (!(data.numDynamicBones == 0))
+				if (data.numDynamicBones != 0)
 				{
 					for (std::size_t i1 = 0; i1 < data.numDynamicBones; i1++)
 					{
@@ -8406,7 +8423,7 @@ namespace zonetool::iw8
 			}
 			if (const auto items_13 = reader.read_array(data.collidableBones, 3, data.numCollidableBones))
 			{
-				if (!(data.numCollidableBones == 0))
+				if (data.numCollidableBones != 0)
 				{
 					for (std::size_t i2 = 0; i2 < data.numCollidableBones; i2++)
 					{
@@ -8548,7 +8565,7 @@ namespace zonetool::iw8
 			}
 			if (const auto items_8 = reader.read_array(data.cameras, 7, data.cameraCount))
 			{
-				if (!(data.cameraCount == 0))
+				if (data.cameraCount != 0)
 				{
 					for (std::size_t i1 = 0; i1 < data.cameraCount; i1++)
 					{
@@ -8559,7 +8576,7 @@ namespace zonetool::iw8
 			reader.read_array(data.cameraSwitchParams, 3, data.frames);
 			if (const auto items_19 = reader.read_array(data.frameNames, 7, data.frameNameCount))
 			{
-				if (!(data.frameNameCount == 0))
+				if (data.frameNameCount != 0)
 				{
 					for (std::size_t i2 = 0; i2 < data.frameNameCount; i2++)
 					{
@@ -8585,7 +8602,7 @@ namespace zonetool::iw8
 
 		void read_materialtexturedef_array(zone_reader& reader, MaterialTextureDef* data, const std::size_t count)
 		{
-			if (!(count == 0))
+			if (count != 0)
 			{
 				for (std::size_t i1 = 0; i1 < count; i1++)
 				{
@@ -8679,7 +8696,7 @@ namespace zonetool::iw8
 			reader.read_string(data.name);
 			if (const auto items_3 = reader.read_array(data.imageNodes, 7, data.imageNodeCount))
 			{
-				if (!(data.imageNodeCount == 0))
+				if (data.imageNodeCount != 0)
 				{
 					for (std::size_t i1 = 0; i1 < data.imageNodeCount; i1++)
 					{
@@ -8698,7 +8715,7 @@ namespace zonetool::iw8
 			reader.read_string(data.name);
 			if (const auto items_3 = reader.read_array(data.keyValuePairs, 7, data.numVariables))
 			{
-				if (!(data.numVariables == 0))
+				if (data.numVariables != 0)
 				{
 					for (std::size_t i1 = 0; i1 < data.numVariables; i1++)
 					{
@@ -8732,7 +8749,7 @@ namespace zonetool::iw8
 		{
 			if (const auto items_0 = reader.read_array(data.nodes, 7, (data.height * *reinterpret_cast<const std::uint32_t*>(&data))))
 			{
-				if (!((data.height * *reinterpret_cast<const std::uint32_t*>(&data)) == 0))
+				if ((data.height * *reinterpret_cast<const std::uint32_t*>(&data)) != 0)
 				{
 					for (std::size_t i1 = 0; i1 < (data.height * *reinterpret_cast<const std::uint32_t*>(&data)); i1++)
 					{
@@ -8746,7 +8763,7 @@ namespace zonetool::iw8
 		{
 			if (const auto items_0 = reader.read_array(data.levels, 7, *reinterpret_cast<const std::uint32_t*>(&data)))
 			{
-				if (!(*reinterpret_cast<const std::uint32_t*>(&data) == 0))
+				if (*reinterpret_cast<const std::uint32_t*>(&data) != 0)
 				{
 					for (std::size_t i1 = 0; i1 < *reinterpret_cast<const std::uint32_t*>(&data); i1++)
 					{
@@ -8774,7 +8791,7 @@ namespace zonetool::iw8
 			read_stterraingrid(reader, data.grid);
 			if (const auto items_2 = reader.read_array(data.layerMaterials, 7, data.layerMaterialsCount))
 			{
-				if (!(data.layerMaterialsCount == 0))
+				if (data.layerMaterialsCount != 0)
 				{
 					for (std::size_t i1 = 0; i1 < data.layerMaterialsCount; i1++)
 					{
@@ -8805,7 +8822,7 @@ namespace zonetool::iw8
 			reader.read_string(data.name);
 			if (const auto items_3 = reader.read_array(data.surfaces, 7, data.surfaceCount))
 			{
-				if (!(data.surfaceCount == 0))
+				if (data.surfaceCount != 0)
 				{
 					for (std::size_t i1 = 0; i1 < data.surfaceCount; i1++)
 					{
@@ -8813,21 +8830,19 @@ namespace zonetool::iw8
 					}
 				}
 			}
-			if (const auto items_13 = reader.read_array(data.maps, 3, data.mapsCount))
+			reader.read_array(data.maps, 3, data.mapsCount);
+			if (const auto items_14 = reader.read_array(data.flattenedImages, 7, data.flattenedImagesCount))
 			{
-			}
-			if (const auto items_16 = reader.read_array(data.flattenedImages, 7, data.flattenedImagesCount))
-			{
-				read_gfximage_ptr_array(reader, items_16, data.flattenedImagesCount);
+				read_gfximage_ptr_array(reader, items_14, data.flattenedImagesCount);
 			}
 			read_stcluttersamplepoints(reader, data.clutterSamplePoints);
-			if (const auto items_21 = reader.read_array(data.lightmaps, 7, data.lightmapCount))
+			if (const auto items_19 = reader.read_array(data.lightmaps, 7, data.lightmapCount))
 			{
-				if (!(data.lightmapCount == 0))
+				if (data.lightmapCount != 0)
 				{
 					for (std::size_t i3 = 0; i3 < data.lightmapCount; i3++)
 					{
-						read_gfximage_ptr_array(reader, &items_21[i3].images[0], 3);
+						read_gfximage_ptr_array(reader, &items_19[i3].images[0], 3);
 					}
 				}
 			}
@@ -8843,7 +8858,7 @@ namespace zonetool::iw8
 			reader.read_asset(ASSET_TYPE_SCRIPTFILE, data.scriptFile);
 			if (const auto items_4 = reader.read_array(data.patchFunctions, 7, data.numPatchFunctions))
 			{
-				if (!(data.numPatchFunctions == 0))
+				if (data.numPatchFunctions != 0)
 				{
 					for (std::size_t i1 = 0; i1 < data.numPatchFunctions; i1++)
 					{
@@ -8867,7 +8882,7 @@ namespace zonetool::iw8
 		{
 			if (const auto items_0 = reader.read_array(data.models, 7, *reinterpret_cast<const std::uint32_t*>(&data)))
 			{
-				if (!(*reinterpret_cast<const std::uint32_t*>(&data) == 0))
+				if (*reinterpret_cast<const std::uint32_t*>(&data) != 0)
 				{
 					for (std::size_t i1 = 0; i1 < *reinterpret_cast<const std::uint32_t*>(&data); i1++)
 					{
@@ -8950,7 +8965,7 @@ namespace zonetool::iw8
 
 		void read_dynentitydef_array(zone_reader& reader, DynEntityDef* data, const std::size_t count)
 		{
-			if (!(count == 0))
+			if (count != 0)
 			{
 				for (std::size_t i1 = 0; i1 < count; i1++)
 				{
@@ -8969,7 +8984,7 @@ namespace zonetool::iw8
 
 		void read_spatialpartition_transientpopulation_ptr_array(zone_reader& reader, SpatialPartition_TransientPopulation** data, const std::size_t count)
 		{
-			if (!(count == 0))
+			if (count != 0)
 			{
 				for (std::size_t i1 = 0; i1 < count; i1++)
 				{
@@ -9011,7 +9026,7 @@ namespace zonetool::iw8
 
 		void read_const_dlogserializer_ptr_array(zone_reader& reader, DLogSerializer** data, const std::size_t count)
 		{
-			if (!(count == 0))
+			if (count != 0)
 			{
 				for (std::size_t i1 = 0; i1 < count; i1++)
 				{
@@ -9066,7 +9081,7 @@ namespace zonetool::iw8
 
 		void read_dlogcolumn_array(zone_reader& reader, DLogColumn* data, const std::size_t count)
 		{
-			if (!(count == 0))
+			if (count != 0)
 			{
 				for (std::size_t i1 = 0; i1 < count; i1++)
 				{
@@ -9097,14 +9112,14 @@ namespace zonetool::iw8
 
 		void read_dlogevent_array(zone_reader& reader, DLogEvent* data, const std::size_t count)
 		{
-			if (!(count == 0))
+			if (count != 0)
 			{
 				for (std::size_t i1 = 0; i1 < count; i1++)
 				{
 					reader.read_string(data[i1].name);
 					if (const auto items_3 = reader.read_array(data[i1].rows, 7, data[i1].rowCount))
 					{
-						if (!(data[i1].rowCount == 0))
+						if (data[i1].rowCount != 0)
 						{
 							for (std::size_t i2 = 0; i2 < data[i1].rowCount; i2++)
 							{
@@ -9120,7 +9135,7 @@ namespace zonetool::iw8
 					read_dloghashtable(reader, data[i1].columnHashTable);
 					if (const auto items_19 = reader.read_array(data[i1].channelRefs, 7, data[i1].channelRefCount))
 					{
-						if (!(data[i1].channelRefCount == 0))
+						if (data[i1].channelRefCount != 0)
 						{
 							for (std::size_t i3 = 0; i3 < data[i1].channelRefCount; i3++)
 							{
@@ -9142,7 +9157,7 @@ namespace zonetool::iw8
 			reader.read_string(data.project);
 			if (const auto items_4 = reader.read_array(data.channels, 7, data.channelCount))
 			{
-				if (!(data.channelCount == 0))
+				if (data.channelCount != 0)
 				{
 					for (std::size_t i1 = 0; i1 < data.channelCount; i1++)
 					{
