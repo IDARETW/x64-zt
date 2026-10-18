@@ -668,6 +668,25 @@ namespace zonetool::iw8::havok
 		return found != this->identities_.end() ? std::optional(found->second) : std::nullopt;
 	}
 
+	std::optional<std::pair<std::uint32_t, std::uint32_t>> type_table::member(std::uint32_t index, const std::string_view name) const
+	{
+		for (std::size_t depth = 0; index && depth < 64; depth++)
+		{
+			const auto& info = this->types_.at(index);
+			for (const auto& entry : info.members)
+			{
+				if (entry.name == name)
+				{
+					return std::pair(entry.offset, entry.type);
+				}
+			}
+
+			index = info.parent;
+		}
+
+		return {};
+	}
+
 	std::uint32_t type_table::size_of(std::uint32_t index) const
 	{
 		for (std::size_t depth = 0; index && depth < 64; depth++)

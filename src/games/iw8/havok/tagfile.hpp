@@ -50,6 +50,9 @@ namespace zonetool::iw8::havok
 		std::string identity(std::uint32_t index) const;
 		std::optional<std::uint32_t> find(std::string_view identity) const;
 
+		// The offset and type of a member, in the type or one of its parents.
+		std::optional<std::pair<std::uint32_t, std::uint32_t>> member(std::uint32_t index, std::string_view name) const;
+
 		std::uint32_t size_of(std::uint32_t index) const;
 		std::uint32_t alignment_of(std::uint32_t index) const;
 		pointer_kind kind_of(std::uint32_t pointer_type) const;
