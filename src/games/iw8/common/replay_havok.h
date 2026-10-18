@@ -105,6 +105,12 @@ struct PhysicsAsset
     std::uint32_t simulationCategory{1};
 };
 
+// Bakes without the Replay executable from here on: the shapes and physics objects are built
+// natively, with the Havok type compendium of the Replay zone folder (code_post_gfx).
+// With checkWithReplay, the Replay executable loads the shape lists and checks their bounds.
+void UseNativeHavok(const std::filesystem::path &zoneFolder, bool checkWithReplay = false);
+bool UsesNativeHavok();
+
 void PrepareCollisionBaker(const std::filesystem::path &replayExecutable);
 bool FindOpaqueString(std::string_view value, std::uint32_t &id);
 BakeResult BakeCollision(const BakeInput &input);

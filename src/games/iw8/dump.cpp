@@ -1,5 +1,6 @@
 #include <std_include.hpp>
 #include "iw8.hpp"
+#include "havok/compendium.hpp"
 #include "havok/mesh.hpp"
 #include "havok/objects.hpp"
 #include "havok/physics.hpp"
@@ -246,26 +247,7 @@ namespace zonetool::iw8
 				original.size(), offset, asset, bytes_at(written.data), bytes_at(original), blocks.empty() ? " equal" : blocks));
 		}
 
-		// The Replay global Havok type compendium: the code_post_gfx physics library physicsglobaltypecompendium.
-		const havok::type_table& replay_compendium(const std::filesystem::path& zone_folder)
-		{
-			static const auto compendium = [&zone_folder]
-			{
-				const auto zone = load_zone(zone_folder / "code_post_gfx.ff");
-				for (const auto& asset : zone->assets)
-				{
-					const auto& library = *static_cast<const PhysicsLibrary*>(asset.header);
-					if (asset.type == ASSET_TYPE_PHYSICSLIBRARY && !asset.referenced && library.isGlobalTypeCompendium)
-					{
-						return havok::type_table::read({reinterpret_cast<const std::uint8_t*>(library.havokData), library.havokDataSize});
-					}
-				}
-
-				throw std::runtime_error("code_post_gfx has no Havok type compendium");
-			}();
-
-			return compendium;
-		}
+		using havok::replay_compendium;
 
 		// The Havok tagfiles in the data records of an asset dump.
 		std::vector<std::string_view> tagfile_records(const std::string_view dump)
@@ -900,7 +882,8 @@ namespace zonetool::iw8
 		}
 
 		// The triangles of `expected` that `found` has (same shape tag and winding, vertices within the tolerance).
-		std::size_t matching_triangles(const havok::decoded_mesh& expected, const havok::decoded_mesh& found, const float tolerance)
+		std::size_t matching_triangles(const havok::decoded_mesh& expected, const havok::decoded_mesh& found, const float tolerance,
+			std::vector<bool>* found_used = nullptr)
 		{
 			const auto cell_of = [](const std::array<havok::vector3, 3>& triangle)
 			{
@@ -975,6 +958,11 @@ namespace zonetool::iw8
 					used[*best] = true;
 					matched++;
 				}
+			}
+
+			if (found_used)
+			{
+				*found_used = std::move(used);
 			}
 
 			return matched;
@@ -1781,6 +1769,363 @@ namespace zonetool::iw8
 				counts.other_assets, counts.shapes.built, counts.shapes.copied, counts.shapes.masses, counts.shapes.mass_error);
 		}
 
+		struct comparison
+		{
+			std::size_t same{};
+			std::size_t havok{};
+			std::size_t shapes{};
+			float largest_distance{};
+			double largest_mass_difference{};
+			// Triangles that the built meshes keep beyond the reference ones.
+			std::size_t extra_triangles{};
+			double largest_extra_area{};
+			// Assets without Havok data that differ, by type.
+			std::map<std::string, std::size_t> other;
+			std::string first_other;
+		};
+
+		// The largest distance from a triangle of the reference mesh to the closest triangle with the same tag and winding of the
+		// built one, measured at the corners (the meshes quantize their vertices differently). The built mesh may keep more
+		// triangles: small ones that the Replay tools leave out.
+		float mesh_distance(const havok::decoded_mesh& built, const havok::decoded_mesh& reference, const float limit, comparison& result)
+		{
+			for (auto tolerance = 1.0f / 64.0f;; tolerance *= 2.0f)
+			{
+				std::vector<bool> used;
+				if (matching_triangles(reference, built, tolerance, &used) == reference.triangles.size())
+				{
+					for (std::size_t t = 0; t < built.triangles.size(); t++)
+					{
+						if (!used[t])
+						{
+							const auto& [a, b, c] = built.triangles[t];
+							const std::array<double, 3> ab{static_cast<double>(b[0]) - a[0], static_cast<double>(b[1]) - a[1], static_cast<double>(b[2]) - a[2]};
+							const std::array<double, 3> ac{static_cast<double>(c[0]) - a[0], static_cast<double>(c[1]) - a[1], static_cast<double>(c[2]) - a[2]};
+							const std::array<double, 3> n{ab[1] * ac[2] - ab[2] * ac[1], ab[2] * ac[0] - ab[0] * ac[2], ab[0] * ac[1] - ab[1] * ac[0]};
+							result.extra_triangles++;
+							result.largest_extra_area = std::max(result.largest_extra_area, std::sqrt(n[0] * n[0] + n[1] * n[1] + n[2] * n[2]) / 2.0);
+						}
+					}
+
+					return tolerance;
+				}
+
+				if (tolerance > limit)
+				{
+					throw std::runtime_error(std::format("compressed mesh triangles differ by more than {}", limit));
+				}
+			}
+		}
+
+		// Two shapes built from the same input must agree: compressed meshes on their triangles and convex shapes, compound
+		// shapes on their instances, convex polytopes on their bounds.
+		float compare_built_shapes(const havok::tagfile& a_file, const std::uint32_t a, const havok::tagfile& b_file, const std::uint32_t b,
+			const havok::type_table& types, comparison& result)
+		{
+			const auto& x = a_file.items.at(a);
+			const auto& y = b_file.items.at(b);
+			const auto identity = types.identity(x.type);
+			if (x.type != y.type)
+			{
+				throw std::runtime_error(std::format("a {} is a {} in the other zone", identity, types.identity(y.type)));
+			}
+
+			if (identity == "hknpCompressedMeshShape")
+			{
+				const auto first = havok::read_compressed_mesh_shape(a_file, types, a);
+				const auto second = havok::read_compressed_mesh_shape(b_file, types, b);
+				if (first.triangles.size() < second.triangles.size() || first.convex_shapes.size() != second.convex_shapes.size())
+				{
+					char debug[MAX_PATH]{};
+					if (GetEnvironmentVariableA("IW8_DUMP_DEBUG", debug, sizeof(debug)))
+					{
+						for (const auto& [name, mesh_data] : {std::pair("compare_a.txt", &first), std::pair("compare_b.txt", &second)})
+						{
+							std::ofstream text(std::filesystem::path(debug) / name);
+							for (std::size_t t = 0; t < mesh_data->triangles.size(); t++)
+							{
+								const auto& tri = mesh_data->triangles[t];
+								text << std::format("{} {} {} {} {} {} {} {} {} {}\n", tri[0][0], tri[0][1], tri[0][2], tri[1][0], tri[1][1], tri[1][2],
+									tri[2][0], tri[2][1], tri[2][2], mesh_data->triangle_tags[t]);
+							}
+						}
+					}
+
+					throw std::runtime_error(std::format("compressed meshes have {} and {} triangles, {} and {} convex shapes", first.triangles.size(),
+						second.triangles.size(), first.convex_shapes.size(), second.convex_shapes.size()));
+				}
+
+				for (std::size_t i = 0; i < first.convex_shapes.size(); i++)
+				{
+					const auto& p = first.convex_shapes[i];
+					const auto& q = second.convex_shapes[i];
+					if (p.translation != q.translation || p.rotation != q.rotation || p.shape_tag != q.shape_tag)
+					{
+						throw std::runtime_error(std::format("convex shape {} of a compressed mesh moved", i));
+					}
+
+					compare_built_shapes(a_file, first.convex_items[i], b_file, second.convex_items[i], types, result);
+				}
+
+				return mesh_distance(first, second, 1.0f, result);
+			}
+
+			if (identity == "hknpConvexPolytopeShape")
+			{
+				const auto p = havok::instance_bounds({.vertices = havok::read_convex_polytope_shape(a_file, types, a).vertices});
+				const auto q = havok::instance_bounds({.vertices = havok::read_convex_polytope_shape(b_file, types, b).vertices});
+				float largest{};
+				for (std::size_t k = 0; k < 6; k++)
+				{
+					largest = std::max(largest, std::abs(p[k] - q[k]));
+				}
+
+				if (largest > 0.01f)
+				{
+					throw std::runtime_error(std::format("convex polytopes differ by {}", largest));
+				}
+
+				// Hulls of model points: the Replay tools simplify them a little.
+				const auto pm = havok::read_mass_properties(a_file, types, a);
+				const auto qm = havok::read_mass_properties(b_file, types, b);
+				const auto difference = pm && qm ? mass_difference(*pm, *qm) : 0.0;
+				result.largest_mass_difference = std::max(result.largest_mass_difference, difference);
+				if (!!pm != !!qm || difference > 0.02)
+				{
+					throw std::runtime_error(std::format("convex polytopes have mass properties {:.4f} apart", difference));
+				}
+
+				return largest;
+			}
+
+			if (identity == "hknpCompoundShape")
+			{
+				const auto elements_at = member_offset(types, x.type, "instances.elements");
+				const auto& p = a_file.items.at(item_target(x, elements_at));
+				const auto& q = b_file.items.at(item_target(y, elements_at));
+				if (p.count != q.count)
+				{
+					throw std::runtime_error("compound shapes have other instance counts");
+				}
+
+				float largest{};
+				for (std::uint32_t i = 0; i < p.count; i++)
+				{
+					// Transforms and tags, without the tree position in the translation w.
+					if (!std::equal(p.data.begin() + i * 112, p.data.begin() + i * 112 + 60, q.data.begin() + i * 112) ||
+						item_value<std::uint16_t>(p, i * 112 + 88) != item_value<std::uint16_t>(q, i * 112 + 88))
+					{
+						throw std::runtime_error(std::format("compound shape instance {} differs", i));
+					}
+
+					largest = std::max(largest, compare_built_shapes(a_file, item_target(p, i * 112 + 80), b_file, item_target(q, i * 112 + 80), types,
+						result));
+				}
+
+				return largest;
+			}
+
+			return 0.0f;
+		}
+
+		// Two tagfiles built from the same input: shape lists with the same entries and tags, physics assets with the same
+		// objects, and shapes that agree.
+		void compare_tagfiles(const havok::tagfile& a, const havok::tagfile& b, const havok::type_table& types, comparison& result)
+		{
+			const auto& x = a.items.at(1);
+			const auto& y = b.items.at(1);
+			if (x.type != y.type)
+			{
+				throw std::runtime_error("the tagfiles have other root types");
+			}
+
+			const auto identity = types.identity(x.type);
+			const auto array_of = [&](const havok::tagfile& file, const havok::item& root, const std::string_view name) -> const havok::item*
+			{
+				const auto target = item_target(root, member_offset(types, root.type, name));
+				return target ? &file.items.at(target) : nullptr;
+			};
+
+			if (identity == "HavokPhysicsShapeList")
+			{
+				for (const auto name : {"shapeIndices", "vertCounts", "triCounts", "shapeTagData", "shapeContents", "convexCounts"})
+				{
+					const auto* p = array_of(a, x, name);
+					const auto* q = array_of(b, y, name);
+					if ((p ? p->data : std::vector<std::uint8_t>{}) != (q ? q->data : std::vector<std::uint8_t>{}))
+					{
+						throw std::runtime_error(std::format("the shape lists have other {}", name));
+					}
+				}
+
+				const auto* p_bounds = array_of(a, x, "minMaxes");
+				const auto* q_bounds = array_of(b, y, "minMaxes");
+				for (std::size_t k = 0; p_bounds && q_bounds && k < p_bounds->data.size() / 4; k++)
+				{
+					if (std::abs(item_value<float>(*p_bounds, k * 4) - item_value<float>(*q_bounds, k * 4)) > 1e-4f)
+					{
+						throw std::runtime_error("the shape lists have other bounds");
+					}
+				}
+
+				const auto* p_shapes = array_of(a, x, "shapes");
+				const auto* q_shapes = array_of(b, y, "shapes");
+				const auto* p_names = array_of(a, x, "shapeNames");
+				const auto* q_names = array_of(b, y, "shapeNames");
+				for (std::uint32_t i = 0; p_shapes && q_shapes && i < p_shapes->count; i++)
+				{
+					if (item_string(a, item_target(*p_names, i * 8)) != item_string(b, item_target(*q_names, i * 8)))
+					{
+						throw std::runtime_error(std::format("shape list entry {} has another name", i));
+					}
+
+					result.largest_distance = std::max(result.largest_distance, compare_built_shapes(a, item_target(*p_shapes, i * 8), b,
+						item_target(*q_shapes, i * 8), types, result));
+					result.shapes++;
+				}
+
+				return;
+			}
+
+			if (identity == "HavokPhysicsAsset")
+			{
+				// The objects other than shapes must have the same bytes, without their pointers.
+				const auto bytes_of = [](const havok::item* object)
+				{
+					if (!object)
+					{
+						return std::vector<std::uint8_t>{};
+					}
+
+					auto data = object->data;
+					for (const auto& pointer : object->pointers)
+					{
+						std::fill_n(data.begin() + pointer.offset, std::min<std::size_t>(8, data.size() - pointer.offset), 0);
+					}
+
+					return data;
+				};
+
+				const auto* p_system = array_of(a, x, "physicsSystemData");
+				const auto* q_system = array_of(b, y, "physicsSystemData");
+				if (bytes_of(&x) != bytes_of(&y) || bytes_of(p_system) != bytes_of(q_system))
+				{
+					throw std::runtime_error("the physics assets have other values");
+				}
+
+				for (const auto name : {"materials", "motionProperties", "bodyCinfos"})
+				{
+					if (bytes_of(p_system ? array_of(a, *p_system, name) : nullptr) != bytes_of(q_system ? array_of(b, *q_system, name) : nullptr))
+					{
+						throw std::runtime_error(std::format("the physics systems have other {}", name));
+					}
+				}
+
+				const auto* p_bodies = p_system ? array_of(a, *p_system, "bodyCinfos") : nullptr;
+				const auto* q_bodies = q_system ? array_of(b, *q_system, "bodyCinfos") : nullptr;
+				const auto shape_at = p_bodies ? member_offset(types, p_bodies->type, "shape") : 0;
+				const auto stride = p_bodies ? types.size_of(p_bodies->type) : 0;
+				for (std::uint32_t i = 0; p_bodies && q_bodies && i < p_bodies->count; i++)
+				{
+					result.largest_distance = std::max(result.largest_distance, compare_built_shapes(a, item_target(*p_bodies, i * stride + shape_at), b,
+						item_target(*q_bodies, i * stride + shape_at), types, result));
+					result.shapes++;
+				}
+			}
+		}
+
+		// IW8_REWRITE=compare compares the zone with IW8_COMPARE_ZONE, built from the same input (with the Havok data of the
+		// Replay executable and without it): all assets must be the same, except Havok data that must agree.
+		void verify_compare(const std::filesystem::path& zone_folder, const loaded_zone& zone)
+		{
+			char other_path[MAX_PATH]{};
+			if (!GetEnvironmentVariableA("IW8_COMPARE_ZONE", other_path, sizeof(other_path)))
+			{
+				throw std::runtime_error("IW8_REWRITE=compare needs IW8_COMPARE_ZONE");
+			}
+
+			const auto& compendium = replay_compendium(zone_folder);
+			const auto other = load_zone(std::filesystem::path(other_path));
+			std::map<asset_key, const void*> other_assets;
+			for (const auto& asset : other->assets)
+			{
+				if (!asset.referenced)
+				{
+					other_assets.emplace(asset_key{asset.type, asset_name(asset.type, asset.header)}, asset.header);
+				}
+			}
+
+			comparison result;
+			std::set<asset_key> seen;
+			for (const auto& asset : zone.assets)
+			{
+				const asset_key key{asset.type, asset_name(asset.type, asset.header)};
+				if (asset.referenced || !seen.emplace(key).second)
+				{
+					continue;
+				}
+
+				const auto format = find_asset_format(asset.type);
+				const auto found = other_assets.find(key);
+				if (found == other_assets.end())
+				{
+					throw std::runtime_error(std::format("{} \"{}\" is missing from the other zone", format ? format->name : "?", key.second));
+				}
+
+				const auto dump = dump_asset_data(asset.type, asset.header);
+				const auto other_dump = dump_asset_data(asset.type, found->second);
+				if (dump == other_dump)
+				{
+					result.same++;
+					continue;
+				}
+
+				// Without the Havok data, the dumps must be the same.
+				auto blank = dump;
+				auto other_blank = other_dump;
+				const auto records = tagfile_records(dump);
+				const auto other_records = tagfile_records(other_dump);
+				if (records.size() != other_records.size() || records.empty())
+				{
+					result.other[format ? format->name : "?"]++;
+					if (result.first_other.empty())
+					{
+						result.first_other = std::format("{} \"{}\"", format ? format->name : "?", key.second);
+					}
+
+					continue;
+				}
+
+				try
+				{
+					for (std::size_t r = 0; r < records.size(); r++)
+					{
+						const std::span x(reinterpret_cast<const std::uint8_t*>(records[r].data()), records[r].size());
+						const std::span y(reinterpret_cast<const std::uint8_t*>(other_records[r].data()), other_records[r].size());
+						compare_tagfiles(havok::read_tagfile(x, &compendium), havok::read_tagfile(y, &compendium), compendium, result);
+					}
+				}
+				catch (const std::exception& e)
+				{
+					throw std::runtime_error(std::format("{} \"{}\": {}", format ? format->name : "?", key.second, e.what()));
+				}
+
+				result.havok++;
+			}
+
+			std::string differences;
+			for (const auto& [type, count] : result.other)
+			{
+				differences += std::format(" {} {}", count, type);
+			}
+
+			ZONETOOL_INFO("%s: %zu assets are the same and %zu agree on their Havok data (%zu shapes, largest vertex distance %.6f, %zu "
+				"triangles kept beyond the other zone, largest area %.6f, mass properties %.4f apart); other differences:%s%s%s", zone.name.data(),
+				result.same, result.havok, result.shapes, result.largest_distance, result.extra_triangles, result.largest_extra_area,
+				result.largest_mass_difference, differences.empty() ? " none" :
+				differences.data(), result.first_other.empty() ? "" : ", first ", result.first_other.data());
+		}
+
 		// The asset list of the zone: <pool>,<name> for an asset, <pool>,,<name> for a reference.
 		void write_asset_csv(const loaded_zone& zone)
 		{
@@ -1889,6 +2234,10 @@ namespace zonetool::iw8
 			else if (std::string_view(rewrite) == "physics")
 			{
 				verify_physics(zone_folder, *zone);
+			}
+			else if (std::string_view(rewrite) == "compare")
+			{
+				verify_compare(zone_folder, *zone);
 			}
 			else
 			{

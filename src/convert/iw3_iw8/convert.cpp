@@ -2135,6 +2135,19 @@ namespace zonetool::convert::iw3_iw8
 
 		const auto replay = option("replay");
 		args.replayExecutable = replay.empty() ? (conversion.target_game_path / "game_dx12_ship_replay.exe").string() : replay;
+
+		// --havok native builds the collision and physics without the Replay executable; native-check also loads the
+		// collision with it to check the bounds.
+		if (const auto havok = option("havok"); !havok.empty() && havok != "exe")
+		{
+			if (havok != "native" && havok != "native-check")
+			{
+				throw std::runtime_error(std::format("--havok must be exe, native or native-check, not \"{}\"", havok));
+			}
+
+			// The type compendium comes from the zone folder of the game.
+			iw8::havok::UseNativeHavok(std::filesystem::path(args.replayExecutable).parent_path() / "zone", havok == "native-check");
+		}
 		args.unlinkerExecutable = option("unlinker");
 		args.gscTool = option("gsc_tool");
 		args.metadataPath = option("metadata");
