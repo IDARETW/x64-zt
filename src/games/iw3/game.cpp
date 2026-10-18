@@ -6,7 +6,13 @@ namespace zonetool::iw3
 {
 	namespace
 	{
-		void dump_zone(const std::filesystem::path&, const std::filesystem::path&, const asset_dumper)
+		void dump_zone(const std::filesystem::path&, const std::filesystem::path&, const converter*)
+		{
+			throw std::runtime_error("iw3 zones are read through OAT Unlinker: use dumpzone <zone> --target iw8");
+		}
+
+		void dump_asset(const std::filesystem::path&, const std::filesystem::path&, const std::string&, const std::string&,
+			const converter*)
 		{
 			throw std::runtime_error("iw3 zones are read through OAT Unlinker: use dumpzone <zone> --target iw8");
 		}
@@ -37,6 +43,7 @@ namespace zonetool::iw3
 				.block_count = 9,
 			},
 			.dump_zone = dump_zone,
+			.dump_asset = dump_asset,
 			.verify_zone = verify_zone,
 			.build_zone = build_zone,
 		};

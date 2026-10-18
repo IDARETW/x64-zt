@@ -7,12 +7,17 @@
 
 namespace zonetool
 {
-	template <ASSET_TEMPLATE>
+	template <ASSET_TEMPLATE, bool compressed_only = false>
 	class rawfile : public asset_interface
 	{
 	private:
 		std::string name_;
 		S* asset_ = nullptr;
+
+		static int buffer_size(const S* asset)
+		{
+			return asset->compressedLen || compressed_only ? asset->compressedLen : asset->len + 1;
+		}
 
 	public:
 		S* parse(const std::string& name, zone_memory* mem)
@@ -71,13 +76,14 @@ namespace zonetool
 				std::string str = ZONETOOL_BRANDING;
 				zone_buffer buf(std::vector<uint8_t>(str.begin(), str.end()));
 				auto compressed = buf.compress_zlib();
-				std::string buffer(compressed.begin(), compressed.end());
+				const auto buffer = mem->allocate<char>(compressed.size());
+				std::memcpy(buffer, compressed.data(), compressed.size());
 
 				this->asset_ = mem->allocate<S>();
 				this->asset_->name = mem->duplicate_string(name);
-				this->asset_->buffer = mem->duplicate_string(buffer.data());
+				this->asset_->buffer = buffer;
 				this->asset_->len = static_cast<int>(str.size());
-				this->asset_->compressedLen = static_cast<int>(buffer.size());
+				this->asset_->compressedLen = static_cast<int>(compressed.size());
 			}
 			else if (!this->asset_)
 			{
@@ -111,7 +117,7 @@ namespace zonetool
 		{
 			reader.push_stream(Streams::XFILE_BLOCK_VIRTUAL);
 			reader.read_string(asset->name);
-			reader.read_array(asset->buffer, 0, asset->compressedLen ? asset->compressedLen : asset->len + 1);
+			reader.read_array(asset->buffer, 0, buffer_size(asset));
 			reader.pop_stream();
 		}
 
@@ -126,7 +132,7 @@ namespace zonetool
 
 			if (data->buffer)
 			{
-				buf->write(data->buffer, data->compressedLen ? data->compressedLen : data->len + 1);
+				buf->write(data->buffer, buffer_size(data));
 				buf->clear_pointer(&dest->buffer);
 			}
 

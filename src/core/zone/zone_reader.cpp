@@ -112,6 +112,27 @@ namespace zonetool
 		return this->zone_index_;
 	}
 
+	void zone_reader::set_shared_stream_keys(const std::span<const XStreamFileKey> keys)
+	{
+		this->shared_stream_keys_ = keys;
+		this->shared_stream_key_index_ = 0;
+	}
+
+	XStreamFileKey zone_reader::next_shared_stream_key()
+	{
+		if (this->shared_stream_key_index_ >= this->shared_stream_keys_.size())
+		{
+			throw std::runtime_error("the zone has no shared stream key left");
+		}
+
+		return this->shared_stream_keys_[this->shared_stream_key_index_++];
+	}
+
+	std::size_t zone_reader::shared_stream_keys_read() const
+	{
+		return this->shared_stream_key_index_;
+	}
+
 	void zone_reader::push_stream(const std::uint8_t block)
 	{
 		if (block >= this->blocks_.size())
@@ -227,7 +248,7 @@ namespace zonetool
 	void* zone_reader::read_bytes(const std::size_t size)
 	{
 		auto& block = this->current_block();
-		const auto is_runtime = this->current_block_ == this->layout_.runtime_block;
+		const auto is_runtime = this->current_block_ == this->layout_.runtime_block || this->current_block_ == this->layout_.unread_block;
 		if (block.position + size > block.size)
 		{
 			// Runtime data holds no file bytes, and some loaders size it differently from the game.
@@ -292,7 +313,7 @@ namespace zonetool
 		// Any other value is a raw heap pointer that the game ignores.
 		const auto tag = pointer_value(pointer) >> offset_tag_shift;
 		const auto relative = this->layout_.relative_offsets && tag == relative_offset_tag;
-		if (tag != 0 && tag != this->layout_.offset_tag && !relative)
+		if (tag != this->layout_.offset_tag && !relative && (tag != 0 || !this->layout_.untagged_offsets))
 		{
 			return false;
 		}
@@ -502,7 +523,7 @@ namespace zonetool
 		{
 			if (this->is_inline(*field))
 			{
-				this->align(3);
+				this->align(this->layout_.asset_alignment);
 				const auto slot = this->is_insert(*field) ? this->insert_pointer() : nullptr;
 				this->inline_asset_loader_(type, field, slot);
 			}

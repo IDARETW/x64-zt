@@ -1,5 +1,5 @@
 games = {
-	known = {"h1", "h2", "iw3", "iw7", "iw8"},
+	known = {"h1", "h2", "iw3", "iw6", "iw7", "iw8", "s1", "s2"},
 	enabled = {},
 	dependencies = {
 		h1 = function()
@@ -9,6 +9,18 @@ games = {
 		h2 = function()
 			dependencies.use(directxtex)
 			gsc_tool.import_engine("h2")
+		end,
+		s1 = function()
+			dependencies.use(directxtex)
+			gsc_tool.import_engine("s1")
+		end,
+		s2 = function()
+			dependencies.use(directxtex)
+			gsc_tool.import_engine("s2")
+		end,
+		iw6 = function()
+			dependencies.use(directxtex)
+			gsc_tool.import_engine("iw6")
 		end,
 		iw7 = function()
 			dependencies.use(directxtex)
@@ -32,8 +44,18 @@ games = {
 			links {"mfplat", "mfreadwrite", "mfuuid", "shlwapi"}
 		end,
 	},
+	converter_requires = {
+		s1_h2 = {"h1"},
+		s1_s2 = {"h1"},
+	},
 	converter_dependencies = {
+		s1_s2 = function()
+			games.dependencies.h1()
+		end,
 		h2_h1 = function()
+			dependencies.use(shader_tool)
+		end,
+		iw6_h1 = function()
 			dependencies.use(shader_tool)
 		end,
 	},
@@ -57,6 +79,15 @@ end
 
 games.enabled = select_games()
 
+function games.requirements_met(name)
+	for _, required in ipairs(games.converter_requires[name] or {}) do
+		if not table.contains(games.enabled, required) then
+			return false
+		end
+	end
+	return true
+end
+
 function games.converters()
 	if _OPTIONS["no-convert"] then
 		return {}
@@ -65,7 +96,7 @@ function games.converters()
 	local converters = {}
 	for _, dir in ipairs(os.matchdirs("src/convert/*")) do
 		local source, target = path.getname(dir):match("^(%w+)_(%w+)$")
-		if source and table.contains(games.enabled, source) and table.contains(games.enabled, target) then
+		if source and table.contains(games.enabled, source) and table.contains(games.enabled, target) and games.requirements_met(source .. "_" .. target) then
 			table.insert(converters, {source = source, target = target})
 		end
 	end
