@@ -966,6 +966,40 @@ iw8::MapSun loadLighting(const Args &args, const std::string &dumpDirectory,
     return lighting;
 }
 
+// Replay picks the shadowed spots of each frame (sub_141959080): R_AddPotentiallyShadowedLight
+// keeps the best scores of the spots in the view cone (radius * intensity / distance) in a list
+// of at most 64 (0x10C794F4, 0x40 at init), and only a limited number of their shadow maps
+// render each frame (the rest are deferred, flag 0x400). Every Umbra object of a converted
+// world spans the scene, so every shadowed spot in the view cone competes, walls or not: with
+// IW7 Frontier's 90 the owner saw lights switch on and off as the camera moved. Shipped worlds
+// keep few (mp_hideout: 37); the others keep their light without a shadow map.
+void limitShadowedSpotLights(iw8::MapSun &lighting)
+{
+    constexpr size_t kMaxShadowedSpots = 32;
+    std::vector<size_t> shadowed;
+    for (size_t index = 0; index < lighting.primaryLights.size(); ++index)
+    {
+        const auto &light = lighting.primaryLights[index];
+        if (light.type == 2 && light.canUseShadowMap && index != lighting.sunPrimaryLightIndex)
+            shadowed.push_back(index);
+    }
+    if (shadowed.size() <= kMaxShadowedSpots)
+        return;
+    const auto importance = [&](const size_t index) {
+        const auto &light = lighting.primaryLights[index];
+        const double luminance =
+            0.2126 * light.color[0] + 0.7152 * light.color[1] + 0.0722 * light.color[2];
+        return double(light.intensity) * luminance * double(light.radius) * light.radius;
+    };
+    std::ranges::stable_sort(shadowed, [&](const size_t a, const size_t b) {
+        return importance(a) > importance(b);
+    });
+    for (size_t rank = kMaxShadowedSpots; rank < shadowed.size(); ++rank)
+        lighting.primaryLights[shadowed[rank]].canUseShadowMap = false;
+    info("local lights: shadow maps for %zu of %zu shadowed spots (Replay's per-frame budget)",
+         kMaxShadowedSpots, shadowed.size());
+}
+
 // IW3 lights a surface with diffuse = color * r_diffuseColorScale (1) * falloff(d / radius),
 // in the units of the IW3 sun the world keeps (R_SetLightProperties; light_point_linear
 // samples falloff_linear = 1 - d/r). Replay's record builder (0x19A9020) turns ComPrimaryLight
@@ -1287,6 +1321,7 @@ int writeMapPackage(const Args &args, const std::string &map, const std::string 
     const auto renderMesh = replayrender::Load(renderPath);
     timing.lap("render load");
     calibrateLocalLights(lighting, renderMesh.solidTriangles);
+    limitShadowedSpotLights(lighting);
     // Use the final ComWorld sun vector, including any requested profile.
     // Replay rejects compressed shadows whose stored direction differs from
     // the active sun. Moving entities and breakable panes are not baked.

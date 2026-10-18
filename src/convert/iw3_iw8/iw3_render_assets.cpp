@@ -44,6 +44,9 @@ namespace
 {
 using Json = nlohmann::json;
 
+// Surface flag bit 20: an unlit surface whose material parameters' w is its emission gain.
+constexpr unsigned kEmissionFlag = 1u << 20;
+
 struct Image
 {
     unsigned width{};
@@ -90,6 +93,9 @@ struct SourceMaterial
     std::shared_ptr<const Water> water;
     std::array<float, 4> tint{1, 1, 1, 1};
     std::array<float, 4> environment{0.8f, 4.0f, 2.5f, 0.625f};
+    // High dynamic range emission of an unlit material: the emissionScale constant of converters
+    // of engines whose unlit materials emit above 1 (IW7 lamps: tint 318); IW3 materials have none.
+    float emission{1};
     SurfaceKind kind{SurfaceKind::opaque};
     bool castsShadow{true};
     bool shadowOnly{};
@@ -2086,6 +2092,8 @@ SourceMaterial ReadMaterial(const std::filesystem::path &root,
         }
         else if (key == "envMapParms")
             material.environment = Literal<4>(constant.at("literal"), material.environment);
+        else if (key == "emissionScale")
+            material.emission = Literal<4>(constant.at("literal"), {1, 1, 1, 1})[0];
     }
     for (const auto &state : source.value("stateBits", Json::array()))
     {
@@ -2293,6 +2301,13 @@ SourceMaterial ReadMaterial(const std::filesystem::path &root,
     }
     if (techset.find("unlit") != std::string::npos || noLitPass)
         material.flags |= 128u;
+    // An unlit surface that emits above 1 carries the gain in the material parameters' w (unused
+    // by unlit shading) and flag bit 20; the world shader applies it with MAP_EMISSION.
+    if ((material.flags & 128u) && material.emission > 1.0f)
+    {
+        material.flags |= kEmissionFlag;
+        material.environment[3] = material.emission;
+    }
     // IW3 polygon offset level (flags bits 18-19), which the vertex shaders
     // turn into IW3's distance-scaled pull toward the camera.
     material.flags |= material.polygonOffset << 18;
@@ -2692,6 +2707,8 @@ enum class TechniqueGeometry
 // World atlas tiles may span 2x2 cells (sources at least twice the cell size);
 // set by PrepareRenderAssets before any techset is compiled.
 std::string g_tileSpanDefines;
+// MAP_EMISSION when a world material emits above 1 (kEmissionFlag); IW3 maps compile without it.
+std::string g_emissionDefines;
 
 void ReplaceAtlasTokens(std::string &source, const unsigned columns, const unsigned atlasSize)
 {
@@ -2721,7 +2738,8 @@ Json BuildTechset(const std::string &map, const unsigned columns, const unsigned
     if (staticModel)
         ApplyStaticModelTechniqueLayout(techset);
     std::string pixelSource =
-        "#define MAP_SOURCE_SUN_MASK 1\n#define MAP_SOURCE_CHANNELS 1\n" + glassEnvironment;
+        "#define MAP_SOURCE_SUN_MASK 1\n#define MAP_SOURCE_CHANNELS 1\n" + glassEnvironment +
+        g_emissionDefines;
     if (const char *diag = std::getenv("IW8_ZONETOOL_DIAG_NO_PROBES"); diag && *diag == '1')
         pixelSource += "#define MAP_DIAG_NO_PROBES 1\n";
     if (model)
@@ -3585,6 +3603,11 @@ RenderPlan PrepareRenderAssets(const std::filesystem::path &exportRoot, const Js
         }
         materials.push_back(std::move(material));
     }
+    g_emissionDefines = std::ranges::any_of(materials, [](const SourceMaterial &material) {
+                            return (material.flags & kEmissionFlag) != 0;
+                        })
+                            ? "#define MAP_EMISSION 1\n"
+                            : "";
     // IW3 DXT5 normal maps keep Y replicated in RGB and X in alpha (red equals
     // green texel for texel). Every consumer here reads X from red, so move
     // alpha into red once per image; this left one bump axis flat before.

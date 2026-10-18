@@ -4126,14 +4126,16 @@ void BuildPreparedStaticModels(const SourceStaticModels &source, const RenderPla
                 // 4-9 the layer rank (flags bits 12-17), bits 10-15 the falloff
                 // table row of a falloff layer, else the IW3 polygon offset level
                 // (flags bits 18-19), bits 16-23 the low flags.
-                const unsigned lowFlags = (kind + material.flags) & 0xFFu;
-                const unsigned blendFlags = (material.flags >> 8) & 0xFu;
-                const unsigned layer = (material.flags >> 12) & 0x3Fu;
-                const unsigned offsetLevel = (material.flags >> 18) & 3u;
-                if (material.flags > 0xFFFFFu || material.falloffIndex > 0x3Fu)
+                // Flag bit 20 (the emission gain of unlit world surfaces) has no model field:
+                // model surfaces emit their colour as is.
+                const unsigned flags = material.flags & ~(1u << 20);
+                const unsigned lowFlags = (kind + flags) & 0xFFu;
+                const unsigned blendFlags = (flags >> 8) & 0xFu;
+                const unsigned layer = (flags >> 12) & 0x3Fu;
+                const unsigned offsetLevel = (flags >> 18) & 3u;
+                if (flags > 0xFFFFFu || material.falloffIndex > 0x3Fu)
                     throw std::runtime_error("IW3 model material metadata exceeds Replay fields");
-                const unsigned row =
-                    (material.flags & 1024u) != 0 ? material.falloffIndex : offsetLevel;
+                const unsigned row = (flags & 1024u) != 0 ? material.falloffIndex : offsetLevel;
                 const std::uint32_t metadata = blendFlags | (layer << 4) | (row << 10) |
                                                (lowFlags << 16) | 0xFF000000u;
                 auto &destinationSurface = converted.surfaces[surfaceIndex];
@@ -7833,6 +7835,169 @@ iw8::vfx::Emitter ConvertFxElement(
     return emitter;
 }
 
+// Native Replay effects of extractions from games whose particle systems Replay's
+// descend from (IW7): extracted/vfx/<name>.json holds the records of an effect in
+// Replay's layout (hex) with the children of their pointers, and the linked assets
+// by source name: materials of the extraction, its models, other native effects
+// and the FX light definition.
+struct NativeFx
+{
+    iw8::vfx::Effect effect;
+    std::set<std::string> materials;
+    std::set<std::string> models;
+    std::set<std::string> effects;
+    bool lights{};
+};
+
+std::vector<std::uint8_t> NativeBytes(const Json &value, const std::size_t size, const char *what)
+{
+    const auto text = value.get<std::string>();
+    if (text.size() != size * 2)
+        throw std::runtime_error(std::string("native effect ") + what + " has the wrong size");
+    std::vector<std::uint8_t> bytes(size);
+    for (std::size_t index = 0; index < size; ++index)
+        bytes[index] = static_cast<std::uint8_t>(std::stoul(text.substr(index * 2, 2), nullptr, 16));
+    return bytes;
+}
+
+template <typename T> T NativeRecord(const Json &value, const char *what)
+{
+    T record{};
+    const auto bytes = NativeBytes(value, sizeof(T), what);
+    std::memcpy(&record, bytes.data(), sizeof(T));
+    return record;
+}
+
+std::vector<iw8_focus::ParticleCurveControlPointDef> NativeCurve(const Json &points)
+{
+    std::vector<iw8_focus::ParticleCurveControlPointDef> result;
+    for (const auto &point : points)
+        result.push_back({point.at(0).get<float>(), point.at(1).get<float>(), point.at(2).get<float>(), 0});
+    return result;
+}
+
+std::vector<NativeFx> ReadNativeFx(const std::filesystem::path &root)
+{
+    std::vector<NativeFx> result;
+    std::error_code error;
+    if (!std::filesystem::is_directory(root / "vfx", error))
+        return result;
+    for (const auto &file : std::filesystem::recursive_directory_iterator(root / "vfx"))
+    {
+        if (!file.is_regular_file() || file.path().extension() != ".json")
+            continue;
+        const Json source = ReadJson(file.path());
+        NativeFx fx;
+        fx.effect.name = source.at("name").get<std::string>();
+        fx.effect.native = NativeRecord<iw8_focus::ParticleSystemDef>(source.at("system"), "system");
+        for (const auto &emitterNode : source.at("emitters"))
+        {
+            iw8::vfx::Emitter emitter;
+            emitter.native = NativeRecord<iw8_focus::ParticleEmitterDef>(emitterNode.at("emitter"), "emitter");
+            emitter.fadeCurve = NativeCurve(emitterNode.at("fade_curve"));
+            for (const auto &stateNode : emitterNode.at("states"))
+            {
+                iw8::vfx::State state;
+                state.native = NativeRecord<iw8_focus::ParticleStateDef>(stateNode.at("state"), "state");
+                const auto &groups = stateNode.at("groups");
+                if (groups.size() != state.groups.size())
+                    throw std::runtime_error("native effect state does not have three module groups: " + fx.effect.name);
+                for (std::size_t group = 0; group < groups.size(); ++group)
+                    for (const auto &moduleNode : groups.at(group))
+                    {
+                        iw8::vfx::Module module;
+                        module.imported = true;
+                        module.native = NativeRecord<iw8_focus::ParticleModuleDef>(moduleNode.at("module"), "module");
+                        for (const auto &childNode : moduleNode.at("children"))
+                        {
+                            iw8::vfx::Module::ImportedChild child;
+                            child.offset = childNode.at("offset").get<std::size_t>();
+                            if (const auto curve = childNode.find("curve"); curve != childNode.end())
+                            {
+                                child.curve = true;
+                                child.points = NativeCurve(*curve);
+                            }
+                            else
+                                for (const auto &entryNode : childNode.at("entries"))
+                                {
+                                    iw8::vfx::Module::LinkedEntry entry;
+                                    const auto bytes = NativeBytes(entryNode.at("entry"), entry.native.size(), "linked asset");
+                                    std::memcpy(entry.native.data(), bytes.data(), bytes.size());
+                                    for (const auto &asset : entryNode.at("assets"))
+                                    {
+                                        const auto offset = asset.at(0).get<std::size_t>();
+                                        const auto type = asset.at(1).get<std::string>();
+                                        const auto name = asset.at(2).get<std::string>();
+                                        IW8_XAssetType assetType{};
+                                        if (type == "material")
+                                            assetType = ASSET_TYPE_MATERIAL, fx.materials.insert(name);
+                                        else if (type == "xmodel")
+                                            assetType = ASSET_TYPE_XMODEL, fx.models.insert(name);
+                                        else if (type == "vfx")
+                                            assetType = ASSET_TYPE_VFX, fx.effects.insert(name);
+                                        else if (type == "lightdef")
+                                            assetType = ASSET_TYPE_LIGHTDEF, fx.lights = true;
+                                        else
+                                            throw std::runtime_error("native effect links an asset of an unknown type: " + type);
+                                        entry.assets.push_back({offset, {assetType, name}});
+                                    }
+                                    child.entries.push_back(std::move(entry));
+                                }
+                            module.importedChildren.push_back(std::move(child));
+                        }
+                        state.groups[group].push_back(std::move(module));
+                    }
+                emitter.states.push_back(std::move(state));
+            }
+            fx.effect.emitters.push_back(std::move(emitter));
+        }
+        result.push_back(std::move(fx));
+    }
+    std::ranges::sort(result, {}, [](const NativeFx &fx) { return fx.effect.name; });
+    return result;
+}
+
+// The converted names of the assets that a native effect links (effects by their
+// aliases, materials by the converted effect materials, the light definition of the
+// map's FX lights) and the particle material data of its material modules, as
+// converted IW3 effects have them.
+iw8::vfx::Effect ResolveNativeFx(const NativeFx &fx, const PreparedMap &map,
+                                 const std::unordered_map<std::string, std::string> &effectAliases)
+{
+    auto effect = fx.effect;
+    effect.name = effectAliases.at(fx.effect.name);
+    for (auto &emitter : effect.emitters)
+        for (auto &state : emitter.states)
+            for (auto &group : state.groups)
+                for (auto &module : group)
+                {
+                    const std::array<std::uint8_t, 192> *materialData = nullptr;
+                    for (auto &child : module.importedChildren)
+                        for (auto &entry : child.entries)
+                            for (auto &[offset, asset] : entry.assets)
+                            {
+                                if (asset.first == ASSET_TYPE_MATERIAL)
+                                {
+                                    if (!materialData)
+                                        if (const auto data = map.fxParticleMaterialData.find(asset.second);
+                                            data != map.fxParticleMaterialData.end())
+                                            materialData = &data->second;
+                                    asset.second = VfxMaterial(map, asset.second);
+                                }
+                                else if (asset.first == ASSET_TYPE_VFX)
+                                    asset.second = effectAliases.at(asset.second);
+                                else if (asset.first == ASSET_TYPE_LIGHTDEF)
+                                    asset.second = map.vfxLightDef;
+                            }
+                    if (module.native.moduleType ==
+                            static_cast<std::uint16_t>(iw8_focus::ParticleModuleType::initMaterial) &&
+                        materialData)
+                        std::memcpy(module.native.moduleData + offsetof(iw8_focus::ParticleModuleInitMaterial, materialData),
+                                    materialData->data(), materialData->size());
+                }
+    return effect;
+}
+
 iw8::vfx::Effect ConvertFx(
     const PreparedMap &map, const PreparedFx &source,
     const std::unordered_map<std::string, std::string> &effectAliases,
@@ -8927,6 +9092,12 @@ PreparedMap PrepareFastfile(const ImportOptions &options)
         result.chyronClock = clock;
     }
     result.fxEffects = ReadPreparedFx(exportRoot);
+    const auto nativeFx = ReadNativeFx(exportRoot);
+    if (!nativeFx.empty())
+        zt::info("iw3: read %zu native Replay effect(s) of the extraction", nativeFx.size());
+    const auto isNativeFx = [&](const std::string &name) {
+        return std::ranges::any_of(nativeFx, [&](const NativeFx &fx) { return fx.effect.name == name; });
+    };
     auto declaredFx = ReadDeclaredFx(exportRoot / "zone_source" / (sourceMap + ".zone"));
     // Effect names the map scripts hold as plain literals (loaded at runtime
     // through iw3compat_loadfx).
@@ -8967,7 +9138,7 @@ PreparedMap PrepareFastfile(const ImportOptions &options)
                      commonImpactFx);
         for (const auto &name : scriptFx)
         {
-            if (declaredFx.contains(name))
+            if (declaredFx.contains(name) || isNativeFx(name))
                 continue;
             if (std::ranges::none_of(result.fxEffects,
                                      [&](const PreparedFx &effect) { return effect.name == name; }))
@@ -9028,6 +9199,8 @@ PreparedMap PrepareFastfile(const ImportOptions &options)
         for (const auto &dependency : effect.dependencies)
             if (dependency.type == "material")
                 fxMaterialNames.insert(dependency.name);
+    for (const auto &fx : nativeFx)
+        fxMaterialNames.insert(fx.materials.begin(), fx.materials.end());
     std::vector<std::string> missingFxMaterials;
     for (const auto &name : fxMaterialNames)
     {
@@ -9346,6 +9519,8 @@ PreparedMap PrepareFastfile(const ImportOptions &options)
         for (const auto &dependency : effect.dependencies)
             if (dependency.type == "xmodel")
                 fxModelNames.insert(dependency.name);
+    for (const auto &fx : nativeFx)
+        fxModelNames.insert(fx.models.begin(), fx.models.end());
     for (const auto &model : sourceEntityModels.models)
         fxModelNames.erase(model.name);
     // Launched vehicle parts: rigid models simulated with their IW3 physics
@@ -10005,14 +10180,18 @@ PreparedMap PrepareFastfile(const ImportOptions &options)
     zt::info("iw3: converted %zu FX-referenced XModels through native model/material closure",
              sourceFxModels.models.size());
     timing.lap("prepare models");
-    const auto effectAliases = BuildFxAliases(result, options.map);
-    const bool hasOmniLights = std::ranges::any_of(
-        result.fxEffects, [&](const PreparedFx &effect) {
-            return effectAliases.contains(effect.name) &&
-                   std::ranges::any_of(effect.elements, [](const PreparedFxElement &element) {
-                       return element.type == 6;
-                   });
-        });
+    auto effectAliases = BuildFxAliases(result, options.map);
+    for (const auto &fx : nativeFx)
+        effectAliases.emplace(fx.effect.name, "vfx/mw120r/" + options.map + "/" + fx.effect.name);
+    const bool hasOmniLights =
+        std::ranges::any_of(result.fxEffects,
+                            [&](const PreparedFx &effect) {
+                                return effectAliases.contains(effect.name) &&
+                                       std::ranges::any_of(effect.elements, [](const PreparedFxElement &element) {
+                                           return element.type == 6;
+                                       });
+                            }) ||
+        std::ranges::any_of(nativeFx, [](const NativeFx &fx) { return fx.lights; });
     if (hasOmniLights)
         result.vfxLightDef = "mw120r/" + options.map + "/light_fx_default";
     result.vfxEffects.reserve(effectAliases.size());
@@ -10082,6 +10261,45 @@ PreparedMap PrepareFastfile(const ImportOptions &options)
             appendEffect(appendEffect, effect);
     zt::info("iw3: converted %zu of %zu map-reachable source FX graph(s) to native Replay VFX",
              result.vfxEffects.size(), result.fxEffects.size());
+    {
+        // An effect that does not resolve leaves the map with the effects that start
+        // it; scripts then load it as an absent effect.
+        std::set<std::string> registered;
+        std::set<std::string> failed;
+        const auto registerNative = [&](auto &&self, const NativeFx &fx) -> bool {
+            if (failed.contains(fx.effect.name))
+                return false;
+            if (!registered.insert(fx.effect.name).second)
+                return true;
+            bool children = true;
+            for (const auto &child : fx.effects)
+            {
+                const auto found = std::ranges::find(nativeFx, child, [](const NativeFx &other) {
+                    return other.effect.name;
+                });
+                children = found != nativeFx.end() && self(self, *found) && children;
+            }
+            try
+            {
+                if (!children)
+                    throw std::runtime_error("an effect that it starts does not convert");
+                result.vfxEffects.push_back(ResolveNativeFx(fx, result, effectAliases));
+                return true;
+            }
+            catch (const std::exception &error)
+            {
+                zt::warn("iw3: native effect %s is left out: %s", fx.effect.name.c_str(), error.what());
+                failed.insert(fx.effect.name);
+                effectAliases.erase(fx.effect.name);
+                return false;
+            }
+        };
+        for (const auto &fx : nativeFx)
+            registerNative(registerNative, fx);
+        if (!nativeFx.empty())
+            zt::info("iw3: registered %zu of %zu native Replay effect(s) of the extraction",
+                     nativeFx.size() - failed.size(), nativeFx.size());
+    }
     if (!result.smallGlassEffect.empty())
         zt::info("iw3: converted impacts/small_glass to native Replay VFX '%s'",
                  result.smallGlassEffect.c_str());

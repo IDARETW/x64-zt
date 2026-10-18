@@ -61,9 +61,26 @@ Without a command, `zonetool.exe` opens an interactive console.
   pieces of the world's compressed mesh and of the brush models' compound shapes become brushes, the other
   primitives the world's collision triangles, with the contents, surface types and surface flags of their shape tags
   (the encoding of Replay's), and each glass piece the hull of its pane. Positions are in units of 32 game units. A
-  map without Havok data collides by its solid render surfaces. It does not have effects, sounds or scripts.
-  `IW7_EXPORT_ONLY=1` stops after the extraction, and `IW7_REUSE_EXTRACTION=1` converts the complete extraction of
-  an earlier run again.
+  map without Havok data collides by its solid render surfaces. The effects that the map's createfx script places
+  (read by decompiling the map's script files with `--gsc_tool`) become IW3 map scripts of the extraction (the map
+  script, its `_fx` script and its createfx script), and their particle systems native Replay effects
+  (`extracted/vfx/<name>.json`: the records in Replay's layout, which `export_effects.cpp` converts module by module,
+  with their curves and the assets they link by source name), which the pipeline resolves and registers; their
+  materials become IW3 effect materials. The zones of the common effect materials (`techsets_common`,
+  `techsets_common_core_mp`, `techsets_common_mp`, `techsets_global_core_mp`) must be in the zone folder too. Sound,
+  cloud, physics light and emissive graph modules do not convert yet. It does not have sounds, scriptables or the
+  map's own scripts. `IW7_EXPORT_ONLY=1` stops after the extraction, and `IW7_REUSE_EXTRACTION=1` converts the
+  complete extraction of an earlier run again.
+- IW7 materials: a colour map of `TS_COLOR_SPECULAR_MAP` (`*_packed_cs`) holds the specular reflectance in its alpha;
+  the surface's alpha is the texture of `TS_ALPHA_REVEAL_THICKNESS_MAP` of the same layer (`*_packed_a`, `_ar`,
+  `_r`: its channels in the order of the letters). The extraction writes the colour with that alpha
+  (`<colour>_a<hash>`), or opaque. Layered world materials (`..._b1..._b2...`) blend each layer by a vertex colour
+  channel (green, blue, alpha) and that alpha. A premultiplied (`blendadd`) material blends by its alpha when its
+  colour holds one, else adds. Unlit materials keep the hue of their tint; one that emits above the sun gets an
+  `emissionScale` constant, which the pipeline gives the world shader (`MAP_EMISSION`, flag bit 20; model surfaces
+  emit their colour as is). The sky and the models that it draws (planets) take the units of the converted lights.
+- The pipeline keeps shadow maps for the 32 most important shadowed spot lights of a map (`limitShadowedSpotLights`):
+  Replay picks at most 64 shadowed spots a frame from the view cone, and a converted world lets all of them compete.
 
 ## Build cache
 
