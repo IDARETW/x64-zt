@@ -235,8 +235,19 @@ class Context:
         self.indent = 2
         self.objects = []         # (expr, type) of enclosing loop elements and pointer targets
         self.required = collections.OrderedDict()  # var -> (parameter, type) the caller passes
+        self.pending = []         # lines computing values that the next statement uses
+        self.hoisted = {}         # expression key -> (variable, indent) of the computed values in scope
+        self.sums = 0
+
+    def flush(self, out):
+        out.extend(self.pending)
+        self.pending = []
 
     def line(self, text, out):
+        # A line outside a block ends the scope of the values computed in it.
+        self.hoisted = {k: v for k, v in self.hoisted.items() if v[1] <= self.indent}
+        out.extend(self.pending)
+        self.pending = []
         out.append('\t' * self.indent + text)
 
 
@@ -407,20 +418,35 @@ def expression(ctx, expr):
             return '__umulh(static_cast<std::uint64_t>(%s), static_cast<std::uint64_t>(%s))' % (args[0], args[1])
         raise Unsupported('operator %s' % name)
     if 'reduce' in expr:
+        # A loop that sums a value per element: compute the sum before the statement that uses it.
         loop = expr['reduce']
         if loop not in ctx.loop_counts:
             raise Unsupported('reduce over an unknown loop')
+        key = json.dumps(expr, sort_keys=True)
+        found = ctx.hoisted.get(key)
+        if found and found[1] <= ctx.indent:
+            return found[0]
         index = 'i%d' % loop
         saved = ctx.loops.get(loop)
         ctx.loops[loop] = index
-        step = expression(ctx, expr['step'])
+        count = expression(ctx, ctx.loop_counts[loop])
         start = expression(ctx, expr['start'])
+        pending = len(ctx.pending)
+        step = expression(ctx, expr['step'])
+        if len(ctx.pending) != pending:
+            raise Unsupported('a sum inside a sum')
         if saved is None:
             del ctx.loops[loop]
-        return '[&]\n%s{\n%s\tstd::size_t value = %s;\n%s\tfor (std::size_t %s = 0; %s < %s; %s++)\n%s\t{\n%s\t\tvalue += %s;\n%s\t}\n%s\treturn value;\n%s}()' % (
-            *(['\t' * ctx.indent] + ['\t' * ctx.indent]), start, '\t' * ctx.indent, index, index,
-            ctx.loop_counts[loop], index, '\t' * ctx.indent, '\t' * ctx.indent, step, '\t' * ctx.indent,
-            '\t' * ctx.indent, '\t' * ctx.indent)
+        else:
+            ctx.loops[loop] = saved
+        ctx.sums += 1
+        name = 'sum_%d' % ctx.sums
+        pad = '\t' * ctx.indent
+        ctx.pending += [pad + 'std::size_t %s = %s;' % (name, start),
+                        pad + 'for (std::size_t %s = 0; %s < %s; %s++)' % (index, index, count, index),
+                        pad + '{', pad + '\t%s += %s;' % (name, step), pad + '}']
+        ctx.hoisted[key] = (name, ctx.indent)
+        return name
     if 'select' in expr:
         return '(%s ? %s : %s)' % (condition(ctx, expr['select']), expression(ctx, expr['then']),
                                    expression(ctx, expr['else']))
@@ -436,7 +462,17 @@ CC = {'e': '==', 'z': '==', 'ne': '!=', 'nz': '!=', 'a': '>', 'b': '<', 'ae': '>
       'ge': '>=', 'le': '<='}
 
 
-def condition(ctx, cond):
+INVERSE = {'e': 'ne', 'z': 'nz', 'ne': 'e', 'nz': 'z', 'a': 'be', 'be': 'a', 'b': 'ae', 'ae': 'b', 'g': 'le',
+           'le': 'g', 'l': 'ge', 'ge': 'l', 's': 'ns', 'ns': 's'}
+
+
+def condition(ctx, cond, negate=False):
+    if negate:
+        cc = cond.get('compare', cond.get('test'))
+        if cc in INVERSE:
+            key = 'compare' if 'compare' in cond else 'test'
+            return condition(ctx, dict(cond, **{key: INVERSE[cc]}))
+        return '!(%s)' % condition(ctx, cond)
     if 'compare' in cond:
         cc = cond['compare']
         if cc not in CC:
@@ -652,8 +688,8 @@ def union_arm(type_name, element, size, size_expr=None):
 
 def emit_pointer(ctx, op, out):
     body = list(op['body'])
-    # A temp read between the pointer and its data (the element count) comes first.
-    while body and body[0]['op'] == 'temp':
+    # Temp reads and counting loops between the pointer and its data (the element count) come first.
+    while body and (body[0]['op'] == 'temp' or (body[0]['op'] == 'loop' and not body[0]['body'])):
         emit_ops(ctx, [body[0]], out)
         body = body[1:]
     # if (c) {} else { data n }: the pointee holds n bytes or none.
@@ -748,13 +784,12 @@ def emit_pointer(ctx, op, out):
     else:
         raise Unsupported('pointer body starts with %s' % first['op'])
     variable = 'items_%d' % len(out)
-    needs_items = f in ('struct', 'array', 'script_strings', 'script_string', 'string', 'strings', 'asset') or any(
-        o['op'] not in ('data', 'hook', 'register', 'store') for o in rest)
-    if not needs_items:
-        ctx.line('%s;' % read, out)
-        return
+    # The values the read needs come first; an unused pointee drops only the lines after them.
+    ctx.flush(out)
+    start = len(out)
     ctx.line('if (const auto %s = %s)' % (variable, read), out)
     ctx.line('{', out)
+    first_inner = len(out)
     ctx.indent += 1
     saved = ctx.item
     ctx.item = (variable, target, True)
@@ -777,6 +812,12 @@ def emit_pointer(ctx, op, out):
     ctx.objects.pop()
     ctx.item = saved
     ctx.indent -= 1
+    if len(out) == first_inner:
+        # Nothing reads through the items: read the pointee alone.
+        del out[start:]
+        ctx.pending = []
+        ctx.line('%s;' % read, out)
+        return
     ctx.line('}', out)
 
 
@@ -784,11 +825,12 @@ def emit_loop(ctx, op, out):
     loop = op['id']
     if op['count'] is None:
         raise Unsupported('loop without a count')
-    count = expression(ctx, op['count'])
     body = [o for o in op['body'] if o['op'] not in ('data', 'hook', 'register', 'store')]
-    ctx.loop_counts[loop] = count
+    # A loop that reads nothing only defines the count of a later sum over it.
+    ctx.loop_counts[loop] = op['count']
     if not body:
         return
+    count = expression(ctx, op['count'])
     index = 'i%d' % loop
     ctx.loops[loop] = index
     pushed = 0
@@ -845,14 +887,13 @@ def emit_ops(ctx, ops, out):
             ctx.indent -= 1
             if not then_out and not else_out:
                 continue
-            cond = condition(ctx, op['cond'])
             if not then_out:
-                ctx.line('if (!(%s))' % cond, out)
+                ctx.line('if (%s)' % condition(ctx, op['cond'], negate=True), out)
                 ctx.line('{', out)
                 out.extend(else_out)
                 ctx.line('}', out)
                 continue
-            ctx.line('if (%s)' % cond, out)
+            ctx.line('if (%s)' % condition(ctx, op['cond']), out)
             ctx.line('{', out)
             out.extend(then_out)
             ctx.line('}', out)
