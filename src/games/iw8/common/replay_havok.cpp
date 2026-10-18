@@ -644,7 +644,7 @@ CollisionInput ReadCollision(const std::filesystem::path &path)
     }
     if (cursor != bytes.size())
         throw std::runtime_error("Collision input has trailing data");
-    // A world needs hulls or a triangle mesh (an IW7 world is a mesh alone).
+    // A world needs hulls or a triangle mesh (an IW7 world without Havok data is a mesh alone).
     if (!result.models[0].hullCount &&
         std::ranges::none_of(result.meshes, [](const Mesh &mesh) { return mesh.model == 0; }))
         throw std::runtime_error("Collision input has no world hulls");
