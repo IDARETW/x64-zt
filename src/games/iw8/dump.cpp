@@ -1,6 +1,8 @@
 #include <std_include.hpp>
 #include "iw8.hpp"
+#include "havok/mesh.hpp"
 #include "havok/objects.hpp"
+#include "havok/physics.hpp"
 #include "havok/tagfile.hpp"
 #include "zone/asset_files.hpp"
 #include "zone/loader.hpp"
@@ -897,6 +899,888 @@ namespace zonetool::iw8
 				same_orders, same_bounds, worst_bounds, worst_radius, other_children, other_volumes);
 		}
 
+		// The triangles of `expected` that `found` has (same shape tag and winding, vertices within the tolerance).
+		std::size_t matching_triangles(const havok::decoded_mesh& expected, const havok::decoded_mesh& found, const float tolerance)
+		{
+			const auto cell_of = [](const std::array<havok::vector3, 3>& triangle)
+			{
+				std::array<std::int64_t, 3> cell{};
+				for (std::size_t axis = 0; axis < 3; axis++)
+				{
+					cell[axis] = static_cast<std::int64_t>(std::floor((triangle[0][axis] + triangle[1][axis] + triangle[2][axis]) / 3.0f));
+				}
+
+				return cell;
+			};
+
+			const auto key_of = [](const std::array<std::int64_t, 3>& cell)
+			{
+				return (cell[0] * 73856093) ^ (cell[1] * 19349663) ^ (cell[2] * 83492791);
+			};
+
+			std::unordered_multimap<std::int64_t, std::size_t> grid;
+			for (std::size_t t = 0; t < found.triangles.size(); t++)
+			{
+				grid.emplace(key_of(cell_of(found.triangles[t])), t);
+			}
+
+			std::vector<bool> used(found.triangles.size());
+			std::size_t matched{};
+			for (std::size_t t = 0; t < expected.triangles.size(); t++)
+			{
+				// The closest unused triangle within the tolerance.
+				const auto& want = expected.triangles[t];
+				const auto cell = cell_of(want);
+				std::optional<std::size_t> best;
+				auto best_distance = tolerance;
+				for (std::int64_t dx = -1; dx <= 1; dx++)
+				{
+					for (std::int64_t dy = -1; dy <= 1; dy++)
+					{
+						for (std::int64_t dz = -1; dz <= 1; dz++)
+						{
+							const auto [begin, end] = grid.equal_range(key_of({cell[0] + dx, cell[1] + dy, cell[2] + dz}));
+							for (auto entry = begin; entry != end; ++entry)
+							{
+								const auto& have = found.triangles[entry->second];
+								if (used[entry->second] || found.triangle_tags[entry->second] != expected.triangle_tags[t])
+								{
+									continue;
+								}
+
+								for (std::size_t turn = 0; turn < 3; turn++)
+								{
+									float distance{};
+									for (std::size_t corner = 0; corner < 3; corner++)
+									{
+										for (std::size_t axis = 0; axis < 3; axis++)
+										{
+											distance = std::max(distance, std::abs(have[(corner + turn) % 3][axis] - want[corner][axis]));
+										}
+									}
+
+									if (distance <= best_distance)
+									{
+										best = entry->second;
+										best_distance = distance;
+									}
+								}
+							}
+						}
+					}
+				}
+
+				if (best)
+				{
+					used[*best] = true;
+					matched++;
+				}
+			}
+
+			return matched;
+		}
+
+		// IW8_REWRITE=mesh decodes each compressed mesh shape of the zone and checks its trees, builds it again from the
+		// decoded triangles and convex shapes without the game, and decodes the built mesh: it must hold the same triangles
+		// (within the vertex quantization) and convex shapes, and write and read back the same.
+		void verify_mesh(const std::filesystem::path& zone_folder, const loaded_zone& zone)
+		{
+			const auto& compendium = replay_compendium(zone_folder);
+			const auto mesh_type = *compendium.find("hknpCompressedMeshShape");
+			std::set<asset_key> seen;
+			std::size_t meshes{};
+			std::size_t triangles{};
+			std::size_t convex_shapes{};
+			std::size_t removed{};
+			std::size_t degenerate{};
+			std::size_t stock_bytes{};
+			std::size_t built_bytes{};
+			std::size_t other_primitives{};
+			std::size_t relaxed{};
+			float largest_error{};
+			for (const auto& asset : zone.assets)
+			{
+				const asset_key key{asset.type, asset_name(asset.type, asset.header)};
+				if (asset.referenced || !seen.emplace(key).second)
+				{
+					continue;
+				}
+
+				if (asset.type == ASSET_TYPE_PHYSICSLIBRARY && static_cast<const PhysicsLibrary*>(asset.header)->isGlobalTypeCompendium)
+				{
+					continue;
+				}
+
+				const auto dump = dump_asset_data(asset.type, asset.header);
+				for (const auto record : tagfile_records(dump))
+				{
+					const std::span bytes(reinterpret_cast<const std::uint8_t*>(record.data()), record.size());
+					if (const auto reference = havok::compendium_reference(bytes); reference && *reference != havok::replay_compendium_signature)
+					{
+						continue;
+					}
+
+					havok::tagfile file;
+					try
+					{
+						file = havok::read_tagfile(bytes, &compendium);
+					}
+					catch (const havok::unknown_type&)
+					{
+						continue;
+					}
+
+					for (std::uint32_t index = 1; index < file.items.size(); index++)
+					{
+						if (file.items[index].type != mesh_type)
+						{
+							continue;
+						}
+
+						const auto format = find_asset_format(asset.type);
+						const auto fail = [&](const std::string& what)
+						{
+							char debug[MAX_PATH]{};
+							if (GetEnvironmentVariableA("IW8_DUMP_DEBUG", debug, sizeof(debug)))
+							{
+								std::ofstream(std::filesystem::path(debug) / "mesh.hkx", std::ios::binary).write(record.data(), static_cast<std::streamsize>(record.size()));
+								std::ofstream(std::filesystem::path(debug) / "mesh_item.txt") << index;
+							}
+
+							return std::runtime_error(std::format("{} \"{}\": compressed mesh {}: {}", format ? format->name : "?", key.second, index, what));
+						};
+
+						havok::decoded_mesh stock;
+						try
+						{
+							stock = havok::read_compressed_mesh_shape(file, compendium, index);
+						}
+						catch (const std::exception& e)
+						{
+							throw fail(std::format("the stock mesh: {}", e.what()));
+						}
+
+						if (std::ranges::find(stock.convex_keys, 0xFFFFFFFF) != stock.convex_keys.end())
+						{
+							throw fail("a stock convex shape has no primitive");
+						}
+
+						// Other custom primitives (convex pieces of shared vertices) are not built.
+						if (stock.custom)
+						{
+							other_primitives++;
+							continue;
+						}
+
+						// The decoded triangles, with one vertex per position.
+						havok::object_builder builder(compendium);
+						havok::compressed_mesh mesh;
+						mesh.convex_radius = stock.convex_radius;
+						mesh.user_data = stock.user_data;
+						std::map<havok::vector3, std::uint32_t> vertex_index;
+						for (std::size_t t = 0; t < stock.triangles.size(); t++)
+						{
+							havok::mesh_triangle triangle;
+							triangle.shape_tag = stock.triangle_tags[t];
+							for (std::size_t corner = 0; corner < 3; corner++)
+							{
+								const auto& p = stock.triangles[t][corner];
+								const auto [found, added] = vertex_index.try_emplace(p, static_cast<std::uint32_t>(mesh.vertices.size()));
+								if (added)
+								{
+									mesh.vertices.push_back(p);
+								}
+
+								triangle.vertices[corner] = found->second;
+							}
+
+							mesh.triangles.push_back(triangle);
+						}
+
+						std::unordered_map<std::uint32_t, std::uint32_t> copies;
+						for (std::size_t i = 0; i < stock.convex_shapes.size(); i++)
+						{
+							auto instance = stock.convex_shapes[i];
+							instance.shape = havok::copy_item(builder, file, stock.convex_items[i], copies);
+							mesh.convex_shapes.push_back(std::move(instance));
+						}
+
+						havok::compressed_mesh_stats stats;
+						const auto shape = havok::add_compressed_mesh_shape(builder, mesh, &stats);
+						const auto built = builder.finish(file.sdk_version, havok::replay_compendium_signature, shape);
+						havok::decoded_mesh ours;
+						try
+						{
+							ours = havok::read_compressed_mesh_shape(built, compendium, 1, true);
+						}
+						catch (const std::exception& e)
+						{
+							throw fail(std::format("the built mesh: {}", e.what()));
+						}
+
+						// Triangles without an area are left out.
+						std::size_t areas{};
+						for (const auto& triangle : stock.triangles)
+						{
+							const auto& [a, b, c] = triangle;
+							const std::array<double, 3> ab{static_cast<double>(b[0]) - a[0], static_cast<double>(b[1]) - a[1], static_cast<double>(b[2]) - a[2]};
+							const std::array<double, 3> ac{static_cast<double>(c[0]) - a[0], static_cast<double>(c[1]) - a[1], static_cast<double>(c[2]) - a[2]};
+							areas += std::abs(ab[1] * ac[2] - ab[2] * ac[1]) + std::abs(ab[2] * ac[0] - ab[0] * ac[2]) + std::abs(ab[0] * ac[1] - ab[1] * ac[0]) > 0.0;
+						}
+
+						degenerate += stock.triangles.size() - areas;
+						if (ours.triangles.size() != areas)
+						{
+							throw fail(std::format("the built mesh has {} triangles, the stock mesh {} with an area", ours.triangles.size(), areas));
+						}
+
+						// A vertex moves by the largest quantization error of the built mesh at most.
+						const auto tolerance = stats.largest_error * 1.01f + 1e-6f;
+						largest_error = std::max(largest_error, stats.largest_error);
+						relaxed += stats.tolerance > mesh.packed_tolerance;
+						const auto matched = matching_triangles(stock, ours, tolerance);
+						if (matched != areas)
+						{
+							char debug[MAX_PATH]{};
+							if (GetEnvironmentVariableA("IW8_DUMP_DEBUG", debug, sizeof(debug)))
+							{
+								for (const auto& [name, mesh_data] : {std::pair("mesh_stock.txt", &stock), std::pair("mesh_built.txt", &ours)})
+								{
+									std::ofstream text(std::filesystem::path(debug) / name);
+									for (std::size_t t = 0; t < mesh_data->triangles.size(); t++)
+									{
+										const auto& tri = mesh_data->triangles[t];
+										text << std::format("{} {} {} {} {} {} {} {} {} {}\n", tri[0][0], tri[0][1], tri[0][2], tri[1][0], tri[1][1], tri[1][2], tri[2][0],
+											tri[2][1], tri[2][2], mesh_data->triangle_tags[t]);
+									}
+								}
+							}
+
+							throw fail(std::format("{} of {} triangles of the built mesh match the stock mesh", matched, areas));
+						}
+
+						if (ours.convex_shapes.size() != stock.convex_shapes.size() || std::ranges::find(ours.convex_keys, 0xFFFFFFFF) != ours.convex_keys.end())
+						{
+							throw fail("the built mesh does not hold each convex shape once");
+						}
+
+						for (std::size_t i = 0; i < ours.convex_shapes.size(); i++)
+						{
+							const auto& a = ours.convex_shapes[i];
+							const auto& b = stock.convex_shapes[i];
+							if (a.rotation != b.rotation || a.translation != b.translation || a.shape_tag != b.shape_tag || a.vertices != b.vertices)
+							{
+								throw fail(std::format("convex shape {} differs", i));
+							}
+						}
+
+						const auto written = havok::write_compact_tagfile(built, compendium);
+						if (havok::write_compact_tagfile(havok::read_tagfile(written, &compendium), compendium) != written)
+						{
+							throw fail("the built mesh reads back differently");
+						}
+
+						meshes++;
+						triangles += areas;
+						convex_shapes += stock.convex_shapes.size();
+						removed += stock.removed;
+						stock_bytes += record.size();
+						built_bytes += written.size();
+					}
+				}
+			}
+
+			ZONETOOL_INFO("%s: %zu compressed meshes build again (%zu triangles, %zu convex shapes; %zu removed and %zu degenerate stock "
+				"primitives left out); tagfiles %zu bytes, built %zu; %zu with other custom primitives; largest vertex error %.6f, %zu meshes "
+				"with a larger packing tolerance", zone.name.data(), meshes, triangles, convex_shapes, removed, degenerate, stock_bytes, built_bytes,
+				other_primitives, largest_error, relaxed);
+		}
+
+		std::uint32_t member_offset(const havok::type_table& types, const std::uint32_t type, const std::string_view name)
+		{
+			const auto found = types.member(type, name);
+			if (!found)
+			{
+				throw std::runtime_error(std::format("{} has no member {}", types.identity(type), name));
+			}
+
+			return found->first;
+		}
+
+		std::string item_string(const havok::tagfile& file, const std::uint32_t index)
+		{
+			if (!index)
+			{
+				return {};
+			}
+
+			const auto& text = file.items.at(index).data;
+			return std::string(reinterpret_cast<const char*>(text.data()), strnlen(reinterpret_cast<const char*>(text.data()), text.size()));
+		}
+
+		// The input of a compressed mesh that holds the decoded geometry, with one vertex per position.
+		havok::compressed_mesh mesh_input(const havok::decoded_mesh& decoded)
+		{
+			havok::compressed_mesh mesh;
+			mesh.convex_radius = decoded.convex_radius;
+			mesh.user_data = decoded.user_data;
+			std::map<havok::vector3, std::uint32_t> vertex_index;
+			for (std::size_t t = 0; t < decoded.triangles.size(); t++)
+			{
+				havok::mesh_triangle triangle;
+				triangle.shape_tag = decoded.triangle_tags[t];
+				for (std::size_t corner = 0; corner < 3; corner++)
+				{
+					const auto& p = decoded.triangles[t][corner];
+					const auto [found, added] = vertex_index.try_emplace(p, static_cast<std::uint32_t>(mesh.vertices.size()));
+					if (added)
+					{
+						mesh.vertices.push_back(p);
+					}
+
+					triangle.vertices[corner] = found->second;
+				}
+
+				mesh.triangles.push_back(triangle);
+			}
+
+			mesh.convex_shapes = decoded.convex_shapes;
+			return mesh;
+		}
+
+		struct rebuilt_shapes
+		{
+			// Built item -> the largest vertex error of a built compressed mesh.
+			std::unordered_map<std::uint32_t, float> mesh_errors;
+			std::size_t built{};
+			std::size_t copied{};
+			std::size_t masses{};
+			double mass_error{};
+		};
+
+		// The inertia tensor of mass properties: R diag(inertia) R^T.
+		std::array<std::array<double, 3>, 3> inertia_tensor(const havok::mass_properties& properties)
+		{
+			const auto [x, y, z, w] = properties.rotation;
+			const std::array<std::array<double, 3>, 3> r{{{1 - 2.0 * (y * y + z * z), 2.0 * (x * y - z * w), 2.0 * (x * z + y * w)},
+				{2.0 * (x * y + z * w), 1 - 2.0 * (x * x + z * z), 2.0 * (y * z - x * w)},
+				{2.0 * (x * z - y * w), 2.0 * (y * z + x * w), 1 - 2.0 * (x * x + y * y)}}};
+			std::array<std::array<double, 3>, 3> tensor{};
+			for (std::size_t i = 0; i < 3; i++)
+			{
+				for (std::size_t j = 0; j < 3; j++)
+				{
+					for (std::size_t k = 0; k < 3; k++)
+					{
+						tensor[i][j] += r[i][k] * properties.inertia[k] * r[j][k];
+					}
+				}
+			}
+
+			return tensor;
+		}
+
+		// The largest difference of two mass properties relative to their size: volume, centre (to the size of the shape)
+		// and inertia tensor.
+		double mass_difference(const havok::mass_properties& a, const havok::mass_properties& b)
+		{
+			auto result = std::abs(static_cast<double>(a.volume) - b.volume) / std::max(std::abs(static_cast<double>(a.volume)), 1e-9);
+			const auto size = std::cbrt(std::abs(static_cast<double>(a.volume)));
+			for (std::size_t i = 0; i < 3; i++)
+			{
+				result = std::max(result, std::abs(static_cast<double>(a.centre[i]) - b.centre[i]) / std::max(size, 1e-6));
+			}
+
+			const auto x = inertia_tensor(a);
+			const auto y = inertia_tensor(b);
+			double largest{};
+			for (const auto& row : x)
+			{
+				for (const auto value : row)
+				{
+					largest = std::max(largest, std::abs(value));
+				}
+			}
+
+			for (std::size_t i = 0; i < 3; i++)
+			{
+				for (std::size_t j = 0; j < 3; j++)
+				{
+					result = std::max(result, std::abs(x[i][j] - y[i][j]) / std::max(largest, 1e-12));
+				}
+			}
+
+			return result;
+		}
+
+		// A shape of a tagfile built again without the game: compressed meshes from their geometry, compound shapes with a SIMD
+		// tree from their instances, convex polytopes from their vertices. Other shapes are copied, as are shape properties.
+		std::uint32_t rebuild_shape(havok::object_builder& builder, const havok::tagfile& file, const havok::type_table& types,
+			const std::uint32_t index, std::unordered_map<std::uint32_t, std::uint32_t>& copies, rebuilt_shapes& rebuilt)
+		{
+			if (const auto found = copies.find(index); found != copies.end())
+			{
+				return found->second;
+			}
+
+			const auto& shape = file.items.at(index);
+			const auto identity = types.identity(shape.type);
+			const auto properties = item_target(shape, member_offset(types, shape.type, "properties"));
+			const auto flags = item_value<std::uint16_t>(shape, member_offset(types, shape.type, "flags"));
+			const auto dispatch = item_value<std::uint8_t>(shape, member_offset(types, shape.type, "dispatchType"));
+			const auto radius = item_value<float>(shape, member_offset(types, shape.type, "convexRadius"));
+			const auto user_data = item_value<std::uint64_t>(shape, member_offset(types, shape.type, "userData"));
+			std::optional<std::uint32_t> built;
+			std::optional<havok::mass_properties> masses;
+			if (identity == "hknpConvexPolytopeShape" && radius == 0.0f)
+			{
+				const auto source = havok::read_convex_polytope_shape(file, types, index);
+				const auto hull = havok::convex_hull(source.vertices, 0.0f);
+				built = havok::add_convex_polytope_shape(builder, hull, {flags, dispatch, user_data});
+
+				// Mass properties are built from the hull and must decode close to the stock ones.
+				if (const auto stock = havok::read_mass_properties(file, types, index))
+				{
+					const auto ours = havok::convex_mass_properties(hull, stock->mass);
+					havok::add_mass_properties(builder, *built, ours);
+					masses = ours;
+					rebuilt.masses++;
+
+					// Some stock shapes keep no inertia.
+					if (stock->inertia != havok::vector3{})
+					{
+						rebuilt.mass_error = std::max(rebuilt.mass_error, mass_difference(*stock, ours));
+					}
+				}
+			}
+			else if (identity == "hknpCompressedMeshShape")
+			{
+				const auto decoded = havok::read_compressed_mesh_shape(file, types, index);
+				if (!decoded.custom)
+				{
+					auto mesh = mesh_input(decoded);
+					for (std::size_t i = 0; i < mesh.convex_shapes.size(); i++)
+					{
+						mesh.convex_shapes[i].shape = rebuild_shape(builder, file, types, decoded.convex_items[i], copies, rebuilt);
+					}
+
+					havok::compressed_mesh_stats stats;
+					built = havok::add_compressed_mesh_shape(builder, mesh, &stats);
+					rebuilt.mesh_errors[*built] = stats.largest_error;
+				}
+			}
+			else if (identity == "hknpCompoundShape" &&
+				item_value<std::uint8_t>(shape, member_offset(types, shape.type, "boundingVolumeData.type")) == 2)
+			{
+				const auto& elements = file.items.at(item_target(shape, member_offset(types, shape.type, "instances.elements")));
+				std::vector<havok::compound_instance> instances;
+				for (std::uint32_t i = 0; i < elements.count; i++)
+				{
+					const auto child = item_target(elements, i * 112 + 80);
+					const auto& child_item = file.items.at(child);
+					if (types.identity(child_item.type) != "hknpConvexPolytopeShape")
+					{
+						instances.clear();
+						break;
+					}
+
+					havok::compound_instance instance;
+					for (std::size_t column = 0; column < 3; column++)
+					{
+						for (std::size_t axis = 0; axis < 3; axis++)
+						{
+							instance.rotation[column][axis] = item_value<float>(elements, i * 112 + column * 16 + axis * 4);
+						}
+					}
+
+					for (std::size_t axis = 0; axis < 3; axis++)
+					{
+						instance.translation[axis] = item_value<float>(elements, i * 112 + 48 + axis * 4);
+					}
+
+					instance.shape_tag = item_value<std::uint16_t>(elements, i * 112 + 88);
+					instance.shape = rebuild_shape(builder, file, types, child, copies, rebuilt);
+					// The bounds come from the hull that was built.
+					instance.vertices = havok::read_convex_polytope_shape(file, types, child).vertices;
+					instances.push_back(std::move(instance));
+				}
+
+				if (!instances.empty())
+				{
+					built = havok::add_compound_shape(builder, instances);
+				}
+			}
+
+			if (!built)
+			{
+				rebuilt.copied++;
+				return havok::copy_item(builder, file, index, copies);
+			}
+
+			rebuilt.built++;
+			if (properties && !masses)
+			{
+				builder.point(*built, "properties", havok::copy_item(builder, file, properties, copies));
+			}
+
+			copies.emplace(index, *built);
+			return *built;
+		}
+
+		// The geometry of two shapes must agree: compressed meshes their triangles (within the vertex error of the built mesh)
+		// and convex shapes, compound shapes their instances, convex polytopes their bounds.
+		void compare_shapes(const havok::tagfile& stock_file, const std::uint32_t stock, const havok::tagfile& built_file, const std::uint32_t built,
+			const havok::type_table& types, const float tolerance)
+		{
+			const auto& a = stock_file.items.at(stock);
+			const auto& b = built_file.items.at(built);
+			const auto identity = types.identity(a.type);
+			if (a.type != b.type)
+			{
+				throw std::runtime_error(std::format("a {} became a {}", identity, types.identity(b.type)));
+			}
+
+			if (identity == "hknpCompressedMeshShape")
+			{
+				const auto expected = havok::read_compressed_mesh_shape(stock_file, types, stock);
+				const auto found = havok::read_compressed_mesh_shape(built_file, types, built, true);
+				if (expected.custom)
+				{
+					return;
+				}
+
+				const auto matched = matching_triangles(expected, found, tolerance * 1.01f + 1e-6f);
+				if (matched != expected.triangles.size() || found.triangles.size() != expected.triangles.size() ||
+					found.convex_shapes.size() != expected.convex_shapes.size())
+				{
+					throw std::runtime_error(std::format("a compressed mesh has {} of {} triangles and {} of {} convex shapes", matched,
+						expected.triangles.size(), found.convex_shapes.size(), expected.convex_shapes.size()));
+				}
+
+				for (std::size_t i = 0; i < expected.convex_shapes.size(); i++)
+				{
+					const auto& x = expected.convex_shapes[i];
+					const auto& y = found.convex_shapes[i];
+					if (x.rotation != y.rotation || x.translation != y.translation || x.shape_tag != y.shape_tag)
+					{
+						throw std::runtime_error(std::format("convex shape {} of a compressed mesh moved", i));
+					}
+				}
+			}
+			else if (identity == "hknpConvexPolytopeShape")
+			{
+				const auto x = havok::instance_bounds({.vertices = havok::read_convex_polytope_shape(stock_file, types, stock).vertices});
+				const auto y = havok::instance_bounds({.vertices = havok::read_convex_polytope_shape(built_file, types, built).vertices});
+				for (std::size_t k = 0; k < 6; k++)
+				{
+					if (std::abs(x[k] - y[k]) > 1e-3f)
+					{
+						throw std::runtime_error("a convex polytope has other bounds");
+					}
+				}
+			}
+		}
+
+		struct physics_counts
+		{
+			std::size_t lists{};
+			std::size_t assets{};
+			std::size_t other_assets{};
+			std::size_t other_values{};
+			std::string first_difference;
+			rebuilt_shapes shapes;
+		};
+
+		// A HavokPhysicsShapeList built again: the same entries and tags, shapes with the same geometry.
+		void verify_shape_list(const havok::tagfile& file, const havok::type_table& types, physics_counts& counts)
+		{
+			const auto& root = file.items.at(1);
+			const auto array_of = [&](const std::string_view name) -> const havok::item*
+			{
+				const auto target = item_target(root, member_offset(types, root.type, name));
+				return target ? &file.items.at(target) : nullptr;
+			};
+
+			const auto* shapes = array_of("shapes");
+			const auto count = shapes ? shapes->count : 0;
+			const auto values = [&](const std::string_view name, const std::uint32_t index)
+			{
+				const auto* list = array_of(name);
+				return list && index < list->count ? item_value<std::uint32_t>(*list, index * 4) : 0u;
+			};
+
+			havok::object_builder builder(types);
+			std::unordered_map<std::uint32_t, std::uint32_t> copies;
+			std::vector<havok::shape_list_entry> entries;
+			for (std::uint32_t i = 0; i < count; i++)
+			{
+				havok::shape_list_entry entry;
+				entry.shape = rebuild_shape(builder, file, types, item_target(*shapes, i * 8), copies, counts.shapes);
+				const auto* names = array_of("shapeNames");
+				entry.name = names ? item_string(file, item_target(*names, i * 8)) : std::string{};
+				entry.index = static_cast<std::int32_t>(values("shapeIndices", i));
+				entry.vertex_count = values("vertCounts", i);
+				entry.triangle_count = values("triCounts", i);
+				entry.contents = values("shapeContents", i);
+				entry.convex_count = values("convexCounts", i);
+				if (const auto* bounds = array_of("minMaxes"))
+				{
+					for (std::size_t axis = 0; axis < 3; axis++)
+					{
+						entry.minimum[axis] = item_value<float>(*bounds, i * 32 + axis * 4);
+						entry.maximum[axis] = item_value<float>(*bounds, i * 32 + 16 + axis * 4);
+					}
+				}
+
+				entries.push_back(std::move(entry));
+			}
+
+			std::vector<havok::shape_tag> tags;
+			if (const auto* data = array_of("shapeTagData"))
+			{
+				for (std::uint32_t i = 0; i < data->count; i++)
+				{
+					tags.push_back({item_value<std::uint32_t>(*data, i * 24), item_value<std::uint32_t>(*data, i * 24 + 4),
+						item_value<std::uint16_t>(*data, i * 24 + 8), item_value<std::uint64_t>(*data, i * 24 + 16)});
+				}
+			}
+
+			const auto list = havok::add_shape_list(builder, entries, tags);
+			auto built = builder.finish(file.sdk_version, {}, list);
+			const auto written = havok::write_self_describing_tagfile(built, types);
+			const auto again = havok::read_tagfile(written, &types);
+
+			// The arrays of the list must hold the same values.
+			const auto& built_root = again.items.at(1);
+			for (const auto name : {"shapeIndices", "vertCounts", "triCounts", "minMaxes", "shapeTagData", "shapeContents", "convexCounts"})
+			{
+				const auto offset = member_offset(types, root.type, name);
+				const auto stock_target = item_target(root, offset);
+				const auto built_target = item_target(built_root, offset);
+				const auto stock_data = stock_target ? file.items.at(stock_target).data : std::vector<std::uint8_t>{};
+				const auto built_data = built_target ? again.items.at(built_target).data : std::vector<std::uint8_t>{};
+				if (stock_data != built_data)
+				{
+					throw std::runtime_error(std::format("the shape list {} differ", name));
+				}
+			}
+
+			const auto* built_names = again.items.at(item_target(built_root, member_offset(types, root.type, "shapeNames"))).count ?
+				&again.items.at(item_target(built_root, member_offset(types, root.type, "shapeNames"))) : nullptr;
+			const auto& built_shapes = again.items.at(item_target(built_root, member_offset(types, root.type, "shapes")));
+			for (std::uint32_t i = 0; i < count; i++)
+			{
+				if (!built_names || item_string(again, item_target(*built_names, i * 8)) != entries[i].name)
+				{
+					throw std::runtime_error(std::format("shape list entry {} has another name", i));
+				}
+
+				const auto built_shape = item_target(built_shapes, i * 8);
+				const auto error = counts.shapes.mesh_errors.contains(entries[i].shape) ? counts.shapes.mesh_errors.at(entries[i].shape) : 0.0f;
+				compare_shapes(file, item_target(*shapes, i * 8), again, built_shape, types, error);
+			}
+
+			counts.lists++;
+		}
+
+		// A one-body HavokPhysicsAsset built again from its values: the objects other than the shape must have the same bytes.
+		void verify_physics_asset(const havok::tagfile& file, const havok::type_table& types, physics_counts& counts)
+		{
+			const auto& root = file.items.at(1);
+			const auto system_index = item_target(root, member_offset(types, root.type, "physicsSystemData"));
+			if (!system_index)
+			{
+				counts.other_assets++;
+				return;
+			}
+
+			const auto& system = file.items.at(system_index);
+			const auto target_of = [&](const havok::item& owner, const std::string_view name) -> const havok::item*
+			{
+				const auto target = item_target(owner, member_offset(types, owner.type, name));
+				return target ? &file.items.at(target) : nullptr;
+			};
+
+			const auto* bodies = target_of(system, "bodyCinfos");
+			const auto* materials = target_of(system, "materials");
+			const auto* motions = target_of(system, "motionProperties");
+			const auto one = [&](const std::string_view name)
+			{
+				const auto* list = target_of(root, name);
+				return list && list->count == 1;
+			};
+
+			if (!bodies || bodies->count != 1 || target_of(system, "constraintCinfos") || (materials && materials->count != 1) ||
+				(motions && motions->count != 1) || !one("bodyQualityNameCRCLookup") || !one("materialNameCRCLookup") ||
+				!one("motionPropertiesNameCRCLookup") || !one("bodySFXAssetNames") || !one("bodyVFXAssetNames") || !one("bodyServerUsage") ||
+				!one("bodyDrivers") || !one("simulationCategories") || target_of(root, "constraintServerUsage") || target_of(root, "mutable") ||
+				target_of(root, "mutableShapeNames") || !!materials != !!motions)
+			{
+				counts.other_assets++;
+				return;
+			}
+
+			const auto first = [&](const std::string_view name)
+			{
+				return item_value<std::uint32_t>(*target_of(root, name), 0);
+			};
+
+			const auto body_member = [&](const std::string_view name)
+			{
+				return member_offset(types, bodies->type, name);
+			};
+
+			havok::physics_asset asset;
+			asset.use_category = item_value<std::int32_t>(root, member_offset(types, root.type, "useCategory"));
+			asset.body_quality_crc = first("bodyQualityNameCRCLookup");
+			asset.material_crc = first("materialNameCRCLookup");
+			asset.motion_properties_crc = first("motionPropertiesNameCRCLookup");
+			asset.server_usage = static_cast<std::int32_t>(first("bodyServerUsage"));
+			asset.body_driver = static_cast<std::int32_t>(first("bodyDrivers"));
+			asset.simulation_category = static_cast<std::int32_t>(first("simulationCategories"));
+			asset.system_properties = materials != nullptr;
+			auto& body = asset.body;
+			body.name = item_string(file, item_target(*bodies, body_member("name")));
+			body.collision_filter_info = item_value<std::uint32_t>(*bodies, body_member("collisionFilterInfo"));
+			body.material_id = item_value<std::uint16_t>(*bodies, body_member("materialId"));
+			body.quality_id = item_value<std::uint8_t>(*bodies, body_member("qualityId"));
+			body.motion_type = item_value<std::uint8_t>(*bodies, body_member("motionType"));
+			body.mass = item_value<float>(*bodies, body_member("mass"));
+			body.motion_properties_id = item_value<std::uint16_t>(*bodies, body_member("motionPropertiesId"));
+			body.activation_priority = item_value<std::int8_t>(*bodies, body_member("activationPriority"));
+
+			havok::object_builder builder(types);
+			std::unordered_map<std::uint32_t, std::uint32_t> copies;
+			const auto stock_shape = item_target(*bodies, body_member("shape"));
+			body.shape = rebuild_shape(builder, file, types, stock_shape, copies, counts.shapes);
+			const auto error = counts.shapes.mesh_errors.contains(body.shape) ? counts.shapes.mesh_errors.at(body.shape) : 0.0f;
+			const auto built_root = havok::add_physics_asset(builder, asset);
+			const auto written = havok::write_compact_tagfile(builder.finish(file.sdk_version, havok::replay_compendium_signature, built_root), types);
+			const auto again = havok::read_tagfile(written, &types);
+
+			// The bytes of each object without its pointer fields.
+			const auto bytes_of = [&](const havok::tagfile& source, const havok::item* object)
+			{
+				if (!object)
+				{
+					return std::vector<std::uint8_t>{};
+				}
+
+				auto data = object->data;
+				for (const auto& pointer : object->pointers)
+				{
+					std::fill_n(data.begin() + pointer.offset, std::min<std::size_t>(8, data.size() - pointer.offset), 0);
+				}
+
+				(void)source;
+				return data;
+			};
+
+			const auto& built_asset = again.items.at(1);
+			const auto& built_system = again.items.at(item_target(built_asset, member_offset(types, root.type, "physicsSystemData")));
+			const auto built_target = [&](const havok::item& owner, const std::string_view name) -> const havok::item*
+			{
+				const auto target = item_target(owner, member_offset(types, owner.type, name));
+				return target ? &again.items.at(target) : nullptr;
+			};
+
+			const auto* built_body = built_target(built_system, "bodyCinfos");
+			for (const auto& [name, x, y] : {std::tuple("asset", &root, &built_asset), std::tuple("system", &system, &built_system),
+				std::tuple("material", materials, built_target(built_system, "materials")),
+				std::tuple("motion properties", motions, built_target(built_system, "motionProperties")), std::tuple("body", bodies, built_body)})
+			{
+				const auto a = bytes_of(file, x);
+				const auto b = bytes_of(again, y);
+				if (a != b)
+				{
+					const auto at = std::ranges::mismatch(a, b).in1 - a.begin();
+					if (counts.first_difference.empty())
+					{
+						counts.first_difference = std::format("{} at 0x{:X} ({} and {} bytes)", name, at, a.size(), b.size());
+					}
+
+					counts.other_values++;
+					return;
+				}
+			}
+
+			compare_shapes(file, stock_shape, again, item_target(*built_body, body_member("shape")), types, error);
+			counts.assets++;
+		}
+
+		// IW8_REWRITE=physics builds the Havok data of the zone again without the game: each HavokPhysicsShapeList (col_map,
+		// map_ents) and each one-body HavokPhysicsAsset, with their shapes. Lists must keep their entries and tags, assets the
+		// bytes of their objects, and shapes their geometry.
+		void verify_physics(const std::filesystem::path& zone_folder, const loaded_zone& zone)
+		{
+			const auto& compendium = replay_compendium(zone_folder);
+			const auto list_type = *compendium.find("HavokPhysicsShapeList");
+			const auto asset_type = *compendium.find("HavokPhysicsAsset");
+			std::set<asset_key> seen;
+			physics_counts counts;
+			for (const auto& asset : zone.assets)
+			{
+				const asset_key key{asset.type, asset_name(asset.type, asset.header)};
+				if (asset.referenced || !seen.emplace(key).second)
+				{
+					continue;
+				}
+
+				const auto dump = dump_asset_data(asset.type, asset.header);
+				for (const auto record : tagfile_records(dump))
+				{
+					const std::span bytes(reinterpret_cast<const std::uint8_t*>(record.data()), record.size());
+					if (const auto reference = havok::compendium_reference(bytes); reference && *reference != havok::replay_compendium_signature)
+					{
+						continue;
+					}
+
+					havok::tagfile file;
+					try
+					{
+						file = havok::read_tagfile(bytes, &compendium);
+					}
+					catch (const havok::unknown_type&)
+					{
+						continue;
+					}
+
+					if (file.items.size() < 2 || (file.items[1].type != list_type && file.items[1].type != asset_type))
+					{
+						continue;
+					}
+
+					try
+					{
+						if (file.items[1].type == list_type)
+						{
+							verify_shape_list(file, compendium, counts);
+						}
+						else
+						{
+							verify_physics_asset(file, compendium, counts);
+						}
+					}
+					catch (const std::exception& e)
+					{
+						char debug[MAX_PATH]{};
+						if (GetEnvironmentVariableA("IW8_DUMP_DEBUG", debug, sizeof(debug)))
+						{
+							std::ofstream(std::filesystem::path(debug) / "physics.hkx", std::ios::binary).write(record.data(), static_cast<std::streamsize>(record.size()));
+						}
+
+						const auto format = find_asset_format(asset.type);
+						throw std::runtime_error(std::format("{} \"{}\": {}", format ? format->name : "?", key.second, e.what()));
+					}
+				}
+			}
+
+			ZONETOOL_INFO("%s: %zu shape lists and %zu one-body physics assets build again (%zu with other values%s%s, %zu of another "
+				"kind); %zu shapes built, %zu copied; %zu mass properties built, largest difference %.6f", zone.name.data(), counts.lists,
+				counts.assets, counts.other_values, counts.first_difference.empty() ? "" : ", first: ", counts.first_difference.data(),
+				counts.other_assets, counts.shapes.built, counts.shapes.copied, counts.shapes.masses, counts.shapes.mass_error);
+		}
+
 		// The asset list of the zone: <pool>,<name> for an asset, <pool>,,<name> for a reference.
 		void write_asset_csv(const loaded_zone& zone)
 		{
@@ -997,6 +1881,14 @@ namespace zonetool::iw8
 			else if (std::string_view(rewrite) == "compound")
 			{
 				verify_compound(zone_folder, *zone);
+			}
+			else if (std::string_view(rewrite) == "mesh")
+			{
+				verify_mesh(zone_folder, *zone);
+			}
+			else if (std::string_view(rewrite) == "physics")
+			{
+				verify_physics(zone_folder, *zone);
 			}
 			else
 			{

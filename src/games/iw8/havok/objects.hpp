@@ -72,8 +72,35 @@ namespace zonetool::iw8::havok
 		float convex_radius{};
 	};
 
+	// The vertices of the child shape placed by the transform of the instance, as the Replay tools place them.
+	std::vector<vector3> placed_vertices(const compound_instance& instance);
+	// The placed vertices with the convex radius: minimum x, y, z, then maximum x, y, z.
+	std::array<float, 6> instance_bounds(const compound_instance& instance);
+	// An hknpShapeInstance without its shape pointer. translation_w is the bit pattern of the w of the translation.
+	std::vector<std::uint8_t> instance_data(const compound_instance& instance, std::uint32_t translation_w);
+
 	// An hknpCompoundShape of the instances with a SIMD tree, as the Replay tools make them. Returns the shape item.
 	std::uint32_t add_compound_shape(object_builder& builder, std::span<const compound_instance> instances);
+
+	// The mass properties of a shape as hknpShapeMassProperties keeps them: the inertia in the frame of the rotation (a
+	// quaternion x, y, z, w).
+	struct mass_properties
+	{
+		float volume{};
+		float mass{};
+		vector3 centre{};
+		vector3 inertia{};
+		std::array<float, 4> rotation{0.0f, 0.0f, 0.0f, 1.0f};
+	};
+
+	// The mass properties of a convex polytope of uniform density. The Replay tools scale the inertia by 1.5.
+	mass_properties convex_mass_properties(const polytope& shape, float mass, float inertia_factor = 1.5f);
+
+	// Gives the shape its mass properties (hkRefCountedProperties with an hknpShapeMassProperties).
+	void add_mass_properties(object_builder& builder, std::uint32_t shape, const mass_properties& properties);
+
+	// The mass properties that a shape item keeps, as they decode.
+	std::optional<mass_properties> read_mass_properties(const tagfile& file, const type_table& types, std::uint32_t shape);
 
 	// A copy of an item of another tagfile, with the items that it points at.
 	std::uint32_t copy_item(object_builder& builder, const tagfile& file, std::uint32_t item,
