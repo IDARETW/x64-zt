@@ -2,6 +2,8 @@
 
 namespace zonetool::iw8
 {
+	struct loaded_zone;
+
 	struct zone_asset
 	{
 		std::int32_t type;
@@ -38,4 +40,13 @@ namespace zonetool::iw8
 	// a zone that is written again. Other strings follow in the order of use.
 	written_zone write_zone(std::span<const zone_asset> list, std::span<const zone_asset> assets,
 		std::span<const char* const> script_strings, const write_options& options = {});
+
+	// Writes the assets and script strings of a loaded zone again with the choices of this writer. The list entries
+	// follow (-2), as in stock zones. The zone must load with keep_temp_data.
+	written_zone write_zone(const loaded_zone& zone);
+
+	// Writes zone data that another writer made with the choices of this writer, for example a zone of the IW3
+	// converter: the zone loads, keeping the data that the game drops, and is written again. The result keeps the xfile
+	// version and the transient flag of `file`, and at least its preload walk size.
+	xfile::fastfile rewrite_fastfile(const std::string& name, xfile::fastfile file);
 }

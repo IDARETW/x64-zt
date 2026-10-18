@@ -54,6 +54,13 @@
 
 using namespace zt;
 
+namespace zonetool::iw8
+{
+	const game& definition();
+	xfile::fastfile rewrite_fastfile(const std::string& name, xfile::fastfile file);
+	std::vector<std::int32_t> zone_list_types(const std::filesystem::path& path);
+}
+
 namespace
 {
 struct Args
@@ -316,6 +323,10 @@ bool prepareOutputDirectory(const std::string &outputDirectory, const std::strin
     return !error;
 }
 
+// --writer iw8-zonetool writes each zone in the stream layout of the converter, for byte comparisons with
+// iw8-zonetool builds.
+bool g_converterLayout = false;
+
 struct ZoneValidation
 {
     uint32_t assetCount{};
@@ -350,9 +361,14 @@ bool validateZoneFile(const std::string &path, ZoneValidation *details = nullptr
         return false;
     }
 
+    // The converter layout declares the asset list header in block 0. The x64-zt writer declares it in block 1 with
+    // the peak of the loader there, as most stock zones do.
+    const auto &blocks = header.xfileHeader.blockSize;
+    const bool listBlock = g_converterLayout ? blocks[iw8::XFILE_BLOCK_TEMP] == sizeof(IW8_XAssetList)
+                                             : blocks[iw8::XFILE_BLOCK_TEMP] == 0 &&
+                                                   blocks[iw8::XFILE_BLOCK_TEMP_PRELOAD] >= sizeof(IW8_XAssetList);
     if (header.transientFileType != 0 || header.residentHash != 0 ||
-        header.xfileHeader.preloadWalkSize == 0 ||
-        header.xfileHeader.blockSize[iw8::XFILE_BLOCK_TEMP] != sizeof(IW8_XAssetList) ||
+        header.xfileHeader.preloadWalkSize == 0 || !listBlock ||
         header.xfileHeader.blockSize[iw8::XFILE_BLOCK_CALLBACK] != 0 ||
         header.xfileHeader.blockSize[iw8::XFILE_BLOCK_SCRIPT] != 0 ||
         header.xfileHeader.blockSize[iw8::XFILE_BLOCK_UNK10] != 0)
@@ -371,10 +387,45 @@ bool validateZoneFile(const std::string &path, ZoneValidation *details = nullptr
         }
         streamTotal += size;
     }
-    if (streamTotal < header.xfileHeader.size)
+    // The converter layout keeps every block byte. The x64-zt writer declares the temp block peak, as the loader
+    // reuses it for each asset, so stock zones and its zones can declare fewer bytes than the zone data.
+    if (g_converterLayout && streamTotal < header.xfileHeader.size)
     {
         err("validate: %s has invalid stream sizes", path.c_str());
         return false;
+    }
+
+    if (!g_converterLayout)
+    {
+        // The zones of the x64-zt writer must load with the IW8 zone loader, which reads every asset.
+        std::vector<std::int32_t> types;
+        try
+        {
+            types = zonetool::iw8::zone_list_types(path);
+        }
+        catch (const std::exception &e)
+        {
+            err("validate: %s does not load: %s", path.c_str(), e.what());
+            return false;
+        }
+
+        std::array<uint32_t, ASSET_TYPE_COUNT> typeCounts{};
+        for (const auto type : types)
+        {
+            if (type < 0 || type >= ASSET_TYPE_COUNT)
+            {
+                err("validate: %s has an invalid top-level asset type", path.c_str());
+                return false;
+            }
+            ++typeCounts[type];
+        }
+        info("validate: %s loads with %zu top-level asset(s)", path.c_str(), types.size());
+        if (details)
+        {
+            details->assetCount = static_cast<uint32_t>(types.size());
+            details->typeCounts = typeCounts;
+        }
+        return true;
     }
 
     IW8_XAssetList root{};
@@ -713,6 +764,33 @@ template <> Iw8WriteParams writeParams(const iw8::ZoneBuffer &buffer)
     }
     params.calcSize = buffer.calcSize();
     return params;
+}
+
+// Writes a zone that the converter built: the x64-zt zone writer lays it out again and the core container stores it.
+bool writeZone(const std::string &outputPath, const std::vector<uint8_t> &body, const Iw8WriteParams &params)
+{
+    if (g_converterLayout)
+        return iw8_write(outputPath, body, params);
+
+    try
+    {
+        zonetool::xfile::fastfile file{};
+        file.payload.assign(body.begin(), body.end());
+        file.block_sizes.assign(std::begin(params.blockSize), std::end(params.blockSize));
+        file.xfile_version = params.xfileVersion;
+        file.transient = params.transientFileType != 0;
+        file.preload_walk_size = params.preloadWalkSize;
+        const auto written = zonetool::iw8::rewrite_fastfile(
+            std::filesystem::path(outputPath).stem().string(), std::move(file));
+        zonetool::xfile::write(outputPath, zonetool::iw8::definition().format, written);
+        info("iw8: wrote %s (%zu bytes of zone data)", outputPath.c_str(), written.payload.size());
+        return true;
+    }
+    catch (const std::exception &e)
+    {
+        err("iw8: cannot write %s: %s", outputPath.c_str(), e.what());
+        return false;
+    }
 }
 
 iw8::MapSun loadLighting(const Args &args, const std::string &dumpDirectory,
@@ -1594,13 +1672,13 @@ int writeMapPackage(const Args &args, const std::string &map, const std::string 
         writer.build();
         timing.lap("zone build");
 
-        if (!iw8_write(path_join(outputDirectory, "techsets_" + map + ".ff"),
+        if (!writeZone(path_join(outputDirectory, "techsets_" + map + ".ff"),
                        techsets.body(), writeParams(techsets)))
         {
             result = 1;
         }
 
-        if (!iw8_write(path_join(outputDirectory, map + ".ff"), writer.body(), writeParams(writer)))
+        if (!writeZone(path_join(outputDirectory, map + ".ff"), writer.body(), writeParams(writer)))
         {
             result = 1;
         }
@@ -1617,7 +1695,7 @@ int writeMapPackage(const Args &args, const std::string &map, const std::string 
     const auto writeEmpty = [&](const std::string &name) {
         iw8::ZoneBuffer buffer;
         iw8::buildEmptyZone(buffer);
-        if (!iw8_write(path_join(outputDirectory, name), buffer.data(), writeParams(buffer)))
+        if (!writeZone(path_join(outputDirectory, name), buffer.data(), writeParams(buffer)))
         {
             result = 1;
         }
@@ -1664,7 +1742,7 @@ int writeMapPackage(const Args &args, const std::string &map, const std::string 
             continue;
         }
         zone->build();
-        if (!iw8_write(path_join(outputDirectory, name + ".ff"), zone->body(), writeParams(*zone)))
+        if (!writeZone(path_join(outputDirectory, name + ".ff"), zone->body(), writeParams(*zone)))
             result = 1;
         for (auto &row : outputLedgerRows(name, zone->assetList(), renderMesh, prepared, map, stockCopier.get()))
             ledgerRows.push_back(std::move(row));
@@ -1929,7 +2007,9 @@ int buildMap(const Args &args, const iw3::PreparedMap *prepared = nullptr)
             (GetFileAttributesW(directory.c_str()) & FILE_ATTRIBUTE_REPARSE_POINT))
             return;
         std::error_code cleanupError;
-        for (const std::string &name : expectedFiles(map))
+        auto names = expectedFiles(map);
+        names.push_back(kPreviewFile);
+        for (const std::string &name : names)
         {
             std::filesystem::remove(directory / name, cleanupError);
             cleanupError.clear();
@@ -2113,11 +2193,6 @@ int buildIw3(const Args &args)
 
 } // namespace
 
-namespace zonetool::iw8
-{
-	const game& definition();
-}
-
 namespace zonetool::convert::iw3_iw8
 {
 	void convert_zone(const std::filesystem::path& zone_path, const zone_conversion& conversion)
@@ -2141,18 +2216,27 @@ namespace zonetool::convert::iw3_iw8
 		const auto replay = option("replay");
 		args.replayExecutable = replay.empty() ? (conversion.target_game_path / "game_dx12_ship_replay.exe").string() : replay;
 
-		// --havok native builds the collision and physics without the Replay executable; native-check also loads the
-		// collision with it to check the bounds.
-		if (const auto havok = option("havok"); !havok.empty() && havok != "exe")
+		// The collision and physics are built without the Replay executable. --havok exe bakes them with it, and
+		// native-check also loads the native collision with it to check the bounds.
+		const auto havok = option("havok").empty() ? std::string("native") : option("havok");
+		if (havok != "native" && havok != "native-check" && havok != "exe")
 		{
-			if (havok != "native" && havok != "native-check")
-			{
-				throw std::runtime_error(std::format("--havok must be exe, native or native-check, not \"{}\"", havok));
-			}
+			throw std::runtime_error(std::format("--havok must be native, native-check or exe, not \"{}\"", havok));
+		}
 
+		if (havok != "exe")
+		{
 			// The type compendium comes from the zone folder of the game.
 			::iw8::havok::UseNativeHavok(std::filesystem::path(args.replayExecutable).parent_path() / "zone", havok == "native-check");
 		}
+
+		// The x64-zt zone writer lays out the zones. --writer iw8-zonetool keeps the stream layout of the converter.
+		const auto writer = option("writer");
+		if (!writer.empty() && writer != "x64-zt" && writer != "iw8-zonetool")
+		{
+			throw std::runtime_error(std::format("--writer must be x64-zt or iw8-zonetool, not \"{}\"", writer));
+		}
+		g_converterLayout = writer == "iw8-zonetool";
 		args.unlinkerExecutable = option("unlinker");
 		args.gscTool = option("gsc_tool");
 		args.metadataPath = option("metadata");

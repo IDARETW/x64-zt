@@ -79,12 +79,11 @@ namespace zonetool::iw8
 			xfile::write(std::filesystem::path(output) / (zone.name + ".ff"), definition().format, file);
 		}
 
-		// IW8_REWRITE=fresh writes the zone with the choices of the writer, loads the result and compares the assets.
+		// IW8_REWRITE=fresh writes the zone with the choices of the writer (as the IW3 converter writes its zones), loads
+		// the result and compares the assets.
 		void verify_fresh_write(const loaded_zone& zone)
 		{
-			const auto list = to_zone_assets(zone.list);
-			const auto assets = to_zone_assets(zone.assets);
-			const auto written = write_zone(list, assets, zone.script_strings);
+			const auto written = write_zone(zone);
 			save_written_zone(zone, written);
 
 			xfile::fastfile file{};
@@ -2092,14 +2091,67 @@ namespace zonetool::iw8
 				throw std::runtime_error("IW8_REWRITE=compare needs IW8_COMPARE_ZONE");
 			}
 
+			// Both zones keep the data that the game drops, so that each asset dumps the same way whatever its layout.
 			const auto& compendium = replay_compendium(zone_folder);
-			const auto other = load_zone(std::filesystem::path(other_path));
+			const auto other = load_zone(std::filesystem::path(other_path), {.keep_temp_data = true});
 			std::map<asset_key, const void*> other_assets;
 			for (const auto& asset : other->assets)
 			{
 				if (!asset.referenced)
 				{
 					other_assets.emplace(asset_key{asset.type, asset_name(asset.type, asset.header)}, asset.header);
+				}
+			}
+
+			// The zones list the same assets in the same order, with the same script strings, whatever their layout.
+			const auto list_of = [](const loaded_zone& z)
+			{
+				std::vector<std::tuple<std::int32_t, std::string, bool>> list;
+				for (const auto& entry : z.list)
+				{
+					list.emplace_back(entry.type, asset_name(entry.type, entry.header), entry.referenced);
+				}
+
+				return list;
+			};
+
+			const auto strings_of = [](const loaded_zone& z)
+			{
+				std::vector<std::optional<std::string>> strings;
+				for (const auto string : z.script_strings)
+				{
+					strings.emplace_back(string ? std::optional<std::string>(string) : std::nullopt);
+				}
+
+				return strings;
+			};
+
+			if (list_of(zone) != list_of(*other))
+			{
+				throw std::runtime_error(std::format("the asset lists differ ({} and {} entries)", zone.list.size(), other->list.size()));
+			}
+
+			if (strings_of(zone) != strings_of(*other))
+			{
+				throw std::runtime_error(std::format("the script strings differ ({} and {})", zone.script_strings.size(),
+					other->script_strings.size()));
+			}
+
+			std::set<asset_key> held;
+			for (const auto& asset : zone.assets)
+			{
+				if (!asset.referenced)
+				{
+					held.emplace(asset.type, asset_name(asset.type, asset.header));
+				}
+			}
+
+			for (const auto& [key, header] : other_assets)
+			{
+				if (!held.contains(key))
+				{
+					const auto format = find_asset_format(key.first);
+					throw std::runtime_error(std::format("{} \"{}\" is missing from this zone", format ? format->name : "?", key.second));
 				}
 			}
 
@@ -2167,8 +2219,9 @@ namespace zonetool::iw8
 				differences += std::format(" {} {}", count, type);
 			}
 
-			ZONETOOL_INFO("%s: %zu assets are the same and %zu agree on their Havok data (%zu shapes, largest vertex distance %.6f, %zu "
-				"triangles kept beyond the other zone, largest area %.6f, mass properties %.4f apart); other differences:%s%s%s", zone.name.data(),
+			ZONETOOL_INFO("%s: the same asset list (%zu entries) and script strings (%zu); %zu assets are the same and %zu agree on their "
+				"Havok data (%zu shapes, largest vertex distance %.6f, %zu triangles kept beyond the other zone, largest area %.6f, mass "
+				"properties %.4f apart); other differences:%s%s%s", zone.name.data(), zone.list.size(), zone.script_strings.size(),
 				result.same, result.havok, result.shapes, result.largest_distance, result.extra_triangles, result.largest_extra_area,
 				result.largest_mass_difference, differences.empty() ? " none" :
 				differences.data(), result.first_other.empty() ? "" : ", first ", result.first_other.data());
