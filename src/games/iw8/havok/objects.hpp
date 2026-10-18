@@ -18,6 +18,10 @@ namespace zonetool::iw8::havok
 		// An array of count elements of the type, with their bytes.
 		std::uint32_t array(std::string_view element_type, std::uint32_t count, std::span<const std::uint8_t> data);
 
+		// An item as it is: type, count, data. Its pointers come from pointer().
+		std::uint32_t raw(std::uint32_t type, std::uint8_t flags, std::uint32_t count, std::vector<std::uint8_t> data);
+		void pointer(std::uint32_t item, std::uint32_t offset, std::uint32_t pointer_type, std::uint32_t target);
+
 		// Points a member of an item (pointer, hkRefPtr, hkArray, hkRelArray or hkStringPtr) at another item.
 		void point(std::uint32_t item, std::string_view member, std::uint32_t target, std::uint32_t element = 0);
 		// Writes the bytes of a member of an item.
@@ -29,7 +33,8 @@ namespace zonetool::iw8::havok
 			this->set(item, member, std::span(reinterpret_cast<const std::uint8_t*>(&value), sizeof(T)), element);
 		}
 
-		tagfile finish(std::string_view sdk_version, std::optional<std::uint64_t> compendium);
+		// The items as a tagfile with the root object as item 1.
+		tagfile finish(std::string_view sdk_version, std::optional<std::uint64_t> compendium, std::uint32_t root = 1);
 
 	private:
 		const type_table& types_;
@@ -52,4 +57,25 @@ namespace zonetool::iw8::havok
 
 	// The polytope that an hknpConvexPolytopeShape item holds.
 	polytope read_convex_polytope_shape(const tagfile& file, const type_table& types, std::uint32_t item);
+
+	struct compound_instance
+	{
+		std::uint32_t shape{};
+		// The columns of the rotation.
+		std::array<vector3, 3> rotation{{{1.0f, 0.0f, 0.0f}, {0.0f, 1.0f, 0.0f}, {0.0f, 0.0f, 1.0f}}};
+		vector3 translation{};
+		std::uint16_t shape_tag{};
+		// The estimated shape key count of the child shape (a convex shape has 1).
+		std::uint32_t shape_keys = 1;
+		// The vertices and convex radius of the child shape in its own frame, for the bounds.
+		std::vector<vector3> vertices;
+		float convex_radius{};
+	};
+
+	// An hknpCompoundShape of the instances with a SIMD tree, as the Replay tools make them. Returns the shape item.
+	std::uint32_t add_compound_shape(object_builder& builder, std::span<const compound_instance> instances);
+
+	// A copy of an item of another tagfile, with the items that it points at.
+	std::uint32_t copy_item(object_builder& builder, const tagfile& file, std::uint32_t item,
+		std::unordered_map<std::uint32_t, std::uint32_t>& copies);
 }
