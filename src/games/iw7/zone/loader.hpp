@@ -20,4 +20,6 @@ namespace zonetool::iw7
 	const char* get_asset_name(XAssetType type, const void* header);
 
 	std::unique_ptr<loaded_zone> load_zone(const std::filesystem::path& path);
+	// Loads zone data that is in memory, for example an asset of a shared stream file.
+	std::unique_ptr<loaded_zone> load_zone(const std::string& name, xfile::fastfile file);
 }

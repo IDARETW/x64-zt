@@ -83,6 +83,8 @@ struct Args
     std::string gscTool;
     std::string actsExecutable;
     std::string stockCache;
+    // An extraction that another front end wrote (iw3::ImportOptions::extraction).
+    std::string extraction;
 };
 
 struct MapMetadata
@@ -2130,6 +2132,7 @@ int buildIw3(const Args &args)
     options.fastfile = args.positional[0];
     options.map = map;
     options.unlinker = args.unlinkerExecutable;
+    options.extraction = args.extraction;
     options.iw3ModeAssets = args.iw3ModeAssets;
     options.style =
         args.style == "iw8" ? iw3::MapStyle::iw8 : iw3::MapStyle::iw3;
@@ -2195,7 +2198,10 @@ int buildIw3(const Args &args)
 
 namespace zonetool::convert::iw3_iw8
 {
-	void convert_zone(const std::filesystem::path& zone_path, const zone_conversion& conversion)
+	namespace
+	{
+	void convert_map(const std::filesystem::path& zone_path, const zone_conversion& conversion,
+		const std::filesystem::path& extraction)
 	{
 		const auto option = [&](const std::string& name)
 		{
@@ -2240,7 +2246,11 @@ namespace zonetool::convert::iw3_iw8
 		args.unlinkerExecutable = option("unlinker");
 		args.gscTool = option("gsc_tool");
 		args.metadataPath = option("metadata");
-		args.iw3Roots.push_back(conversion.source_game_path.string());
+		args.extraction = extraction.string();
+		if (extraction.empty())
+		{
+			args.iw3Roots.push_back(conversion.source_game_path.string());
+		}
 		args.outputDirectory = (conversion.output_folder / map).string();
 		if (const auto profile = option("lighting_profile"); !profile.empty())
 		{
@@ -2287,5 +2297,17 @@ namespace zonetool::convert::iw3_iw8
 				}
 			}
 		}
+	}
+	}
+
+	void convert_zone(const std::filesystem::path& zone_path, const zone_conversion& conversion)
+	{
+		convert_map(zone_path, conversion, {});
+	}
+
+	void convert_extraction(const std::filesystem::path& zone_path, const std::filesystem::path& extraction,
+		const zone_conversion& conversion)
+	{
+		convert_map(zone_path, conversion, extraction);
 	}
 }

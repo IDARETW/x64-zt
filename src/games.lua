@@ -47,6 +47,8 @@ games = {
 	converter_requires = {
 		s1_h2 = {"h1"},
 		s1_s2 = {"h1"},
+		-- IW7 maps go through the map pipeline of the IW3 converter.
+		iw7_iw8 = {"iw3"},
 	},
 	converter_dependencies = {
 		s1_s2 = function()
@@ -57,6 +59,11 @@ games = {
 		end,
 		iw6_h1 = function()
 			dependencies.use(shader_tool)
+		end,
+		iw7_iw8 = function()
+			links {"convert-iw3-iw8"}
+			-- IW7 entity keys are script string tokens.
+			gsc_tool.import_engine("iw7")
 		end,
 	},
 }

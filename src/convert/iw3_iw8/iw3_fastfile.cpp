@@ -547,6 +547,10 @@ void RunUnlinker(const std::filesystem::path &unlinker, const ImportOptions &opt
 
 std::filesystem::path FindIw3CommonFastfile(const ImportOptions &options)
 {
+    // An extraction of another front end holds every asset; the zone folder beside it is not IW3.
+    if (!options.extraction.empty())
+        return {};
+
     std::vector<std::filesystem::path> roots = options.searchPaths;
     roots.push_back(options.fastfile.parent_path());
     std::vector<std::filesystem::path> candidates;
@@ -6124,8 +6128,9 @@ CollisionData ReadCollision(const Json &collision)
     if (unreferencedTriangles)
         zt::info("iw3: omitted %zu source collision triangles not referenced by a clip-map partition",
                  unreferencedTriangles);
+    // A world can be a triangle mesh alone (an IW7 extraction has no brushes).
     constexpr std::size_t maximumHulls = 262144;
-    if (result.hulls.empty() || result.hulls.size() > maximumHulls)
+    if ((result.hulls.empty() && result.meshes.empty()) || result.hulls.size() > maximumHulls)
     {
         throw std::runtime_error("IW3 collision has " + std::to_string(result.hulls.size()) +
                                  " hulls; maximum is " + std::to_string(maximumHulls));
@@ -8645,10 +8650,14 @@ PreparedMap PrepareFastfile(const ImportOptions &options)
     std::filesystem::create_directories(extracted);
     std::filesystem::create_directories(result.root);
 
-    const auto unlinker = FindUnlinker(options.unlinker);
-    const auto cacheDirectory = ExtractionCacheDirectory(unlinker, options);
-    const bool cached = !std::getenv("IW8_ZONETOOL_NO_EXTRACT_CACHE") &&
+    // An extraction of another front end takes the place of the extraction cache.
+    const bool external = !options.extraction.empty();
+    const auto unlinker = external ? std::filesystem::path{} : FindUnlinker(options.unlinker);
+    const auto cacheDirectory = external ? options.extraction : ExtractionCacheDirectory(unlinker, options);
+    const bool cached = (external || !std::getenv("IW8_ZONETOOL_NO_EXTRACT_CACHE")) &&
                         std::filesystem::is_regular_file(cacheDirectory / "complete", error);
+    if (external && !cached)
+        throw std::runtime_error("the extraction at " + cacheDirectory.string() + " is not complete");
     if (cached)
     {
         zt::info("iw3: reusing cached extraction %s", cacheDirectory.string().c_str());
@@ -8816,9 +8825,11 @@ PreparedMap PrepareFastfile(const ImportOptions &options)
 
     // Entity model skeletons: a second, model-only export in XMODEL_EXPORT
     // form, kept beside the cached extraction.
-    const auto skeletonRoot = std::getenv("IW8_ZONETOOL_NO_EXTRACT_CACHE")
+    const auto skeletonRoot = std::getenv("IW8_ZONETOOL_NO_EXTRACT_CACHE") && !external
                                   ? result.scratch / "skeleton"
                                   : cacheDirectory / "skeleton";
+    if (external && !std::filesystem::is_regular_file(skeletonRoot / "complete", error))
+        throw std::runtime_error("the extraction at " + cacheDirectory.string() + " has no complete skeleton export");
     if (!std::filesystem::is_regular_file(skeletonRoot / "complete", error))
     {
         std::error_code skeletonError;

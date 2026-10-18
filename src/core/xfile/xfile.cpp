@@ -1214,6 +1214,11 @@ namespace zonetool::xfile
 		std::filesystem::rename(partial, path);
 	}
 
+	std::string read_iw7_shared_stream(const std::string_view data, const format& format)
+	{
+		return decompress_iwc(strip_auth_blocks(data, format));
+	}
+
 	fastfile read(const std::filesystem::path& path, const format& format)
 	{
 		std::string data;

@@ -49,6 +49,15 @@ Without a command, `zonetool.exe` opens an interactive console.
   `--writer x64-zt|iw8-zonetool` (the IW8 zone writer lays out each zone, the default; or the zone keeps the stream
   layout of the converter, for byte comparisons with iw8-zonetool builds), `--dump 1` (also dumps each zone for
   `buildzone`). Tool paths can also go in `zonetool.json` `tools`.
+- `dumpzone <iw7 map zone> --target iw8` converts an IW7 map with the same options. `convert/iw7_iw8` writes the map
+  to `output/.iw7-extract/<zone>/` in the layout of the IW3 extraction cache, and the IW3 map pipeline converts that
+  extraction. The zone folder must hold `techsets_<zone>.ff` (the map's materials) and the `imagefile<N>.pak` and
+  `assetfile<N>.pak` files that the map streams its images and model surfaces from. The extraction has the world
+  surfaces, static and entity models, materials with their colour, normal and specular images, the sky, the sun,
+  spawn points, triggers and entities; the sky also shows the models that are too large for Replay model bounds
+  (planets). It does not have lightmaps, local lights, reflection probes, effects, sounds, scripts or the Havok
+  collision of the map: the collision comes from the solid render surfaces. `IW7_EXPORT_ONLY=1` stops after the
+  extraction, and `IW7_REUSE_EXTRACTION=1` converts the complete extraction of an earlier run again.
 
 ## Build cache
 

@@ -36,6 +36,9 @@ struct ImportOptions
     bool iw3ModeAssets{true};
     // IW3's look, or Replay's native fog/atmosphere/volumetrics (iw3_vision.h).
     MapStyle style{MapStyle::iw3};
+    // An extraction in the layout of the extraction cache (extracted/, skeleton/ and their complete files) that another
+    // front end wrote, for example from IW7 zones. It replaces the OAT Unlinker.
+    std::filesystem::path extraction;
 };
 
 struct PreparedXModel

@@ -17,9 +17,10 @@ bool read_file(const std::string &path, std::vector<uint8_t> &out)
     FILE *f = std::fopen(path.c_str(), "rb");
     if (!f)
         return false;
-    std::fseek(f, 0, SEEK_END);
-    long n = std::ftell(f);
-    std::fseek(f, 0, SEEK_SET);
+    // A Replay zone can reach 4 GB: long offsets stop at 2 GB.
+    _fseeki64(f, 0, SEEK_END);
+    const auto n = _ftelli64(f);
+    _fseeki64(f, 0, SEEK_SET);
     if (n < 0)
     {
         std::fclose(f);
