@@ -369,9 +369,8 @@ namespace zonetool::convert::iw7_iw8
 
 		// The IW3 material of a material, with the images of its roles (the pipeline's defaults for the missing ones).
 		json export_material(const iw7::Material* material,
-			const std::array<std::optional<std::string>, image_role_count>& images)
+			const std::array<std::optional<std::string>, image_role_count>& images, const material_class& kind)
 		{
-			const auto kind = classify_material(material);
 			std::string cull = "back";
 			if (material)
 			{
@@ -618,7 +617,6 @@ namespace zonetool::convert::iw7_iw8
 		std::array<std::size_t, 7> kinds{};
 		for (const auto& [name, material] : output.materials)
 		{
-			kinds[static_cast<std::size_t>(classify_material(material).kind)]++;
 			std::array<std::optional<std::string>, image_role_count> images;
 			for (std::size_t role = 0; role < image_role_count; role++)
 			{
@@ -631,8 +629,16 @@ namespace zonetool::convert::iw7_iw8
 				images[role] = written != role_files.end() ? std::optional(*written) : builtins[name][role];
 			}
 
+			// Glass panes blend as the pipeline's glass.
+			auto kind = classify_material(material);
+			if (output.glass_materials.contains(name) && kind.kind != surface_kind::opaque)
+			{
+				kind = {surface_kind::blend};
+			}
+
+			kinds[static_cast<std::size_t>(kind.kind)]++;
 			missing += material == nullptr;
-			write_json(output.extracted / "materials" / (name + ".json"), export_material(material, images));
+			write_json(output.extracted / "materials" / (name + ".json"), export_material(material, images, kind));
 		}
 
 		const auto written = std::ranges::count_if(files, [](const auto& entry)

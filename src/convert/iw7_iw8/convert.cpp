@@ -55,9 +55,10 @@ namespace zonetool::convert::iw7_iw8
 				triangles += world.dpvs.surfaces[i].tris.triCount;
 			}
 
-			ZONETOOL_INFO("iw7: %s: %u surfaces, %zu vertices, %zu triangles, %u static models, %u transient zones, %u lightmaps",
+			const auto fx_world = source.fx_world();
+			ZONETOOL_INFO("iw7: %s: %u surfaces, %zu vertices, %zu triangles, %u static models, %u transient zones, %u lightmaps, %u glass pieces",
 				source.name().data(), world.surfaceCount, vertices, triangles, world.dpvs.smodelCount, world.draw.transientZoneCount,
-				world.draw.lightMapCount);
+				world.draw.lightMapCount, fx_world ? fx_world->glassSys.initPieceCount : 0);
 		}
 
 		extraction output{};

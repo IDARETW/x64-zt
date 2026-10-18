@@ -749,6 +749,44 @@ namespace zonetool::convert::iw7_iw8
 			brush_models.push_back({{"bounds", {bounds.mins, bounds.maxs}}, {"start", surfaces.size()}, {"count", 0}});
 		}
 
+		// A glass pane draws its rectangle, which Replay's breakable glass replaces.
+		for (const auto& pane : glass_panes(source))
+		{
+			auto vertices = json::array();
+			float center[3]{};
+			for (auto k = 0; k < 4; k++)
+			{
+				vertices.push_back(
+				{
+					{"position", pane.corners[k]},
+					{"normal", pane.normal},
+					{"tangent", pane.tangent},
+					{"binormal_sign", 1.0f},
+					{"uv", pane.uvs[k]},
+					{"lightmap_uv", {0.0f, 0.0f}},
+					{"color", {255, 255, 255, 255}},
+				});
+
+				for (auto axis = 0; axis < 3; axis++)
+				{
+					center[axis] += pane.corners[k][axis] * 0.25f;
+				}
+			}
+
+			const auto material = output.add_material(source, pane.material);
+			output.glass_materials.insert(material);
+			brush_models.push_back({{"bounds", {pane.mins, pane.maxs}}, {"start", surfaces.size()}, {"count", 1}});
+			surface_indices.push_back(surfaces.size());
+			surfaces.push_back(
+			{
+				{"material", material},
+				{"lightmap", -1},
+				{"reflection_probe", probes.find(center)},
+				{"vertices", std::move(vertices)},
+				{"indices", {0, 1, 2, 0, 2, 3}},
+			});
+		}
+
 		// Replay draws one DPVS cell and leaves occlusion to Umbra: one cell with one tree that holds every surface
 		// and static model.
 		const auto bounds = bounds_json(world.bounds);

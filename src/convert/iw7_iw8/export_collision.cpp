@@ -173,6 +173,13 @@ namespace zonetool::convert::iw7_iw8
 			nodes.push_back({{"brushes", std::move(leaf)}, {"count", count}});
 		}
 
+		// The glass panes: the pipeline gives each the hull of its breakable glass.
+		const auto panes = glass_panes(source);
+		for (const auto& pane : panes)
+		{
+			submodels.push_back({{"leaf", 0}, {"mins", pane.mins}, {"maxs", pane.maxs}});
+		}
+
 		auto static_models = json::array();
 		for (auto i = 0u; i < world.dpvs.smodelCount; i++)
 		{
