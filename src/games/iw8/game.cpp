@@ -22,8 +22,8 @@ namespace zonetool::iw8
 			std::map<std::string, std::size_t> counts;
 			for (const auto& asset : zone->assets)
 			{
-				const auto reader = find_asset_reader(asset.type);
-				++counts[reader ? reader->name : std::to_string(asset.type)];
+				const auto format = find_asset_format(asset.type);
+				++counts[format ? format->name : std::to_string(asset.type)];
 			}
 
 			ZONETOOL_INFO("%s: %zu assets, %zu script strings, all bytes read", zone->name.data(), zone->assets.size(),
