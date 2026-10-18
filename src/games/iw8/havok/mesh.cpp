@@ -615,7 +615,9 @@ namespace zonetool::iw8::havok
 		// The vertices of one section are packed when the grid of the section keeps them within the tolerance. The tolerance
 		// grows until the shared vertices fit in the 16 bits of the section tables; the Replay tools pack every vertex of one
 		// section.
-		const auto multi = shared;
+		// A large mesh (an IW7 world) can have more vertices on section borders than the 16-bit shared table holds: then
+		// each section packs its own copy of them, within the same tolerance.
+		const auto multi = std::ranges::count(shared, true) > 0x10000 ? std::vector<bool>(mesh.vertices.size()) : shared;
 		auto tolerance = mesh.packed_tolerance;
 		for (;; tolerance = tolerance < 1e6f ? tolerance * 8.0f : std::numeric_limits<float>::infinity())
 		{

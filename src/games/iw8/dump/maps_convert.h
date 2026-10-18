@@ -28,4 +28,6 @@ bool iw3CompassBounds(const std::string &input, CompassBounds &bounds);
 size_t iw3ToIw8EntityString(const std::string &input, std::string &output,
                             std::vector<TriggerModelSource> *triggers = nullptr);
 void validateIw8EntityString(const std::string &input);
+// The entity classes that iw3ToIw8EntityString keeps, or drops on purpose; it rejects any other class.
+bool iw3EntityClassConverts(const std::string &classname);
 } // namespace convert

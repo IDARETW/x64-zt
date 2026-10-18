@@ -314,6 +314,13 @@ uint32_t brushModelIndex(const Entity &entity)
 }
 } // namespace
 
+bool iw3EntityClassConverts(const std::string &classname)
+{
+    const std::string name = lowercase(classname);
+    return isReplayEntity(name) || isSourceOnlyMarker(name) || isModeSpecificSpawn(name) ||
+           isOldSchoolPickup(name) || name == "info_notnull" || name == "misc_model";
+}
+
 bool iw3CompassBounds(const std::string &input, CompassBounds &bounds)
 {
     std::array<std::array<float, 2>, 2> corners{};

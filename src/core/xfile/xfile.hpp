@@ -46,6 +46,9 @@ namespace zonetool::xfile
 	// Writes an unsigned zone with the payload stored (not compressed).
 	void write(const std::filesystem::path& path, const format& format, const fastfile& file);
 
+	// Reads one stream of an IW7 shared stream file (assetfile<N>.pak): signed blocks that hold a compressed payload.
+	std::string read_iw7_shared_stream(std::string_view data, const format& format);
+
 	std::string write_s2(const format& format, const fastfile& file, std::string_view payload);
 
 	std::string decompress_s2_stream(std::string_view data);

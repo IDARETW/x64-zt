@@ -397,9 +397,14 @@ namespace zonetool::iw7
 
 	std::unique_ptr<loaded_zone> load_zone(const std::filesystem::path& path)
 	{
+		return load_zone(path.stem().string(), xfile::read(path, definition().format));
+	}
+
+	std::unique_ptr<loaded_zone> load_zone(const std::string& name, xfile::fastfile file)
+	{
 		auto zone = std::make_unique<loaded_zone>();
-		zone->name = path.stem().string();
-		zone->file = xfile::read(path, definition().format);
+		zone->name = name;
+		zone->file = std::move(file);
 
 		const auto assets = read_zone_with_best_phase(*zone, next_zone_index());
 		zone->reader->resolve_deferred_offsets();
