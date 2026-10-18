@@ -139,6 +139,7 @@ IW8 asset code is generated, not written by hand. Do not edit the generated file
 - `localize,<file>` adds the entries of `localizedstrings/<file>.str` or `.json`, as in the other games. IW8 localized string names are lowercase.
 - The IW8 build takes the CSV commands of the other games: `require`, `include`, `ignore`, `reference`, `iterate`, `addpath` and `addpaths`. An asset without a dump comes from the `require` zones, with the assets that it points at. An asset that is not in a dump or a `require` zone becomes a reference, with a warning.
 - The writer reserves the block 2 header of each asset that the map preload (`Preload_*Ptr`) loads there. The asset table holds that block per type.
+- `havok/tagfile` reads and writes Havok 2018.2 tagfiles (TAG0) without the game: compact files that name the Replay global type compendium (code_post_gfx physics library `physicsglobaltypecompendium`), and self-describing files with a TYPE section from that compendium.
 
 ## Compatibility rules
 
@@ -157,6 +158,7 @@ Run these after a change to a reader, writer or the container code:
 | Reader | `verifyzone --all` | H1: 6991 of 6991. IW7: 686 of 687 (`mp_vlobby_room` on disk is a modified file). IW8: 9533 of 9545 (the 12 others are frontend zones that the Replay loader also rejects) |
 | IW8 writer | `IW8_REWRITE=1 verifyzone --all` | Each zone written again with its own pointer markers gives the same data (block sizes can differ: stock zones add slack) |
 | IW8 writer | `IW8_REWRITE=fresh verifyzone --all` | Each zone written with the choices of the writer loads with the same assets |
+| IW8 Havok | `IW8_REWRITE=havok verifyzone --all` | Each compact Havok tagfile writes again to the same bytes, and each self-describing one reads back with the same items (134015 and 1694 in the stock zones) |
 | IW8 dumps | `IW8_REWRITE=dump verifyzone --all` | Each zone dumps, parses, writes, loads and dumps again to the same files. The log names each asset of a shared type that keeps a `.iw8` file (17 string tables) |
 | Writer | `dumpzone X`, `buildzone X`, `verifyzone X`, then `dumpzone` the built zone | The two dumps are equal, except pointer values and the known differences |
 
