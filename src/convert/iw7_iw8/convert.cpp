@@ -70,6 +70,7 @@ namespace zonetool::convert::iw7_iw8
 		collect_static_models(source, output);
 		export_entities(source, output);
 		export_effects(source, output, conversion);
+		export_sounds(source, output);
 		export_models(source, output);
 		remove_missing_entity_models(source, output);
 		export_world(source, output);

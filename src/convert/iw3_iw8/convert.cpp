@@ -966,16 +966,122 @@ iw8::MapSun loadLighting(const Args &args, const std::string &dumpDirectory,
     return lighting;
 }
 
+// A shadowed spot inside its fixture (IW7 puts lights in their lamp housings and behind light
+// panels) has its shadow map covered by the fixture beyond the shadow near plane (sub_141985070
+// places it shadowNearPlaneBias, 8 for converted lights, in front of the light): the light then
+// goes dark whenever it gets a shadow map, which Replay gives the spots near the camera, and
+// IW7 Frontier's lamps switched off as the owner came close (2026-10-18). A spot whose cone the
+// shadow casters close within 64 units on most rays keeps its light without a shadow map.
+void dropEnclosedShadowedSpots(iw8::MapSun &lighting, const std::vector<float> &solidTriangles,
+                               const replaysunshadow::Scene *casters)
+{
+    constexpr double kNearPlane = 8.0; // emitComWorldBody's shadowNearPlaneBias
+    constexpr double kReach = 64.0;
+    std::vector<float> triangles = solidTriangles;
+    if (casters)
+        for (const auto &surface : casters->surfaces)
+            for (const auto &vertex : surface.vertices)
+                triangles.insert(triangles.end(), vertex.position.begin(), vertex.position.end());
+    size_t dropped = 0;
+    for (size_t index = 0; index < lighting.primaryLights.size(); ++index)
+    {
+        auto &light = lighting.primaryLights[index];
+        if (light.type != 2 || !light.canUseShadowMap || index == lighting.sunPrimaryLightIndex)
+            continue;
+        const double o[3]{light.origin[0], light.origin[1], light.origin[2]};
+        const double reach = std::min<double>(light.radius, kReach);
+        std::vector<size_t> candidates;
+        for (size_t t = 0; t + 9 <= triangles.size(); t += 9)
+        {
+            bool outside = false;
+            for (size_t axis = 0; axis < 3 && !outside; ++axis)
+            {
+                const float *v = &triangles[t];
+                const double low = std::min({v[axis], v[3 + axis], v[6 + axis]});
+                const double high = std::max({v[axis], v[3 + axis], v[6 + axis]});
+                outside = low > o[axis] + reach || high < o[axis] - reach;
+            }
+            if (!outside)
+                candidates.push_back(t);
+        }
+        // Emission axis = -ComPrimaryLight dir; rays on the axis and on rings of the cone.
+        const double axis[3]{-light.direction[0], -light.direction[1], -light.direction[2]};
+        // Across the axis: z x axis, or y x axis for a vertical axis.
+        double u[3]{-axis[1], axis[0], 0.0};
+        if (std::abs(axis[2]) >= 0.999)
+        {
+            u[0] = axis[2];
+            u[1] = 0.0;
+            u[2] = -axis[0];
+        }
+        const double length = std::sqrt(u[0] * u[0] + u[1] * u[1] + u[2] * u[2]);
+        for (auto &c : u)
+            c /= length;
+        const double v[3]{axis[1] * u[2] - axis[2] * u[1], axis[2] * u[0] - axis[0] * u[2],
+                          axis[0] * u[1] - axis[1] * u[0]};
+        const double outer = std::acos(std::clamp<double>(light.cosHalfFovOuter, -1.0, 1.0));
+        unsigned rays = 0, blocked = 0;
+        for (const double fraction : {0.0, 0.3, 0.6, 0.9})
+            for (unsigned k = 0; k < (fraction == 0.0 ? 1u : 8u); ++k)
+            {
+                const double polar = outer * fraction, azimuth = 2.0 * std::numbers::pi * k / 8.0;
+                double d[3];
+                for (unsigned c = 0; c < 3; ++c)
+                    d[c] = std::cos(polar) * axis[c] +
+                           std::sin(polar) * (std::cos(azimuth) * u[c] + std::sin(azimuth) * v[c]);
+                ++rays;
+                for (const size_t t : candidates)
+                {
+                    const float *p = &triangles[t];
+                    const double e1[3]{p[3] - p[0], p[4] - p[1], p[5] - p[2]};
+                    const double e2[3]{p[6] - p[0], p[7] - p[1], p[8] - p[2]};
+                    const double h[3]{d[1] * e2[2] - d[2] * e2[1], d[2] * e2[0] - d[0] * e2[2],
+                                      d[0] * e2[1] - d[1] * e2[0]};
+                    const double det = e1[0] * h[0] + e1[1] * h[1] + e1[2] * h[2];
+                    if (std::abs(det) < 1e-9)
+                        continue;
+                    const double s[3]{o[0] - p[0], o[1] - p[1], o[2] - p[2]};
+                    const double a = (s[0] * h[0] + s[1] * h[1] + s[2] * h[2]) / det;
+                    if (a < 0.0 || a > 1.0)
+                        continue;
+                    const double q[3]{s[1] * e1[2] - s[2] * e1[1], s[2] * e1[0] - s[0] * e1[2],
+                                      s[0] * e1[1] - s[1] * e1[0]};
+                    const double b = (d[0] * q[0] + d[1] * q[1] + d[2] * q[2]) / det;
+                    if (b < 0.0 || a + b > 1.0)
+                        continue;
+                    const double distance = (e2[0] * q[0] + e2[1] * q[1] + e2[2] * q[2]) / det;
+                    // The near plane clips what is closer to the light along its axis.
+                    if (distance * std::cos(polar) > kNearPlane && distance <= reach)
+                    {
+                        ++blocked;
+                        break;
+                    }
+                }
+            }
+        if (blocked * 5 >= rays * 3)
+        {
+            light.canUseShadowMap = false;
+            ++dropped;
+            info("local light %zu: shadow casters close %u of %u cone rays within %.0f units; no shadow map",
+                 index, blocked, rays, reach);
+        }
+    }
+    if (dropped)
+        info("local lights: %zu shadowed spot(s) enclosed by their fixture keep no shadow map", dropped);
+}
+
 // Replay picks the shadowed spots of each frame (sub_141959080): R_AddPotentiallyShadowedLight
 // keeps the best scores of the spots in the view cone (radius * intensity / distance) in a list
-// of at most 64 (0x10C794F4, 0x40 at init), and only a limited number of their shadow maps
-// render each frame (the rest are deferred, flag 0x400). Every Umbra object of a converted
-// world spans the scene, so every shadowed spot in the view cone competes, walls or not: with
-// IW7 Frontier's 90 the owner saw lights switch on and off as the camera moved. Shipped worlds
-// keep few (mp_hideout: 37); the others keep their light without a shadow map.
+// of at most 64 (0x10C794F4, 0x40 at init) less the dynamic lights, and renders the shadow of at
+// most 16 of them a frame (an int dvar of default and maximum 16, 0x1055A448) when something
+// moved in it. A spot left out keeps its light for that frame without a shadow: its GPU record
+// keeps shadow slot 0xFF (0x1419A95D0 sets the slots of the frame's list) and the forward+ shader
+// then skips the shadow lookup. Every Umbra object of a converted world spans the scene, so every
+// shadowed spot in the view cone competes, walls or not. Keep about as many as the 37 dynamic-shadow
+// spots of stock mp_hideout (IW7 Frontier has 90); the others keep their light without a shadow map.
 void limitShadowedSpotLights(iw8::MapSun &lighting)
 {
-    constexpr size_t kMaxShadowedSpots = 32;
+    constexpr size_t kMaxShadowedSpots = 40;
     std::vector<size_t> shadowed;
     for (size_t index = 0; index < lighting.primaryLights.size(); ++index)
     {
@@ -1321,6 +1427,7 @@ int writeMapPackage(const Args &args, const std::string &map, const std::string 
     const auto renderMesh = replayrender::Load(renderPath);
     timing.lap("render load");
     calibrateLocalLights(lighting, renderMesh.solidTriangles);
+    dropEnclosedShadowedSpots(lighting, renderMesh.solidTriangles, prepared ? &prepared->shadowScene : nullptr);
     limitShadowedSpotLights(lighting);
     // Use the final ComWorld sun vector, including any requested profile.
     // Replay rejects compressed shadows whose stored direction differs from

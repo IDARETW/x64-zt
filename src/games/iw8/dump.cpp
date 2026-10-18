@@ -1145,9 +1145,11 @@ namespace zonetool::iw8
 						}
 
 						degenerate += stock.triangles.size() - areas;
-						if (ours.triangles.size() != areas)
+						// The writer leaves out the triangles that its vertex grids collapse.
+						if (ours.triangles.size() + stats.collapsed != areas)
 						{
-							throw fail(std::format("the built mesh has {} triangles, the stock mesh {} with an area", ours.triangles.size(), areas));
+							throw fail(std::format("the built mesh has {} triangles ({} collapsed), the stock mesh {} with an area",
+								ours.triangles.size(), stats.collapsed, areas));
 						}
 
 						// A vertex moves by the largest quantization error of the built mesh at most.
@@ -1155,7 +1157,7 @@ namespace zonetool::iw8
 						largest_error = std::max(largest_error, stats.largest_error);
 						relaxed += stats.tolerance > mesh.packed_tolerance;
 						const auto matched = matching_triangles(stock, ours, tolerance);
-						if (matched != areas)
+						if (matched + stats.collapsed != areas)
 						{
 							char debug[MAX_PATH]{};
 							if (GetEnvironmentVariableA("IW8_DUMP_DEBUG", debug, sizeof(debug)))

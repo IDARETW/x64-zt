@@ -676,13 +676,23 @@ namespace zonetool::convert::iw7_iw8
 				}
 				case iw7::PARTICLE_MODULE_INIT_OCCLUSION_QUERY:
 				{
-					// Replay adds a depth bias before the fade times and a ray cast flag after the world size.
+					// Replay adds a depth bias before the fade times and a ray cast flag after the world size. Its stock
+					// effects scale their queries by 1 (IW7's glares keep 0, a query of no size), and bias them toward the
+					// camera by up to 1 unit: IW7 places its fixture glares about 0.4 units inside the fixture, which hid
+					// them from most views and let them flicker on and off.
 					const auto& source = data.initOcclusionQuery;
 					base();
-					result.set(8, 0.0f);
+					auto scale = source.m_scale;
+					if (scale.min == 0.0f && scale.max == 0.0f)
+					{
+						scale.min = 1.0f;
+						scale.max = 1.0f;
+					}
+
+					result.set(8, 0.5f);
 					result.set(12, source.m_fadeInTime);
 					result.set(16, source.m_fadeOutTime);
-					result.set(20, source.m_scale);
+					result.set(20, scale);
 					result.set(28, source.m_worldSize);
 					return result;
 				}
@@ -947,6 +957,11 @@ namespace zonetool::convert::iw7_iw8
 				return "createExploder";
 			}
 
+			if (kind == "createloopsound")
+			{
+				return "createLoopSound";
+			}
+
 			return std::nullopt;
 		}
 
@@ -1140,6 +1155,101 @@ iw7_waittill_string( message, ent )
 	ent notify( "returned", message );
 }
 
+iw7_waittill_any( a, b, c, d, e, f )
+{
+	self iw7_waittill_any_return( a, b, c, d, e, f );
+}
+
+iw7_cointoss()
+{
+	return randomint( 100 ) >= 50;
+}
+
+iw7_random( values )
+{
+	keys = getarraykeys( values );
+	if ( !keys.size )
+		return undefined;
+	return values[ keys[ randomint( keys.size ) ] ];
+}
+
+iw7_array_remove( values, removed )
+{
+	result = [];
+	foreach ( value in values )
+	{
+		if ( value != removed )
+			result[ result.size ] = value;
+	}
+	return result;
+}
+
+iw7_spawn_tag_origin( origin, angles )
+{
+	if ( !isdefined( origin ) )
+		origin = self.origin;
+	ent = spawn( "script_model", origin );
+	ent setmodel( "tag_origin" );
+	if ( isdefined( angles ) )
+		ent.angles = angles;
+	else if ( isdefined( self.angles ) )
+		ent.angles = self.angles;
+	return ent;
+}
+
+iw7_flag_init( name )
+{
+	if ( !isdefined( level.iw7_flags ) )
+		level.iw7_flags = [];
+	level.iw7_flags[ name ] = 0;
+}
+
+iw7_flag( name )
+{
+	return isdefined( level.iw7_flags ) && isdefined( level.iw7_flags[ name ] ) && level.iw7_flags[ name ];
+}
+
+iw7_flag_set( name )
+{
+	if ( !isdefined( level.iw7_flags ) )
+		level.iw7_flags = [];
+	level.iw7_flags[ name ] = 1;
+	level notify( name );
+}
+
+iw7_flag_clear( name )
+{
+	if ( isdefined( level.iw7_flags ) )
+		level.iw7_flags[ name ] = 0;
+	level notify( name );
+}
+
+iw7_flag_wait( name )
+{
+	while ( !iw7_flag( name ) )
+		level waittill( name );
+}
+
+iw7_delaythread( delay, function, a, b, c, d )
+{
+	self thread iw7_delaythread_proc( delay, function, a, b, c, d );
+}
+
+iw7_delaythread_proc( delay, function, a, b, c, d )
+{
+	wait( delay );
+	if ( isdefined( d ) )
+		self [[ function ]]( a, b, c, d );
+	else if ( isdefined( c ) )
+		self [[ function ]]( a, b, c );
+	else if ( isdefined( b ) )
+		self [[ function ]]( a, b );
+	else if ( isdefined( a ) )
+		self [[ function ]]( a );
+	else
+		self [[ function ]]();
+}
+
 iw7_unsupported( a, b, c, d, e, f )
 {
 }
@@ -1148,9 +1258,10 @@ iw7_unsupported( a, b, c, d, e, f )
 		// The map's own script (scripts\mp\maps\<map>\<map>) as the IW3 map script that the pipeline translates: the
 		// functions that its main runs, with IW7's utilities replaced by the IW3 ones or their IW3 versions. Calls
 		// of other IW7 scripts drop out in the pipeline. The converted models have one bone (tag_origin), which the
-		// effects on their tags take; sounds, animations, cinematics and scriptable states do not convert. Adds the
-		// effects that it loads.
-		std::string translate_map_script(const std::string& map, const std::string& text, std::set<std::string>& effects)
+		// effects on their tags take; animations, cinematics and scriptable states do not convert. Adds the effects
+		// that it loads.
+		std::string translate_map_script(const std::string& map, const std::string& text, std::set<std::string>& effects,
+			const std::function<bool(const std::string&)>& add_model)
 		{
 			const auto functions = script_functions(text);
 			std::map<std::string, const script_function*> by_name;
@@ -1207,13 +1318,23 @@ iw7_unsupported( a, b, c, d, e, f )
 
 				for (const auto& [from, to] : std::initializer_list<std::pair<std::string_view, std::string_view>>{
 					{"scripts\\engine\\utility::getstructarray(", "common_scripts\\utility::getstructarray("},
-					{"scripts\\engine\\utility::getstruct(", "iw7_getstruct("},
-					{"scripts\\engine\\utility::waittill_either(", "iw7_waittill_either("},
-					{"scripts\\engine\\utility::waittill_any_return(", "iw7_waittill_any_return("},
 					{"scripts\\engine\\utility::waitframe(", "waitframe("},
 					{"scripts\\engine\\utility::array_thread(", "common_scripts\\utility::array_thread("},
 				})
 				{
+					for (auto at = body.find(from); at != std::string::npos; at = body.find(from, at + to.size()))
+					{
+						body.replace(at, from.size(), to);
+					}
+				}
+
+				// The utilities that the script's own IW3 versions replace (map_script_helpers).
+				for (const auto name : {"getstruct", "waittill_either", "waittill_any_return", "waittill_any", "cointoss",
+					"random", "array_remove", "spawn_tag_origin", "flag_init", "flag_set", "flag_clear", "flag_wait", "flag",
+					"delaythread"})
+				{
+					const auto from = std::format("scripts\\engine\\utility::{}(", name);
+					const auto to = std::format("iw7_{}(", name);
 					for (auto at = body.find(from); at != std::string::npos; at = body.find(from, at + to.size()))
 					{
 						body.replace(at, from.size(), to);
@@ -1233,8 +1354,27 @@ iw7_unsupported( a, b, c, d, e, f )
 					});
 				}
 
-				for (const auto name : {"playsoundonmovingent", "playcinematicforalllooping", "scriptmodelplayanim",
-					"precachempanim", "setscriptablepartstate"})
+				// A model that the script names by a string converts with the map's models; one that the zones do not
+				// hold, or that a variable names, would stop the script.
+				for (const auto name : {"precachemodel", "setmodel"})
+				{
+					body = rewrite_calls(body, name, [&](const std::vector<std::string>& arguments)
+					{
+						const auto& model = arguments.front();
+						const auto literal = arguments.size() == 1 && model.size() > 2 && model.starts_with('"') && model.ends_with('"');
+						return std::format("{}( {} )", literal && add_model(model.substr(1, model.size() - 2)) ? name : "iw7_unsupported",
+							join(arguments));
+					});
+				}
+
+				// A sound on a moving entity plays as IW3's playsound, which the pipeline passes for the converted aliases.
+				body = rewrite_calls(body, "playsoundonmovingent", [](const std::vector<std::string>& arguments)
+				{
+					return "playsound( " + join(arguments) + " )";
+				});
+
+				for (const auto name : {"playcinematicforalllooping", "scriptmodelplayanim", "precachempanim",
+					"setscriptablepartstate"})
 				{
 					body = rewrite_calls(body, name, [](const std::vector<std::string>& arguments)
 					{
@@ -1278,6 +1418,8 @@ iw7_unsupported( a, b, c, d, e, f )
 		static const std::regex placement(
 			R"re((\w+)\s+scripts\\common\\createfx::set_origin_and_angles\(\s*\(([^)]*)\)\s*,\s*\(([^)]*)\)\s*\);)re");
 		static const std::regex value(R"re((\w+)\.v\[\s*"(\w+)"\s*\]\s*=\s*([^;]+);)re");
+		// The sound script of the map (gen\<map>_sound) places its emitters with createfx's own calls.
+		static const std::regex sound_creation(R"re((\w+)\s*=\s*scripts\\common\\createfx::(createloopsound)\(\s*\);)re");
 
 		std::map<std::string, std::string> effects;
 		std::vector<effect_placement> placements;
@@ -1318,6 +1460,11 @@ iw7_unsupported( a, b, c, d, e, f )
 					current[match[1].str()] = placements.size();
 					placements.push_back({match[2].str(), match[3].str()});
 				}
+				else if (std::regex_search(line, match, sound_creation))
+				{
+					current[match[1].str()] = placements.size();
+					placements.push_back({match[2].str(), {}});
+				}
 				else if (std::regex_search(line, match, placement))
 				{
 					if (const auto found = current.find(match[1].str()); found != current.end())
@@ -1350,9 +1497,36 @@ iw7_unsupported( a, b, c, d, e, f )
 		if (const auto found = scripts.find(std::format("scripts/mp/maps/{0}/{0}", source.name())); found != scripts.end())
 		{
 			std::set<std::string> loaded;
-			map_script = translate_map_script(source.name(), found->second, loaded);
+			map_script = translate_map_script(source.name(), found->second, loaded, [&](const std::string& name)
+			{
+				const auto model = static_cast<const iw7::XModel*>(source.find(iw7::ASSET_TYPE_XMODEL, name));
+				if (model)
+				{
+					output.models.try_emplace(file_name(name), model);
+				}
+
+				return model != nullptr;
+			});
 			ZONETOOL_INFO("iw7: translated the map script (%zu bytes) with %zu effects of its own", map_script.size(), loaded.size());
 			placed.insert(loaded.begin(), loaded.end());
+		}
+
+		// The strings that can name sound aliases: the aliases of the loop sounds and the map script's strings.
+		for (const auto& entry : placements)
+		{
+			for (const auto& [key, text] : entry.values)
+			{
+				if (key == "soundalias" && text.size() > 2 && text.front() == '"' && text.back() == '"')
+				{
+					output.sound_names.insert(text.substr(1, text.size() - 2));
+				}
+			}
+		}
+
+		static const std::regex literal(R"re("([\w/]+)")re");
+		for (auto it = std::sregex_iterator(map_script.begin(), map_script.end(), literal); it != std::sregex_iterator(); ++it)
+		{
+			output.sound_names.insert((*it)[1].str());
 		}
 
 		export_effect_graphs(source, output, {placed.begin(), placed.end()});
@@ -1379,7 +1553,8 @@ iw7_unsupported( a, b, c, d, e, f )
 			file << "// The effect placements of the map (IW7 createfx).\nmain()\n{\n";
 			for (const auto& entry : placements)
 			{
-				file << std::format("\tent = maps\\mp\\_utility::{}( \"{}\" );\n", *iw3_create_call(entry.kind), entry.fxid);
+				file << (entry.fxid.empty() ? std::format("\tent = maps\\mp\\_utility::{}();\n", *iw3_create_call(entry.kind))
+					: std::format("\tent = maps\\mp\\_utility::{}( \"{}\" );\n", *iw3_create_call(entry.kind), entry.fxid));
 				file << std::format("\tent.v[ \"origin\" ] = ( {} );\n", entry.origin);
 				file << std::format("\tent.v[ \"angles\" ] = ( {} );\n", entry.angles);
 				for (const auto& [key, text] : entry.values)

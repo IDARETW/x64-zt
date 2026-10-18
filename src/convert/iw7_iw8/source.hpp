@@ -44,6 +44,17 @@ namespace zonetool::convert::iw7_iw8
 		{
 			if (!header || this->held_.contains(header))
 			{
+				// A map zone holds the shared images of effects without their pixels (format 0); the global zones hold
+				// them.
+				if constexpr (std::is_same_v<T, iw7::GfxImage>)
+				{
+					if (header && header->imageFormat == 0 && header->name)
+					{
+						const auto found = static_cast<T*>(this->find(type, asset_name(header->name)));
+						return found ? found : header;
+					}
+				}
+
 				return header;
 			}
 

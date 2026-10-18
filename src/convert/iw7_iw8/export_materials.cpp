@@ -247,7 +247,9 @@ namespace zonetool::convert::iw7_iw8
 			return result;
 		}
 
-		// IW3 normal maps hold the slopes x/z and y/z, which its shaders decode as xy * 4.08 - 2.08.
+		// IW3 normal maps hold the slopes x/z and y/z, which its shaders decode as xy * 4.08 - 2.08. IW7 normal maps keep x
+		// in alpha and y in green (packed ones keep the gloss in red and the occlusion in blue): read as x, the gloss
+		// tilted every normal of a map by its own amount (Frontier's floors by about 30 degrees, noisy reflections).
 		void encode_normal_slopes(DirectX::ScratchImage& image)
 		{
 			const auto& metadata = image.GetMetadata();
@@ -255,7 +257,7 @@ namespace zonetool::convert::iw7_iw8
 			for (std::size_t i = 0; i < metadata.width * metadata.height; i++)
 			{
 				auto* pixel = pixels + i * 4;
-				const auto x = pixel[0] / 255.0f * 2.0f - 1.0f;
+				const auto x = pixel[3] / 255.0f * 2.0f - 1.0f;
 				const auto y = pixel[1] / 255.0f * 2.0f - 1.0f;
 				const auto z = std::max(std::sqrt(std::max(0.0f, 1.0f - x * x - y * y)), 0.25f);
 				const auto encode = [](const float slope, const float scale, const float bias)
@@ -502,16 +504,27 @@ namespace zonetool::convert::iw7_iw8
 			const std::array<std::optional<std::string>, image_role_count>& images, const material_class& kind, const int layer,
 			const float light_scale)
 		{
-			// An unlit material keeps the hue of its tint; one that emits above the sun's level (in the units of the
-			// converted lights) gives the pipeline its gain (Frontier's lamps: tint 318, 33 times the sun).
+			// An unlit material emits its tint in the units of the converted lights (the sun's level is 1): one that emits
+			// below it keeps the tint, one above it the hue of its tint and gives the pipeline its gain (Frontier's lamps:
+			// tint 318, 33 times the sun). Unlit overlays (screen dots over screens of tint 15) then keep IW7's balance.
 			auto constants = json::array({{{"name", "colorTint"}, {"literal", material_tint(material, layer, kind)}}});
 			if (kind.unlit)
 			{
 				const auto tint = material_color_tint(material);
-				const auto emission = std::max({tint[0], tint[1], tint[2]}) * light_scale;
+				const auto peak = std::max({tint[0], tint[1], tint[2], 0.0f});
+				const auto emission = peak * light_scale;
+				std::array<float, 4> color{1.0f, 1.0f, 1.0f, 1.0f};
+				for (std::size_t c = 0; c < 3; c++)
+				{
+					color[c] = peak > 0.0f ? std::clamp(tint[c] / peak * std::min(emission, 1.0f), 0.0f, 1.0f) : 0.0f;
+				}
+
+				constants[0]["literal"] = color;
+				// The pipeline takes constants up to 64, far past white.
 				if (emission > 1.0f)
 				{
-					constants.push_back({{"name", "emissionScale"}, {"literal", {emission, emission, emission, 1.0f}}});
+					constants.push_back({{"name", "emissionScale"}, {"literal", {std::min(emission, 64.0f), std::min(emission, 64.0f),
+						std::min(emission, 64.0f), 1.0f}}});
 				}
 			}
 
@@ -561,8 +574,10 @@ namespace zonetool::convert::iw7_iw8
 	namespace
 	{
 		// An effect material as the pipeline reads IW3 effect materials: an emissive sprite material of one colour map in
-		// the IW3 effect technique set of its blend (feathered, faded edge on), a cloud or a distortion.
-		json export_effect_material(const iw7::Material* material, const std::string& color)
+		// the IW3 effect technique set of its blend (feathered, faded edge on), a cloud or a distortion. Without its colour
+		// map (an image of a pak that is not there) it adds black: white drew the table hologram's dot grid of Frontier as a
+		// white slab.
+		json export_effect_material(const iw7::Material* material, const std::optional<std::string>& color)
 		{
 			std::vector<std::string_view> tokens;
 			if (material && material->techniqueSet)
@@ -578,7 +593,7 @@ namespace zonetool::convert::iw7_iw8
 				return std::ranges::find(tokens, token) != tokens.end();
 			};
 
-			const auto additive = has("add") || has("blendadd");
+			const auto additive = !color || has("add") || has("blendadd");
 			const auto feather = has("zfeather");
 			auto constants = json::array();
 			const auto constant = [&](const std::string_view iw3_name, const std::string_view iw7_name, const std::array<float, 4> fallback)
@@ -666,7 +681,7 @@ namespace zonetool::convert::iw7_iw8
 					{
 						{"name", "colorMap"},
 						{"semantic", "colorMap"},
-						{"image", color},
+						{"image", color.value_or("$black")},
 						{"samplerState", {{"filter", "linear"}, {"mipMap", "linear"}, {"clampU", clamped}, {"clampV", clamped},
 							{"clampW", clamped}}},
 					}})},
@@ -949,8 +964,13 @@ namespace zonetool::convert::iw7_iw8
 
 			if (output.effect_materials.contains(name))
 			{
-				write_json(output.extracted / "materials" / (name + ".json"),
-					export_effect_material(material, images[static_cast<std::size_t>(image_role::color)].value_or("$white")));
+				const auto& color = images[static_cast<std::size_t>(image_role::color)];
+				if (!color)
+				{
+					ZONETOOL_WARNING("iw7: effect material \"%s\" has no colour map and adds nothing", name.data());
+				}
+
+				write_json(output.extracted / "materials" / (name + ".json"), export_effect_material(material, color));
 				continue;
 			}
 

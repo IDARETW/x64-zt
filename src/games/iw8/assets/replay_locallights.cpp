@@ -36,8 +36,16 @@ constexpr size_t kLightAABB = 0x3F80;
 // R_EntityMoved indexes localClient * 80 + entityNum / 32 (write_maps stamps 160).
 constexpr uint32_t kEntityMotionWords = 160;
 
-constexpr unsigned kSegments = 16;
-constexpr double kMaxCapStep = std::numbers::pi / 12; // 15 degrees per cap ring
+// Light volumes as small as stock ones (mp_hideout: spots of 28-44 vertices and at most 85
+// triangles, omnis of 32 vertices and 60 triangles, a sphere of 6 sides and 6 bands). Volumes of up
+// to 114 vertices and 224 triangles (16 sides, 15 degree cap rings) left IW7 Frontier's lit floors
+// ending on screen-tile steps that changed with the view (owner screenshots, 2026-10-18).
+constexpr unsigned kSpotSegments = 8;
+constexpr double kMaxCapStep = std::numbers::pi / 6; // 30 degrees per cap ring
+constexpr unsigned kOmniSegments = 6;
+constexpr unsigned kOmniBands = 6;
+// ComPrimaryLight bulb radius of every converted light (map_zone.h emitComWorldBody, +0x5C).
+constexpr double kBulbRadius = 1.0;
 constexpr size_t kMaxLeafLights = 16;
 
 double Dot(const Vec3 &a, const Vec3 &b)
@@ -101,25 +109,34 @@ void VolumeMesh(const Light &light, std::vector<Vec3> &points, std::vector<uint1
 {
     Vec3 v;
     const Vec3 u = Basis(light.direction, v);
-    const double ring = std::cos(std::numbers::pi / kSegments);
     if (light.type == 2)
     {
+        // The record builder (0x1419A9020, +72) moves the shader's cone apex back along the
+        // axis by bulb / tan(outer), so the cone holds the bulb (28.6 units for a 2 degree
+        // spot); the lit points are also within the radius of the light origin.
         const double outer = std::acos(std::clamp<double>(light.cosHalfFovOuter, 0.0175, 1.0));
+        const double apexOffset = kBulbRadius / std::tan(outer);
+        Light apex = light;
+        for (unsigned k = 0; k < 3; ++k)
+            apex.origin[k] = float(light.origin[k] - light.direction[k] * apexOffset);
+        const double ring = std::cos(std::numbers::pi / kSpotSegments);
         const double polar = std::atan(std::tan(outer) / ring);
         const unsigned rings = std::max(1u, unsigned(std::ceil(polar / kMaxCapStep)));
         const double step = polar / rings;
-        const double reach = light.radius / (ring * std::cos(step * .5));
-        points.push_back(light.origin);                                // 0 apex
-        points.push_back(Point(light, u, v, 0, 0, reach));             // 1 cap pole
+        const double reach = (light.radius + apexOffset) / (ring * std::cos(step * .5));
+        points.push_back(apex.origin);                                 // 0 apex
+        points.push_back(Point(apex, u, v, 0, 0, reach));              // 1 cap pole
         for (unsigned r = 1; r <= rings; ++r)
-            for (unsigned s = 0; s < kSegments; ++s)
-                points.push_back(Point(light, u, v, step * r,
-                                       2 * std::numbers::pi * s / kSegments, reach));
+            for (unsigned s = 0; s < kSpotSegments; ++s)
+                points.push_back(Point(apex, u, v, step * r,
+                                       2 * std::numbers::pi * s / kSpotSegments, reach));
         Vec3 inside{};
         for (unsigned k = 0; k < 3; ++k)
-            inside[k] = float(light.origin[k] + light.direction[k] * reach * .5 * std::cos(polar));
-        const auto at = [](unsigned r, unsigned s) { return 2 + (r - 1) * kSegments + s % kSegments; };
-        for (unsigned s = 0; s < kSegments; ++s)
+            inside[k] = float(apex.origin[k] + light.direction[k] * reach * .5 * std::cos(polar));
+        const auto at = [](unsigned r, unsigned s) {
+            return 2 + (r - 1) * kSpotSegments + s % kSpotSegments;
+        };
+        for (unsigned s = 0; s < kSpotSegments; ++s)
         {
             Triangle(triangles, points, inside, 1, at(1, s), at(1, s + 1));
             for (unsigned r = 1; r < rings; ++r)
@@ -131,25 +148,27 @@ void VolumeMesh(const Light &light, std::vector<Vec3> &points, std::vector<uint1
         }
         return;
     }
-    constexpr unsigned rings = 8;
-    const double step = std::numbers::pi / rings;
+    const double ring = std::cos(std::numbers::pi / kOmniSegments);
+    const double step = std::numbers::pi / kOmniBands;
     const double reach = light.radius / (ring * std::cos(step * .5));
     points.push_back(Point(light, u, v, 0, 0, reach));
     points.push_back(Point(light, u, v, std::numbers::pi, 0, reach));
-    for (unsigned r = 1; r < rings; ++r)
-        for (unsigned s = 0; s < kSegments; ++s)
+    for (unsigned r = 1; r < kOmniBands; ++r)
+        for (unsigned s = 0; s < kOmniSegments; ++s)
             points.push_back(
-                Point(light, u, v, step * r, 2 * std::numbers::pi * s / kSegments, reach));
-    const auto at = [](unsigned r, unsigned s) { return 2 + (r - 1) * kSegments + s % kSegments; };
-    for (unsigned s = 0; s < kSegments; ++s)
+                Point(light, u, v, step * r, 2 * std::numbers::pi * s / kOmniSegments, reach));
+    const auto at = [](unsigned r, unsigned s) {
+        return 2 + (r - 1) * kOmniSegments + s % kOmniSegments;
+    };
+    for (unsigned s = 0; s < kOmniSegments; ++s)
     {
         Triangle(triangles, points, light.origin, 0, at(1, s), at(1, s + 1));
-        for (unsigned r = 1; r + 1 < rings; ++r)
+        for (unsigned r = 1; r + 1 < kOmniBands; ++r)
         {
             Triangle(triangles, points, light.origin, at(r, s), at(r + 1, s), at(r + 1, s + 1));
             Triangle(triangles, points, light.origin, at(r, s), at(r + 1, s + 1), at(r, s + 1));
         }
-        Triangle(triangles, points, light.origin, 1, at(rings - 1, s + 1), at(rings - 1, s));
+        Triangle(triangles, points, light.origin, 1, at(kOmniBands - 1, s + 1), at(kOmniBands - 1, s));
     }
 }
 

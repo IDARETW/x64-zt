@@ -55,10 +55,11 @@ namespace zonetool::convert::iw7_iw8
 			ZONETOOL_WARNING("iw7: zone \"techsets_%s\" was not found; materials keep default images", this->name_.data());
 		}
 
-		// The multiplayer common zones hold models that maps place (flags, tag_origin) without holding them, and their
-		// techsets zones the materials of the common effects that map effects use.
+		// The multiplayer common zones hold models that maps place (flags, tag_origin) without holding them, their
+		// techsets zones the materials of the common effects that map effects use, and the global zones the images of
+		// those materials.
 		for (const auto common : {"common_core_mp", "common_mp", "techsets_common", "techsets_common_core_mp", "techsets_common_mp",
-			"techsets_global_core_mp"})
+			"techsets_global_core_mp", "global_core_mp", "global_mp"})
 		{
 			this->load(common);
 		}
@@ -219,8 +220,13 @@ namespace zonetool::convert::iw7_iw8
 			if (!asset.referenced)
 			{
 				this->held_.insert(asset.header);
-				this->assets_[asset.type].try_emplace(std::string(asset_name(iw7::get_asset_name(asset.type, asset.header))),
-					asset.header);
+				const auto [entry, added] = this->assets_[asset.type].try_emplace(
+					std::string(asset_name(iw7::get_asset_name(asset.type, asset.header))), asset.header);
+				// An image with its pixels replaces an image without them (format 0) of the same name.
+				if (!added && asset.type == iw7::ASSET_TYPE_IMAGE && static_cast<iw7::GfxImage*>(entry->second)->imageFormat == 0)
+				{
+					entry->second = asset.header;
+				}
 			}
 		}
 

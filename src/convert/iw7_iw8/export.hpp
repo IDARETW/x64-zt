@@ -34,6 +34,9 @@ namespace zonetool::convert::iw7_iw8
 		// The layers of layered IW7 materials (techsets "..._b1..._b2..."), which convert as materials of their own: by
 		// name in the extraction, the layer (1 to 3) of the material that `materials` holds.
 		std::map<std::string, int> material_layers;
+		// The strings of the map's scripts that can name sound aliases (createfx loop sounds, playsound): export_sounds
+		// writes the aliases of the map's sound bank among them.
+		std::set<std::string> sound_names;
 
 		// Adds the material or model of a header and returns its name in the extraction.
 		std::string add_material(const source_map& source, iw7::Material* header);
@@ -182,6 +185,10 @@ namespace zonetool::convert::iw7_iw8
 	void export_effects(const source_map& source, extraction& output, const zone_conversion& conversion);
 	// Converts IW7 particle systems and the effects that they start to native Replay effects.
 	void export_effect_graphs(const source_map& source, extraction& output, const std::vector<std::string>& effects);
+	// Writes the aliases of the map's sound bank (<map>.all) that the scripts name, with their secondary aliases, as IW3
+	// alias definitions (extracted/soundaliases/<alias>.iw3.json), and their sounds of the bank's .sabl (FLAC frames)
+	// as wave files, which the pipeline converts.
+	void export_sounds(const source_map& source, extraction& output);
 
 	std::string bsp_name(const source_map& source);
 

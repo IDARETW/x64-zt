@@ -385,6 +385,8 @@ namespace zonetool::iw8::havok
 			std::uint16_t tag{};
 			std::array<std::uint32_t, 4> vertices{};
 			std::uint32_t corners{};
+			// The triangle (a, c, d) of a quad, whose (a, b, c) is `index`.
+			std::uint32_t second = std::numeric_limits<std::uint32_t>::max();
 		};
 
 		using dvector = std::array<double, 3>;
@@ -484,6 +486,7 @@ namespace zonetool::iw8::havok
 				{
 					result.vertices = ring;
 					result.corners = 4;
+					result.second = triangles[other->second];
 					paired[other->second] = true;
 					break;
 				}
@@ -725,6 +728,53 @@ namespace zonetool::iw8::havok
 			throw std::runtime_error(std::format("a compressed mesh needs {} shared vertices (65536 at most)", shared_vertices.size()));
 		}
 
+		// A triangle that the vertex grids collapse has no area left: the mesh builds again without it, as the trees of
+		// the Replay tools hold only primitives with an area (IW7 Frontier's large world, packed with a coarser
+		// tolerance, and its models had 33).
+		const auto collapsed = [&](const std::uint32_t a, const std::uint32_t b, const std::uint32_t c)
+		{
+			const std::array<double, 3> ab{double(decoded[b][0]) - decoded[a][0], double(decoded[b][1]) - decoded[a][1],
+				double(decoded[b][2]) - decoded[a][2]};
+			const std::array<double, 3> ac{double(decoded[c][0]) - decoded[a][0], double(decoded[c][1]) - decoded[a][1],
+				double(decoded[c][2]) - decoded[a][2]};
+			return ab[1] * ac[2] - ab[2] * ac[1] == 0.0 && ab[2] * ac[0] - ab[0] * ac[2] == 0.0 && ab[0] * ac[1] - ab[1] * ac[0] == 0.0;
+		};
+
+		std::unordered_set<std::uint32_t> collapsed_triangles;
+		for (std::uint32_t p = 0; p < primitives.size(); p++)
+		{
+			const auto& v = primitives[p].vertices;
+			if (!primitives[p].convex && collapsed(v[0], v[1], v[2]))
+			{
+				collapsed_triangles.insert(primitives[p].index);
+			}
+
+			if (!primitives[p].convex && primitives[p].corners == 4 && collapsed(v[0], v[2], v[3]))
+			{
+				collapsed_triangles.insert(primitives[p].second);
+			}
+		}
+
+		if (!collapsed_triangles.empty())
+		{
+			if (stats)
+			{
+				stats->collapsed += collapsed_triangles.size();
+			}
+
+			auto kept = mesh;
+			kept.triangles.clear();
+			for (std::uint32_t t = 0; t < mesh.triangles.size(); t++)
+			{
+				if (!collapsed_triangles.contains(t))
+				{
+					kept.triangles.push_back(mesh.triangles[t]);
+				}
+			}
+
+			return add_compressed_mesh_shape(builder, kept, stats);
+		}
+
 		if (stats)
 		{
 			stats->sections = section_count;
@@ -812,7 +862,11 @@ namespace zonetool::iw8::havok
 			}
 		}
 
-		const auto primitive_bits = static_cast<std::uint32_t>(std::bit_width(most_primitives - 1)) + 1;
+		// With more than one section a key holds the section above 8 bits (7 for the primitive, 1 for the triangle of a quad), as in
+		// every stock multi-section mesh: Replay decodes keys that way (the shape-tag lookup at 0x141E30200 takes the section from
+		// key >> 8 and the primitive from key >> 1 & 0x7F; narrower keys sent it past the data runs of a section, a crash). A single
+		// section keeps the narrowest width, as stock meshes do.
+		const auto primitive_bits = section_count > 1 ? 8u : static_cast<std::uint32_t>(std::bit_width(most_primitives - 1)) + 1;
 		const auto section_bits = static_cast<std::uint32_t>(std::bit_width(section_count - 1));
 		const auto key_of = [&](const std::uint32_t section, const std::uint32_t local)
 		{
@@ -1167,6 +1221,11 @@ namespace zonetool::iw8::havok
 		{
 			return offset_of(types, section_type, name);
 		};
+		// Replay takes the section of a key from above bit 8 (see add_compressed_mesh_shape).
+		if (sections.count > 1 && primitive_bits != 8)
+		{
+			throw std::runtime_error(std::format("a compressed mesh of {} sections has {}-bit primitive keys", sections.count, primitive_bits));
+		}
 
 		auto shared_grid = make_grid(domain, shared_bits);
 		std::vector<bounds> section_geometry(sections.count, empty_bounds);
@@ -1225,7 +1284,10 @@ namespace zonetool::iw8::havok
 				return {shared_grid.decode(0, q[0]), shared_grid.decode(1, q[1]), shared_grid.decode(2, q[2])};
 			};
 
+			// Havok finds the shape tag of a primitive by the run that holds it, and reads a null run when none does
+			// (0xC0000005 in Replay's compressed mesh queries, 0x141E30200): every primitive needs exactly one run.
 			std::vector<std::uint16_t> tags(primitive_count);
+			std::vector<std::uint8_t> covered(primitive_count);
 			for (std::uint32_t r = 0; r < run_count; r++)
 			{
 				const auto value = get<std::uint16_t>(runs.data, (first_run + r) * 4);
@@ -1234,6 +1296,16 @@ namespace zonetool::iw8::havok
 				for (std::uint32_t k = first; k < static_cast<std::uint32_t>(first + count) && k < primitive_count; k++)
 				{
 					tags[k] = value;
+					covered[k]++;
+				}
+			}
+
+			for (std::uint32_t k = 0; k < primitive_count; k++)
+			{
+				if (covered[k] != 1)
+				{
+					throw std::runtime_error(std::format("compressed mesh section {} primitive {} is in {} data runs ({} runs, {} primitives)",
+						s, k, covered[k], run_count, primitive_count));
 				}
 			}
 

@@ -32,6 +32,8 @@ namespace zonetool::iw8::havok
 		// The packing tolerance that the shared vertices needed, and the largest distance of a vertex from its input.
 		float tolerance{};
 		float largest_error{};
+		// The triangles that the vertex grids collapsed, which the mesh leaves out.
+		std::size_t collapsed{};
 	};
 
 	// An hknpCompressedMeshShape of the triangles and convex shapes, with its static mesh tree and SIMD tree. Returns the
