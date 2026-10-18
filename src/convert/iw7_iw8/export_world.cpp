@@ -212,7 +212,7 @@ namespace zonetool::convert::iw7_iw8
 						}
 
 						corners.page = surface.lightmapIndex;
-						if (valid)
+						if (valid && horizontal(corners))
 						{
 							this->add(std::move(corners));
 						}
@@ -220,19 +220,25 @@ namespace zonetool::convert::iw7_iw8
 				}
 			}
 
-			// The packed colour of the floor (red, green, blue and sun visibility bytes, as IW3 packs ground
-			// lighting) for the volume texels, which the pipeline doubles.
-			std::optional<std::uint32_t> ground_lighting(const float* point) const
+			// A floor: its height and its light as the bytes of IW3 model lighting (the colour halved, as the
+			// pipeline doubles the texels; the sun visibility).
+			struct floor_hit
 			{
-				const auto cell = this->cell_of(point[0], point[1]);
+				float height{};
+				std::array<std::uint8_t, 3> color{};
+				std::uint8_t visibility{};
+			};
+
+			// The lightmapped surfaces over a point, from the lowest.
+			std::vector<floor_hit> floors(const float x, const float y) const
+			{
+				std::vector<floor_hit> result;
+				const auto cell = this->cell_of(x, y);
 				if (!cell)
 				{
-					return {};
+					return result;
 				}
 
-				const triangle* floor{};
-				std::array<float, 3> weights{};
-				auto height = -FLT_MAX;
 				for (const auto index : this->cells_[*cell])
 				{
 					const auto& candidate = this->triangles_[index];
@@ -245,9 +251,9 @@ namespace zonetool::convert::iw7_iw8
 
 					const std::array<float, 3> w
 					{
-						((p[1][0] - point[0]) * (p[2][1] - point[1]) - (p[2][0] - point[0]) * (p[1][1] - point[1])) / area,
-						((p[2][0] - point[0]) * (p[0][1] - point[1]) - (p[0][0] - point[0]) * (p[2][1] - point[1])) / area,
-						((p[0][0] - point[0]) * (p[1][1] - point[1]) - (p[1][0] - point[0]) * (p[0][1] - point[1])) / area,
+						((p[1][0] - x) * (p[2][1] - y) - (p[2][0] - x) * (p[1][1] - y)) / area,
+						((p[2][0] - x) * (p[0][1] - y) - (p[0][0] - x) * (p[2][1] - y)) / area,
+						((p[0][0] - x) * (p[1][1] - y) - (p[1][0] - x) * (p[0][1] - y)) / area,
 					};
 
 					if (w[0] < 0.0f || w[1] < 0.0f || w[2] < 0.0f)
@@ -255,40 +261,54 @@ namespace zonetool::convert::iw7_iw8
 						continue;
 					}
 
-					const auto z = w[0] * p[0][2] + w[1] * p[1][2] + w[2] * p[2][2];
-					if (z <= point[2] + 1.0f && z >= point[2] - max_drop && z > height)
+					const auto& page = this->lightmaps_.pages[candidate.page];
+					float u{};
+					float v{};
+					for (auto k = 0; k < 3; k++)
 					{
-						floor = &candidate;
-						weights = w;
-						height = z;
+						u += w[k] * candidate.uvs[k][0];
+						v += w[k] * candidate.uvs[k][1];
 					}
+
+					const auto tx = std::min(static_cast<std::size_t>(std::clamp(u, 0.0f, 1.0f) * static_cast<float>(page.width)), page.width - 1);
+					const auto ty = std::min(static_cast<std::size_t>(std::clamp(v, 0.0f, 1.0f) * static_cast<float>(page.height)), page.height - 1);
+					const auto texel = ty * page.width + tx;
+					floor_hit hit{w[0] * p[0][2] + w[1] * p[1][2] + w[2] * p[2][2], {}, page.visibility[texel]};
+					for (auto channel = 0; channel < 3; channel++)
+					{
+						const auto level = std::clamp(light_level(page.ambient[texel][channel]) * 0.5f, 0.0f, 1.0f);
+						hit.color[channel] = static_cast<std::uint8_t>(std::lround(level * 255.0f));
+					}
+
+					result.push_back(hit);
 				}
 
-				if (!floor)
+				std::ranges::sort(result, {}, &floor_hit::height);
+				return result;
+			}
+
+			// The packed colour of the floor (red, green, blue and sun visibility bytes, as IW3 packs ground
+			// lighting).
+			std::optional<std::uint32_t> ground_lighting(const float* point) const
+			{
+				const auto hits = this->floors(point[0], point[1]);
+				const auto floor = std::ranges::find_if(hits.rbegin(), hits.rend(), [&](const floor_hit& hit)
+				{
+					return hit.height <= point[2] + 1.0f && hit.height >= point[2] - max_drop;
+				});
+
+				if (floor == hits.rend())
 				{
 					return {};
 				}
 
-				const auto& page = this->lightmaps_.pages[floor->page];
-				float u{};
-				float v{};
-				for (auto k = 0; k < 3; k++)
-				{
-					u += weights[k] * floor->uvs[k][0];
-					v += weights[k] * floor->uvs[k][1];
-				}
+				return floor->color[0] | floor->color[1] << 8 | floor->color[2] << 16 | static_cast<std::uint32_t>(floor->visibility) << 24;
+			}
 
-				const auto x = std::min(static_cast<std::size_t>(std::clamp(u, 0.0f, 1.0f) * static_cast<float>(page.width)), page.width - 1);
-				const auto y = std::min(static_cast<std::size_t>(std::clamp(v, 0.0f, 1.0f) * static_cast<float>(page.height)), page.height - 1);
-				const auto texel = y * page.width + x;
-				auto color = static_cast<std::uint32_t>(page.visibility[texel]) << 24;
-				for (auto channel = 0; channel < 3; channel++)
-				{
-					const auto level = std::clamp(light_level(page.ambient[texel][channel]) * 0.5f, 0.0f, 1.0f);
-					color |= static_cast<std::uint32_t>(std::lround(level * 255.0f)) << (8 * channel);
-				}
-
-				return color;
+			// The area of the floors: the lowest and highest x and y.
+			const std::array<float, 4>& floor_area() const
+			{
+				return this->floor_area_;
 			}
 
 		private:
@@ -304,11 +324,23 @@ namespace zonetool::convert::iw7_iw8
 			};
 
 			const world_lightmaps& lightmaps_;
+			std::array<float, 4> floor_area_{FLT_MAX, FLT_MAX, -FLT_MAX, -FLT_MAX};
 			std::array<float, 2> origin_{};
 			std::size_t columns_{};
 			std::size_t rows_{};
 			std::vector<triangle> triangles_;
 			std::vector<std::vector<unsigned int>> cells_;
+
+			// Floors and ceilings, not walls.
+			static bool horizontal(const triangle& corners)
+			{
+				const auto& p = corners.positions;
+				const std::array<float, 3> u{p[1][0] - p[0][0], p[1][1] - p[0][1], p[1][2] - p[0][2]};
+				const std::array<float, 3> v{p[2][0] - p[0][0], p[2][1] - p[0][1], p[2][2] - p[0][2]};
+				const std::array<float, 3> n{u[1] * v[2] - u[2] * v[1], u[2] * v[0] - u[0] * v[2], u[0] * v[1] - u[1] * v[0]};
+				const auto length = std::sqrt(n[0] * n[0] + n[1] * n[1] + n[2] * n[2]);
+				return length > 0.0f && std::abs(n[2]) > 0.5f * length;
+			}
 
 			std::optional<std::size_t> cell_of(const float x, const float y) const
 			{
@@ -335,6 +367,14 @@ namespace zonetool::convert::iw7_iw8
 				const auto right = clamp_cell(std::max({p[0][0], p[1][0], p[2][0]}) - this->origin_[0], this->columns_);
 				const auto bottom = clamp_cell(std::min({p[0][1], p[1][1], p[2][1]}) - this->origin_[1], this->rows_);
 				const auto top = clamp_cell(std::max({p[0][1], p[1][1], p[2][1]}) - this->origin_[1], this->rows_);
+				for (const auto& corner : p)
+				{
+					this->floor_area_[0] = std::min(this->floor_area_[0], corner[0]);
+					this->floor_area_[1] = std::min(this->floor_area_[1], corner[1]);
+					this->floor_area_[2] = std::max(this->floor_area_[2], corner[0]);
+					this->floor_area_[3] = std::max(this->floor_area_[3], corner[1]);
+				}
+
 				for (auto row = bottom; row <= top; row++)
 				{
 					for (auto column = left; column <= right; column++)
@@ -376,6 +416,217 @@ namespace zonetool::convert::iw7_iw8
 				{"primary_light", 0},
 				{"reflection_probe", probes.find(instance.placement.origin)},
 			};
+		}
+	}
+
+	namespace
+	{
+		// IW3's light grid: points 32 units apart in x and y and 64 in z, counted from -131072.
+		constexpr std::int64_t grid_base = 131072;
+		constexpr std::int64_t grid_spacing_xy = 32;
+		constexpr std::int64_t grid_spacing_z = 64;
+		// The points of a column reach this far over its highest floor.
+		constexpr float grid_headroom = 192.0f;
+		// The grid reaches this far around the spawn points.
+		constexpr float play_margin = 1024.0f;
+
+		void write_bytes(const std::filesystem::path& path, const std::vector<std::uint8_t>& bytes)
+		{
+			std::filesystem::create_directories(path.parent_path());
+			std::ofstream stream(path, std::ios::binary | std::ios::trunc);
+			stream.write(reinterpret_cast<const char*>(bytes.data()), static_cast<std::streamsize>(bytes.size()));
+			if (!stream)
+			{
+				throw std::runtime_error(std::format("cannot write {}", path.string()));
+			}
+		}
+
+		template <typename T>
+		void append(std::vector<std::uint8_t>& bytes, const T value)
+		{
+			const auto* data = reinterpret_cast<const std::uint8_t*>(&value);
+			bytes.insert(bytes.end(), data, data + sizeof(T));
+		}
+
+		// Writes an IW3 light grid in the layout of the IW3 extraction: rows of columns, each row a run of points from
+		// its lowest floor to over its highest one. A point takes the light of the floor under it in all 56
+		// directions; the sun lights the points over floors that see it. IW7 keeps its light grid in a compressed
+		// tree, which does not convert yet.
+		void export_light_grid(const source_map& source, const floor_light& floors, extraction& output)
+		{
+			// The grid covers the play space: the spawn points with a margin. The world reaches far beyond it (set
+			// dressing in the distance), which would take more points than Replay's light grid holds.
+			const auto& spawns = source.map_ents()->spawnList;
+			std::array<float, 6> play{FLT_MAX, FLT_MAX, FLT_MAX, -FLT_MAX, -FLT_MAX, -FLT_MAX};
+			for (auto i = 0u; i < spawns.spawnsCount; i++)
+			{
+				for (auto axis = 0; axis < 3; axis++)
+				{
+					play[axis] = std::min(play[axis], spawns.spawns[i].origin[axis]);
+					play[axis + 3] = std::max(play[axis + 3], spawns.spawns[i].origin[axis]);
+				}
+			}
+
+			auto area = floors.floor_area();
+			if (spawns.spawnsCount)
+			{
+				area = {std::max(area[0], play[0] - play_margin), std::max(area[1], play[1] - play_margin),
+					std::min(area[2], play[3] + play_margin), std::min(area[3], play[4] + play_margin)};
+			}
+
+			const auto lowest = spawns.spawnsCount ? play[2] - 256.0f : -FLT_MAX;
+			const auto highest = spawns.spawnsCount ? play[5] + 768.0f : FLT_MAX;
+			if (area[0] > area[2] || area[1] > area[3])
+			{
+				ZONETOOL_WARNING("iw7: the world has no floors for a light grid");
+				return;
+			}
+
+			const auto index = [](const float value, const std::int64_t spacing)
+			{
+				return (static_cast<std::int64_t>(std::floor(value)) + grid_base) / spacing;
+			};
+
+			const auto first_column = index(area[0], grid_spacing_xy);
+			const auto last_column = index(area[2], grid_spacing_xy) + 1;
+			const auto first_row = index(area[1], grid_spacing_xy);
+			const auto last_row = index(area[3], grid_spacing_xy) + 1;
+
+			std::map<std::array<std::uint8_t, 3>, std::uint16_t> palette_indices;
+			std::vector<std::uint8_t> palette;
+			const auto palette_index = [&](const std::array<std::uint8_t, 3>& color)
+			{
+				// 5 bits a channel keep the palette within its 65536 entries.
+				const std::array<std::uint8_t, 3> key{static_cast<std::uint8_t>(color[0] & 0xF8), static_cast<std::uint8_t>(color[1] & 0xF8),
+					static_cast<std::uint8_t>(color[2] & 0xF8)};
+				if (const auto found = palette_indices.find(key); found != palette_indices.end())
+				{
+					return found->second;
+				}
+
+				const auto created = static_cast<std::uint16_t>(palette_indices.size());
+				palette_indices.emplace(key, created);
+				for (auto sample = 0; sample < 56; sample++)
+				{
+					// Blue, green and red bytes, as the model lighting texels take them.
+					palette.push_back(key[2]);
+					palette.push_back(key[1]);
+					palette.push_back(key[0]);
+				}
+
+				return created;
+			};
+
+			std::vector<std::uint8_t> row_starts;
+			std::vector<std::uint8_t> row_data;
+			std::vector<std::uint8_t> entries;
+			auto min_z = INT64_MAX;
+			auto max_z = INT64_MIN;
+			std::size_t entry_count{};
+			for (auto row = first_row; row <= last_row; row++)
+			{
+				const auto y = static_cast<float>(row * grid_spacing_xy - grid_base);
+				std::vector<std::vector<floor_light::floor_hit>> columns;
+				auto bottom = INT64_MAX;
+				auto top = INT64_MIN;
+				for (auto c = first_column; c <= last_column; c++)
+				{
+					auto hits = floors.floors(static_cast<float>(c * grid_spacing_xy - grid_base), y);
+					std::erase_if(hits, [&](const auto& hit) { return hit.height < lowest || hit.height > highest; });
+					if (!hits.empty())
+					{
+						bottom = std::min(bottom, index(hits.front().height, grid_spacing_z));
+						top = std::max(top, index(hits.back().height + grid_headroom, grid_spacing_z));
+					}
+
+					columns.push_back(std::move(hits));
+				}
+
+				const auto used = std::ranges::find_if(columns, [](const auto& hits) { return !hits.empty(); });
+				if (used == columns.end())
+				{
+					append<std::uint16_t>(row_starts, 0xFFFF);
+					continue;
+				}
+
+				const auto last_used = std::find_if(columns.rbegin(), columns.rend(), [](const auto& hits) { return !hits.empty(); }).base();
+				top = std::min(top, bottom + 254);
+				min_z = std::min(min_z, bottom);
+				max_z = std::max(max_z, top);
+				if (row_data.size() / 4 > 0xFFFE)
+				{
+					throw std::runtime_error("the light grid rows exceed the IW3 format");
+				}
+
+				const auto height = static_cast<std::uint8_t>(top - bottom + 1);
+				append<std::uint16_t>(row_starts, static_cast<std::uint16_t>(row_data.size() / 4));
+				append<std::uint16_t>(row_data, static_cast<std::uint16_t>(first_column + (used - columns.begin())));
+				append<std::uint16_t>(row_data, static_cast<std::uint16_t>(last_used - used));
+				append<std::uint16_t>(row_data, static_cast<std::uint16_t>(bottom));
+				append<std::uint16_t>(row_data, height);
+				append<std::uint32_t>(row_data, static_cast<std::uint32_t>(entry_count));
+
+				// Runs of columns: the columns with floors hold the points of the whole row, the others none.
+				for (auto it = used; it != last_used;)
+				{
+					const auto filled = !it->empty();
+					std::uint8_t run{};
+					for (; it != last_used && !it->empty() == filled && run < 255; ++it, ++run)
+					{
+						for (auto z = bottom; filled && z <= top; z++)
+						{
+							const auto point = static_cast<float>(z * grid_spacing_z - grid_base);
+							const auto floor = std::ranges::find_if(it->rbegin(), it->rend(), [&](const auto& hit) { return hit.height <= point + 32.0f; });
+							const auto& hit = floor == it->rend() ? it->front() : *floor;
+							append<std::uint16_t>(entries, palette_index(hit.color));
+							entries.push_back(static_cast<std::uint8_t>(hit.visibility > 127 ? sun_light : 0));
+							entries.push_back(0);
+							entry_count++;
+						}
+					}
+
+					row_data.push_back(run);
+					row_data.push_back(filled ? height : 0);
+					if (filled)
+					{
+						row_data.push_back(0);
+					}
+				}
+
+				row_data.resize((row_data.size() + 3) & ~std::size_t{3});
+			}
+
+			if (!entry_count)
+			{
+				ZONETOOL_WARNING("iw7: the world has no floors for a light grid");
+				return;
+			}
+
+			const auto stem = bsp_name(source) + ".lightgrid";
+			write_bytes(output.extracted / (stem + ".rows.bin"), row_starts);
+			write_bytes(output.extracted / (stem + ".raw.bin"), row_data);
+			write_bytes(output.extracted / (stem + ".entries.bin"), entries);
+			write_bytes(output.extracted / (stem + ".colors.bin"), palette);
+			write_json(output.extracted / (stem + ".json"),
+			{
+				{"schema", 1},
+				{"name", bsp_name(source)},
+				{"row_axis", 1},
+				{"col_axis", 0},
+				{"mins", {first_column, first_row, min_z}},
+				{"maxs", {last_column, last_row, max_z}},
+				{"row_count", last_row - first_row + 1},
+				{"entry_count", entry_count},
+				{"color_count", palette_indices.size()},
+				{"sun_primary_light_index", sun_light},
+				{"has_light_regions", false},
+				{"row_starts", {{"bytes", row_starts.size()}, {"file", stem + ".rows.bin"}}},
+				{"row_data", {{"bytes", row_data.size()}, {"file", stem + ".raw.bin"}}},
+				{"entries", {{"bytes", entries.size()}, {"file", stem + ".entries.bin"}}},
+				{"colors", {{"bytes", palette.size()}, {"file", stem + ".colors.bin"}}},
+			});
+
+			ZONETOOL_INFO("iw7: light grid of %zu points with %zu colours", entry_count, palette_indices.size());
 		}
 	}
 
@@ -443,6 +694,7 @@ namespace zonetool::convert::iw7_iw8
 		auto lightmaps = export_lightmaps(source, output);
 		auto probes = export_reflection_probes(source, output);
 		const floor_light floors(source, world, lightmaps);
+		export_light_grid(source, floors, output);
 
 		// The index of each surface among the surfaces with an area.
 		auto surfaces = json::array();
