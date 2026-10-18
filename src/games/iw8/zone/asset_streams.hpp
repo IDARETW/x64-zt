@@ -135,6 +135,8 @@ namespace zonetool::iw8
 		std::uint8_t preload_block;
 		void (*load)(load_stream& stream, void* asset);
 		void (*write)(write_stream& stream, void* asset);
+		void (*dump)(dump_stream& stream, void* asset);
+		void (*parse)(parse_stream& stream, void* asset);
 	};
 
 	// The format of an asset type, or nullptr for a type that zones do not hold.

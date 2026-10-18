@@ -1025,7 +1025,7 @@ for pool in S['profile']['pools']:
 
 # ---- output -------------------------------------------------------------------------------------
 # The stream classes of zone/streams.hpp that the asset table instantiates.
-STREAMS = ['load_stream', 'write_stream']
+STREAMS = ['load_stream', 'write_stream', 'dump_stream', 'parse_stream']
 
 
 def main():
