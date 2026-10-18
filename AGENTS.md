@@ -137,6 +137,7 @@ IW8 asset code is generated, not written by hand. Do not edit the generated file
 - `dumpzone` writes `<pool>/<name>.iw8` for each asset and `<zone>.csv`. `buildzone` reads `zone_source/<zone>.csv` and the dumps, and writes `output/<zone>.ff`.
 - Raw files, script files (`<name>.gscbin`), string tables, localized strings, Lua files and fonts use the files of the other games (`src/core/assets`), so their dumps build into IW8 zones. A dump writes the `.iw8` file only when the shared file does not hold the asset (a string table cell with `"`, or a last column that is empty in each row). A build reads the shared file first.
 - `localize,<file>` adds the entries of `localizedstrings/<file>.str` or `.json`, as in the other games. IW8 localized string names are lowercase.
+- The IW8 build takes the CSV commands of the other games: `require`, `include`, `ignore`, `reference`, `iterate`, `addpath` and `addpaths`. An asset without a dump comes from the `require` zones, with the assets that it points at. An asset that is not in a dump or a `require` zone becomes a reference, with a warning.
 - The writer reserves the block 2 header of each asset that the map preload (`Preload_*Ptr`) loads there. The asset table holds that block per type.
 
 ## Compatibility rules

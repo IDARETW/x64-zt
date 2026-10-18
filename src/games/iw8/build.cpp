@@ -18,10 +18,16 @@ namespace zonetool::iw8
 
 		struct build_context
 		{
+			std::filesystem::path zone_folder;
+			std::string fastfile;
 			asset_parser parser;
 			std::vector<zone_asset> list;
 			std::vector<zone_asset> assets;
 			std::map<asset_key, void*> parsed;
+			std::vector<std::unique_ptr<loaded_zone>> required_zones;
+			std::map<asset_key, void*> required;
+			std::vector<asset_key> required_dependencies;
+			std::set<asset_key> ignored;
 			bool is_referencing{};
 		};
 
@@ -37,6 +43,12 @@ namespace zonetool::iw8
 			}
 
 			return -1;
+		}
+
+		std::string name_of(const std::int32_t type, const void* header)
+		{
+			const auto name = get_asset_name(type, header);
+			return name ? name : "";
 		}
 
 		std::string_view field(const csv::row* row, const int index)
@@ -71,20 +83,73 @@ namespace zonetool::iw8
 			return rows;
 		}
 
-		// Parses the dump of an asset once: nullptr when the asset has no dump.
+		csv::parser open_csv(const std::string& name)
+		{
+			csv::parser parser("zone_source\\" + name + ".csv", ',');
+			if (!parser.valid())
+			{
+				throw std::runtime_error(std::format("Could not find csv file \"{}\"", name));
+			}
+
+			return parser;
+		}
+
+		// The asset from its dump, else from a required zone. nullptr when the asset has neither or is ignored.
 		void* parse_asset(build_context& context, const std::int32_t type, const std::string& name)
 		{
 			const auto [entry, added] = context.parsed.try_emplace({type, name}, nullptr);
-			if (added)
+			if (!added || context.ignored.contains({type, name}))
 			{
-				entry->second = context.parser.parse_file(type, name);
-				if (entry->second)
+				return entry->second;
+			}
+
+			entry->second = context.parser.parse_file(type, name);
+			if (const auto required = context.required.find({type, name}); !entry->second && required != context.required.end())
+			{
+				entry->second = required->second;
+				for (auto& dependency : asset_dependencies(type, required->second))
 				{
-					context.assets.emplace_back(type, entry->second, false);
+					context.required_dependencies.emplace_back(std::move(dependency));
 				}
 			}
 
+			if (entry->second)
+			{
+				context.assets.emplace_back(type, entry->second, false);
+			}
+
 			return entry->second;
+		}
+
+		void add_reference(build_context& context, const std::int32_t type, const std::string& name)
+		{
+			context.ignored.emplace(type, name);
+			context.list.emplace_back(type, context.parser.stub(type, name), true);
+		}
+
+		void add_named_asset(build_context& context, const std::int32_t type, const std::string& name, const bool referenced)
+		{
+			if (referenced || context.ignored.contains({type, name}))
+			{
+				add_reference(context, type, name);
+				return;
+			}
+
+			if (const auto header = parse_asset(context, type, name))
+			{
+				context.list.emplace_back(type, header, false);
+				return;
+			}
+
+			std::string paths;
+			for (const auto& file : asset_file_locations(type, name))
+			{
+				paths += std::format("{}{}", paths.empty() ? "" : " or ", file.path);
+			}
+
+			ZONETOOL_WARNING("%s \"%s\" not found (%s), adding it as a reference", find_asset_format(type)->name, name.data(),
+				paths.data());
+			add_reference(context, type, name);
 		}
 
 		// localize,<file> adds the entries of localizedstrings/<file>.str or .json when there is such a file. An entry
@@ -151,46 +216,93 @@ namespace zonetool::iw8
 				name = localize_name(name);
 			}
 
-			if (referenced)
-			{
-				context.list.emplace_back(type, context.parser.stub(type, name), true);
-				return;
-			}
+			add_named_asset(context, type, name, referenced);
+		}
 
-			const auto header = parse_asset(context, type, name);
-			if (!header)
+		// require,<zone> loads <zone>.ff from the zone folder. An asset without a dump comes from the required zones.
+		void require_zone(build_context& context, const std::string_view name)
+		{
+			const auto path = context.zone_folder / std::filesystem::path(name).replace_extension(".ff");
+			ZONETOOL_INFO("Loading required zone \"%s\"...", path.string().data());
+			const auto& zone = context.required_zones.emplace_back(load_zone(path, {.keep_temp_data = true}));
+			for (const auto& asset : zone->assets)
 			{
-				std::string paths;
-				for (const auto& file : asset_file_locations(type, name))
+				if (!asset.referenced)
 				{
-					paths += std::format("{}{}", paths.empty() ? "" : " or ", file.path);
+					context.required.try_emplace({asset.type, name_of(asset.type, asset.header)}, asset.header);
+				}
+			}
+		}
+
+		// ignore,<csv> makes references of the assets in zone_source/<csv>.csv.
+		void ignore_assets(build_context& context, const std::string& name)
+		{
+			auto parser = open_csv(name);
+			for (const auto row : read_csv_rows(parser))
+			{
+				const auto type = type_of(field(row, 0));
+				const auto asset = std::string(field(row, 1));
+				if (type >= 0 && !asset.empty())
+				{
+					context.ignored.emplace(type, type == ASSET_TYPE_LOCALIZE_ENTRY ? localize_name(asset) : asset);
+				}
+			}
+		}
+
+		// iterate,<pool> adds each .iw8 dump in zonetool/<zone>/<pool>/, and iterate,true the dumps of each pool.
+		void iterate_assets(build_context& context, const std::string_view pool)
+		{
+			for (std::int32_t type = 0; type < ASSET_TYPE_COUNT; type++)
+			{
+				const auto format = find_asset_format(type);
+				if (!format || (pool != "true" && format->name != pool))
+				{
+					continue;
 				}
 
-				throw std::runtime_error(std::format("there is no dump of {} \"{}\" ({})", field(row, 0), name, paths));
-			}
+				const auto folder = std::filesystem::path("zonetool") / context.fastfile / format->name;
+				if (!std::filesystem::is_directory(folder))
+				{
+					continue;
+				}
 
-			context.list.emplace_back(type, header, false);
+				for (const auto& file : std::filesystem::recursive_directory_iterator(folder))
+				{
+					if (file.is_regular_file() && file.path().extension() == ".iw8" && !file.path().filename().string().starts_with(','))
+					{
+						add_named_asset(context, type, std::filesystem::relative(file.path(), folder).replace_extension().generic_string(),
+							context.is_referencing);
+					}
+				}
+			}
 		}
 
 		void parse_csv(build_context& context, const std::string& name)
 		{
-			csv::parser parser("zone_source\\" + name + ".csv", ',');
-			if (!parser.valid())
-			{
-				throw std::runtime_error(std::format("Could not find csv file \"{}\" to build zone", name));
-			}
-
+			auto parser = open_csv(name);
 			for (const auto row : read_csv_rows(parser))
 			{
 				const auto command = field(row, 0);
 				const auto argument = field(row, 1);
-				if (command == "include")
+				if (command == "require")
+				{
+					require_zone(context, argument);
+				}
+				else if (command == "include")
 				{
 					parse_csv(context, std::string(argument));
+				}
+				else if (command == "ignore")
+				{
+					ignore_assets(context, std::string(argument));
 				}
 				else if (command == "reference")
 				{
 					context.is_referencing = argument == "true";
+				}
+				else if (command == "iterate")
+				{
+					iterate_assets(context, argument);
 				}
 				else if (command == "addpath")
 				{
@@ -207,12 +319,15 @@ namespace zonetool::iw8
 			}
 		}
 
-		// The assets that the dumps name and that have a dump of their own: the zone holds them too.
+		// The assets that the zone assets name and that have a dump or a required zone: the zone holds them too.
 		void parse_dependencies(build_context& context)
 		{
-			for (std::size_t i = 0; i < context.parser.references().size(); i++)
+			std::size_t dumped{};
+			std::size_t required{};
+			while (dumped < context.parser.references().size() || required < context.required_dependencies.size())
 			{
-				const auto [type, name] = context.parser.references()[i];
+				const auto [type, name] = dumped < context.parser.references().size() ? context.parser.references()[dumped++]
+					: context.required_dependencies[required++];
 				parse_asset(context, type, name);
 			}
 		}
@@ -226,7 +341,7 @@ namespace zonetool::iw8
 		filesystem::set_fastfile(name);
 		ZONETOOL_INFO("Building fastfile \"%s\"", name.data());
 
-		build_context context;
+		build_context context{.zone_folder = zone_folder, .fastfile = name};
 		const auto search_paths = filesystem::get_search_paths();
 		parse_csv(context, name);
 		parse_dependencies(context);

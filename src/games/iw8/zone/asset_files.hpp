@@ -18,6 +18,8 @@ namespace zonetool::iw8
 	std::string localize_name(const std::string& name);
 
 	std::string dump_asset_data(std::int32_t type, const void* header);
+	// The assets that the fields of an asset point at, by type and name.
+	std::vector<std::pair<std::int32_t, std::string>> asset_dependencies(std::int32_t type, const void* header);
 	asset_file dump_asset_file(std::int32_t type, const void* header);
 	void dump_asset(std::int32_t type, const void* header);
 
