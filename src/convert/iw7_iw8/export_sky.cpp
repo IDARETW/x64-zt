@@ -412,7 +412,7 @@ namespace zonetool::convert::iw7_iw8
 			return name;
 		}
 
-		ZONETOOL_WARNING("iw7: the world has no sky cube map");
+		ZONETOOL_WARNING("iw7: the world has no sky cube map that converts; the pipeline draws a dark sky");
 		return {};
 	}
 }

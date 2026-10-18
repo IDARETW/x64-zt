@@ -629,11 +629,17 @@ namespace zonetool::convert::iw7_iw8
 				images[role] = written != role_files.end() ? std::optional(*written) : builtins[name][role];
 			}
 
-			// Glass panes blend as the pipeline's glass.
+			// Glass panes blend as the pipeline's glass. Replay maps have no refraction: a distortion layer of a model
+			// adds black.
 			auto kind = classify_material(material);
 			if (output.glass_materials.contains(name) && kind.kind != surface_kind::opaque)
 			{
 				kind = {surface_kind::blend};
+			}
+			else if (kind.kind == surface_kind::distortion)
+			{
+				kind = {surface_kind::additive, true};
+				images = {"$black", {}, {}};
 			}
 
 			kinds[static_cast<std::size_t>(kind.kind)]++;
