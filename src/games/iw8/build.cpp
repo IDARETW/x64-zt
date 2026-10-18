@@ -85,13 +85,17 @@ namespace zonetool::iw8
 
 		csv::parser open_csv(const std::string& name)
 		{
-			csv::parser parser("zone_source\\" + name + ".csv", ',');
+			return csv::parser("zone_source\\" + name + ".csv", ',');
+		}
+
+		std::vector<csv::row*> read_zone_source(csv::parser& parser, const std::string& name)
+		{
 			if (!parser.valid())
 			{
 				throw std::runtime_error(std::format("Could not find csv file \"{}\"", name));
 			}
 
-			return parser;
+			return read_csv_rows(parser);
 		}
 
 		// The asset from its dump, else from a required zone. nullptr when the asset has neither or is ignored.
@@ -238,7 +242,7 @@ namespace zonetool::iw8
 		void ignore_assets(build_context& context, const std::string& name)
 		{
 			auto parser = open_csv(name);
-			for (const auto row : read_csv_rows(parser))
+			for (const auto row : read_zone_source(parser, name))
 			{
 				const auto type = type_of(field(row, 0));
 				const auto asset = std::string(field(row, 1));
@@ -280,7 +284,7 @@ namespace zonetool::iw8
 		void parse_csv(build_context& context, const std::string& name)
 		{
 			auto parser = open_csv(name);
-			for (const auto row : read_csv_rows(parser))
+			for (const auto row : read_zone_source(parser, name))
 			{
 				const auto command = field(row, 0);
 				const auto argument = field(row, 1);
