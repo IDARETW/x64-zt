@@ -50,6 +50,7 @@ namespace zonetool::iw8
 				}
 
 				this->reader_.align(format->alignment);
+				const auto first_alias = this->reader_.alias_count();
 				const auto data = this->reader_.read_bytes(format->size);
 				std::vector<std::pair<const void*, std::uint64_t>> markers;
 				try
@@ -67,6 +68,7 @@ namespace zonetool::iw8
 				// Block 1 rewinds after the asset: keep the header in reader memory.
 				auto header = static_cast<void*>(this->reader_.allocate<std::uint8_t>(format->size));
 				std::memcpy(header, data, format->size);
+				this->reader_.move_aliases(data, format->size, header, first_alias);
 
 				const auto start = static_cast<const std::uint8_t*>(data);
 				for (const auto& [marked, value] : markers)
@@ -220,6 +222,7 @@ namespace zonetool::iw8
 			assets.read_inline_asset(type, field, insert_slot);
 		});
 		read_asset_list(*zone, reader, trace.get());
+		reader.resolve_aliases();
 		reader.set_inline_asset_loader({});
 		reader.set_read_trace({});
 
