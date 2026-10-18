@@ -180,6 +180,11 @@ namespace zonetool::convert::iw7_iw8
 		return this->first<iw7::MapEnts>(iw7::ASSET_TYPE_MAP_ENTS);
 	}
 
+	iw7::FxWorld* source_map::fx_world() const
+	{
+		return this->first<iw7::FxWorld>(iw7::ASSET_TYPE_FXWORLD);
+	}
+
 	void* source_map::find(const iw7::XAssetType type, const std::string_view name) const
 	{
 		const auto pool = this->assets_.find(type);

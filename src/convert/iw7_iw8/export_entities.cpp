@@ -375,6 +375,13 @@ namespace zonetool::convert::iw7_iw8
 			entities += "}\n";
 		}
 
+		// IW7's breakable glass: an IW3 glass entity for each pane.
+		const auto panes = glass_panes(source);
+		for (auto i = 0u; i < panes.size(); i++)
+		{
+			entities += std::format("{{\n\"classname\" \"script_brushmodel\"\n\"model\" \"*{}\"\n}}\n", glass_brush_model(source, i));
+		}
+
 		entities = with_converting_classes(entities);
 		const auto path = output.extracted / (bsp_name(source) + ".ents");
 		std::filesystem::create_directories(path.parent_path());

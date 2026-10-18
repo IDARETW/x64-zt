@@ -25,6 +25,8 @@ namespace zonetool::convert::iw7_iw8
 		std::set<std::string> exported_models;
 		// The models beyond the range of Replay model bounds (planets): the sky draws them.
 		std::set<std::string> distant_models;
+		// The materials of glass panes, which convert as lit glass (IW7 draws them premultiplied).
+		std::set<std::string> glass_materials;
 
 		// Adds the material or model of a header and returns its name in the extraction.
 		std::string add_material(const source_map& source, iw7::Material* header);
@@ -75,6 +77,23 @@ namespace zonetool::convert::iw7_iw8
 	// The bounds of a trigger model: its hulls, in the space of the entity that places it, 1 unit larger (the margin
 	// of IW3 brush model bounds).
 	box trigger_bounds(const iw7::MapTriggers& triggers, unsigned int model);
+
+	// A piece of IW7's breakable glass: a rectangle in the world, which the extraction gives a brush model after the
+	// trigger models and an IW3 glass entity (a script_brushmodel of intact glass), which the pipeline turns into
+	// Replay's breakable glass.
+	struct glass_pane
+	{
+		std::array<std::array<float, 3>, 4> corners{};
+		std::array<std::array<float, 2>, 4> uvs{};
+		std::array<float, 3> normal{};
+		std::array<float, 3> tangent{};
+		std::array<float, 3> mins{};
+		std::array<float, 3> maxs{};
+		iw7::Material* material{};
+	};
+
+	std::vector<glass_pane> glass_panes(const source_map& source);
+	unsigned int glass_brush_model(const source_map& source, unsigned int pane);
 
 	struct mesh_vertex
 	{

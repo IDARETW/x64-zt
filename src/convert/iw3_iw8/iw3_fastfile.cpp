@@ -4579,10 +4579,11 @@ Json BuildGlassPanes(const std::vector<BrushModel> &models, const RenderPlan &pl
         const bool intactGlass =
             std::any_of(model.surfaces.begin(), model.surfaces.end(), [&](const Surface &surface) {
                 const auto material = plan.materials.find(surface.material);
-                // Additive and multiply layers (blend != 0) are not panes.
+                // Additive and multiply layers (blend != 0) are not panes, nor are unlit
+                // blended overlays (the zones of IW7's Hardpoint): glass is lit.
                 return material != plan.materials.end() &&
                        material->second.kind == SurfaceKind::glass &&
-                       material->second.blend == 0 &&
+                       material->second.blend == 0 && !(material->second.flags & 128u) &&
                        surface.material.find("shattered") == std::string::npos;
             });
         if (!intactGlass)
