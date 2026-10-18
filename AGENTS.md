@@ -6,7 +6,7 @@ Guide for humans and agents who work on x64-zt. Read it before you change code.
 
 x64-zt is a fastfile unlinker and linker for x64 Call of Duty titles. It reads `.ff` zones, dumps their assets to disk, builds new zones from those dumps, and converts assets from one game to another.
 
-The `v2` branch is a standalone rewrite. It reads fastfiles directly and never loads a game exe via runtime methodology. v1 (`main`) loaded the game binary and hooked its zone loader. v2 keeps the v1 asset logic and the v1 dump formats. Current scope is H1 (MWR 1.15) and IW7. Other games are currently not supported, but can be done with due time easily.
+The `v2` branch is a standalone rewrite. It reads fastfiles directly and never loads a game exe via runtime methodology. v1 (`main`) loaded the game binary and hooked its zone loader. v2 keeps the v1 asset logic and the v1 dump formats. Current scope is H1 (MWR 1.15), IW7 and IW8 (Modern Warfare 2019, Replay 1.20). Other games are currently not supported, but can be done with due time easily.
 
 ## Build
 
@@ -120,8 +120,22 @@ Stream facts:
 - Data read in TEMP is lost after `pop_stream`. Copy it with `duplicate` if you keep it.
 - H1 pointers: `0xFDFDFDFFFFFFFFFF` is inline, `...FE` is inline with an insert slot. Other values are offsets: block `(v >> 32) & 0xF`, offset `(u32)v - 1`.
 - IW7 pointers: -1 is shared (treat as inline), -2 is inline, -3 is insert. Other values are offsets: block is the high dword.
+- IW8 blocks: TEMP 1 (rewinds on pop), TEMP_POSTLOAD 2 (aligns to 32 on pop), RUNTIME 4, VIRTUAL 5. IW8 has 11 blocks. The asset list header stays at the start of block 1.
+- IW8 pointers: -1 is shared, -2 is inline, -3 is insert. Other values are offsets: block `(v >> 32) & 0xF`, offset `(u32)v - 1`. With bit 36 set, the offset counts from the start of the outermost asset. Stock zones use these relative offsets for the data of the asset that loads.
+- IW8 zones with a `.fp` file beside them are patched: the container reader applies the VCDIFF delta before the asset data loads.
 - The game reads most arrays inline when the pointer is not null, and ignores the value. Third-party zones store raw heap pointers there. `zone_reader` follows only a valid offset.
 - Stock zones point some fields into arrays that are already written. The writers reuse these with `insert_sub_buffer` and `find_sub_buffer`, so built zones keep the stock size.
+
+## IW8
+
+IW8 asset code is generated, not written by hand. Do not edit the generated files.
+
+- `tools/iw8_format.json` describes what each Replay 1.20 `Load_*` routine reads, in member terms. It comes from the game exe.
+- `tools/gen_iw8_structs.py` writes `src/games/iw8/structs.hpp`. `tools/iw8_layouts.txt` corrects the Replay layouts that differ from the schema.
+- `tools/gen_iw8_streams.py` writes `src/games/iw8/zone/asset_streams.{hpp,cpp}`: one traversal per record, the `IW8_ASSETS(x)` list and the asset table.
+- A traversal is a template over a stream (`zone/streams.hpp`). `load_stream`, `write_stream`, `dump_stream` and `parse_stream` run the same steps, so `read()` and `write()` cannot disagree.
+- `dumpzone` writes `<pool>/<name>.iw8` for each asset and `<zone>.csv`. `buildzone` reads `zone_source/<zone>.csv` and the dumps, and writes `output/<zone>.ff`.
+- The writer reserves the block 2 header of each asset that the map preload (`Preload_*Ptr`) loads there. The asset table holds that block per type.
 
 ## Compatibility rules
 
@@ -137,10 +151,13 @@ Run these after a change to a reader, writer or the container code:
 | Check | Command | Pass condition |
 |---|---|---|
 | Container | `inspect --all` | Every zone passes |
-| Reader | `verifyzone --all` | H1: 6991 of 6991. IW7: 686 of 687 (`mp_vlobby_room` on disk is a modified file) |
+| Reader | `verifyzone --all` | H1: 6991 of 6991. IW7: 686 of 687 (`mp_vlobby_room` on disk is a modified file). IW8: 9533 of 9545 (the 12 others are frontend zones that the Replay loader also rejects) |
+| IW8 writer | `IW8_REWRITE=1 verifyzone --all` | Each zone written again with its own pointer markers gives the same data (block sizes can differ: stock zones add slack) |
+| IW8 writer | `IW8_REWRITE=fresh verifyzone --all` | Each zone written with the choices of the writer loads with the same assets |
+| IW8 dumps | `IW8_REWRITE=dump verifyzone --all` | Each zone dumps, parses, writes, loads and dumps again to the same dumps |
 | Writer | `dumpzone X`, `buildzone X`, `verifyzone X`, then `dumpzone` the built zone | The two dumps are equal, except pointer values and the known differences |
 
-Good round-trip zones: H1 `mp_shipment`, `mp_crash`. IW7 `mp_frontend`, `mp_afghan`.
+Good round-trip zones: H1 `mp_shipment`, `mp_crash`. IW7 `mp_frontend`, `mp_afghan`. IW8 `mp_shipment`, `common_mp`.
 
 ## Code style
 
