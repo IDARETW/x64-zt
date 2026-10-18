@@ -99,15 +99,15 @@ namespace zonetool::iw8
 				written.data.size(), zone.file.payload.size());
 		}
 
-		std::map<asset_key, std::string> dump_assets(const loaded_zone& zone)
+		std::map<asset_key, asset_file> dump_assets(const loaded_zone& zone)
 		{
-			std::map<asset_key, std::string> dumps;
+			std::map<asset_key, asset_file> dumps;
 			for (const auto& asset : zone.assets)
 			{
 				const asset_key key{asset.type, asset_name(asset.type, asset.header)};
 				if (!asset.referenced && !dumps.contains(key))
 				{
-					dumps.emplace(key, dump_asset_data(asset.type, asset.header));
+					dumps.emplace(key, dump_asset_file(asset.type, asset.header));
 				}
 			}
 
@@ -122,18 +122,18 @@ namespace zonetool::iw8
 			asset_parser parser;
 			std::map<asset_key, void*> parsed;
 			std::vector<zone_asset> assets;
-			for (const auto& [key, data] : dumps)
+			std::size_t shared{};
+			for (const auto& [key, file] : dumps)
 			{
-				const auto format = find_asset_format(key.first);
-				try
+				const auto header = parser.parse_asset_file(key.first, key.second, file);
+				parsed.emplace(key, header);
+				assets.emplace_back(key.first, header, false);
+				shared += file.shared;
+
+				// An asset of a type with a shared file that the shared file does not hold.
+				if (!file.shared && asset_file_locations(key.first, key.second).size() > 1)
 				{
-					const auto header = parser.parse(data);
-					parsed.emplace(key, header);
-					assets.emplace_back(key.first, header, false);
-				}
-				catch (const std::exception& e)
-				{
-					throw std::runtime_error(std::format("{} \"{}\": {}", format->name, key.second, e.what()));
+					ZONETOOL_INFO("%s: %s", zone.name.data(), file.path.data());
 				}
 			}
 
@@ -149,38 +149,37 @@ namespace zonetool::iw8
 			const std::array<const char*, 1> strings{nullptr};
 			const auto written = write_zone(list, assets, strings);
 
-			xfile::fastfile file{};
-			file.payload = written.data;
-			file.block_sizes = written.block_sizes;
-			const auto reloaded = load_zone(zone.name, std::move(file), {.keep_temp_data = true});
+			xfile::fastfile fastfile{};
+			fastfile.payload = written.data;
+			fastfile.block_sizes = written.block_sizes;
+			const auto reloaded = load_zone(zone.name, std::move(fastfile), {.keep_temp_data = true});
 			if (distinct_assets(*reloaded) != distinct_assets(zone))
 			{
 				throw std::runtime_error("the zone that the dumps make holds other assets");
 			}
 
 			const auto again = dump_assets(*reloaded);
-			for (const auto& [key, data] : dumps)
+			for (const auto& [key, file] : dumps)
 			{
 				const auto found = again.find(key);
-				if (found == again.end() || found->second != data)
+				if (found == again.end() || found->second.path != file.path || found->second.data != file.data)
 				{
 					char debug[MAX_PATH]{};
 					if (GetEnvironmentVariableA("IW8_DUMP_DEBUG", debug, sizeof(debug)))
 					{
-						std::ofstream(std::filesystem::path(debug) / "first.iw8", std::ios::binary).write(data.data(), static_cast<std::streamsize>(data.size()));
+						std::ofstream(std::filesystem::path(debug) / "first", std::ios::binary).write(file.data.data(), static_cast<std::streamsize>(file.data.size()));
 						if (found != again.end())
 						{
-							std::ofstream(std::filesystem::path(debug) / "again.iw8", std::ios::binary).write(found->second.data(), static_cast<std::streamsize>(found->second.size()));
+							std::ofstream(std::filesystem::path(debug) / "again", std::ios::binary).write(found->second.data.data(), static_cast<std::streamsize>(found->second.data.size()));
 						}
 					}
 
-					const auto format = find_asset_format(key.first);
-					throw std::runtime_error(std::format("{} \"{}\" dumps differently from the zone that its dump makes",
-						format->name, key.second));
+					throw std::runtime_error(std::format("{} dumps differently from the zone that its dump makes", file.path));
 				}
 			}
 
-			ZONETOOL_INFO("%s: %zu assets dump, parse and write again to the same dumps", zone.name.data(), dumps.size());
+			ZONETOOL_INFO("%s: %zu assets (%zu in shared files) dump, parse and write again to the same files", zone.name.data(),
+				dumps.size(), shared);
 		}
 
 		// IW8_REWRITE=1 writes the zone again from the loaded assets and compares it with the zone data.
