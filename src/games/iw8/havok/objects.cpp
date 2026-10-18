@@ -1,64 +1,22 @@
 #include <std_include.hpp>
 #include "objects.hpp"
+#include "detail.hpp"
 
 #include <bit>
 #include <numeric>
 
 namespace zonetool::iw8::havok
 {
+	using namespace detail;
+
 	namespace
 	{
-		// HK_REAL_MAX: the bounds of an empty AABB are inverted with it.
-		constexpr auto real_max = 3.40282e38f;
-
-		// Minimum x, y, z, then maximum x, y, z.
-		using bounds = std::array<float, 6>;
-
-		constexpr bounds empty_bounds{real_max, real_max, real_max, -real_max, -real_max, -real_max};
-
-		void include(bounds& target, const bounds& source)
-		{
-			for (std::size_t axis = 0; axis < 3; axis++)
-			{
-				target[axis] = std::min(target[axis], source[axis]);
-				target[axis + 3] = std::max(target[axis + 3], source[axis + 3]);
-			}
-		}
-
-		// An hkcdSimdTree node: the bounds of four children, then four data words (child nodes or, in a leaf, instances).
-		struct tree_node
-		{
-			std::array<bounds, 4> children{empty_bounds, empty_bounds, empty_bounds, empty_bounds};
-			std::array<std::uint32_t, 4> data{};
-			bool leaf{};
-		};
-
 		// hkHalf16: the high 16 bits of a float, rounded.
 		std::uint16_t to_half16(const float value)
 		{
 			std::uint32_t bits{};
 			std::memcpy(&bits, &value, sizeof(bits));
 			return static_cast<std::uint16_t>((bits + 0x8000) >> 16);
-		}
-
-		template <typename T>
-		void put(std::vector<std::uint8_t>& out, const T& value)
-		{
-			const auto bytes = reinterpret_cast<const std::uint8_t*>(&value);
-			out.insert(out.end(), bytes, bytes + sizeof(T));
-		}
-
-		template <typename T>
-		T get(const std::vector<std::uint8_t>& data, const std::size_t offset)
-		{
-			if (offset + sizeof(T) > data.size())
-			{
-				throw std::runtime_error("a Havok object is shorter than its members");
-			}
-
-			T value{};
-			std::memcpy(&value, data.data() + offset, sizeof(T));
-			return value;
 		}
 
 		const item& target_of(const tagfile& file, const item& owner, const std::uint32_t offset)
@@ -127,35 +85,6 @@ namespace zonetool::iw8::havok
 				parent = block + static_cast<std::uint32_t>(ranges.size() - 1);
 				first = begin;
 			}
-		}
-
-		std::vector<std::uint8_t> write_nodes(const std::vector<tree_node>& nodes)
-		{
-			std::vector<std::uint8_t> out;
-			for (const auto& node : nodes)
-			{
-				// lx, hx, ly, hy, lz, hz
-				for (std::size_t axis = 0; axis < 3; axis++)
-				{
-					for (const auto side : {axis, axis + 3})
-					{
-						for (const auto& child : node.children)
-						{
-							put(out, child[side]);
-						}
-					}
-				}
-
-				for (const auto word : node.data)
-				{
-					put(out, word);
-				}
-
-				put(out, static_cast<std::uint8_t>(node.leaf));
-				out.insert(out.end(), 15, 0);
-			}
-
-			return out;
 		}
 	}
 
@@ -430,6 +359,94 @@ namespace zonetool::iw8::havok
 		return result;
 	}
 
+	std::vector<vector3> placed_vertices(const compound_instance& instance)
+	{
+		if (instance.vertices.empty())
+		{
+			throw std::runtime_error("a shape instance has no vertices");
+		}
+
+		std::vector<vector3> placed;
+		for (const auto& v : instance.vertices)
+		{
+			vector3 p{};
+			for (std::size_t axis = 0; axis < 3; axis++)
+			{
+				p[axis] = instance.rotation[0][axis] * v[0] + instance.rotation[1][axis] * v[1] + instance.rotation[2][axis] * v[2] +
+					instance.translation[axis];
+			}
+
+			placed.push_back(p);
+		}
+
+		return placed;
+	}
+
+	std::array<float, 6> instance_bounds(const compound_instance& instance)
+	{
+		auto box = empty_bounds;
+		for (const auto& p : placed_vertices(instance))
+		{
+			include(box, {p[0], p[1], p[2], p[0], p[1], p[2]});
+		}
+
+		for (std::size_t axis = 0; axis < 3; axis++)
+		{
+			box[axis] -= instance.convex_radius;
+			box[axis + 3] += instance.convex_radius;
+		}
+
+		return box;
+	}
+
+	std::vector<std::uint8_t> instance_data(const compound_instance& instance, const std::uint32_t translation_w)
+	{
+		const auto translated = std::ranges::any_of(instance.translation, [](const float value)
+		{
+			return value != 0.0f;
+		});
+
+		// The stock rotation flags start between 7e-5 and 4e-3 from the identity.
+		auto rotated = false;
+		for (std::size_t column = 0; column < 3; column++)
+		{
+			for (std::size_t axis = 0; axis < 3; axis++)
+			{
+				rotated |= std::abs(instance.rotation[column][axis] - (column == axis ? 1.0f : 0.0f)) > 1e-4f;
+			}
+		}
+
+		// The w of column 0 holds the transform flags (0x2 translation, 0x4 rotation) in the bits of 0.5.
+		std::vector<std::uint8_t> out;
+		for (std::size_t column = 0; column < 3; column++)
+		{
+			for (const auto value : instance.rotation[column])
+			{
+				put(out, value);
+			}
+
+			put(out, column ? 0u : 0x3F000040u | (translated ? 0x2u : 0u) | (rotated ? 0x4u : 0u));
+		}
+
+		for (const auto value : instance.translation)
+		{
+			put(out, value);
+		}
+
+		put(out, translation_w);
+		for (std::size_t axis = 0; axis < 4; axis++)
+		{
+			put(out, 1.0f);
+		}
+
+		// shape, shapeTag, destructionTag, then isEmpty, nextEmptyElement, instanceId and parentShape.
+		put(out, std::uint64_t{});
+		put(out, instance.shape_tag);
+		put(out, std::uint16_t{0xFFFF});
+		out.insert(out.end(), 20, 0);
+		return out;
+	}
+
 	std::uint32_t add_compound_shape(object_builder& builder, const std::span<const compound_instance> instances)
 	{
 		if (instances.empty())
@@ -443,29 +460,9 @@ namespace zonetool::iw8::havok
 		std::vector<double> radii;
 		for (const auto& instance : instances)
 		{
-			if (instance.vertices.empty())
-			{
-				throw std::runtime_error("a compound shape instance has no vertices");
-			}
-
-			std::vector<vector3> placed;
-			auto box = empty_bounds;
-			for (const auto& v : instance.vertices)
-			{
-				vector3 p{};
-				for (std::size_t axis = 0; axis < 3; axis++)
-				{
-					p[axis] = instance.rotation[0][axis] * v[0] + instance.rotation[1][axis] * v[1] + instance.rotation[2][axis] * v[2] +
-						instance.translation[axis];
-					box[axis] = std::min(box[axis], p[axis]);
-					box[axis + 3] = std::max(box[axis + 3], p[axis]);
-				}
-
-				placed.push_back(p);
-			}
-
+			const auto box = instance_bounds(instance);
 			double radius{};
-			for (const auto& p : placed)
+			for (const auto& p : placed_vertices(instance))
 			{
 				double square{};
 				for (std::size_t axis = 0; axis < 3; axis++)
@@ -475,12 +472,6 @@ namespace zonetool::iw8::havok
 				}
 
 				radius = std::max(radius, std::sqrt(square));
-			}
-
-			for (std::size_t axis = 0; axis < 3; axis++)
-			{
-				box[axis] -= instance.convex_radius;
-				box[axis + 3] += instance.convex_radius;
 			}
 
 			boxes.push_back(box);
@@ -561,55 +552,13 @@ namespace zonetool::iw8::havok
 			put(point_data, std::uint32_t{0x3F000000} | order[k]);
 		}
 
+		// The w of the translation holds the position of the instance in the tree points, in the bits of 0.5.
 		std::vector<std::uint8_t> elements;
 		std::uint32_t shape_keys{};
 		for (std::uint32_t i = 0; i < count; i++)
 		{
-			const auto& instance = instances[i];
-			const auto translated = std::ranges::any_of(instance.translation, [](const float value)
-			{
-				return value != 0.0f;
-			});
-
-			// The stock rotation flags start between 7e-5 and 4e-3 from the identity.
-			auto rotated = false;
-			for (std::size_t column = 0; column < 3; column++)
-			{
-				for (std::size_t axis = 0; axis < 3; axis++)
-				{
-					rotated |= std::abs(instance.rotation[column][axis] - (column == axis ? 1.0f : 0.0f)) > 1e-4f;
-				}
-			}
-
-			// The w of column 0 holds the transform flags (0x2 translation, 0x4 rotation) and the w of the translation the
-			// position of the instance in the tree points, both in the bits of 0.5.
-			for (std::size_t column = 0; column < 3; column++)
-			{
-				for (const auto value : instance.rotation[column])
-				{
-					put(elements, value);
-				}
-
-				put(elements, column ? 0u : 0x3F000040u | (translated ? 0x2u : 0u) | (rotated ? 0x4u : 0u));
-			}
-
-			for (const auto value : instance.translation)
-			{
-				put(elements, value);
-			}
-
-			put(elements, std::uint32_t{0x3F000000} | position[i]);
-			for (std::size_t axis = 0; axis < 4; axis++)
-			{
-				put(elements, 1.0f);
-			}
-
-			// shape, shapeTag, destructionTag, then isEmpty, nextEmptyElement, instanceId and parentShape.
-			put(elements, std::uint64_t{});
-			put(elements, instance.shape_tag);
-			put(elements, std::uint16_t{0xFFFF});
-			elements.insert(elements.end(), 20, 0);
-			shape_keys += instance.shape_keys;
+			std::ranges::copy(instance_data(instances[i], std::uint32_t{0x3F000000} | position[i]), std::back_inserter(elements));
+			shape_keys += instances[i].shape_keys;
 		}
 
 		std::vector<std::uint8_t> aabb_data;
@@ -650,6 +599,320 @@ namespace zonetool::iw8::havok
 		builder.point(object, "boundingVolumeData.simdTree.points", builder.array("hkVector4", count, point_data));
 		builder.set(object, "boundingVolumeData.type", std::uint8_t{2});
 		return object;
+	}
+
+	namespace
+	{
+		// hkPackedVector3: three 16-bit mantissas and the high half of a float with their shared exponent. Each value is the
+		// mantissa times that float times 65536.
+		std::array<std::int16_t, 4> pack_vector3(const vector3& value)
+		{
+			const auto bits = [](const float x)
+			{
+				return std::bit_cast<std::uint32_t>(x);
+			};
+
+			// The largest exponent of the values and a tiny one, rounded up a little.
+			std::uint32_t exponent{};
+			for (const auto x : {value[0], value[1], value[2], std::bit_cast<float>(0x28800000u)})
+			{
+				exponent = std::max(exponent, bits(x * std::bit_cast<float>(0x3F800089u)) & 0x7F800000);
+			}
+
+			std::array<std::int16_t, 4> packed{};
+			for (std::size_t axis = 0; axis < 3; axis++)
+			{
+				// The value times 2^30 / 2^exponent, truncated, saturated and rounded to its high half.
+				const auto scaled = std::bit_cast<float>(bits(value[axis]) + 0x4E800000u - exponent);
+				const auto whole = scaled >= 2147483648.0f ? 0x7FFFFFFF : scaled < -2147483648.0f ? std::numeric_limits<std::int32_t>::min() :
+					static_cast<std::int32_t>(scaled);
+				packed[axis] = static_cast<std::int16_t>((static_cast<std::uint32_t>(whole) + 0x8000u) >> 16);
+			}
+
+			packed[3] = static_cast<std::int16_t>(static_cast<std::int32_t>(exponent - 0x4E800000u + 0x3F800000u) >> 16);
+			return packed;
+		}
+
+		vector3 unpack_vector3(const std::array<std::int16_t, 4>& packed)
+		{
+			const auto scale = std::bit_cast<float>(static_cast<std::uint32_t>(static_cast<std::uint16_t>(packed[3])) << 16) * 65536.0f;
+			return {packed[0] * scale, packed[1] * scale, packed[2] * scale};
+		}
+
+		// A unit quaternion in four shorts: the high half of q * 30000 * 65536 with the sign bit flipped.
+		std::array<std::int16_t, 4> pack_rotation(const std::array<float, 4>& rotation)
+		{
+			std::array<std::int16_t, 4> packed{};
+			for (std::size_t i = 0; i < 4; i++)
+			{
+				const auto whole = static_cast<std::int32_t>(rotation[i] * 1966080000.0f);
+				packed[i] = static_cast<std::int16_t>((static_cast<std::uint32_t>(whole) + 0x80000000u) >> 16);
+			}
+
+			return packed;
+		}
+
+		std::array<float, 4> unpack_rotation(const std::array<std::int16_t, 4>& packed)
+		{
+			std::array<float, 4> rotation{};
+			for (std::size_t i = 0; i < 4; i++)
+			{
+				rotation[i] = static_cast<std::int16_t>(static_cast<std::uint16_t>(packed[i]) ^ 0x8000) / 30000.0f;
+			}
+
+			return rotation;
+		}
+
+		using matrix3 = std::array<std::array<double, 3>, 3>;
+
+		// The eigenvalues and eigenvectors (columns) of a symmetric matrix, by Jacobi rotations.
+		std::pair<std::array<double, 3>, matrix3> diagonalize(matrix3 a)
+		{
+			matrix3 v{{{1.0, 0.0, 0.0}, {0.0, 1.0, 0.0}, {0.0, 0.0, 1.0}}};
+			for (auto sweep = 0; sweep < 64; sweep++)
+			{
+				const auto off = std::abs(a[0][1]) + std::abs(a[0][2]) + std::abs(a[1][2]);
+				const auto scale = std::abs(a[0][0]) + std::abs(a[1][1]) + std::abs(a[2][2]);
+				if (off <= 1e-15 * scale || off == 0.0)
+				{
+					break;
+				}
+
+				for (const auto [p, q] : {std::pair(0, 1), std::pair(0, 2), std::pair(1, 2)})
+				{
+					if (a[p][q] == 0.0)
+					{
+						continue;
+					}
+
+					const auto theta = (a[q][q] - a[p][p]) / (2.0 * a[p][q]);
+					const auto t = (theta >= 0.0 ? 1.0 : -1.0) / (std::abs(theta) + std::sqrt(theta * theta + 1.0));
+					const auto c = 1.0 / std::sqrt(t * t + 1.0);
+					const auto s = t * c;
+					for (auto k = 0; k < 3; k++)
+					{
+						const auto akp = a[k][p];
+						const auto akq = a[k][q];
+						a[k][p] = c * akp - s * akq;
+						a[k][q] = s * akp + c * akq;
+					}
+
+					for (auto k = 0; k < 3; k++)
+					{
+						const auto apk = a[p][k];
+						const auto aqk = a[q][k];
+						a[p][k] = c * apk - s * aqk;
+						a[q][k] = s * apk + c * aqk;
+					}
+
+					for (auto k = 0; k < 3; k++)
+					{
+						const auto vkp = v[k][p];
+						const auto vkq = v[k][q];
+						v[k][p] = c * vkp - s * vkq;
+						v[k][q] = s * vkp + c * vkq;
+					}
+				}
+			}
+
+			return {{a[0][0], a[1][1], a[2][2]}, v};
+		}
+
+		// The unit quaternion of a rotation matrix (columns are the rotated axes).
+		std::array<float, 4> quaternion_of(const matrix3& r)
+		{
+			std::array<double, 4> q{};
+			const auto trace = r[0][0] + r[1][1] + r[2][2];
+			if (trace > 0.0)
+			{
+				const auto s = std::sqrt(trace + 1.0) * 2.0;
+				q = {(r[2][1] - r[1][2]) / s, (r[0][2] - r[2][0]) / s, (r[1][0] - r[0][1]) / s, 0.25 * s};
+			}
+			else if (r[0][0] > r[1][1] && r[0][0] > r[2][2])
+			{
+				const auto s = std::sqrt(1.0 + r[0][0] - r[1][1] - r[2][2]) * 2.0;
+				q = {0.25 * s, (r[0][1] + r[1][0]) / s, (r[0][2] + r[2][0]) / s, (r[2][1] - r[1][2]) / s};
+			}
+			else if (r[1][1] > r[2][2])
+			{
+				const auto s = std::sqrt(1.0 + r[1][1] - r[0][0] - r[2][2]) * 2.0;
+				q = {(r[0][1] + r[1][0]) / s, 0.25 * s, (r[1][2] + r[2][1]) / s, (r[0][2] - r[2][0]) / s};
+			}
+			else
+			{
+				const auto s = std::sqrt(1.0 + r[2][2] - r[0][0] - r[1][1]) * 2.0;
+				q = {(r[0][2] + r[2][0]) / s, (r[1][2] + r[2][1]) / s, 0.25 * s, (r[1][0] - r[0][1]) / s};
+			}
+
+			const auto sign = q[3] < 0.0 ? -1.0 : 1.0;
+			const auto length = std::sqrt(q[0] * q[0] + q[1] * q[1] + q[2] * q[2] + q[3] * q[3]);
+			return {static_cast<float>(sign * q[0] / length), static_cast<float>(sign * q[1] / length), static_cast<float>(sign * q[2] / length),
+				static_cast<float>(sign * q[3] / length)};
+		}
+	}
+
+	mass_properties convex_mass_properties(const polytope& shape, const float mass, const float inertia_factor)
+	{
+		if (shape.vertices.empty())
+		{
+			throw std::runtime_error("a convex shape without vertices has no mass properties");
+		}
+
+		// Tetrahedra from a point inside to each face triangle.
+		std::array<double, 3> origin{};
+		for (const auto& v : shape.vertices)
+		{
+			for (std::size_t axis = 0; axis < 3; axis++)
+			{
+				origin[axis] += v[axis] / static_cast<double>(shape.vertices.size());
+			}
+		}
+
+		double volume{};
+		std::array<double, 3> centre{};
+		matrix3 second{};
+		for (const auto& face : shape.faces)
+		{
+			const auto point = [&](const std::uint32_t index)
+			{
+				const auto& v = shape.vertices.at(index);
+				return std::array<double, 3>{v[0] - origin[0], v[1] - origin[1], v[2] - origin[2]};
+			};
+
+			for (std::size_t k = 1; k + 1 < face.size(); k++)
+			{
+				const auto a = point(face[0]);
+				const auto b = point(face[k]);
+				const auto c = point(face[k + 1]);
+				const auto d = (a[0] * (b[1] * c[2] - b[2] * c[1]) + a[1] * (b[2] * c[0] - b[0] * c[2]) + a[2] * (b[0] * c[1] - b[1] * c[0])) / 6.0;
+				volume += d;
+				const std::array<double, 3> sum{a[0] + b[0] + c[0], a[1] + b[1] + c[1], a[2] + b[2] + c[2]};
+				for (std::size_t i = 0; i < 3; i++)
+				{
+					centre[i] += d * sum[i] / 4.0;
+					for (std::size_t j = 0; j < 3; j++)
+					{
+						second[i][j] += d / 20.0 * (a[i] * a[j] + b[i] * b[j] + c[i] * c[j] + sum[i] * sum[j]);
+					}
+				}
+			}
+		}
+
+		if (!(volume > 0.0))
+		{
+			throw std::runtime_error("a convex shape has no volume");
+		}
+
+		mass_properties result;
+		result.volume = static_cast<float>(volume);
+		result.mass = mass;
+		for (std::size_t i = 0; i < 3; i++)
+		{
+			centre[i] /= volume;
+		}
+
+		// The inertia about the centre, for the mass.
+		matrix3 inertia{};
+		const auto density = mass / volume;
+		const auto trace = second[0][0] + second[1][1] + second[2][2] - volume * (centre[0] * centre[0] + centre[1] * centre[1] + centre[2] * centre[2]);
+		for (std::size_t i = 0; i < 3; i++)
+		{
+			for (std::size_t j = 0; j < 3; j++)
+			{
+				const auto covariance = second[i][j] - volume * centre[i] * centre[j];
+				inertia[i][j] = density * inertia_factor * ((i == j ? trace : 0.0) - covariance);
+			}
+		}
+
+		auto [moments, axes] = diagonalize(inertia);
+		const auto determinant = axes[0][0] * (axes[1][1] * axes[2][2] - axes[1][2] * axes[2][1]) -
+			axes[0][1] * (axes[1][0] * axes[2][2] - axes[1][2] * axes[2][0]) + axes[0][2] * (axes[1][0] * axes[2][1] - axes[1][1] * axes[2][0]);
+		if (determinant < 0.0)
+		{
+			for (auto& row : axes)
+			{
+				row[2] = -row[2];
+			}
+		}
+
+		for (std::size_t i = 0; i < 3; i++)
+		{
+			result.centre[i] = static_cast<float>(centre[i] + origin[i]);
+			result.inertia[i] = static_cast<float>(moments[i]);
+		}
+
+		result.rotation = quaternion_of(axes);
+		return result;
+	}
+
+	void add_mass_properties(object_builder& builder, const std::uint32_t shape, const mass_properties& properties)
+	{
+		const auto values = builder.object("hknpShapeMassProperties");
+		builder.set(values, "compressedMassProperties.centerOfMass", pack_vector3(properties.centre));
+		builder.set(values, "compressedMassProperties.inertia", pack_vector3(properties.inertia));
+		builder.set(values, "compressedMassProperties.majorAxisSpace", pack_rotation(properties.rotation));
+		builder.set(values, "compressedMassProperties.mass", properties.mass);
+		builder.set(values, "compressedMassProperties.volume", properties.volume);
+
+		// hknpShape keeps its mass properties under the key 0xF100.
+		std::vector<std::uint8_t> entry(16);
+		const std::uint16_t key = 0xF100;
+		std::memcpy(entry.data() + 8, &key, sizeof(key));
+		const auto entries = builder.array("hkRefCountedProperties::Entry", 1, entry);
+		builder.point(entries, "object", values);
+
+		const auto list = builder.object("hkRefCountedProperties");
+		builder.point(list, "entries", entries);
+		builder.point(shape, "properties", list);
+	}
+
+	std::optional<mass_properties> read_mass_properties(const tagfile& file, const type_table& types, const std::uint32_t index)
+	{
+		const auto& shape = file.items.at(index);
+		const auto offset_of = [&](const std::uint32_t type, const std::string_view name)
+		{
+			const auto found = types.member(type, name);
+			if (!found)
+			{
+				throw std::runtime_error(std::format("{} has no member {}", types.identity(type), name));
+			}
+
+			return found->first;
+		};
+
+		const auto pointer = [&](const item& owner, const std::uint32_t offset) -> const item*
+		{
+			const auto found = std::ranges::find(owner.pointers, offset, &pointer_field::offset);
+			return found != owner.pointers.end() && found->target ? &file.items.at(found->target) : nullptr;
+		};
+
+		const auto* list = pointer(shape, offset_of(shape.type, "properties"));
+		const auto* entries = list ? pointer(*list, offset_of(list->type, "entries")) : nullptr;
+		for (std::uint32_t i = 0; entries && i < entries->count; i++)
+		{
+			const auto* object = pointer(*entries, i * 16);
+			if (!object || get<std::uint16_t>(entries->data, i * 16 + 8) != 0xF100 || types.identity(object->type) != "hknpShapeMassProperties")
+			{
+				continue;
+			}
+
+			const auto packed = [&](const std::string_view name)
+			{
+				std::array<std::int16_t, 4> values{};
+				std::memcpy(values.data(), object->data.data() + offset_of(object->type, name), sizeof(values));
+				return values;
+			};
+
+			mass_properties result;
+			result.centre = unpack_vector3(packed("compressedMassProperties.centerOfMass"));
+			result.inertia = unpack_vector3(packed("compressedMassProperties.inertia"));
+			result.rotation = unpack_rotation(packed("compressedMassProperties.majorAxisSpace"));
+			result.mass = get<float>(object->data, offset_of(object->type, "compressedMassProperties.mass"));
+			result.volume = get<float>(object->data, offset_of(object->type, "compressedMassProperties.volume"));
+			return result;
+		}
+
+		return {};
 	}
 
 	std::uint32_t copy_item(object_builder& builder, const tagfile& file, const std::uint32_t index,
