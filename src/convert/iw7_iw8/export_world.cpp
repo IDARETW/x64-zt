@@ -75,7 +75,7 @@ namespace zonetool::convert::iw7_iw8
 
 		// The surface, or nothing when none of its triangles has an area.
 		std::optional<json> export_surface(const source_map& source, const iw7::GfxWorld& world, const iw7::GfxSurface& surface,
-			extraction& output)
+			const std::size_t lightmap_count, const reflection_probes& probes, extraction& output)
 		{
 			const auto& tris = surface.tris;
 			if (surface.transientZone >= world.draw.transientZoneCount)
@@ -118,6 +118,8 @@ namespace zonetool::convert::iw7_iw8
 				return zone->vd.vertices[tris.firstVertex + index];
 			};
 
+			// The probe of a surface is the probe at the centre of its vertices.
+			float center[3]{};
 			for (std::size_t t = 0; t < index_count; t += 3)
 			{
 				const auto triangle = world.draw.indices + tris.baseIndex + t;
@@ -132,6 +134,10 @@ namespace zonetool::convert::iw7_iw8
 					if (inserted)
 					{
 						vertices.push_back(export_vertex(vertex(triangle[corner])));
+						for (auto axis = 0; axis < 3; axis++)
+						{
+							center[axis] += vertex(triangle[corner]).xyz[axis];
+						}
 					}
 
 					indices.push_back(found->second);
@@ -144,20 +150,23 @@ namespace zonetool::convert::iw7_iw8
 			}
 
 			const auto material_name = output.add_material(source, surface.material);
+			for (auto& value : center)
+			{
+				value /= static_cast<float>(vertices.size());
+			}
 
 			return json
 			{
 				{"material", material_name},
-				// The IW7 lightmaps do not convert yet.
-				{"lightmap", -1},
-				{"reflection_probe", 0},
+				{"lightmap", surface.lightmapIndex < lightmap_count ? static_cast<int>(surface.lightmapIndex) : -1},
+				{"reflection_probe", probes.find(center)},
 				{"vertices", std::move(vertices)},
 				{"indices", std::move(indices)},
 			};
 		}
 
 		json export_static_model(const source_map& source, const iw7::GfxWorld& world, const unsigned int index,
-			extraction& output)
+			const reflection_probes& probes, extraction& output)
 		{
 			const auto& instance = world.dpvs.smodelDrawInsts[index];
 			const auto model_name = output.add_model(source, instance.model);
@@ -181,7 +190,7 @@ namespace zonetool::convert::iw7_iw8
 				{"mins", bounds[0]},
 				{"maxs", bounds[1]},
 				{"primary_light", 0},
-				{"reflection_probe", 0},
+				{"reflection_probe", probes.find(instance.placement.origin)},
 			};
 		}
 	}
@@ -247,6 +256,8 @@ namespace zonetool::convert::iw7_iw8
 	{
 		const auto& world = *source.world();
 		const auto& dpvs = world.dpvs;
+		auto lightmaps = export_lightmaps(source, output);
+		auto probes = export_reflection_probes(source, output);
 
 		// The index of each surface among the surfaces with an area.
 		auto surfaces = json::array();
@@ -255,7 +266,7 @@ namespace zonetool::convert::iw7_iw8
 		for (auto i = 0u; i < world.surfaceCount; i++)
 		{
 			first_surface[i] = surfaces.size();
-			if (auto surface = export_surface(source, world, dpvs.surfaces[i], output))
+			if (auto surface = export_surface(source, world, dpvs.surfaces[i], lightmaps.size(), probes, output))
 			{
 				surface_indices.push_back(surfaces.size());
 				surfaces.push_back(std::move(*surface));
@@ -269,7 +280,7 @@ namespace zonetool::convert::iw7_iw8
 		auto model_indices = json::array();
 		for (auto i = 0u; i < dpvs.smodelCount; i++)
 		{
-			auto model = export_static_model(source, world, i, output);
+			auto model = export_static_model(source, world, i, probes, output);
 			if (output.exported_models.contains(model.at("model").get<std::string>()))
 			{
 				model_indices.push_back(models.size());
@@ -302,6 +313,12 @@ namespace zonetool::convert::iw7_iw8
 		// Replay draws one DPVS cell and leaves occlusion to Umbra: one cell with one tree that holds every surface
 		// and static model.
 		const auto bounds = bounds_json(world.bounds);
+		auto probe_indices = json::array();
+		for (std::size_t i = 0; i < probes.entries.size(); i++)
+		{
+			probe_indices.push_back(i);
+		}
+
 		json tree =
 		{
 			{"bounds", bounds},
@@ -313,7 +330,7 @@ namespace zonetool::convert::iw7_iw8
 		{
 			{"bounds", bounds},
 			{"portals", json::array()},
-			{"reflection_probes", json::array({0})},
+			{"reflection_probes", probe_indices},
 			{"surfaces", surface_indices},
 			{"models", model_indices},
 			{"trees", json::array({std::move(tree)})},
@@ -321,7 +338,7 @@ namespace zonetool::convert::iw7_iw8
 
 		const auto com_world = source.com_world();
 		const auto sun_index = 1u;
-		const auto light_count = com_world ? std::min(com_world->primaryLightCount, primary_light_count) : 0u;
+		const auto light_count = com_world ? com_world->primaryLightCount : 0u;
 
 		json value =
 		{
@@ -338,9 +355,9 @@ namespace zonetool::convert::iw7_iw8
 			{"brush_models", std::move(brush_models)},
 			{"dpvs", {{"planes", json::array()}, {"nodes", json::array({1})},
 				{"cells", json::array({std::move(cell)})}}},
-			{"lightmaps", json::array()},
+			{"lightmaps", std::move(lightmaps)},
 			{"light_regions", json::array()},
-			{"reflection_probes", json::array({{{"image", export_default_probe(output)}, {"origin", {0.0f, 0.0f, 0.0f}}}})},
+			{"reflection_probes", std::move(probes.entries)},
 		};
 
 		write_json(output.extracted / (bsp_name(source) + ".replay-world.json"), value);

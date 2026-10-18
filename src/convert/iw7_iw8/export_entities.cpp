@@ -184,6 +184,19 @@ namespace zonetool::convert::iw7_iw8
 		}
 	}
 
+	float light_unit_scale(const source_map& source)
+	{
+		const auto com_world = source.com_world();
+		if (!com_world || com_world->primaryLightCount <= sun_light)
+		{
+			return 1.0f;
+		}
+
+		const auto& sun = com_world->primaryLights[sun_light];
+		const auto luminance = 0.2126f * sun.color[0] + 0.7152f * sun.color[1] + 0.0722f * sun.color[2];
+		return light_type(sun.type) == 1 && luminance > 0.0f ? 1.0f / luminance : 1.0f;
+	}
+
 	void export_com_world(const source_map& source, extraction& output)
 	{
 		const auto com_world = source.com_world();
@@ -192,38 +205,86 @@ namespace zonetool::convert::iw7_iw8
 			throw std::runtime_error(std::format("zone \"{}\" holds no com world", source.name()));
 		}
 
-		// The empty light and the sun: the IW3 pipeline needs the attenuation export of each local light definition, which
-		// IW7 does not have.
+		// IW7 local lights are physical, as Replay's: a light of colour c lights a surface with c * N.L / (pi d^2)
+		// inside its radius, in the units of the lightmaps (calibration: lamps then light their surroundings at the
+		// level of the brightest lightmap texels). Each takes Replay's linear light definition.
+		const auto scale = light_unit_scale(source);
 		auto lights = json::array();
-		for (auto i = 0u; i < com_world->primaryLightCount && i < primary_light_count; i++)
+		std::size_t local_lights{};
+		for (auto i = 0u; i < com_world->primaryLightCount; i++)
 		{
 			const auto& light = com_world->primaryLights[i];
-			// IW7 lights are in the high dynamic range units that its exposure scales (Frontier's sun has a luminance of
-			// 9.5); the sun converts in its colour at the luminance of an IW3 sun.
+			auto type = light_type(light.type);
 			std::array<float, 3> color{light.color[0], light.color[1], light.color[2]};
 			const auto luminance = 0.2126f * color[0] + 0.7152f * color[1] + 0.0722f * color[2];
-			if (light_type(light.type) == 1 && luminance > 0.0f)
+			std::optional<float> intensity;
+			if (type == 1 && i != sun_light)
+			{
+				// One sun lights the world.
+				type = 0;
+			}
+			else if (type == 1)
+			{
+				std::ranges::for_each(color, [&](float& channel) { channel *= scale; });
+			}
+			else if (type >= 2 && luminance > 0.0f && light.radius > 0.0f)
 			{
 				std::ranges::for_each(color, [&](float& channel) { channel /= luminance; });
+				intensity = luminance / std::numbers::pi_v<float>;
+				local_lights++;
+			}
+			else
+			{
+				type = 0;
 			}
 
-			lights.push_back(
+			// The pipeline takes a direction for each light and a cone that opens for each spot.
+			std::array<float, 3> direction{light.dir[0], light.dir[1], light.dir[2]};
+			if (type && direction[0] * direction[0] + direction[1] * direction[1] + direction[2] * direction[2] < 1.0e-6f)
 			{
-				{"type", light_type(light.type)},
+				direction = {0.0f, 0.0f, 1.0f};
+			}
+
+			auto outer = light.cosHalfFovOuter;
+			auto inner = light.cosHalfFovInner;
+			if (type == 2)
+			{
+				outer = std::clamp(outer, 0.001f, 0.998f);
+				inner = std::clamp(inner, outer + 0.001f, 1.0f);
+			}
+
+			json entry =
+			{
+				{"type", type},
 				{"can_use_shadow_map", light.canUseShadowMap != 0},
 				{"exponent", light.exponent},
 				{"color", vector_json(color.data(), 3)},
-				{"direction", vector_json(light.dir, 3)},
+				{"direction", vector_json(direction.data(), 3)},
 				{"up", vector_json(light.up, 3)},
 				{"origin", vector_json(light.origin, 3)},
 				{"radius", light.radius},
-				{"cos_half_fov_outer", light.cosHalfFovOuter},
-				{"cos_half_fov_inner", light.cosHalfFovInner},
-				{"cos_half_fov_expanded", light.cosHalfFovOuter},
+				{"cos_half_fov_outer", outer},
+				{"cos_half_fov_inner", inner},
+				{"cos_half_fov_expanded", outer},
 				{"rotation_limit", light.rotationLimit},
 				{"translation_limit", light.translationLimit},
-				{"definition", light.defName ? light.defName : ""},
-			});
+				{"definition", intensity ? "light_point_linear" : ""},
+			};
+
+			if (intensity)
+			{
+				entry["intensity"] = *intensity;
+			}
+
+			lights.push_back(std::move(entry));
+		}
+
+		// The attenuation that IW3's light_point_linear definition names: the pipeline matches it to Replay's own.
+		if (local_lights)
+		{
+			const auto path = output.extracted / "lights" / "light_point_linear";
+			std::filesystem::create_directories(path.parent_path());
+			std::ofstream(path, std::ios::binary | std::ios::trunc).write("bfalloff_linear", 16);
 		}
 
 		write_json(output.extracted / (bsp_name(source) + ".replay-comworld.json"),
@@ -233,6 +294,8 @@ namespace zonetool::convert::iw7_iw8
 			{"in_use", true},
 			{"primary_lights", std::move(lights)},
 		});
+
+		ZONETOOL_INFO("iw7: exported %u primary lights with %zu local lights", com_world->primaryLightCount, local_lights);
 	}
 
 	void remove_missing_entity_models(const source_map& source, const extraction& output)

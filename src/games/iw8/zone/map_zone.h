@@ -800,6 +800,8 @@ struct MapSun
         float rotationLimit = 0.0f;
         float translationLimit = 0.0f;
         float intensity = 1.0f; // ComPrimaryLight +0x10 (local lights: see main CalibrateLocalLights)
+        // The source gives the intensity (in light units), so calibration only scales it.
+        bool authoredIntensity = false;
         std::string definition;
     };
 
