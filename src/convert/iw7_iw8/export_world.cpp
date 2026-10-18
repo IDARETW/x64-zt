@@ -165,10 +165,193 @@ namespace zonetool::convert::iw7_iw8
 			};
 		}
 
+		// The light of the floor under a static model (IW3's ground lighting): the lightmap of the highest lightmapped
+		// world surface under the centre of its bounds. IW7 lights its models from its light grid, which does not
+		// convert yet.
+		class floor_light
+		{
+		public:
+			floor_light(const source_map& source, const iw7::GfxWorld& world, const world_lightmaps& lightmaps)
+				: lightmaps_(lightmaps)
+			{
+				const auto& bounds = world.bounds;
+				this->origin_ = {bounds.midPoint[0] - bounds.halfSize[0], bounds.midPoint[1] - bounds.halfSize[1]};
+				this->columns_ = std::clamp(static_cast<std::size_t>(bounds.halfSize[0] * 2.0f / cell_size) + 1, std::size_t{1},
+					std::size_t{1024});
+				this->rows_ = std::clamp(static_cast<std::size_t>(bounds.halfSize[1] * 2.0f / cell_size) + 1, std::size_t{1},
+					std::size_t{1024});
+				this->cells_.resize(this->columns_ * this->rows_);
+
+				const auto world_surfaces = world.modelCount ? world.models[0].surfaceCount : world.surfaceCount;
+				for (auto i = 0u; i < world_surfaces && i < world.surfaceCount; i++)
+				{
+					const auto& surface = world.dpvs.surfaces[i];
+					const auto zone = surface.transientZone < world.draw.transientZoneCount
+						? source.resolve(iw7::ASSET_TYPE_GFXWORLD_TRANSIENT_ZONE, world.draw.transientZones[surface.transientZone]) : nullptr;
+					if (!zone || !zone->vd.vertices || surface.lightmapIndex >= lightmaps.pages.size() ||
+						!classify_material(source.resolve(iw7::ASSET_TYPE_MATERIAL, surface.material)).solid())
+					{
+						continue;
+					}
+
+					const auto& tris = surface.tris;
+					for (auto t = 0u; t < tris.triCount; t++)
+					{
+						const auto index = world.draw.indices + tris.baseIndex + t * 3;
+						triangle corners{};
+						auto valid = true;
+						for (auto k = 0; k < 3 && valid; k++)
+						{
+							valid = tris.firstVertex + index[k] < zone->vertexCount;
+							if (valid)
+							{
+								const auto& vertex = zone->vd.vertices[tris.firstVertex + index[k]];
+								std::copy_n(vertex.xyz, 3, corners.positions[k].begin());
+								std::copy_n(vertex.lmapCoord, 2, corners.uvs[k].begin());
+							}
+						}
+
+						corners.page = surface.lightmapIndex;
+						if (valid)
+						{
+							this->add(std::move(corners));
+						}
+					}
+				}
+			}
+
+			// The packed colour of the floor (red, green, blue and sun visibility bytes, as IW3 packs ground
+			// lighting) for the volume texels, which the pipeline doubles.
+			std::optional<std::uint32_t> ground_lighting(const float* point) const
+			{
+				const auto cell = this->cell_of(point[0], point[1]);
+				if (!cell)
+				{
+					return {};
+				}
+
+				const triangle* floor{};
+				std::array<float, 3> weights{};
+				auto height = -FLT_MAX;
+				for (const auto index : this->cells_[*cell])
+				{
+					const auto& candidate = this->triangles_[index];
+					const auto& p = candidate.positions;
+					const auto area = (p[1][0] - p[0][0]) * (p[2][1] - p[0][1]) - (p[2][0] - p[0][0]) * (p[1][1] - p[0][1]);
+					if (std::abs(area) < 1.0e-3f)
+					{
+						continue;
+					}
+
+					const std::array<float, 3> w
+					{
+						((p[1][0] - point[0]) * (p[2][1] - point[1]) - (p[2][0] - point[0]) * (p[1][1] - point[1])) / area,
+						((p[2][0] - point[0]) * (p[0][1] - point[1]) - (p[0][0] - point[0]) * (p[2][1] - point[1])) / area,
+						((p[0][0] - point[0]) * (p[1][1] - point[1]) - (p[1][0] - point[0]) * (p[0][1] - point[1])) / area,
+					};
+
+					if (w[0] < 0.0f || w[1] < 0.0f || w[2] < 0.0f)
+					{
+						continue;
+					}
+
+					const auto z = w[0] * p[0][2] + w[1] * p[1][2] + w[2] * p[2][2];
+					if (z <= point[2] + 1.0f && z >= point[2] - max_drop && z > height)
+					{
+						floor = &candidate;
+						weights = w;
+						height = z;
+					}
+				}
+
+				if (!floor)
+				{
+					return {};
+				}
+
+				const auto& page = this->lightmaps_.pages[floor->page];
+				float u{};
+				float v{};
+				for (auto k = 0; k < 3; k++)
+				{
+					u += weights[k] * floor->uvs[k][0];
+					v += weights[k] * floor->uvs[k][1];
+				}
+
+				const auto x = std::min(static_cast<std::size_t>(std::clamp(u, 0.0f, 1.0f) * static_cast<float>(page.width)), page.width - 1);
+				const auto y = std::min(static_cast<std::size_t>(std::clamp(v, 0.0f, 1.0f) * static_cast<float>(page.height)), page.height - 1);
+				const auto texel = y * page.width + x;
+				auto color = static_cast<std::uint32_t>(page.visibility[texel]) << 24;
+				for (auto channel = 0; channel < 3; channel++)
+				{
+					const auto level = std::clamp(light_level(page.ambient[texel][channel]) * 0.5f, 0.0f, 1.0f);
+					color |= static_cast<std::uint32_t>(std::lround(level * 255.0f)) << (8 * channel);
+				}
+
+				return color;
+			}
+
+		private:
+			static constexpr float cell_size = 128.0f;
+			// The floor is at most this far under the centre of a model.
+			static constexpr float max_drop = 1024.0f;
+
+			struct triangle
+			{
+				std::array<std::array<float, 3>, 3> positions{};
+				std::array<std::array<float, 2>, 3> uvs{};
+				unsigned int page{};
+			};
+
+			const world_lightmaps& lightmaps_;
+			std::array<float, 2> origin_{};
+			std::size_t columns_{};
+			std::size_t rows_{};
+			std::vector<triangle> triangles_;
+			std::vector<std::vector<unsigned int>> cells_;
+
+			std::optional<std::size_t> cell_of(const float x, const float y) const
+			{
+				const auto column = std::floor((x - this->origin_[0]) / cell_size);
+				const auto row = std::floor((y - this->origin_[1]) / cell_size);
+				if (column < 0.0f || row < 0.0f || column >= static_cast<float>(this->columns_) || row >= static_cast<float>(this->rows_))
+				{
+					return {};
+				}
+
+				return static_cast<std::size_t>(row) * this->columns_ + static_cast<std::size_t>(column);
+			}
+
+			void add(triangle corners)
+			{
+				const auto& p = corners.positions;
+				const auto index = static_cast<unsigned int>(this->triangles_.size());
+				const auto clamp_cell = [](const float value, const std::size_t count)
+				{
+					return static_cast<std::size_t>(std::clamp(value / cell_size, 0.0f, static_cast<float>(count - 1)));
+				};
+
+				const auto left = clamp_cell(std::min({p[0][0], p[1][0], p[2][0]}) - this->origin_[0], this->columns_);
+				const auto right = clamp_cell(std::max({p[0][0], p[1][0], p[2][0]}) - this->origin_[0], this->columns_);
+				const auto bottom = clamp_cell(std::min({p[0][1], p[1][1], p[2][1]}) - this->origin_[1], this->rows_);
+				const auto top = clamp_cell(std::max({p[0][1], p[1][1], p[2][1]}) - this->origin_[1], this->rows_);
+				for (auto row = bottom; row <= top; row++)
+				{
+					for (auto column = left; column <= right; column++)
+					{
+						this->cells_[row * this->columns_ + column].push_back(index);
+					}
+				}
+
+				this->triangles_.push_back(std::move(corners));
+			}
+		};
+
 		json export_static_model(const source_map& source, const iw7::GfxWorld& world, const unsigned int index,
-			const reflection_probes& probes, extraction& output)
+			const reflection_probes& probes, const floor_light& floors, extraction& output)
 		{
 			const auto& instance = world.dpvs.smodelDrawInsts[index];
+			const auto ground = floors.ground_lighting(world.dpvs.smodelInsts[index].bounds.midPoint);
 			const auto model_name = output.add_model(source, instance.model);
 
 			auto axis = json::array();
@@ -185,8 +368,9 @@ namespace zonetool::convert::iw7_iw8
 				{"axis", std::move(axis)},
 				{"scale", instance.placement.scale},
 				{"cull_dist", instance.cullDist ? static_cast<float>(instance.cullDist) : 1000000.0f},
-				{"ground_lighting", 0},
-				{"model_flags", 0},
+				{"ground_lighting", ground.value_or(0)},
+				// IW3's STATIC_MODEL_FLAG_GROUND_LIGHTING.
+				{"model_flags", ground ? 1 : 0},
 				{"mins", bounds[0]},
 				{"maxs", bounds[1]},
 				{"primary_light", 0},
@@ -258,6 +442,7 @@ namespace zonetool::convert::iw7_iw8
 		const auto& dpvs = world.dpvs;
 		auto lightmaps = export_lightmaps(source, output);
 		auto probes = export_reflection_probes(source, output);
+		const floor_light floors(source, world, lightmaps);
 
 		// The index of each surface among the surfaces with an area.
 		auto surfaces = json::array();
@@ -266,7 +451,7 @@ namespace zonetool::convert::iw7_iw8
 		for (auto i = 0u; i < world.surfaceCount; i++)
 		{
 			first_surface[i] = surfaces.size();
-			if (auto surface = export_surface(source, world, dpvs.surfaces[i], lightmaps.size(), probes, output))
+			if (auto surface = export_surface(source, world, dpvs.surfaces[i], lightmaps.entries.size(), probes, output))
 			{
 				surface_indices.push_back(surfaces.size());
 				surfaces.push_back(std::move(*surface));
@@ -278,11 +463,13 @@ namespace zonetool::convert::iw7_iw8
 		// The static models whose model exported (export_models runs first).
 		auto models = json::array();
 		auto model_indices = json::array();
+		std::size_t ground_lit{};
 		for (auto i = 0u; i < dpvs.smodelCount; i++)
 		{
-			auto model = export_static_model(source, world, i, probes, output);
+			auto model = export_static_model(source, world, i, probes, floors, output);
 			if (output.exported_models.contains(model.at("model").get<std::string>()))
 			{
+				ground_lit += model.at("model_flags").get<int>() != 0;
 				model_indices.push_back(models.size());
 				models.push_back(std::move(model));
 			}
@@ -355,13 +542,13 @@ namespace zonetool::convert::iw7_iw8
 			{"brush_models", std::move(brush_models)},
 			{"dpvs", {{"planes", json::array()}, {"nodes", json::array({1})},
 				{"cells", json::array({std::move(cell)})}}},
-			{"lightmaps", std::move(lightmaps)},
+			{"lightmaps", std::move(lightmaps.entries)},
 			{"light_regions", json::array()},
 			{"reflection_probes", std::move(probes.entries)},
 		};
 
 		write_json(output.extracted / (bsp_name(source) + ".replay-world.json"), value);
-		ZONETOOL_INFO("iw7: exported %zu of %u world surfaces and %zu of %u static models", surface_indices.size(), world.surfaceCount,
-			model_indices.size(), dpvs.smodelCount);
+		ZONETOOL_INFO("iw7: exported %zu of %u world surfaces and %zu of %u static models (%zu lit by the floor under them)",
+			surface_indices.size(), world.surfaceCount, model_indices.size(), dpvs.smodelCount, ground_lit);
 	}
 }

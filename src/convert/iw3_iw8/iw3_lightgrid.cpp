@@ -1111,18 +1111,41 @@ std::vector<std::array<std::uint8_t, 256>> SampleStaticModelLighting(
     const std::vector<LightGridPrimaryLight> &primaryLights, const LightGridSightBlocked &blocked)
 {
     std::vector<std::array<std::uint8_t, 256>> volumes;
+    // R_SetModelGroundLighting: the packed colour in every texel (B, G, R, A).
+    const auto groundLighting = [](std::array<std::uint8_t, 256> &texels, const std::uint32_t color) {
+        for (unsigned texel = 0; texel < 64; ++texel)
+        {
+            texels[texel * 4 + 0] = static_cast<std::uint8_t>(color >> 16);
+            texels[texel * 4 + 1] = static_cast<std::uint8_t>(color >> 8);
+            texels[texel * 4 + 2] = static_cast<std::uint8_t>(color);
+            texels[texel * 4 + 3] = static_cast<std::uint8_t>(color >> 24);
+        }
+    };
+    // Without a light grid, the models with ground lighting keep it and the others take the flat ambient.
+    const auto withoutGrid = [&] {
+        if (std::ranges::none_of(inputs, [](const StaticModelLightingInput &input) {
+                return input.groundLit && input.groundLighting;
+            }))
+            return volumes;
+        volumes.resize(inputs.size());
+        for (std::size_t index = 0; index < inputs.size(); ++index)
+            groundLighting(volumes[index], inputs[index].groundLit && inputs[index].groundLighting
+                                               ? inputs[index].groundLighting
+                                               : 0xFF282828u);
+        return volumes;
+    };
     const auto metadataPath = sourceRoot / "maps" / "mp" / (sourceAsset + ".lightgrid.json");
     std::error_code error;
     if (inputs.empty() || !std::filesystem::is_regular_file(metadataPath, error))
-        return volumes;
+        return withoutGrid();
     const Json metadata = ReadJson(metadataPath);
     if (metadata.value("available", true) == false)
-        return volumes;
+        return withoutGrid();
     std::vector<std::uint8_t> palette;
     const auto cells = ReadCells(sourceRoot, metadata, palette);
     const std::size_t colorCount = palette.size() / 168;
     if (cells.empty() || !colorCount)
-        return volumes;
+        return withoutGrid();
     const int rowAxis = metadata.at("row_axis").get<int>();
     const int columnAxis = metadata.at("col_axis").get<int>();
     const unsigned sun = metadata.at("sun_primary_light_index").get<unsigned>();
@@ -1157,14 +1180,7 @@ std::vector<std::array<std::uint8_t, 256>> SampleStaticModelLighting(
         auto &texels = volumes[index];
         if (input.groundLit && input.groundLighting)
         {
-            // R_SetModelGroundLighting: the packed colour in every texel (B, G, R, A).
-            for (unsigned texel = 0; texel < 64; ++texel)
-            {
-                texels[texel * 4 + 0] = static_cast<std::uint8_t>(input.groundLighting >> 16);
-                texels[texel * 4 + 1] = static_cast<std::uint8_t>(input.groundLighting >> 8);
-                texels[texel * 4 + 2] = static_cast<std::uint8_t>(input.groundLighting);
-                texels[texel * 4 + 3] = static_cast<std::uint8_t>(input.groundLighting >> 24);
-            }
+            groundLighting(texels, input.groundLighting);
             ++ground;
             continue;
         }
