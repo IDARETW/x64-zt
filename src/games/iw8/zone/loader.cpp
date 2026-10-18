@@ -62,28 +62,29 @@ namespace zonetool::iw8
 
 			void read_inline_asset(const std::int32_t type, void** field, void** insert_slot)
 			{
-				const auto loader = find_asset_reader(type);
-				if (!loader)
+				const auto format = find_asset_format(type);
+				if (!format)
 				{
 					throw std::runtime_error(std::format("asset type {} has no reader", type));
 				}
 
-				this->reader_.align(loader->alignment);
-				const auto data = this->reader_.read_bytes(loader->size);
+				this->reader_.align(format->alignment);
+				const auto data = this->reader_.read_bytes(format->size);
 				try
 				{
-					loader->read(this->reader_, data);
+					load_stream stream(this->reader_);
+					format->load(stream, data);
 				}
 				catch (const std::exception& e)
 				{
 					const auto name = *static_cast<const char**>(data);
-					throw std::runtime_error(std::format("{} \"{}\": {}", loader->name,
+					throw std::runtime_error(std::format("{} \"{}\": {}", format->name,
 						name && this->reader_.contains(name) ? name : "", e.what()));
 				}
 
 				// Block 1 rewinds after the asset: keep the header in reader memory.
-				auto header = static_cast<void*>(this->reader_.allocate<std::uint8_t>(loader->size));
-				std::memcpy(header, data, loader->size);
+				auto header = static_cast<void*>(this->reader_.allocate<std::uint8_t>(format->size));
+				std::memcpy(header, data, format->size);
 
 				const auto name = static_cast<const char**>(header);
 				const auto referenced = *name && (*name)[0] == ',';

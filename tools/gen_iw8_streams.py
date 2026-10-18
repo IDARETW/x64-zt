@@ -1,10 +1,12 @@
-"""Generate src/games/iw8/zone/readers.{hpp,cpp} from the IW8 format spec.
+"""Generate src/games/iw8/zone/asset_streams.{hpp,cpp} from the IW8 format spec.
 
-Usage: python tools/gen_iw8_readers.py <acts data/mw19/schema.json> [spec.json] [output folder]
+Usage: python tools/gen_iw8_streams.py <acts data/mw19/schema.json> [spec.json] [output folder]
 
 The spec (tools/iw8_format.json) describes what each Replay 1.20 Load_* routine reads, in member
-terms. This script turns it into zone_reader code: one function per record with nested data, and
-one entry point per asset type. The struct names and member names come from gen_iw8_structs.py."""
+terms. This script turns it into one traversal per record with nested data, and one entry point per
+asset type. A traversal is a template over a stream (zone/streams.hpp): the same steps load, write,
+dump and parse an asset, so the directions cannot disagree. The struct names and member names come
+from gen_iw8_structs.py."""
 import collections
 import json
 import os
@@ -181,7 +183,7 @@ used_names = set()
 def function_name(fid):
     if fid not in function_names:
         f = functions[fid]
-        base = 'read_' + ident(f['type'] or 'unknown').lower()
+        base = 'stream_' + ident(f['type'] or 'unknown').lower()
         if form(fid) == 'array':
             base += '_array'
         name = base
@@ -616,7 +618,7 @@ def emit_load(ctx, op, out):
         if size is None:
             raise Unsupported('inline load without a size: %s' % op['name'])
         if size != {'const': 0}:
-            ctx.line('reader.read_bytes(%s);' % expression(ctx, size), out)
+            ctx.line('stream.bytes(%s);' % expression(ctx, size), out)
         if f in ('empty',):
             return
         op = dict(op, at_start={'const': 1})
@@ -635,19 +637,19 @@ def emit_load(ctx, op, out):
     else:
         expr, type_name = access_as(ctx, op['target'], is_type(want))
     if f == 'string':
-        ctx.line('reader.read_string(%s);' % expr, out)
+        ctx.line('stream.string(%s);' % expr, out)
     elif f == 'strings':
         emit_string_loop(ctx, '&%s' % expr, expression(ctx, op['count']), out)
     elif f == 'script_string':
-        ctx.line('reader.read_script_string(%s);' % expr, out)
+        ctx.line('stream.script_string(%s);' % expr, out)
     elif f == 'script_strings':
-        ctx.line('reader.read_script_strings(&%s, %s);' % (expr, expression(ctx, op['count'])), out)
+        ctx.line('stream.script_strings(&%s, %s);' % (expr, expression(ctx, op['count'])), out)
     elif f == 'asset':
-        ctx.line('reader.read_asset(%s, %s);' % (asset_enum(asset_type_of(fid)), expr), out)
+        ctx.line('stream.asset(%s, %s);' % (asset_enum(asset_type_of(fid)), expr), out)
     elif f == 'struct':
-        ctx.line('%s(reader, %s%s);' % (function_name(fid), expr, call_arguments(ctx, fid)), out)
+        ctx.line('%s(stream, %s%s);' % (function_name(fid), expr, call_arguments(ctx, fid)), out)
     elif f == 'array':
-        ctx.line('%s(reader, &%s, %s%s);' % (function_name(fid), expr, expression(ctx, op['count']),
+        ctx.line('%s(stream, &%s, %s%s);' % (function_name(fid), expr, expression(ctx, op['count']),
                                              call_arguments(ctx, fid)), out)
 
 
@@ -655,7 +657,7 @@ def emit_string_loop(ctx, items, count, out):
     index = 'string_%d' % len(out)
     ctx.line('for (std::size_t %s = 0; %s < %s; %s++)' % (index, index, count, index), out)
     ctx.line('{', out)
-    ctx.line('\treader.read_string((%s)[%s]);' % (items, index), out)
+    ctx.line('\tstream.string((%s)[%s]);' % (items, index), out)
     ctx.line('}', out)
 
 
@@ -734,18 +736,18 @@ def emit_pointer(ctx, op, out):
     if -3 in op['markers']:
         begins = [o for o in walk(body) if o['op'] == 'asset_begin' and 'const' in o['type']]
         if begins:
-            ctx.line('reader.read_asset(%s, %s);' % (asset_enum(begins[0]['type']['const']), expr), out)
+            ctx.line('stream.asset(%s, %s);' % (asset_enum(begins[0]['type']['const']), expr), out)
             return
     if first is None:
         # No pointee data (a null-checked pointer whose target loads nothing).
-        ctx.line('reader.read_single(%s, %d);' % (expr, align), out)
+        ctx.line('stream.single(%s, %d);' % (expr, align), out)
         return
     # A pointer to an array is spelled as a pointer to its element in the structs: count in elements.
     element_of_target, _ = array_element(target)
     if element_of_target is not None:
         target = element_of_target
     tsize = size_of(target)
-    # read: the zone_reader call that reads the pointee (array of the target type, or raw bytes).
+    # read: the stream call that reads the pointee (array of the target type, or raw bytes).
     if first['op'] == 'load':
         fid = first.get('fn')
         if fid is None:
@@ -763,21 +765,21 @@ def emit_pointer(ctx, op, out):
         if per_element and tsize and per_element != tsize:
             # The loader's element differs from the pointer target: a header shorter than the record (the
             # rest follows inline), or a group of targets per element (float4[2] behind float4*).
-            read = 'reinterpret_cast<%s*>(reader.read_stream(%s, %d, %d, %s))' % (
+            read = 'reinterpret_cast<%s*>(stream.elements(%s, %d, %d, %s))' % (
                 cxx_type(target), expr, align, per_element, count)
         else:
-            read = 'reader.read_array(%s, %d, %s)' % (expr, align, count)
+            read = 'stream.array(%s, %d, %s)' % (expr, align, count)
         rest = body[1:]
     elif first['op'] == 'data':
         if not tsize:
             raise Unsupported('pointer to %s of unknown size' % target)
         try:
             count = expression(ctx, divide(first['size'], tsize))
-            read = 'reader.read_array(%s, %d, %s)' % (expr, align, count)
+            read = 'stream.array(%s, %d, %s)' % (expr, align, count)
         except Unsupported:
             # A byte count that is not a whole number of elements: read the bytes.
             count = None
-            read = 'reinterpret_cast<%s*>(reader.read_stream(%s, %d, 1, %s))' % (
+            read = 'reinterpret_cast<%s*>(stream.elements(%s, %d, 1, %s))' % (
                 cxx_type(target), expr, align, expression(ctx, first['size']))
         fid, f = None, None
         rest = body[1:]
@@ -795,19 +797,19 @@ def emit_pointer(ctx, op, out):
     ctx.item = (variable, target, True)
     ctx.objects.append(('%s[0]' % variable, target))
     if f == 'struct':
-        ctx.line('%s(reader, *%s%s);' % (function_name(fid), variable, call_arguments(ctx, fid)), out)
+        ctx.line('%s(stream, *%s%s);' % (function_name(fid), variable, call_arguments(ctx, fid)), out)
     elif f == 'array':
-        ctx.line('%s(reader, %s, %s%s);' % (function_name(fid), variable, count, call_arguments(ctx, fid)), out)
+        ctx.line('%s(stream, %s, %s%s);' % (function_name(fid), variable, count, call_arguments(ctx, fid)), out)
     elif f == 'script_strings':
-        ctx.line('reader.read_script_strings(%s, %s);' % (variable, count), out)
+        ctx.line('stream.script_strings(%s, %s);' % (variable, count), out)
     elif f == 'script_string':
-        ctx.line('reader.read_script_string(*%s);' % variable, out)
+        ctx.line('stream.script_string(*%s);' % variable, out)
     elif f == 'string':
-        ctx.line('reader.read_string(*%s);' % variable, out)
+        ctx.line('stream.string(*%s);' % variable, out)
     elif f == 'strings':
         emit_string_loop(ctx, variable, count, out)
     elif f == 'asset':
-        ctx.line('reader.read_asset(%s, *%s);' % (asset_enum(asset_type_of(fid)), variable), out)
+        ctx.line('stream.asset(%s, *%s);' % (asset_enum(asset_type_of(fid)), variable), out)
     emit_ops(ctx, rest, out)
     ctx.objects.pop()
     ctx.item = saved
@@ -859,20 +861,20 @@ def emit_ops(ctx, ops, out):
             continue
         if kind == 'script_string_data':
             expr, _ = access_as(ctx, op['member'], is_type('scr_string_t'))
-            ctx.line('reader.read_script_string(%s);' % expr, out)
+            ctx.line('stream.script_string(%s);' % expr, out)
             continue
         if kind == 'align':
             mask = op['mask'].get('const') if isinstance(op['mask'], dict) else op['mask']
             if mask:
-                ctx.line('reader.align(%d);' % mask, out)
+                ctx.line('stream.align(%d);' % mask, out)
         elif kind == 'push':
-            ctx.line('reader.push_stream(%s);' % expression(ctx, op['block']), out)
+            ctx.line('stream.push(%s);' % expression(ctx, op['block']), out)
         elif kind == 'pop':
-            ctx.line('reader.pop_stream();', out)
+            ctx.line('stream.pop();', out)
         elif kind == 'asset_begin':
-            ctx.line('reader.begin_asset();', out)
+            ctx.line('stream.begin_asset();', out)
         elif kind == 'asset_end':
-            ctx.line('reader.end_asset();', out)
+            ctx.line('stream.end_asset();', out)
         elif kind == 'load':
             emit_load(ctx, op, out)
         elif kind == 'pointer':
@@ -922,13 +924,26 @@ def emit_ops(ctx, ops, out):
                 raise Unsupported('temp of %s bytes' % size)
             name = 'temp_%d' % op['id']
             alignment = (op.get('alignment') or {}).get('const', size)
-            ctx.line('const auto %s = reader.read_temp<%s>(%d);' % (name, spelled, max(alignment - 1, 0)), out)
+            value = TEMP_VALUES.get((ctx.fid, op['id']))
+            written = 'stream.template missing_temp<%s>()' % spelled if value is None else value(ctx)
+            ctx.line('const auto %s = stream.template temp<%s>(%d, [&]() -> %s { return %s; });' % (
+                name, spelled, max(alignment - 1, 0), spelled, written), out)
             ctx.temps[op['id']] = name
         else:
             raise Unsupported('op %s' % kind)
 
 
 required = {}  # fid -> [(var, type)] outer objects the caller passes, in parameter order
+
+
+def cell_tree_count(ctx):
+    # Load_GfxWorldDrawCells reads aabbTreeCounts before aabbTrees: the count of cell tree i is entry i.
+    outer, _ = resolve_outer(ctx, CELLS_VAR, 'GfxWorldDrawCells')
+    return '%s.aabbTreeCounts[&data - %s.aabbTrees].aabbTreeCount' % (outer, outer)
+
+
+CELLS_VAR = next(f['var'] for f in functions.values() if f['name'] == 'Load_GfxWorldDrawCells')
+TEMP_VALUES = {('Load_GfxCellTree@GfxCellTree', 3): cell_tree_count}
 
 
 def emit_signature(fid):
@@ -938,9 +953,9 @@ def emit_signature(fid):
     params = ['const %s& %s' % (ident(t), 'outer_' + ident(t).lower()) for _, t in required.get(fid, [])]
     extra = ''.join(', [[maybe_unused]] ' + p for p in params)
     if form(fid) == 'array':
-        return 'void %s(zone_reader& reader, %s* data, const std::size_t count%s)' % (
+        return 'template <typename Stream>\n\t\tvoid %s(Stream& stream, %s* data, const std::size_t count%s)' % (
             name, cxx_type(type_name), extra)
-    return 'void %s(zone_reader& reader, %s& data%s)' % (name, cxx_type(type_name), extra)
+    return 'template <typename Stream>\n\t\tvoid %s(Stream& stream, %s& data%s)' % (name, cxx_type(type_name), extra)
 
 
 def emit_function(fid):
@@ -1006,6 +1021,10 @@ for pool in S['profile']['pools']:
 
 
 # ---- output -------------------------------------------------------------------------------------
+# The stream classes of zone/streams.hpp that the asset table instantiates.
+STREAMS = ['load_stream']
+
+
 def main():
     emitted = {}
     failures = collections.OrderedDict()
@@ -1031,7 +1050,7 @@ def main():
             failures[fid] = str(e)
             signature = emit_signature(fid)
             message = '%s: %s' % (functions[fid]['name'], str(e).replace('\\', '/').replace('"', "'"))
-            body = ['\t\treader.unsupported("%s");' % message]
+            body = ['\t\tstream.unsupported("%s");' % message]
         emitted[fid] = (signature, body)
         for op in walk(functions[fid]['ops']):
             if op['op'] == 'load' and op.get('fn'):
@@ -1074,22 +1093,20 @@ def main():
         return function_name(fid)
 
     hpp = ['#pragma once', '',
-           '// Generated by tools/gen_iw8_readers.py from tools/iw8_format.json (the Replay 1.20 Load_* routines).',
+           '// Generated by tools/gen_iw8_streams.py from tools/iw8_format.json (the Replay 1.20 Load_* routines).',
            '', 'namespace zonetool::iw8', '{', '\tenum XAssetType', '\t{']
     for pool in S['profile']['pools']:
         hpp.append('\t\t%s = %d,' % (ASSET_ENUM[pool['id']], pool['id']))
-    hpp += ['\t\tASSET_TYPE_COUNT = %d,' % len(S['profile']['pools']), '\t};', '',
-            '\tstruct asset_reader', '\t{', '\t\tconst char* name;', '\t\tstd::size_t size;',
-            '\t\tstd::size_t alignment;', '\t\tvoid (*read)(zone_reader& reader, void* asset);', '\t};', '',
-            '\t// The loader for an asset type, or nullptr for a type that zones do not hold.',
-            '\tconst asset_reader* find_asset_reader(std::int32_t type);', '']
-    for asset in roots:
-        if asset['loader'] in emitted:
-            hpp.append('\tvoid read_%s_asset(zone_reader& reader, %s* asset);' % (
-                asset['pool'], ident(asset['type'])))
-    hpp += ['}', '']
+    hpp += ['\t\tASSET_TYPE_COUNT = %d,' % len(S['profile']['pools']), '\t};', '']
+    hpp += ['\tstruct asset_format', '\t{', '\t\tconst char* name;', '\t\tstd::size_t size;',
+            '\t\tstd::size_t alignment;']
+    for stream in STREAMS:
+        hpp.append('\t\tvoid (*%s)(%s& stream, void* asset);' % (stream[:-len('_stream')], stream))
+    hpp += ['\t};', '',
+            '\t// The format of an asset type, or nullptr for a type that zones do not hold.',
+            '\tconst asset_format* find_asset_format(std::int32_t type);', '}', '']
 
-    cpp = ['#include <std_include.hpp>', '#include "../iw8.hpp"', '', '// Generated by tools/gen_iw8_readers.py.',
+    cpp = ['#include <std_include.hpp>', '#include "../iw8.hpp"', '', '// Generated by tools/gen_iw8_streams.py.',
            '', 'namespace zonetool::iw8', '{', '\tnamespace', '\t{']
     for fid in order:
         cpp.append('\t\t%s;' % emitted[fid][0])
@@ -1101,40 +1118,42 @@ def main():
         cpp.extend(['\t' + line for line in body])
         cpp.append('\t\t}')
         cpp.append('')
-    cpp.append('\t}')
-    cpp.append('')
     for asset in roots:
         if asset['loader'] in emitted:
             fid = asset['loader']
-            cpp += ['\tvoid read_%s_asset(zone_reader& reader, %s* asset)' % (asset['pool'], ident(asset['type'])), '\t{',
-                    '\t\t%s(reader, *asset);' % entry_name(fid), '\t}', '']
+            cpp += ['\t\ttemplate <typename Stream>',
+                    '\t\tvoid stream_%s_asset(Stream& stream, void* asset)' % asset['pool'], '\t\t{',
+                    '\t\t\t%s(stream, *static_cast<%s*>(asset));' % (entry_name(fid), ident(asset['type'])),
+                    '\t\t}', '']
+    cpp.append('\t}')
+    cpp.append('')
 
-    # Asset table: header size, pointer alignment and reader of every pool.
+    # Asset table: header size, pointer alignment and the streams of every pool.
     by_id = {asset['id']: asset for asset in roots if asset['loader'] in emitted}
-    cpp += ['\tconst asset_reader* find_asset_reader(const std::int32_t type)', '\t{',
-            '\t\tstatic const asset_reader readers[ASSET_TYPE_COUNT]', '\t\t{']
+    cpp += ['\tconst asset_format* find_asset_format(const std::int32_t type)', '\t{',
+            '\t\tstatic const asset_format formats[ASSET_TYPE_COUNT]', '\t\t{']
     for pool in S['profile']['pools']:
         asset = by_id.get(pool['id'])
         if asset is None:
-            cpp.append('\t\t\t{"%s", 0, 0, nullptr},' % pool['name'])
+            cpp.append('\t\t\t{"%s", 0, 0%s},' % (pool['name'], ', nullptr' * len(STREAMS)))
             continue
         pointer = functions[asset['pointer_loader']]
         alignment = next((o['align']['const'] for o in pointer['ops'] if o['op'] == 'pointer' and o['align']), 7)
-        cpp.append('\t\t\t{"%s", %d, %d, [](zone_reader& reader, void* asset) { read_%s_asset(reader, static_cast<%s*>(asset)); }},' % (
-            pool['name'], pool['size'], alignment, asset['pool'], ident(asset['type'])))
+        streams = ''.join(', stream_%s_asset<%s>' % (asset['pool'], stream) for stream in STREAMS)
+        cpp.append('\t\t\t{"%s", %d, %d%s},' % (pool['name'], pool['size'], alignment, streams))
     cpp += ['\t\t};', '']
     for pool in S['profile']['pools']:
         asset = by_id.get(pool['id'])
         if asset is not None:
             cpp.append('\t\tstatic_assert(sizeof(%s) == %d);' % (ident(asset['type']), pool['size']))
     cpp += ['',
-            '\t\tif (type < 0 || type >= ASSET_TYPE_COUNT || !readers[type].read)', '\t\t{', '\t\t\treturn nullptr;', '\t\t}',
-            '', '\t\treturn &readers[type];', '\t}', '']
+            '\t\tif (type < 0 || type >= ASSET_TYPE_COUNT || !formats[type].load)', '\t\t{', '\t\t\treturn nullptr;',
+            '\t\t}', '', '\t\treturn &formats[type];', '\t}', '']
     cpp += ['}', '']
 
     os.makedirs(OUT, exist_ok=True)
-    open(os.path.join(OUT, 'readers.hpp'), 'w', encoding='utf-8', newline='\r\n').write('\n'.join(hpp))
-    open(os.path.join(OUT, 'readers.cpp'), 'w', encoding='utf-8', newline='\r\n').write('\n'.join(cpp))
+    open(os.path.join(OUT, 'asset_streams.hpp'), 'w', encoding='utf-8', newline='\r\n').write('\n'.join(hpp))
+    open(os.path.join(OUT, 'asset_streams.cpp'), 'w', encoding='utf-8', newline='\r\n').write('\n'.join(cpp))
     print('emitted %d functions for %d of %d assets; %d failed' % (
         len(emitted), sum(1 for a in roots if a['loader'] in emitted), len(roots), len(failures)))
     for fid, why in failures.items():
