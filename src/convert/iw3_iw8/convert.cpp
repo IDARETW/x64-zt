@@ -927,6 +927,14 @@ iw8::MapSun loadLighting(const Args &args, const std::string &dumpDirectory,
                 light.rotationLimit = source.at("rotation_limit").get<float>();
                 light.translationLimit = source.at("translation_limit").get<float>();
                 light.definition = source.at("definition").get<std::string>();
+                // Converters of engines with physical light units give each local light its intensity.
+                if (const auto intensity = source.find("intensity"); intensity != source.end())
+                {
+                    light.intensity = intensity->get<float>();
+                    light.authoredIntensity = true;
+                    if (!std::isfinite(light.intensity) || light.intensity < 0.0f)
+                        throw std::runtime_error("invalid primary-light intensity");
+                }
                 if (!std::isfinite(light.radius) || light.radius < 0.0f ||
                     !std::isfinite(light.cosHalfFovOuter) ||
                     !std::isfinite(light.cosHalfFovInner) || !std::isfinite(light.rotationLimit) ||
@@ -973,6 +981,11 @@ void calibrateLocalLights(iw8::MapSun &lighting, const std::vector<float> &solid
         auto &light = lighting.primaryLights[index];
         if (light.type < 2 || index == lighting.sunPrimaryLightIndex || light.radius <= 0.0f)
             continue;
+        if (light.authoredIntensity)
+        {
+            light.intensity *= lighting.lightUnitScale;
+            continue;
+        }
         if (light.definition != "light_point_linear")
             warn("local light %zu: IW3 light def '%s' falloff assumed linear", index,
                  light.definition.c_str());

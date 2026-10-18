@@ -95,8 +95,12 @@ namespace zonetool::convert::iw7_iw8
 
 	std::string bsp_name(const source_map& source);
 
-	// The primary lights that convert: the empty light 0 and the sun.
-	constexpr unsigned int primary_light_count = 2;
+	// The primary light that is the sun (light 0 is empty), in IW7 and IW3 worlds.
+	constexpr unsigned int sun_light = 1;
+
+	// IW7 lights are in the high dynamic range units that its exposure scales: the factor that takes them to IW3
+	// units, in which the sun has a luminance of 1 (Frontier's sun: 9.5).
+	float light_unit_scale(const source_map& source);
 
 	// Adds the models of the world's static models, which export_models writes before export_world.
 	void collect_static_models(const source_map& source, extraction& output);
@@ -112,6 +116,37 @@ namespace zonetool::convert::iw7_iw8
 	std::string export_default_probe(extraction& output);
 	// Writes the sky cube map of the world and returns its image name, or an empty name (the pipeline's dark sky).
 	std::string export_sky(const source_map& source, extraction& output);
+	// Writes the lightmaps of the world as IW3 lightmap files and returns their entries for the world export. The
+	// lightmap index of a surface converts when it is below their count.
+	json export_lightmaps(const source_map& source, extraction& output);
+
+	// The level that IW3 lightmaps and probes take for an IW7 irradiance or radiance (a soft knee above 0.5).
+	float light_level(float value);
+	float linear_to_srgb(float value);
+
+	// The reflection probes of the world: entry 0 is a neutral probe at the origin, as in IW3 worlds, then a probe
+	// for each cube map of the IW7 probe array.
+	struct reflection_probes
+	{
+		struct volume
+		{
+			std::array<float, 3> center{};
+			std::array<std::array<float, 3>, 3> axes{};
+			std::array<float, 3> half_size{};
+			float priority{};
+			unsigned int probe{};
+		};
+
+		json entries = json::array();
+		std::vector<std::array<float, 3>> origins;
+		std::vector<volume> volumes;
+
+		// The probe for a point: the probe of the volume with the highest priority that holds it, else the
+		// nearest probe.
+		unsigned int find(const float* point) const;
+	};
+
+	reflection_probes export_reflection_probes(const source_map& source, extraction& output);
 
 	// Writes a json file of the extraction.
 	void write_json(const std::filesystem::path& path, const json& value);

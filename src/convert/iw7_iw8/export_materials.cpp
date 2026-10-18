@@ -76,7 +76,7 @@ namespace zonetool::convert::iw7_iw8
 		}
 
 		// The resident pixels of an image, or the largest stream that the atlas can use.
-		std::optional<image_pixels> read_pixels(const iw7::GfxImage& image)
+		std::optional<image_pixels> read_pixels(const iw7::GfxImage& image, const std::size_t limit)
 		{
 			if (!image.streamed)
 			{
@@ -91,7 +91,7 @@ namespace zonetool::convert::iw7_iw8
 			// The streams hold the image at growing sizes: the largest one that the atlas can use decodes fastest.
 			const auto files = get_image_stream_files(&image);
 			auto first = static_cast<int>(files.size()) - 1;
-			while (first > 0 && std::max(image.streams[first].width, image.streams[first].height) > max_image_size &&
+			while (first > 0 && std::max<std::size_t>(image.streams[first].width, image.streams[first].height) > limit &&
 				image.streams[first - 1].width)
 			{
 				first--;
@@ -132,17 +132,20 @@ namespace zonetool::convert::iw7_iw8
 			return {};
 		}
 
-		// The top level of each face of an image (one, or the six of a cube map) in a format that DirectXTex processes,
-		// at most the size that the atlas uses.
-		std::vector<DirectX::ScratchImage> load_faces(const iw7::GfxImage& image, const DXGI_FORMAT format)
+		// The top level of each face of an image (one, the six of a cube map, or six for each cube map of an array) in a
+		// format that DirectXTex processes, at most `limit` pixels.
+		std::vector<DirectX::ScratchImage> load_faces(const iw7::GfxImage& image, const DXGI_FORMAT format,
+			const std::size_t limit = max_image_size)
 		{
-			const auto faces = image.mapType == iw7::MAPTYPE_CUBE ? 6u : 1u;
-			if (image.mapType != iw7::MAPTYPE_2D && image.mapType != iw7::MAPTYPE_CUBE)
+			// A cube map array holds the six faces of each of its cube maps in turn.
+			const auto faces = image.mapType == iw7::MAPTYPE_CUBE ? 6u
+				: image.mapType == iw7::MAPTYPE_CUBE_ARRAY ? 6u * std::max<unsigned int>(image.numElements, 1) : 1u;
+			if (image.mapType != iw7::MAPTYPE_2D && image.mapType != iw7::MAPTYPE_CUBE && image.mapType != iw7::MAPTYPE_CUBE_ARRAY)
 			{
 				return {};
 			}
 
-			auto pixels = read_pixels(image);
+			auto pixels = read_pixels(image, limit);
 			if (!pixels || pixels->data.empty() || !pixels->width || !pixels->height)
 			{
 				return {};
@@ -180,7 +183,7 @@ namespace zonetool::convert::iw7_iw8
 					return {};
 				}
 
-				while (decoded.GetMetadata().width > max_image_size || decoded.GetMetadata().height > max_image_size)
+				while (decoded.GetMetadata().width > limit || decoded.GetMetadata().height > limit)
 				{
 					const auto& metadata = decoded.GetMetadata();
 					DirectX::ScratchImage smaller;
@@ -475,9 +478,10 @@ namespace zonetool::convert::iw7_iw8
 		return result;
 	}
 
-	std::vector<DirectX::ScratchImage> load_image_faces(const iw7::GfxImage& image, const DXGI_FORMAT format)
+	std::vector<DirectX::ScratchImage> load_image_faces(const iw7::GfxImage& image, const DXGI_FORMAT format,
+		const std::size_t limit)
 	{
-		return load_faces(image, format);
+		return load_faces(image, format, limit ? limit : max_image_size);
 	}
 
 	const iw7::GfxImage* color_image(const source_map& source, const iw7::Material* material)

@@ -22,12 +22,6 @@ namespace zonetool::convert::iw7_iw8
 			return length > 0.0f ? vec3{value[0] / length, value[1] / length, value[2] / length} : value;
 		}
 
-		float linear_to_srgb(const float value)
-		{
-			const auto clamped = std::clamp(value, 0.0f, 1.0f);
-			return clamped <= 0.0031308f ? clamped * 12.92f : 1.055f * std::pow(clamped, 1.0f / 2.4f) - 0.055f;
-		}
-
 		float srgb_to_linear(const float value)
 		{
 			return value <= 0.04045f ? value / 12.92f : std::pow((value + 0.055f) / 1.055f, 2.4f);
@@ -179,9 +173,9 @@ namespace zonetool::convert::iw7_iw8
 			const auto& bounds = world.modelCount ? world.models[0].bounds : world.bounds;
 			const vec3 center{bounds.midPoint[0], bounds.midPoint[1], bounds.midPoint[2]};
 			auto sun = vec3{0.0f, 0.0f, 1.0f};
-			if (const auto com_world = source.com_world(); com_world && com_world->primaryLightCount >= primary_light_count)
+			if (const auto com_world = source.com_world(); com_world && com_world->primaryLightCount > sun_light)
 			{
-				const auto& light = com_world->primaryLights[primary_light_count - 1];
+				const auto& light = com_world->primaryLights[sun_light];
 				sun = normalized({light.dir[0], light.dir[1], light.dir[2]});
 			}
 
@@ -320,6 +314,12 @@ namespace zonetool::convert::iw7_iw8
 
 			ZONETOOL_INFO("iw7: drew %zu surfaces of %zu distant models into the sky", draws.size(), meshes.size());
 		}
+	}
+
+	float linear_to_srgb(const float value)
+	{
+		const auto clamped = std::clamp(value, 0.0f, 1.0f);
+		return clamped <= 0.0031308f ? clamped * 12.92f : 1.055f * std::pow(clamped, 1.0f / 2.4f) - 0.055f;
 	}
 
 	std::string export_sky(const source_map& source, extraction& output)
