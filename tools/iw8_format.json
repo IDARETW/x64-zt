@@ -8,7 +8,8 @@
    "type": "PhysicsSFXEventAsset",
    "size": 32,
    "loader": "Load_PhysicsSFXEventAsset@PhysicsSFXEventAsset",
-   "pointer_loader": "Load_PhysicsSFXEventAssetPtr@PhysicsSFXEventAsset *"
+   "pointer_loader": "Load_PhysicsSFXEventAssetPtr@PhysicsSFXEventAsset *",
+   "preload_block": 2
   },
   {
    "id": 2,
@@ -16,7 +17,8 @@
    "type": "PhysicsVFXEventAsset",
    "size": 32,
    "loader": "Load_PhysicsVFXEventAsset@PhysicsVFXEventAsset",
-   "pointer_loader": "Load_PhysicsVFXEventAssetPtr@PhysicsVFXEventAsset *"
+   "pointer_loader": "Load_PhysicsVFXEventAssetPtr@PhysicsVFXEventAsset *",
+   "preload_block": 2
   },
   {
    "id": 3,
@@ -24,7 +26,8 @@
    "type": "PhysicsAsset",
    "size": 88,
    "loader": "Load_PhysicsAsset__Atlas_71DDD0@PhysicsAsset",
-   "pointer_loader": "Load_PhysicsAssetPtr@PhysicsAsset *"
+   "pointer_loader": "Load_PhysicsAssetPtr@PhysicsAsset *",
+   "preload_block": 2
   },
   {
    "id": 4,
@@ -32,7 +35,8 @@
    "type": "PhysicsFXPipeline",
    "size": 48,
    "loader": "Load_PhysicsFXPipeline@PhysicsFXPipeline",
-   "pointer_loader": "Load_PhysicsFXPipelinePtr@PhysicsFXPipeline *"
+   "pointer_loader": "Load_PhysicsFXPipelinePtr@PhysicsFXPipeline *",
+   "preload_block": 2
   },
   {
    "id": 5,
@@ -40,7 +44,8 @@
    "type": "PhysicsFXShape",
    "size": 48,
    "loader": "Load_PhysicsFXShape@PhysicsFXShape",
-   "pointer_loader": "Load_PhysicsFXShapePtr@PhysicsFXShape *"
+   "pointer_loader": "Load_PhysicsFXShapePtr@PhysicsFXShape *",
+   "preload_block": 2
   },
   {
    "id": 6,
@@ -48,7 +53,8 @@
    "type": "PhysicsDebugData",
    "size": 312,
    "loader": "Load_PhysicsDebugData__Atlas_71ED00@PhysicsDebugData",
-   "pointer_loader": "Load_PhysicsDebugDataPtr@PhysicsDebugData *"
+   "pointer_loader": "Load_PhysicsDebugDataPtr@PhysicsDebugData *",
+   "preload_block": 2
   },
   {
    "id": 7,
@@ -56,7 +62,8 @@
    "type": "XAnimParts",
    "size": 160,
    "loader": "Load_XAnimParts@XAnimParts",
-   "pointer_loader": "Load_XAnimPartsPtr@XAnimParts *"
+   "pointer_loader": "Load_XAnimPartsPtr@XAnimParts *",
+   "preload_block": 2
   },
   {
    "id": 8,
@@ -64,7 +71,8 @@
    "type": "XModelSurfs",
    "size": 96,
    "loader": "Load_XModelSurfs@XModelSurfs",
-   "pointer_loader": "Load_XModelSurfsPtr@XModelSurfs *"
+   "pointer_loader": "Load_XModelSurfsPtr@XModelSurfs *",
+   "preload_block": 1
   },
   {
    "id": 9,
@@ -72,7 +80,8 @@
    "type": "Replay::XModel",
    "size": 688,
    "loader": "Load_XModel@Replay::XModel",
-   "pointer_loader": "Load_XModelPtr@Replay::XModel *"
+   "pointer_loader": "Load_XModelPtr@Replay::XModel *",
+   "preload_block": 2
   },
   {
    "id": 10,
@@ -80,7 +89,8 @@
    "type": "MayhemData",
    "size": 80,
    "loader": "sub_140E3D2B0@MayhemData",
-   "pointer_loader": "Load_MayhemDataPtr@MayhemData *"
+   "pointer_loader": "Load_MayhemDataPtr@MayhemData *",
+   "preload_block": 2
   },
   {
    "id": 11,
@@ -88,7 +98,8 @@
    "type": "Material",
    "size": 120,
    "loader": "Load_Material@Material",
-   "pointer_loader": "Load_MaterialHandle@Material *"
+   "pointer_loader": "Load_MaterialHandle@Material *",
+   "preload_block": 1
   },
   {
    "id": 12,
@@ -96,7 +107,8 @@
    "type": "Replay::ComputeShader",
    "size": 40,
    "loader": "Load_ComputeShader@Replay::ComputeShader",
-   "pointer_loader": "Load_ComputeShaderPtr@Replay::ComputeShader *"
+   "pointer_loader": "Load_ComputeShaderPtr@Replay::ComputeShader *",
+   "preload_block": 1
   },
   {
    "id": 13,
@@ -104,7 +116,8 @@
    "type": "Replay::ComputeShader",
    "size": 40,
    "loader": "Preload_ComputeShader@Replay::ComputeShader",
-   "pointer_loader": "sub_140E0B100@Replay::ComputeShader *"
+   "pointer_loader": "sub_140E0B100@Replay::ComputeShader *",
+   "preload_block": 1
   },
   {
    "id": 17,
@@ -112,7 +125,8 @@
    "type": "Replay::ComputeShader",
    "size": 40,
    "loader": "Preload_ComputeShader_YAXW4DBStreamStart_Z_2@Replay::ComputeShader",
-   "pointer_loader": "Load_PixelShaderPtr@Replay::ComputeShader *"
+   "pointer_loader": "Load_PixelShaderPtr@Replay::ComputeShader *",
+   "preload_block": 1
   },
   {
    "id": 14,
@@ -120,7 +134,8 @@
    "type": "Replay::ComputeShader",
    "size": 40,
    "loader": "Preload_ComputeShader_YAXW4DBStreamStart_Z_3@Replay::ComputeShader",
-   "pointer_loader": "Load_VertexShaderPtr@Replay::ComputeShader *"
+   "pointer_loader": "Load_VertexShaderPtr@Replay::ComputeShader *",
+   "preload_block": 1
   },
   {
    "id": 15,
@@ -128,7 +143,8 @@
    "type": "Replay::ComputeShader",
    "size": 40,
    "loader": "Preload_ComputeShader_YAXW4DBStreamStart_Z_1@Replay::ComputeShader",
-   "pointer_loader": "Load_HullShaderPtr@Replay::ComputeShader *"
+   "pointer_loader": "Load_HullShaderPtr@Replay::ComputeShader *",
+   "preload_block": 1
   },
   {
    "id": 16,
@@ -136,7 +152,8 @@
    "type": "Replay::ComputeShader",
    "size": 40,
    "loader": "Preload_ComputeShader_YAXW4DBStreamStart_Z_0@Replay::ComputeShader",
-   "pointer_loader": "Load_DomainShaderPtr@Replay::ComputeShader *"
+   "pointer_loader": "Load_DomainShaderPtr@Replay::ComputeShader *",
+   "preload_block": 1
   },
   {
    "id": 18,
@@ -144,7 +161,8 @@
    "type": "MaterialTechniqueSet",
    "size": 64,
    "loader": "Load_MaterialTechniqueSet@MaterialTechniqueSet",
-   "pointer_loader": "Load_MaterialTechniqueSetPtr@MaterialTechniqueSet *"
+   "pointer_loader": "Load_MaterialTechniqueSetPtr@MaterialTechniqueSet *",
+   "preload_block": 1
   },
   {
    "id": 19,
@@ -152,7 +170,8 @@
    "type": "Replay::GfxImage",
    "size": 232,
    "loader": "Load_GfxImage@Replay::GfxImage",
-   "pointer_loader": "Load_GfxImagePtr@Replay::GfxImage *"
+   "pointer_loader": "Load_GfxImagePtr@Replay::GfxImage *",
+   "preload_block": 1
   },
   {
    "id": 20,
@@ -160,7 +179,8 @@
    "type": "SndGlobals",
    "size": 128,
    "loader": "sub_140DDF560@SndGlobals",
-   "pointer_loader": "Load_SndGlobalsPtr@SndGlobals *"
+   "pointer_loader": "Load_SndGlobalsPtr@SndGlobals *",
+   "preload_block": 2
   },
   {
    "id": 21,
@@ -168,7 +188,8 @@
    "type": "SndBankResident",
    "size": 512,
    "loader": "Load_SndBankResident@SndBankResident",
-   "pointer_loader": "Load_SndBankResidentPtr@SndBankResident *"
+   "pointer_loader": "Load_SndBankResidentPtr@SndBankResident *",
+   "preload_block": 1
   },
   {
    "id": 22,
@@ -176,7 +197,8 @@
    "type": "SndBankTransient",
    "size": 512,
    "loader": "Preload_SndBankTransient_YAXW4DBStreamStart_Z_0@SndBankTransient",
-   "pointer_loader": "Load_SndBankTransientPtr@SndBankTransient *"
+   "pointer_loader": "Load_SndBankTransientPtr@SndBankTransient *",
+   "preload_block": 1
   },
   {
    "id": 23,
@@ -184,7 +206,8 @@
    "type": "clipMap_t",
    "size": 248,
    "loader": "Load_clipMap_t@clipMap_t",
-   "pointer_loader": "Load_clipMap_ptr@clipMap_t *"
+   "pointer_loader": "Load_clipMap_ptr@clipMap_t *",
+   "preload_block": 2
   },
   {
    "id": 24,
@@ -192,7 +215,8 @@
    "type": "ComWorld",
    "size": 168,
    "loader": "Load_ComWorld@ComWorld",
-   "pointer_loader": "Load_ComWorldPtr@ComWorld *"
+   "pointer_loader": "Load_ComWorldPtr@ComWorld *",
+   "preload_block": 2
   },
   {
    "id": 25,
@@ -200,7 +224,8 @@
    "type": "GlassWorld",
    "size": 16,
    "loader": "Load_GlassWorld@GlassWorld",
-   "pointer_loader": "Load_GlassWorldPtr@GlassWorld *"
+   "pointer_loader": "Load_GlassWorldPtr@GlassWorld *",
+   "preload_block": 2
   },
   {
    "id": 26,
@@ -208,7 +233,8 @@
    "type": "PathData",
    "size": 152,
    "loader": "sub_140DF33E0@PathData",
-   "pointer_loader": "Load_PathDataPtr@PathData *"
+   "pointer_loader": "Load_PathDataPtr@PathData *",
+   "preload_block": 2
   },
   {
    "id": 27,
@@ -216,7 +242,8 @@
    "type": "NavMeshData",
    "size": 168,
    "loader": "Load_NavMeshData@NavMeshData",
-   "pointer_loader": "Load_NavMeshDataPtr@NavMeshData *"
+   "pointer_loader": "Load_NavMeshDataPtr@NavMeshData *",
+   "preload_block": 2
   },
   {
    "id": 28,
@@ -224,7 +251,8 @@
    "type": "TacticalGraphData",
    "size": 24,
    "loader": "sub_140DF4A30@TacticalGraphData",
-   "pointer_loader": "Load_TacticalGraphDataPtr@TacticalGraphData *"
+   "pointer_loader": "Load_TacticalGraphDataPtr@TacticalGraphData *",
+   "preload_block": 2
   },
   {
    "id": 29,
@@ -232,7 +260,8 @@
    "type": "Replay::MapEnts",
    "size": 1032,
    "loader": "Load_MapEnts@Replay::MapEnts",
-   "pointer_loader": "Load_MapEntsPtr@Replay::MapEnts *"
+   "pointer_loader": "Load_MapEntsPtr@Replay::MapEnts *",
+   "preload_block": 2
   },
   {
    "id": 30,
@@ -240,7 +269,8 @@
    "type": "FxWorld",
    "size": 15568,
    "loader": "Preload_FxWorld@FxWorld",
-   "pointer_loader": "Load_FxWorldPtr@FxWorld *"
+   "pointer_loader": "Load_FxWorldPtr@FxWorld *",
+   "preload_block": 2
   },
   {
    "id": 31,
@@ -248,7 +278,8 @@
    "type": "Replay::GfxWorld",
    "size": 17808,
    "loader": "Load_GfxWorld@Replay::GfxWorld",
-   "pointer_loader": "Load_GfxWorldPtr@Replay::GfxWorld *"
+   "pointer_loader": "Load_GfxWorldPtr@Replay::GfxWorld *",
+   "preload_block": 2
   },
   {
    "id": 32,
@@ -256,7 +287,8 @@
    "type": "Replay::GfxWorldTransientZone",
    "size": 328,
    "loader": "Load_GfxWorldTransientZone@Replay::GfxWorldTransientZone",
-   "pointer_loader": "Load_GfxWorldTransientZonePtr@Replay::GfxWorldTransientZone *"
+   "pointer_loader": "Load_GfxWorldTransientZonePtr@Replay::GfxWorldTransientZone *",
+   "preload_block": 2
   },
   {
    "id": 34,
@@ -264,7 +296,8 @@
    "type": "GfxLightDef",
    "size": 32,
    "loader": "Preload_GfxLightDef@GfxLightDef",
-   "pointer_loader": "Load_GfxLightDefPtr@GfxLightDef *"
+   "pointer_loader": "Load_GfxLightDefPtr@GfxLightDef *",
+   "preload_block": 2
   },
   {
    "id": 35,
@@ -272,7 +305,8 @@
    "type": "GfxGradingClut",
    "size": 24,
    "loader": "Preload_GfxGradingClut@GfxGradingClut",
-   "pointer_loader": "Load_GfxGradingClutPtr@GfxGradingClut *"
+   "pointer_loader": "Load_GfxGradingClutPtr@GfxGradingClut *",
+   "preload_block": 2
   },
   {
    "id": 37,
@@ -280,7 +314,8 @@
    "type": "GfxFogSpline",
    "size": 32,
    "loader": "Load_GfxFogSpline@GfxFogSpline",
-   "pointer_loader": "Load_GfxFogSplinePtr@GfxFogSpline *"
+   "pointer_loader": "Load_GfxFogSplinePtr@GfxFogSpline *",
+   "preload_block": 2
   },
   {
    "id": 38,
@@ -288,7 +323,8 @@
    "type": "AnimationClass",
    "size": 80,
    "loader": "sub_140E32860@AnimationClass",
-   "pointer_loader": "Load_AnimationClassPtr@AnimationClass *"
+   "pointer_loader": "Load_AnimationClassPtr@AnimationClass *",
+   "preload_block": 2
   },
   {
    "id": 39,
@@ -296,7 +332,8 @@
    "type": "PlayerAnimScript",
    "size": 168,
    "loader": "sub_140DDEAB0@PlayerAnimScript",
-   "pointer_loader": "Load_PlayerAnimScriptPtr@PlayerAnimScript *"
+   "pointer_loader": "Load_PlayerAnimScriptPtr@PlayerAnimScript *",
+   "preload_block": 2
   },
   {
    "id": 40,
@@ -304,7 +341,8 @@
    "type": "Gesture",
    "size": 656,
    "loader": "Load_Gesture@Gesture",
-   "pointer_loader": "Load_GesturePtr@Gesture *"
+   "pointer_loader": "Load_GesturePtr@Gesture *",
+   "preload_block": 2
   },
   {
    "id": 41,
@@ -312,7 +350,8 @@
    "type": "LocalizeEntry",
    "size": 16,
    "loader": "Preload_LocalizeEntry@LocalizeEntry",
-   "pointer_loader": "Load_LocalizeEntryPtr@LocalizeEntry *"
+   "pointer_loader": "Load_LocalizeEntryPtr@LocalizeEntry *",
+   "preload_block": 2
   },
   {
    "id": 42,
@@ -320,7 +359,8 @@
    "type": "Replay::WeaponAttachment",
    "size": 968,
    "loader": "Load_WeaponAttachment@Replay::WeaponAttachment",
-   "pointer_loader": "Load_WeaponAttachmentPtr@Replay::WeaponAttachment *"
+   "pointer_loader": "Load_WeaponAttachmentPtr@Replay::WeaponAttachment *",
+   "preload_block": 2
   },
   {
    "id": 43,
@@ -328,7 +368,8 @@
    "type": "WeaponCompleteDef",
    "size": 624,
    "loader": "sub_140D99D00@WeaponCompleteDef",
-   "pointer_loader": "Load_WeaponCompleteDefPtr@WeaponCompleteDef *"
+   "pointer_loader": "Load_WeaponCompleteDefPtr@WeaponCompleteDef *",
+   "preload_block": 2
   },
   {
    "id": 44,
@@ -336,7 +377,8 @@
    "type": "ParticleSystemDef",
    "size": 128,
    "loader": "sub_140D99680@ParticleSystemDef",
-   "pointer_loader": "Load_ParticleSystemDefPtr@ParticleSystemDef *"
+   "pointer_loader": "Load_ParticleSystemDefPtr@ParticleSystemDef *",
+   "preload_block": 2
   },
   {
    "id": 45,
@@ -344,7 +386,8 @@
    "type": "FxImpactTable",
    "size": 40,
    "loader": "Load_FxImpactTable@FxImpactTable",
-   "pointer_loader": "Load_FxImpactTablePtr@FxImpactTable *"
+   "pointer_loader": "Load_FxImpactTablePtr@FxImpactTable *",
+   "preload_block": 2
   },
   {
    "id": 46,
@@ -352,7 +395,8 @@
    "type": "SurfaceFxTable",
    "size": 40,
    "loader": "sub_140E3D7A0@SurfaceFxTable",
-   "pointer_loader": "Load_SurfaceFxTablePtr@SurfaceFxTable *"
+   "pointer_loader": "Load_SurfaceFxTablePtr@SurfaceFxTable *",
+   "preload_block": 2
   },
   {
    "id": 51,
@@ -360,7 +404,8 @@
    "type": "RawFile",
    "size": 24,
    "loader": "Load_RawFile@RawFile",
-   "pointer_loader": "Load_RawFilePtr@RawFile *"
+   "pointer_loader": "Load_RawFilePtr@RawFile *",
+   "preload_block": 2
   },
   {
    "id": 52,
@@ -368,7 +413,8 @@
    "type": "ScriptFile",
    "size": 40,
    "loader": "Load_ScriptFile@ScriptFile",
-   "pointer_loader": "Load_ScriptFilePtr@ScriptFile *"
+   "pointer_loader": "Load_ScriptFilePtr@ScriptFile *",
+   "preload_block": 2
   },
   {
    "id": 53,
@@ -376,7 +422,8 @@
    "type": "ScriptDebugData",
    "size": 24,
    "loader": "sub_140E05100@ScriptDebugData",
-   "pointer_loader": "Load_ScriptDebugDataPtr@ScriptDebugData *"
+   "pointer_loader": "Load_ScriptDebugDataPtr@ScriptDebugData *",
+   "preload_block": 2
   },
   {
    "id": 54,
@@ -384,7 +431,8 @@
    "type": "StringTable",
    "size": 48,
    "loader": "Load_StringTable@StringTable",
-   "pointer_loader": "Load_StringTablePtr@StringTable *"
+   "pointer_loader": "Load_StringTablePtr@StringTable *",
+   "preload_block": 2
   },
   {
    "id": 55,
@@ -392,7 +440,8 @@
    "type": "LeaderboardDef",
    "size": 56,
    "loader": "Load_LeaderboardDef@LeaderboardDef",
-   "pointer_loader": "Load_LeaderboardDefPtr@LeaderboardDef *"
+   "pointer_loader": "Load_LeaderboardDefPtr@LeaderboardDef *",
+   "preload_block": 2
   },
   {
    "id": 56,
@@ -400,7 +449,8 @@
    "type": "VirtualLeaderboardDef",
    "size": 48,
    "loader": "Load_VirtualLeaderboardDef@VirtualLeaderboardDef",
-   "pointer_loader": "Load_VirtualLeaderboardDefPtr@VirtualLeaderboardDef *"
+   "pointer_loader": "Load_VirtualLeaderboardDefPtr@VirtualLeaderboardDef *",
+   "preload_block": 2
   },
   {
    "id": 57,
@@ -408,7 +458,8 @@
    "type": "DDLFile",
    "size": 16,
    "loader": "Load_DDLFile@DDLFile",
-   "pointer_loader": "Load_DDLFilePtr@DDLFile *"
+   "pointer_loader": "Load_DDLFilePtr@DDLFile *",
+   "preload_block": 2
   },
   {
    "id": 58,
@@ -416,7 +467,8 @@
    "type": "TracerDef",
    "size": 144,
    "loader": "Preload_TracerDef@TracerDef",
-   "pointer_loader": "Load_TracerDefPtr@TracerDef *"
+   "pointer_loader": "Load_TracerDefPtr@TracerDef *",
+   "preload_block": 2
   },
   {
    "id": 59,
@@ -424,7 +476,8 @@
    "type": "VehicleDef",
    "size": 3848,
    "loader": "sub_140E1F790@VehicleDef",
-   "pointer_loader": "Load_VehicleDefPtr@VehicleDef *"
+   "pointer_loader": "Load_VehicleDefPtr@VehicleDef *",
+   "preload_block": 2
   },
   {
    "id": 60,
@@ -432,7 +485,8 @@
    "type": "AddonMapEnts",
    "size": 128,
    "loader": "Load_AddonMapEnts@AddonMapEnts",
-   "pointer_loader": "Load_AddonMapEntsPtr@AddonMapEnts *"
+   "pointer_loader": "Load_AddonMapEntsPtr@AddonMapEnts *",
+   "preload_block": 2
   },
   {
    "id": 61,
@@ -440,7 +494,8 @@
    "type": "NetConstStrings",
    "size": 32,
    "loader": "Load_NetConstStrings@NetConstStrings",
-   "pointer_loader": "Load_NetConstStringsPtr@NetConstStrings *"
+   "pointer_loader": "Load_NetConstStringsPtr@NetConstStrings *",
+   "preload_block": 2
   },
   {
    "id": 62,
@@ -448,7 +503,8 @@
    "type": "LuaFile",
    "size": 24,
    "loader": "Load_LuaFile@LuaFile",
-   "pointer_loader": "Load_LuaFilePtr@LuaFile *"
+   "pointer_loader": "Load_LuaFilePtr@LuaFile *",
+   "preload_block": 2
   },
   {
    "id": 63,
@@ -456,7 +512,8 @@
    "type": "ScriptableDef",
    "size": 120,
    "loader": "Load_ScriptableDef@ScriptableDef",
-   "pointer_loader": "Load_ScriptableDefPtr@ScriptableDef *"
+   "pointer_loader": "Load_ScriptableDefPtr@ScriptableDef *",
+   "preload_block": 2
   },
   {
    "id": 64,
@@ -464,7 +521,8 @@
    "type": "EquipmentSoundTable",
    "size": 3208,
    "loader": "sub_140DDB490@EquipmentSoundTable",
-   "pointer_loader": "Load_EquipmentSoundTablePtr@EquipmentSoundTable *"
+   "pointer_loader": "Load_EquipmentSoundTablePtr@EquipmentSoundTable *",
+   "preload_block": 2
   },
   {
    "id": 65,
@@ -472,7 +530,8 @@
    "type": "VectorField",
    "size": 64,
    "loader": "sub_140DFE8E0@VectorField",
-   "pointer_loader": "Load_VectorFieldPtr@VectorField *"
+   "pointer_loader": "Load_VectorFieldPtr@VectorField *",
+   "preload_block": 2
   },
   {
    "id": 66,
@@ -480,7 +539,8 @@
    "type": "FxParticleSimAnimation",
    "size": 120,
    "loader": "sub_140E39520@FxParticleSimAnimation",
-   "pointer_loader": "Load_FxParticleSimAnimationPtr@FxParticleSimAnimation *"
+   "pointer_loader": "Load_FxParticleSimAnimationPtr@FxParticleSimAnimation *",
+   "preload_block": 2
   },
   {
    "id": 67,
@@ -488,7 +548,8 @@
    "type": "Replay::StreamingInfo",
    "size": 72,
    "loader": "Load_StreamingInfo@Replay::StreamingInfo",
-   "pointer_loader": "Load_StreamingInfoPtr@Replay::StreamingInfo *"
+   "pointer_loader": "Load_StreamingInfoPtr@Replay::StreamingInfo *",
+   "preload_block": 1
   },
   {
    "id": 68,
@@ -496,7 +557,8 @@
    "type": "LaserDef",
    "size": 168,
    "loader": "Preload_LaserDef@LaserDef",
-   "pointer_loader": "Load_LaserDefPtr@LaserDef *"
+   "pointer_loader": "Load_LaserDefPtr@LaserDef *",
+   "preload_block": 2
   },
   {
    "id": 69,
@@ -504,7 +566,8 @@
    "type": "TTFDef",
    "size": 32,
    "loader": "Load_TTFDef@TTFDef",
-   "pointer_loader": "Load_TTFDefPtr@TTFDef *"
+   "pointer_loader": "Load_TTFDefPtr@TTFDef *",
+   "preload_block": 2
   },
   {
    "id": 70,
@@ -512,7 +575,8 @@
    "type": "SuitDef",
    "size": 1824,
    "loader": "Preload_SuitDef@SuitDef",
-   "pointer_loader": "Load_SuitDefPtr@SuitDef *"
+   "pointer_loader": "Load_SuitDefPtr@SuitDef *",
+   "preload_block": 2
   },
   {
    "id": 71,
@@ -520,7 +584,8 @@
    "type": "SuitAnimPackage",
    "size": 16,
    "loader": "sub_140E3A410@SuitAnimPackage",
-   "pointer_loader": "Load_SuitAnimPackagePtr@SuitAnimPackage *"
+   "pointer_loader": "Load_SuitAnimPackagePtr@SuitAnimPackage *",
+   "preload_block": 2
   },
   {
    "id": 72,
@@ -528,7 +593,8 @@
    "type": "CameraDef",
    "size": 376,
    "loader": "Preload_CameraDef@CameraDef",
-   "pointer_loader": "Load_CameraDefPtr@CameraDef *"
+   "pointer_loader": "Load_CameraDefPtr@CameraDef *",
+   "preload_block": 2
   },
   {
    "id": 73,
@@ -536,7 +602,8 @@
    "type": "HudOutlineDef",
    "size": 96,
    "loader": "Preload_LocDmgTable@HudOutlineDef",
-   "pointer_loader": "Load_HudOutlineDefPtr@HudOutlineDef *"
+   "pointer_loader": "Load_HudOutlineDefPtr@HudOutlineDef *",
+   "preload_block": 2
   },
   {
    "id": 74,
@@ -544,7 +611,8 @@
    "type": "SpaceshipTargetDef",
    "size": 136,
    "loader": "Preload_SpaceshipTargetDef@SpaceshipTargetDef",
-   "pointer_loader": "Load_SpaceshipTargetDefPtr@SpaceshipTargetDef *"
+   "pointer_loader": "Load_SpaceshipTargetDefPtr@SpaceshipTargetDef *",
+   "preload_block": 2
   },
   {
    "id": 75,
@@ -552,7 +620,8 @@
    "type": "RumbleInfo",
    "size": 56,
    "loader": "Preload_RumbleInfo@RumbleInfo",
-   "pointer_loader": "Load_RumbleInfoPtr@RumbleInfo *"
+   "pointer_loader": "Load_RumbleInfoPtr@RumbleInfo *",
+   "preload_block": 2
   },
   {
    "id": 76,
@@ -560,7 +629,8 @@
    "type": "RumbleGraph",
    "size": 144,
    "loader": "Preload_RumbleGraph@RumbleGraph",
-   "pointer_loader": "Load_RumbleGraphPtr@RumbleGraph *"
+   "pointer_loader": "Load_RumbleGraphPtr@RumbleGraph *",
+   "preload_block": 2
   },
   {
    "id": 77,
@@ -568,7 +638,8 @@
    "type": "WeaponAnimPackage",
    "size": 64,
    "loader": "Load_WeaponAnimPackage@WeaponAnimPackage",
-   "pointer_loader": "Load_WeaponAnimPackagePtr@WeaponAnimPackage *"
+   "pointer_loader": "Load_WeaponAnimPackagePtr@WeaponAnimPackage *",
+   "preload_block": 2
   },
   {
    "id": 78,
@@ -576,7 +647,8 @@
    "type": "WeaponSFXPackage",
    "size": 176,
    "loader": "sub_140D9BF80@WeaponSFXPackage",
-   "pointer_loader": "Load_WeaponSFXPackagePtr@WeaponSFXPackage *"
+   "pointer_loader": "Load_WeaponSFXPackagePtr@WeaponSFXPackage *",
+   "preload_block": 2
   },
   {
    "id": 79,
@@ -584,7 +656,8 @@
    "type": "WeaponVFXPackage",
    "size": 16,
    "loader": "sub_140D9CDE0@WeaponVFXPackage",
-   "pointer_loader": "Load_WeaponVFXPackagePtr@WeaponVFXPackage *"
+   "pointer_loader": "Load_WeaponVFXPackagePtr@WeaponVFXPackage *",
+   "preload_block": 2
   },
   {
    "id": 80,
@@ -592,7 +665,8 @@
    "type": "FootstepVFX",
    "size": 1032,
    "loader": "Preload_FootstepVFX@FootstepVFX",
-   "pointer_loader": "Load_FootstepVFXPtr@FootstepVFX *"
+   "pointer_loader": "Load_FootstepVFXPtr@FootstepVFX *",
+   "preload_block": 2
   },
   {
    "id": 81,
@@ -600,7 +674,8 @@
    "type": "BehaviorTree",
    "size": 56,
    "loader": "sub_140DDA050@BehaviorTree",
-   "pointer_loader": "Load_BehaviorTreePtr@BehaviorTree *"
+   "pointer_loader": "Load_BehaviorTreePtr@BehaviorTree *",
+   "preload_block": 2
   },
   {
    "id": 82,
@@ -608,7 +683,8 @@
    "type": "Animset",
    "size": 64,
    "loader": "Load_Animset@Animset",
-   "pointer_loader": "Load_AnimsetPtr@Animset *"
+   "pointer_loader": "Load_AnimsetPtr@Animset *",
+   "preload_block": 2
   },
   {
    "id": 83,
@@ -616,7 +692,8 @@
    "type": "ASM",
    "size": 80,
    "loader": "Load_ASM@ASM",
-   "pointer_loader": "Load_AsmPtr@ASM *"
+   "pointer_loader": "Load_AsmPtr@ASM *",
+   "preload_block": 2
   },
   {
    "id": 84,
@@ -624,7 +701,8 @@
    "type": "XAnimProceduralBones",
    "size": 32,
    "loader": "Load_XAnimProceduralBones@XAnimProceduralBones",
-   "pointer_loader": "Load_XAnimProceduralBonesPtr@XAnimProceduralBones *"
+   "pointer_loader": "Load_XAnimProceduralBonesPtr@XAnimProceduralBones *",
+   "preload_block": 2
   },
   {
    "id": 85,
@@ -632,7 +710,8 @@
    "type": "XAnimDynamicBones",
    "size": 88,
    "loader": "Load_XAnimDynamicBones@XAnimDynamicBones",
-   "pointer_loader": "Load_XAnimDynamicBonesPtr@XAnimDynamicBones *"
+   "pointer_loader": "Load_XAnimDynamicBonesPtr@XAnimDynamicBones *",
+   "preload_block": 2
   },
   {
    "id": 86,
@@ -640,7 +719,8 @@
    "type": "ReticleDef",
    "size": 72,
    "loader": "Preload_ReticleDef@ReticleDef",
-   "pointer_loader": "Load_ReticleDefPtr@ReticleDef *"
+   "pointer_loader": "Load_ReticleDefPtr@ReticleDef *",
+   "preload_block": 2
   },
   {
    "id": 87,
@@ -648,7 +728,8 @@
    "type": "XAnimCurve",
    "size": 32,
    "loader": "Load_XAnimCurve@XAnimCurve",
-   "pointer_loader": "Load_XAnimCurvePtr@XAnimCurve *"
+   "pointer_loader": "Load_XAnimCurvePtr@XAnimCurve *",
+   "preload_block": 2
   },
   {
    "id": 88,
@@ -656,7 +737,8 @@
    "type": "CoverSelector",
    "size": 120,
    "loader": "Preload_CoverSelector@CoverSelector",
-   "pointer_loader": "Load_CoverSelectorPtr@CoverSelector *"
+   "pointer_loader": "Load_CoverSelectorPtr@CoverSelector *",
+   "preload_block": 2
   },
   {
    "id": 89,
@@ -664,7 +746,8 @@
    "type": "EnemySelector",
    "size": 112,
    "loader": "Preload_EnemySelector@EnemySelector",
-   "pointer_loader": "Load_EnemySelectorPtr@EnemySelector *"
+   "pointer_loader": "Load_EnemySelectorPtr@EnemySelector *",
+   "preload_block": 2
   },
   {
    "id": 90,
@@ -672,7 +755,8 @@
    "type": "ClientCharacter",
    "size": 32,
    "loader": "Preload_ClientCharacter@ClientCharacter",
-   "pointer_loader": "Load_ClientCharacterPtr@ClientCharacter *"
+   "pointer_loader": "Load_ClientCharacterPtr@ClientCharacter *",
+   "preload_block": 2
   },
   {
    "id": 91,
@@ -680,7 +764,8 @@
    "type": "ClothAsset",
    "size": 128,
    "loader": "sub_140DF2050@ClothAsset",
-   "pointer_loader": "Load_ClothAssetPtr@ClothAsset *"
+   "pointer_loader": "Load_ClothAssetPtr@ClothAsset *",
+   "preload_block": 2
   },
   {
    "id": 92,
@@ -688,7 +773,8 @@
    "type": "CinematicMotionDef",
    "size": 592,
    "loader": "Preload_CinematicMotionDef@CinematicMotionDef",
-   "pointer_loader": "Load_CinematicMotionDefPtr@CinematicMotionDef *"
+   "pointer_loader": "Load_CinematicMotionDefPtr@CinematicMotionDef *",
+   "preload_block": 2
   },
   {
    "id": 93,
@@ -696,7 +782,8 @@
    "type": "AccessoryDef",
    "size": 48,
    "loader": "Preload_AccessoryDef@AccessoryDef",
-   "pointer_loader": "Load_AccessoryDefPtr@AccessoryDef *"
+   "pointer_loader": "Load_AccessoryDefPtr@AccessoryDef *",
+   "preload_block": 2
   },
   {
    "id": 94,
@@ -704,7 +791,8 @@
    "type": "LocDmgTable",
    "size": 96,
    "loader": "Preload_LocDmgTable_YAXW4DBStreamStart_Z_1@LocDmgTable",
-   "pointer_loader": "Load_LocDmgTablePtr@LocDmgTable *"
+   "pointer_loader": "Load_LocDmgTablePtr@LocDmgTable *",
+   "preload_block": 2
   },
   {
    "id": 95,
@@ -712,7 +800,8 @@
    "type": "BulletPenetration",
    "size": 1032,
    "loader": "Preload_BulletPenetration@BulletPenetration",
-   "pointer_loader": "Load_BulletPenetrationPtr@BulletPenetration *"
+   "pointer_loader": "Load_BulletPenetrationPtr@BulletPenetration *",
+   "preload_block": 2
   },
   {
    "id": 96,
@@ -720,7 +809,8 @@
    "type": "ScriptBundle",
    "size": 40,
    "loader": "sub_140DFE170@ScriptBundle",
-   "pointer_loader": "Load_ScriptBundlePtr@ScriptBundle *"
+   "pointer_loader": "Load_ScriptBundlePtr@ScriptBundle *",
+   "preload_block": 2
   },
   {
    "id": 97,
@@ -728,7 +818,8 @@
    "type": "BlendSpace2DDef",
    "size": 64,
    "loader": "Load_BlendSpace2DDef@BlendSpace2DDef",
-   "pointer_loader": "Load_BlendSpace2DDefPtr@BlendSpace2DDef *"
+   "pointer_loader": "Load_BlendSpace2DDefPtr@BlendSpace2DDef *",
+   "preload_block": 2
   },
   {
    "id": 98,
@@ -736,7 +827,8 @@
    "type": "XCam",
    "size": 176,
    "loader": "sub_140DF4C30@XCam",
-   "pointer_loader": "Load_XCamPtr@XCam *"
+   "pointer_loader": "Load_XCamPtr@XCam *",
+   "preload_block": 2
   },
   {
    "id": 99,
@@ -744,7 +836,8 @@
    "type": "Replay::Camo",
    "size": 168,
    "loader": "sub_140E411C0@Replay::Camo",
-   "pointer_loader": "Load_CamoPtr@Replay::Camo *"
+   "pointer_loader": "Load_CamoPtr@Replay::Camo *",
+   "preload_block": 2
   },
   {
    "id": 100,
@@ -752,7 +845,8 @@
    "type": "XCompositeModelDef",
    "size": 24,
    "loader": "Load_XCompositeModelDef@XCompositeModelDef",
-   "pointer_loader": "Load_XCompositeModelDefPtr@XCompositeModelDef *"
+   "pointer_loader": "Load_XCompositeModelDefPtr@XCompositeModelDef *",
+   "preload_block": 2
   },
   {
    "id": 101,
@@ -760,7 +854,8 @@
    "type": "XModelDetailCollision",
    "size": 40,
    "loader": "Load_XModelDetailCollision@XModelDetailCollision",
-   "pointer_loader": "Load_XModelDetailCollisionPtr@XModelDetailCollision *"
+   "pointer_loader": "Load_XModelDetailCollisionPtr@XModelDetailCollision *",
+   "preload_block": 2
   },
   {
    "id": 102,
@@ -768,7 +863,8 @@
    "type": "StreamKey",
    "size": 64,
    "loader": "Preload_StreamKey@StreamKey",
-   "pointer_loader": "Load_StreamKeyPtr@StreamKey *"
+   "pointer_loader": "Load_StreamKeyPtr@StreamKey *",
+   "preload_block": 1
   },
   {
    "id": 103,
@@ -776,7 +872,8 @@
    "type": "StreamTreeOverride",
    "size": 24,
    "loader": "sub_140E346C0@StreamTreeOverride",
-   "pointer_loader": "Load_StreamTreeOverridePtr@StreamTreeOverride *"
+   "pointer_loader": "Load_StreamTreeOverridePtr@StreamTreeOverride *",
+   "preload_block": 2
   },
   {
    "id": 104,
@@ -784,7 +881,8 @@
    "type": "KeyValuePairs",
    "size": 24,
    "loader": "sub_140E043E0@KeyValuePairs",
-   "pointer_loader": "Load_KeyValuePairsPtr@KeyValuePairs *"
+   "pointer_loader": "Load_KeyValuePairsPtr@KeyValuePairs *",
+   "preload_block": 1
   },
   {
    "id": 105,
@@ -792,7 +890,8 @@
    "type": "Replay::StTerrain",
    "size": 152,
    "loader": "Load_StTerrain@Replay::StTerrain",
-   "pointer_loader": "Load_StTerrainPtr@Replay::StTerrain *"
+   "pointer_loader": "Load_StTerrainPtr@Replay::StTerrain *",
+   "preload_block": 2
   },
   {
    "id": 106,
@@ -800,7 +899,8 @@
    "type": "NativeScriptPatchFile",
    "size": 40,
    "loader": "sub_140DFD7E0@NativeScriptPatchFile",
-   "pointer_loader": "Load_NativeScriptPatchFilePtr@NativeScriptPatchFile *"
+   "pointer_loader": "Load_NativeScriptPatchFilePtr@NativeScriptPatchFile *",
+   "preload_block": 2
   },
   {
    "id": 107,
@@ -808,7 +908,8 @@
    "type": "CollisionTile",
    "size": 72,
    "loader": "Load_CollisionTile__Atlas_7C5C20@CollisionTile",
-   "pointer_loader": "Load_CollisionTilePtr@CollisionTile *"
+   "pointer_loader": "Load_CollisionTilePtr@CollisionTile *",
+   "preload_block": 2
   },
   {
    "id": 108,
@@ -816,7 +917,8 @@
    "type": "ExecutionDef",
    "size": 104,
    "loader": "Preload_ExecutionDef@ExecutionDef",
-   "pointer_loader": "Load_ExecutionDefPtr@ExecutionDef *"
+   "pointer_loader": "Load_ExecutionDefPtr@ExecutionDef *",
+   "preload_block": 2
   },
   {
    "id": 109,
@@ -824,7 +926,8 @@
    "type": "CarryObjectDef",
    "size": 48,
    "loader": "Preload_CarryObjectDef@CarryObjectDef",
-   "pointer_loader": "Load_CarryObjectDefPtr@CarryObjectDef *"
+   "pointer_loader": "Load_CarryObjectDefPtr@CarryObjectDef *",
+   "preload_block": 2
   },
   {
    "id": 110,
@@ -832,7 +935,8 @@
    "type": "SoundBankListDef",
    "size": 24,
    "loader": "Load_SoundBankListDef@SoundBankListDef",
-   "pointer_loader": "Load_SoundBankListDefPtr@SoundBankListDef *"
+   "pointer_loader": "Load_SoundBankListDefPtr@SoundBankListDef *",
+   "preload_block": 2
   },
   {
    "id": 111,
@@ -840,7 +944,8 @@
    "type": "GfxDecalVolumeMaterial",
    "size": 104,
    "loader": "Preload_GfxDecalVolumeMaterial@GfxDecalVolumeMaterial",
-   "pointer_loader": "Load_GfxDecalVolumeMaterialPtr@GfxDecalVolumeMaterial *"
+   "pointer_loader": "Load_GfxDecalVolumeMaterialPtr@GfxDecalVolumeMaterial *",
+   "preload_block": 1
   },
   {
    "id": 112,
@@ -848,7 +953,8 @@
    "type": "GfxDecalVolumeMask",
    "size": 16,
    "loader": "Preload_GfxDecalVolumeMask@GfxDecalVolumeMask",
-   "pointer_loader": "Load_GfxDecalVolumeMaskPtr@GfxDecalVolumeMask *"
+   "pointer_loader": "Load_GfxDecalVolumeMaskPtr@GfxDecalVolumeMask *",
+   "preload_block": 1
   },
   {
    "id": 113,
@@ -856,7 +962,8 @@
    "type": "DynEntityList",
    "size": 64,
    "loader": "Load_DynEntityList__Atlas_7C7A40@DynEntityList",
-   "pointer_loader": "Load_DynEntityListPtr@DynEntityList *"
+   "pointer_loader": "Load_DynEntityListPtr@DynEntityList *",
+   "preload_block": 2
   },
   {
    "id": 114,
@@ -864,7 +971,8 @@
    "type": "FxWorldTransientZone",
    "size": 160,
    "loader": "Preload_FxWorldTransientZone@FxWorldTransientZone",
-   "pointer_loader": "Load_FxWorldTransientZonePtr@FxWorldTransientZone *"
+   "pointer_loader": "Load_FxWorldTransientZonePtr@FxWorldTransientZone *",
+   "preload_block": 2
   },
   {
    "id": 115,
@@ -872,7 +980,8 @@
    "type": "DLogSchema",
    "size": 88,
    "loader": "sub_140DDADA0@DLogSchema",
-   "pointer_loader": "Load_DLogSchemaPtr@DLogSchema *"
+   "pointer_loader": "Load_DLogSchemaPtr@DLogSchema *",
+   "preload_block": 2
   },
   {
    "id": 116,
@@ -880,7 +989,8 @@
    "type": "MapEdgeList",
    "size": 160,
    "loader": "Load_MapEdgeList__Atlas_7C9C40@MapEdgeList",
-   "pointer_loader": "Load_MapEdgeListPtr@MapEdgeList *"
+   "pointer_loader": "Load_MapEdgeListPtr@MapEdgeList *",
+   "preload_block": 2
   },
   {
    "id": 0,
@@ -888,7 +998,8 @@
    "type": "PhysicsLibrary",
    "size": 24,
    "loader": "sub_140E04AB0@PhysicsLibrary",
-   "pointer_loader": "Load_PhysicsLibraryPtr@PhysicsLibrary *"
+   "pointer_loader": "Load_PhysicsLibraryPtr@PhysicsLibrary *",
+   "preload_block": 2
   }
  ],
  "functions": {

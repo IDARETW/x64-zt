@@ -131,7 +131,10 @@ namespace zonetool::iw8
 		const char* name;
 		std::size_t size;
 		std::size_t alignment;
+		// The block that the map preload (Preload_*Ptr) loads the header to: 1, or 2 that does not rewind.
+		std::uint8_t preload_block;
 		void (*load)(load_stream& stream, void* asset);
+		void (*write)(write_stream& stream, void* asset);
 	};
 
 	// The format of an asset type, or nullptr for a type that zones do not hold.

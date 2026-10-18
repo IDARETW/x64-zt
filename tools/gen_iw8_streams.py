@@ -735,6 +735,9 @@ def emit_pointer(ctx, op, out):
     # An asset pointer loader inlined into its caller: the pointee begins an asset of a known type.
     if -3 in op['markers']:
         begins = [o for o in walk(body) if o['op'] == 'asset_begin' and 'const' in o['type']]
+        if not begins and first and first['op'] == 'load' and first.get('fn'):
+            # The pointee loader of an inserted pointer begins an asset: the pointer is an asset pointer.
+            begins = [o for o in functions[first['fn']]['ops'] if o['op'] == 'asset_begin' and 'const' in o['type']]
         if begins:
             ctx.line('stream.asset(%s, %s);' % (asset_enum(begins[0]['type']['const']), expr), out)
             return
@@ -1022,7 +1025,7 @@ for pool in S['profile']['pools']:
 
 # ---- output -------------------------------------------------------------------------------------
 # The stream classes of zone/streams.hpp that the asset table instantiates.
-STREAMS = ['load_stream']
+STREAMS = ['load_stream', 'write_stream']
 
 
 def main():
@@ -1099,7 +1102,9 @@ def main():
         hpp.append('\t\t%s = %d,' % (ASSET_ENUM[pool['id']], pool['id']))
     hpp += ['\t\tASSET_TYPE_COUNT = %d,' % len(S['profile']['pools']), '\t};', '']
     hpp += ['\tstruct asset_format', '\t{', '\t\tconst char* name;', '\t\tstd::size_t size;',
-            '\t\tstd::size_t alignment;']
+            '\t\tstd::size_t alignment;',
+            '\t\t// The block that the map preload (Preload_*Ptr) loads the header to: 1, or 2 that does not rewind.',
+            '\t\tstd::uint8_t preload_block;']
     for stream in STREAMS:
         hpp.append('\t\tvoid (*%s)(%s& stream, void* asset);' % (stream[:-len('_stream')], stream))
     hpp += ['\t};', '',
@@ -1135,12 +1140,13 @@ def main():
     for pool in S['profile']['pools']:
         asset = by_id.get(pool['id'])
         if asset is None:
-            cpp.append('\t\t\t{"%s", 0, 0%s},' % (pool['name'], ', nullptr' * len(STREAMS)))
+            cpp.append('\t\t\t{"%s", 0, 0, 0%s},' % (pool['name'], ', nullptr' * len(STREAMS)))
             continue
         pointer = functions[asset['pointer_loader']]
         alignment = next((o['align']['const'] for o in pointer['ops'] if o['op'] == 'pointer' and o['align']), 7)
         streams = ''.join(', stream_%s_asset<%s>' % (asset['pool'], stream) for stream in STREAMS)
-        cpp.append('\t\t\t{"%s", %d, %d%s},' % (pool['name'], pool['size'], alignment, streams))
+        cpp.append('\t\t\t{"%s", %d, %d, %d%s},' % (pool['name'], pool['size'], alignment,
+                                                    asset.get('preload_block', 1), streams))
     cpp += ['\t\t};', '']
     for pool in S['profile']['pools']:
         asset = by_id.get(pool['id'])
