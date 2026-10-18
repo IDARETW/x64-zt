@@ -125,8 +125,7 @@ namespace zonetool::iw8
 				header.strings = reinterpret_cast<const char**>(list_marker(this->options_.strings_marker, strings.empty()));
 				header.asset_count = static_cast<std::uint32_t>(entries.size());
 				header.assets = reinterpret_cast<xasset_entry*>(list_marker(this->options_.assets_marker, entries.empty()));
-				this->writer_.push_stream(write_stream::temp_block);
-				this->writer_.write_bytes(&header, sizeof(header));
+				this->writer_.write_raw(&header, sizeof(header));
 
 				this->writer_.push_stream(write_stream::virtual_block);
 				if (header.strings)
@@ -150,12 +149,13 @@ namespace zonetool::iw8
 				}
 
 				this->writer_.pop_stream();
-				this->writer_.pop_stream();
 
 				written_zone zone{};
 				zone.data = this->writer_.data();
 				zone.block_sizes = this->writer_.block_sizes();
-				// The block 2 size is the peak of the map preload. Stock zones declare 0x40 more.
+				// Stock zones declare 0x20 more for block 1 (the size of the asset list header) and 0x40 more for
+				// block 2 than the peaks of the loader and the map preload.
+				zone.block_sizes[write_stream::temp_block] += sizeof(xasset_list);
 				zone.block_sizes[preload_block] += 0x40;
 				// The preload plan records [block u8][int32 delta] for each of 8 moved blocks and a terminator per
 				// asset of the list (see vault re/replay-120-postload-plan).

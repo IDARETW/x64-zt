@@ -465,3 +465,32 @@ alias PlayerAnimsetAlias Replay::PlayerAnimsetAlias
 alias PlayerAnimEntry Replay::PlayerAnimEntry
 alias SndMusicAsset Replay::SndMusicAsset
 alias SndMusicState Replay::SndMusicState
+
+# Records that the Replay schema keeps opaque. No loader reads a member of them (they hold no pointers that the
+# zone fixes up); the definitions below come from stock zone data and the game test build.
+
+# XModel +0x298: Replay only (the game test build has mdaoVolumes here). All 10516 models of 5 stock zones
+# (mp_shipment, common_mp, global_mp, mp_donetsk, code_post_gfx) hold zero: the game fills it.
+struct Replay::XModelRuntimeWord 8
+  0 value : unsigned __int64
+
+# GfxSurfaceBounds +0x18: Replay only (the game test build stops at the bounds). Stock zones hold a small positive
+# float at +0 (for example 0x3707082B) and zeros after it. The meaning of the float is not verified.
+struct Replay::SurfaceBoundsExtra 32
+  0 scalar : float
+  4 reserved : unsigned int[7]
+
+# GfxVoxelTree +0x58: renderer pointers. Load_GfxVoxelTree and q_Postload_GfxVoxelTree (RVA 0xDA2A50) stop at
+# +0x58, and stock zones hold zeros. Names from the game test build, which has one more pointer here (inferred).
+struct Replay::VoxelRuntimeState 24
+  0 voxelInternalNodeDynamicLightList : unsigned int *
+  8 voxelTreeHeaderCPU : GfxVoxelTreeHeader *
+  16 voxelTopDownViewNodeArrayCPU : GfxVoxelTopDownViewNode *
+
+# PlayerAnimsetState +0: 48 bytes in Replay, 80 in the game test build (PlayerASM_ConditionMask: two flags, then the
+# animConditions and animEvents bit arrays). The split between the two arrays in Replay is not verified, so they
+# stay one block of bits. Stock zones set bits in it (for example byte 8 = 0x20).
+struct Replay::PlayerConditionMask 48
+  0 invalidMask : bool
+  1 usesNotetrackEvents : bool
+  4 bits : unsigned int[11]
