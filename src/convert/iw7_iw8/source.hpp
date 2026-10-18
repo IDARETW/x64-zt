@@ -96,7 +96,7 @@ namespace zonetool::convert::iw7_iw8
 		std::unordered_map<std::string, std::vector<streamed_surface>> streamed_;
 
 		void add(std::unique_ptr<iw7::loaded_zone> zone);
-		void load_shared_streams();
+		void load_shared_streams(const iw7::loaded_zone& zone);
 		template <typename T>
 		T* first(iw7::XAssetType type) const;
 	};

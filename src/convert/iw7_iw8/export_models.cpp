@@ -253,7 +253,7 @@ namespace zonetool::convert::iw7_iw8
 				output.exported_models.insert(name);
 				written++;
 			}
-			else
+			else if (!output.distant_models.contains(name))
 			{
 				ZONETOOL_WARNING("iw7: model \"%s\" is not in the loaded zones", name.data());
 			}
