@@ -77,6 +77,26 @@ namespace zonetool
 		this->read_trace_ = std::move(trace);
 	}
 
+	void zone_reader::keep_temp_data()
+	{
+		auto& block = this->blocks_[this->layout_.temp_block];
+		if (block.memory)
+		{
+			VirtualFree(block.memory, 0, MEM_RELEASE);
+		}
+
+		// Temp data never holds more bytes than the zone, plus the alignment of each read.
+		block.size = (16 * this->data_.size() + 0x10FFFFF) & ~std::size_t(0xFFFFF);
+		block.memory = static_cast<std::uint8_t*>(VirtualAlloc(nullptr, block.size, MEM_RESERVE, PAGE_READWRITE));
+		if (!block.memory)
+		{
+			throw std::runtime_error(std::format("cannot reserve 0x{:X} bytes for the temp block", block.size));
+		}
+
+		this->keep_temp_data_ = true;
+		this->temp_committed_ = 0;
+	}
+
 	void zone_reader::set_script_strings(std::vector<std::uint32_t> ids)
 	{
 		this->script_strings_ = std::move(ids);
@@ -115,7 +135,10 @@ namespace zonetool
 
 		if (this->current_block_ == this->layout_.temp_block)
 		{
-			this->blocks_[this->layout_.temp_block].position = state.position_at_push;
+			if (!this->keep_temp_data_)
+			{
+				this->blocks_[this->layout_.temp_block].position = state.position_at_push;
+			}
 		}
 		else if (this->current_block_ == this->layout_.pop_aligned_block)
 		{
@@ -215,6 +238,17 @@ namespace zonetool
 
 			throw std::runtime_error(std::format("block {} overflows at 0x{:X} + 0x{:X} (size 0x{:X})",
 				this->current_block_, block.position, size, block.size));
+		}
+
+		if (this->keep_temp_data_ && this->current_block_ == this->layout_.temp_block && block.position + size > this->temp_committed_)
+		{
+			const auto end = (block.position + size + 0xFFFFF) & ~std::size_t(0xFFFFF);
+			if (!VirtualAlloc(block.memory + this->temp_committed_, end - this->temp_committed_, MEM_COMMIT, PAGE_READWRITE))
+			{
+				throw std::runtime_error(std::format("cannot commit 0x{:X} bytes of temp data", end));
+			}
+
+			this->temp_committed_ = end;
 		}
 
 		const auto destination = block.memory + block.position;

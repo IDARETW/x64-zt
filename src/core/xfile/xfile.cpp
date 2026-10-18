@@ -1003,7 +1003,71 @@ namespace zonetool::xfile
 			}
 
 			file.block_sizes.assign(std::begin(header.block_sizes), std::end(header.block_sizes));
+			file.xfile_version = header.xfile_version;
+			file.transient = header.transient != 0;
+			file.preload_walk_size = header.preload_walk_size;
 		}
+
+		std::string write_iw8(const format& format, const fastfile& file)
+		{
+			if (format.block_count != iw8_block_count || file.block_sizes.size() != iw8_block_count)
+			{
+				throw std::runtime_error(std::format("IW8 zones have {} blocks", iw8_block_count));
+			}
+
+			// A stored frame: the compressor type 1 and "IWC", then the payload.
+			constexpr std::string_view stored_frame = "\x01IWC";
+			if (file.payload.size() > std::numeric_limits<std::uint32_t>::max() - stored_frame.size())
+			{
+				throw std::runtime_error("the zone is too large for an IW8 fastfile");
+			}
+
+			iw8_file_header header{};
+			std::memcpy(header.magic, format.unsigned_magic.data(), sizeof(header.magic));
+			header.version = format.version;
+			header.xfile_version = file.xfile_version ? file.xfile_version : iw8_xfile_versions.back();
+			header.transient = file.transient ? 1 : 0;
+			header.resident_size = static_cast<std::uint32_t>(stored_frame.size() + file.payload.size());
+			header.always_loaded_size = static_cast<std::uint32_t>(file.payload.size());
+			header.size = file.payload.size();
+			header.preload_walk_size = file.preload_walk_size;
+			std::ranges::copy(file.block_sizes, std::begin(header.block_sizes));
+
+			std::string data;
+			data.reserve(sizeof(header) + header.resident_size);
+			data.append(reinterpret_cast<const char*>(&header), sizeof(header));
+			data.append(stored_frame);
+			data.append(file.payload);
+			return data;
+		}
+	}
+
+	void write(const std::filesystem::path& path, const format& format, const fastfile& file)
+	{
+		if (format.container != container::iw8)
+		{
+			throw std::runtime_error(std::format("the {} container has no v2 writer", format.unsigned_magic));
+		}
+
+		const auto data = write_iw8(format, file);
+		if (path.has_parent_path())
+		{
+			std::filesystem::create_directories(path.parent_path());
+		}
+
+		// Write beside the destination and replace it after the complete file is on disk.
+		auto partial = path;
+		partial += ".partial";
+		{
+			std::ofstream stream(partial, std::ios::binary | std::ios::trunc);
+			stream.write(data.data(), static_cast<std::streamsize>(data.size()));
+			if (!stream)
+			{
+				throw std::runtime_error(std::format("cannot write {}", partial.string()));
+			}
+		}
+
+		std::filesystem::rename(partial, path);
 	}
 
 	fastfile read(const std::filesystem::path& path, const format& format)
