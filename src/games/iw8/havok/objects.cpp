@@ -798,6 +798,79 @@ namespace zonetool::iw8::havok
 			}
 		}
 
+		// A flat shape (a two-sided polygon) is a thin slab around its first face; the Replay tools give the one stock flat
+		// hull about 0.0075 of thickness.
+		double extent{};
+		for (std::size_t axis = 0; axis < 3; axis++)
+		{
+			const auto [low, high] = std::ranges::minmax(shape.vertices | std::views::transform([axis](const vector3& v) { return v[axis]; }));
+			extent = std::max(extent, static_cast<double>(high) - low);
+		}
+
+		std::array<double, 3> normal{};
+		double thickness{};
+		if (!(volume > 1e-9 * extent * extent * extent) && !shape.faces.empty())
+		{
+			const auto& ring = shape.faces[0];
+			volume = 0.0;
+			centre = {};
+			second = {};
+			const auto point = [&](const std::uint32_t index)
+			{
+				const auto& v = shape.vertices.at(index);
+				return std::array<double, 3>{v[0] - origin[0], v[1] - origin[1], v[2] - origin[2]};
+			};
+
+			for (std::size_t k = 1; k + 1 < ring.size(); k++)
+			{
+				const auto a = point(ring[0]);
+				const auto b = point(ring[k]);
+				const auto c = point(ring[k + 1]);
+				const std::array<double, 3> ab{b[0] - a[0], b[1] - a[1], b[2] - a[2]};
+				const std::array<double, 3> ac{c[0] - a[0], c[1] - a[1], c[2] - a[2]};
+				const std::array<double, 3> n{ab[1] * ac[2] - ab[2] * ac[1], ab[2] * ac[0] - ab[0] * ac[2], ab[0] * ac[1] - ab[1] * ac[0]};
+				const auto area = std::sqrt(n[0] * n[0] + n[1] * n[1] + n[2] * n[2]) / 2.0;
+				const std::array<double, 3> sum{a[0] + b[0] + c[0], a[1] + b[1] + c[1], a[2] + b[2] + c[2]};
+				volume += area;
+				for (std::size_t i = 0; i < 3; i++)
+				{
+					normal[i] += n[i];
+					centre[i] += area * sum[i] / 3.0;
+					for (std::size_t j = 0; j < 3; j++)
+					{
+						second[i][j] += area / 12.0 * (a[i] * a[j] + b[i] * b[j] + c[i] * c[j] + sum[i] * sum[j]);
+					}
+				}
+			}
+
+			const auto length = std::sqrt(normal[0] * normal[0] + normal[1] * normal[1] + normal[2] * normal[2]);
+			if (!(volume > 0.0) || !(length > 0.0))
+			{
+				throw std::runtime_error("a convex shape has no area");
+			}
+
+			for (auto& value : normal)
+			{
+				value /= length;
+			}
+
+			// From area moments to the moments of the slab.
+			thickness = std::max(0.0075, 1e-3 * extent);
+			volume *= thickness;
+			for (auto& value : centre)
+			{
+				value *= thickness;
+			}
+
+			for (auto& row : second)
+			{
+				for (auto& value : row)
+				{
+					value *= thickness;
+				}
+			}
+		}
+
 		if (!(volume > 0.0))
 		{
 			throw std::runtime_error("a convex shape has no volume");
@@ -809,6 +882,15 @@ namespace zonetool::iw8::havok
 		for (std::size_t i = 0; i < 3; i++)
 		{
 			centre[i] /= volume;
+		}
+
+		// The slab spreads the mass over its thickness along the normal.
+		for (std::size_t i = 0; i < 3; i++)
+		{
+			for (std::size_t j = 0; j < 3; j++)
+			{
+				second[i][j] += volume * thickness * thickness / 12.0 * normal[i] * normal[j];
+			}
 		}
 
 		// The inertia about the centre, for the mass.
