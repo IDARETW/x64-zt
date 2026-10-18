@@ -1241,6 +1241,12 @@ float4 main(Input input) : SV_TARGET0 {
     bool unlit = sky || layer || (flags & 128) != 0;
     if (unlit)
         light = 1;
+#ifdef MAP_EMISSION
+    // Unlit materials that emit above 1 (flag bit 20; IW7 lamps and screens): the gain is the
+    // material parameters' w. Multiply layers keep their colour.
+    if (!sky && (flags & 1048576) != 0 && (flags & 512) == 0)
+        light = input.materialParameters.w;
+#endif
     // Build-time diagnostics keep depth coverage and native postprocessing.
 #if MAP_DEBUG_MODE == 1
     light = 1;

@@ -73,8 +73,11 @@ namespace zonetool::convert::iw7_iw8
 			return cross[0] * cross[0] + cross[1] * cross[1] + cross[2] * cross[2] < 1.0e-12f;
 		}
 
-		// The surface, or nothing when none of its triangles has an area.
-		std::optional<json> export_surface(const source_map& source, const iw7::GfxWorld& world, const iw7::GfxSurface& surface,
+		// The surfaces of a surface (none when none of its triangles has an area): the surface, and for each layer of a
+		// layered material that its vertices reveal, the same triangles in the material of the layer, blended over it by
+		// the weight of the layer in vertex alpha. The vertex colours of a layered material hold the weights of its
+		// layers, not colours.
+		std::vector<json> export_surface(const source_map& source, const iw7::GfxWorld& world, const iw7::GfxSurface& surface,
 			const std::size_t lightmap_count, const reflection_probes& probes, extraction& output)
 		{
 			const auto& tris = surface.tris;
@@ -84,10 +87,13 @@ namespace zonetool::convert::iw7_iw8
 			}
 
 			// Replay maps have no refraction layers.
-			if (classify_material(source.resolve(iw7::ASSET_TYPE_MATERIAL, surface.material)).kind == surface_kind::distortion)
+			const auto* resolved = source.resolve(iw7::ASSET_TYPE_MATERIAL, surface.material);
+			if (classify_material(resolved).kind == surface_kind::distortion)
 			{
 				return {};
 			}
+
+			const auto layers = material_layer_count(resolved);
 
 			const auto zone = source.resolve(iw7::ASSET_TYPE_GFXWORLD_TRANSIENT_ZONE,
 				world.draw.transientZones[surface.transientZone]);
@@ -107,6 +113,7 @@ namespace zonetool::convert::iw7_iw8
 			auto vertices = json::array();
 			auto indices = json::array();
 			std::unordered_map<std::uint16_t, std::size_t> remap;
+			std::vector<std::uint16_t> order;
 			const auto vertex = [&](const std::uint16_t index) -> const iw7::GfxWorldVertex&
 			{
 				if (index >= tris.vertexCount)
@@ -134,6 +141,12 @@ namespace zonetool::convert::iw7_iw8
 					if (inserted)
 					{
 						vertices.push_back(export_vertex(vertex(triangle[corner])));
+						order.push_back(triangle[corner]);
+						if (layers > 1)
+						{
+							vertices.back()["color"] = {255, 255, 255, 255};
+						}
+
 						for (auto axis = 0; axis < 3; axis++)
 						{
 							center[axis] += vertex(triangle[corner]).xyz[axis];
@@ -155,14 +168,48 @@ namespace zonetool::convert::iw7_iw8
 				value /= static_cast<float>(vertices.size());
 			}
 
-			return json
+			const auto lightmap = surface.lightmapIndex < lightmap_count ? static_cast<int>(surface.lightmapIndex) : -1;
+			const auto probe = probes.find(center);
+			std::vector<json> result;
+			result.push_back(
 			{
 				{"material", material_name},
-				{"lightmap", surface.lightmapIndex < lightmap_count ? static_cast<int>(surface.lightmapIndex) : -1},
-				{"reflection_probe", probes.find(center)},
-				{"vertices", std::move(vertices)},
-				{"indices", std::move(indices)},
-			};
+				{"lightmap", lightmap},
+				{"reflection_probe", probe},
+				{"vertices", vertices},
+				{"indices", indices},
+			});
+
+			for (auto layer = 1; layer < layers; layer++)
+			{
+				// Green, blue and alpha weigh the second to fourth layers.
+				const auto weight = [&](const std::uint16_t index)
+				{
+					return vertex(index).color.array[layer];
+				};
+
+				if (std::ranges::none_of(order, [&](const auto index) { return weight(index) != 0; }))
+				{
+					continue;
+				}
+
+				auto overlay = vertices;
+				for (std::size_t v = 0; v < overlay.size(); v++)
+				{
+					overlay[v]["color"] = {255, 255, 255, weight(order[v])};
+				}
+
+				result.push_back(
+				{
+					{"material", output.add_material_layer(source, surface.material, layer)},
+					{"lightmap", lightmap},
+					{"reflection_probe", probe},
+					{"vertices", std::move(overlay)},
+					{"indices", indices},
+				});
+			}
+
+			return result;
 		}
 
 		// The light of the floor under a static model (IW3's ground lighting): the lightmap of the highest lightmapped
@@ -658,6 +705,14 @@ namespace zonetool::convert::iw7_iw8
 		return name;
 	}
 
+	std::string extraction::add_material_layer(const source_map& source, iw7::Material* header, const int layer)
+	{
+		const auto name = this->add_material(source, header) + std::format("__layer{}", layer);
+		this->materials[name] = source.resolve(iw7::ASSET_TYPE_MATERIAL, header);
+		this->material_layers[name] = layer;
+		return name;
+	}
+
 	std::string extraction::add_model(const source_map& source, iw7::XModel* header)
 	{
 		const auto model = source.resolve(iw7::ASSET_TYPE_XMODEL, header);
@@ -703,10 +758,10 @@ namespace zonetool::convert::iw7_iw8
 		for (auto i = 0u; i < world.surfaceCount; i++)
 		{
 			first_surface[i] = surfaces.size();
-			if (auto surface = export_surface(source, world, dpvs.surfaces[i], lightmaps.entries.size(), probes, output))
+			for (auto& surface : export_surface(source, world, dpvs.surfaces[i], lightmaps.entries.size(), probes, output))
 			{
 				surface_indices.push_back(surfaces.size());
-				surfaces.push_back(std::move(*surface));
+				surfaces.push_back(std::move(surface));
 			}
 		}
 

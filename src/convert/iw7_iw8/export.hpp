@@ -2,6 +2,8 @@
 
 #include "source.hpp"
 
+#include <game.hpp>
+
 namespace zonetool::iw7
 {
 	// Decompresses the LZ4 blocks of a stream in a pak file (assets/gfximage.cpp).
@@ -27,9 +29,16 @@ namespace zonetool::convert::iw7_iw8
 		std::set<std::string> distant_models;
 		// The materials of glass panes, which convert as lit glass (IW7 draws them premultiplied).
 		std::set<std::string> glass_materials;
+		// The materials of effects, which convert as the pipeline's effect materials.
+		std::set<std::string> effect_materials;
+		// The layers of layered IW7 materials (techsets "..._b1..._b2..."), which convert as materials of their own: by
+		// name in the extraction, the layer (1 to 3) of the material that `materials` holds.
+		std::map<std::string, int> material_layers;
 
 		// Adds the material or model of a header and returns its name in the extraction.
 		std::string add_material(const source_map& source, iw7::Material* header);
+		// Adds a layer (1 to 3) of a layered material as a material of its own.
+		std::string add_material_layer(const source_map& source, iw7::Material* header, int layer);
 		std::string add_model(const source_map& source, iw7::XModel* header);
 	};
 
@@ -55,6 +64,8 @@ namespace zonetool::convert::iw7_iw8
 		surface_kind kind{};
 		bool unlit{};
 		bool falloff{};
+		// "blendadd": premultiplied alpha (one, inverse source alpha), which classifies as additive.
+		bool premultiplied{};
 
 		// Decals, effects and the sky do not block players and bullets.
 		bool solid() const
@@ -64,6 +75,15 @@ namespace zonetool::convert::iw7_iw8
 	};
 
 	material_class classify_material(const iw7::Material* material);
+
+	// The colorTint of a material as IW7 keeps it (an unlit material's emission can reach far above 1: Frontier's
+	// Neptune is its colour map times 20); white without one.
+	std::array<float, 4> material_color_tint(const iw7::Material* material);
+
+	// The layers of a material: IW7 world techsets blend up to three layers over the first ("r0..._b1..._b2..._b3..."),
+	// each with its own textures (whose shader names end with the layer's digit) and tint (colorTint1 to colorTint3), by
+	// the weights in the green, blue and alpha channels of the vertex colours.
+	int material_layer_count(const iw7::Material* material);
 
 	// The brush model of trigger model N of the map entities: the trigger models follow the world's brush models.
 	unsigned int trigger_brush_model(const source_map& source, unsigned int trigger);
@@ -156,6 +176,12 @@ namespace zonetool::convert::iw7_iw8
 
 	// Reads the Havok data of an IW7 clip map or map entities: a binary packfile of Havok 2014 (hk_2014.2.5-r1).
 	havok_shapes read_havok_shapes(const char* data, std::size_t size);
+
+	// Writes the effects that the map places with its createfx script: IW3 map scripts that place and load them, and the
+	// particle systems as native Replay effects (extracted/vfx/<name>.json), with the materials and models that they use.
+	void export_effects(const source_map& source, extraction& output, const zone_conversion& conversion);
+	// Converts IW7 particle systems and the effects that they start to native Replay effects.
+	void export_effect_graphs(const source_map& source, extraction& output, const std::vector<std::string>& effects);
 
 	std::string bsp_name(const source_map& source);
 

@@ -23,13 +23,47 @@ namespace zonetool::convert::iw7_iw8
 
 		constexpr auto image_role_count = static_cast<std::size_t>(image_role::count);
 
-		// An image file of the extraction: the image that it holds, and whether it was written.
+		// An image file of the extraction: the image that it holds, and whether it was written. IW7 colour maps of
+		// TS_COLOR_SPECULAR_MAP hold the specular reflectance in their alpha, and the alpha of the surface in a texture
+		// of TS_ALPHA_REVEAL_THICKNESS_MAP: their files take the alpha of that texture's channel, else none (opaque).
 		struct image_file
 		{
 			const iw7::GfxImage* image{};
 			image_role role{};
+			const iw7::GfxImage* alpha{};
+			std::size_t alpha_channel{};
+			bool opaque{};
 			std::optional<bool> written;
+			// The written colour's alpha is 1 everywhere.
+			bool opaque_alpha{};
 		};
+
+		// FNV-1a: a short name for a combination of images, the same in each run.
+		std::uint32_t name_hash(const std::string_view name)
+		{
+			std::uint32_t hash = 0x811C9DC5;
+			for (const auto c : name)
+			{
+				hash = (hash ^ static_cast<std::uint8_t>(c)) * 0x01000193;
+			}
+
+			return hash;
+		}
+
+		// The channel of the alpha in a texture of TS_ALPHA_REVEAL_THICKNESS_MAP, which its name gives after
+		// "_packed_": its channels in order ("a" alpha, "r" reveal, "t" thickness).
+		std::optional<std::size_t> alpha_channel(const std::string_view image)
+		{
+			const auto packed = image.rfind("_packed_");
+			if (packed == std::string_view::npos)
+			{
+				return {};
+			}
+
+			const auto channels = image.substr(packed + 8);
+			const auto alpha = channels.find('a');
+			return alpha != std::string_view::npos && alpha < 4 ? std::optional(alpha) : std::nullopt;
+		}
 
 		// The pixels of an image at one size, with the mip levels below it.
 		struct image_pixels
@@ -42,21 +76,29 @@ namespace zonetool::convert::iw7_iw8
 		// The game file sources need not read on several threads at once.
 		std::mutex read_mutex;
 
-		std::optional<image_role> texture_role(const int semantic)
+		// The role of a texture, by its semantic and the first character of its shader name (colorMap, normalMap,
+		// specularMap; a colour semantic can also hold a reveal or emissive map).
+		std::optional<image_role> texture_role(const iw7::MaterialTextureDef& texture)
 		{
-			switch (semantic)
+			switch (texture.semantic)
 			{
 			case iw7::TS_COLOR_MAP:
 			case iw7::TS_COLOR_SPECULAR_MAP:
-				return image_role::color;
+				return texture.nameStart == 'c' ? std::optional(image_role::color) : std::nullopt;
 			case iw7::TS_NORMAL_MAP:
 			case iw7::TS_NORMAL_OCCLUSSION_GLOSS_MAP:
-				return image_role::normal;
+				return texture.nameStart == 'n' ? std::optional(image_role::normal) : std::nullopt;
 			case iw7::TS_SPECULAR_MAP:
-				return image_role::specular;
+				return texture.nameStart == 's' ? std::optional(image_role::specular) : std::nullopt;
 			default:
 				return {};
 			}
+		}
+
+		// The layer of a texture of a layered material: the digit that ends its shader name (colorMap1), else 0.
+		int texture_layer(const iw7::MaterialTextureDef& texture)
+		{
+			return texture.nameEnd >= '1' && texture.nameEnd <= '3' ? texture.nameEnd - '0' : 0;
 		}
 
 		// The engine images that the pipeline makes itself: a zone holds them without pixels.
@@ -228,9 +270,54 @@ namespace zonetool::convert::iw7_iw8
 			}
 		}
 
-		// Writes an image as the DDS file that the pipeline reads.
-		bool write_image(const iw7::GfxImage& image, const image_role role, const std::filesystem::path& path)
+		// Replaces the alpha of a colour image: with the channel of an alpha texture (at the colour's size), or opaque.
+		bool replace_alpha(DirectX::ScratchImage& pixels, const iw7::GfxImage* alpha, const std::size_t channel)
 		{
+			const auto& metadata = pixels.GetMetadata();
+			DirectX::ScratchImage resized;
+			const DirectX::Image* source{};
+			std::vector<DirectX::ScratchImage> faces;
+			if (alpha)
+			{
+				faces = load_faces(*alpha, DXGI_FORMAT_R8G8B8A8_UNORM);
+				if (faces.size() != 1)
+				{
+					ZONETOOL_WARNING("iw7: alpha image \"%s\" (format %d) cannot be read", alpha->name, alpha->imageFormat);
+					return false;
+				}
+
+				source = faces.front().GetImage(0, 0, 0);
+				if (source->width != metadata.width || source->height != metadata.height)
+				{
+					if (FAILED(DirectX::Resize(*source, metadata.width, metadata.height, DirectX::TEX_FILTER_LINEAR |
+						DirectX::TEX_FILTER_FORCE_NON_WIC, resized)))
+					{
+						return false;
+					}
+
+					source = resized.GetImage(0, 0, 0);
+				}
+			}
+
+			const auto* target = pixels.GetImage(0, 0, 0);
+			for (std::size_t y = 0; y < metadata.height; y++)
+			{
+				auto* row = target->pixels + y * target->rowPitch;
+				const auto* alpha_row = source ? source->pixels + y * source->rowPitch : nullptr;
+				for (std::size_t x = 0; x < metadata.width; x++)
+				{
+					row[x * 4 + 3] = alpha_row ? alpha_row[x * 4 + channel] : 0xFF;
+				}
+			}
+
+			return true;
+		}
+
+		// Writes an image as the DDS file that the pipeline reads.
+		bool write_image(image_file& file, const std::filesystem::path& path)
+		{
+			const auto& image = *file.image;
+			const auto role = file.role;
 			auto faces = load_faces(image, DXGI_FORMAT_R8G8B8A8_UNORM);
 			if (faces.size() != 1)
 			{
@@ -243,6 +330,10 @@ namespace zonetool::convert::iw7_iw8
 			if (role == image_role::normal)
 			{
 				encode_normal_slopes(pixels);
+			}
+			else if ((file.alpha || file.opaque) && !replace_alpha(pixels, file.alpha, file.alpha_channel))
+			{
+				return false;
 			}
 
 			// The pipeline decodes the files and encodes the zone's images itself: block compression keeps the
@@ -281,7 +372,8 @@ namespace zonetool::convert::iw7_iw8
 			{
 				// DirectXTex compresses on several threads only with OpenMP, which the build leaves out: the images
 				// convert on several threads instead.
-				const auto format = mips.IsAlphaAllOpaque() ? DXGI_FORMAT_BC1_UNORM : DXGI_FORMAT_BC3_UNORM;
+				file.opaque_alpha = mips.IsAlphaAllOpaque();
+				const auto format = file.opaque_alpha ? DXGI_FORMAT_BC1_UNORM : DXGI_FORMAT_BC3_UNORM;
 				if (const auto compressed = DirectX::Compress(mips.GetImages(), mips.GetImageCount(), mips.GetMetadata(), format,
 					DirectX::TEX_COMPRESS_DEFAULT, DirectX::TEX_THRESHOLD_DEFAULT, stored); FAILED(compressed))
 				{
@@ -367,10 +459,62 @@ namespace zonetool::convert::iw7_iw8
 			return kind.kind == surface_kind::opaque || sort < 7 ? 4 : std::min(sort + 2, 63u);
 		}
 
+		// The value of a constant of a material (names keep 12 characters).
+		std::optional<std::array<float, 4>> material_constant(const iw7::Material* material, const std::string_view name)
+		{
+			for (auto i = 0; material && i < material->constantCount; i++)
+			{
+				const auto& constant = material->constantTable[i];
+				if (std::string_view(constant.name, strnlen(constant.name, sizeof(constant.name))) == name.substr(0, sizeof(constant.name)))
+				{
+					// Unused components can hold NaN, which JSON cannot.
+					std::array<float, 4> value{};
+					for (std::size_t c = 0; c < 4; c++)
+					{
+						value[c] = std::isfinite(constant.literal[c]) ? constant.literal[c] : 0.0f;
+					}
+
+					return value;
+				}
+			}
+
+			return std::nullopt;
+		}
+
+		// The tint of a layer of a material (colorTint, colorTint1 to colorTint3): lit materials keep albedo tints up to
+		// 1, unlit ones (high dynamic range emission) the hue of theirs.
+		std::array<float, 4> material_tint(const iw7::Material* material, const int layer, const material_class& kind)
+		{
+			const auto name = layer ? std::format("colorTint{}", layer) : std::string("colorTint");
+			auto tint = material_constant(material, name).value_or(std::array{1.0f, 1.0f, 1.0f, 1.0f});
+			const auto peak = std::max({tint[0], tint[1], tint[2]});
+			for (std::size_t c = 0; c < 3; c++)
+			{
+				tint[c] = std::clamp(kind.unlit && peak > 1.0f ? tint[c] / peak : tint[c], 0.0f, 1.0f);
+			}
+
+			tint[3] = 1.0f;
+			return tint;
+		}
+
 		// The IW3 material of a material, with the images of its roles (the pipeline's defaults for the missing ones).
 		json export_material(const iw7::Material* material,
-			const std::array<std::optional<std::string>, image_role_count>& images, const material_class& kind)
+			const std::array<std::optional<std::string>, image_role_count>& images, const material_class& kind, const int layer,
+			const float light_scale)
 		{
+			// An unlit material keeps the hue of its tint; one that emits above the sun's level (in the units of the
+			// converted lights) gives the pipeline its gain (Frontier's lamps: tint 318, 33 times the sun).
+			auto constants = json::array({{{"name", "colorTint"}, {"literal", material_tint(material, layer, kind)}}});
+			if (kind.unlit)
+			{
+				const auto tint = material_color_tint(material);
+				const auto emission = std::max({tint[0], tint[1], tint[2]}) * light_scale;
+				if (emission > 1.0f)
+				{
+					constants.push_back({{"name", "emissionScale"}, {"literal", {emission, emission, emission, 1.0f}}});
+				}
+			}
+
 			std::string cull = "back";
 			if (material)
 			{
@@ -399,9 +543,10 @@ namespace zonetool::convert::iw7_iw8
 				{"_type", "material"},
 				{"_version", 1},
 				{"cameraRegion", "lit"},
-				{"constants", json::array({{{"name", "colorTint"}, {"literal", {1.0f, 1.0f, 1.0f, 1.0f}}}})},
+				{"constants", std::move(constants)},
 				{"gameFlags", shadow ? json::array({"CASTS_SHADOW"}) : json::array()},
-				{"sortKey", material ? iw3_sort(*material, kind) : 4u},
+				// A layer sorts as the first decals, which the pipeline draws with a depth bias over their surface.
+				{"sortKey", layer ? 9u : material ? iw3_sort(*material, kind) : 4u},
 				{"stateBits", json::array({state_json(cull, false, kind.kind), state_json(cull, true, kind.kind)})},
 				{"stateBitsEntry", std::move(entries)},
 				{"stateFlags", 0},
@@ -409,6 +554,122 @@ namespace zonetool::convert::iw7_iw8
 				{"techniqueSet", iw3_technique_set(kind)},
 				{"textureAtlas", {{"columns", 1}, {"rows", 1}}},
 				{"textures", std::move(textures)},
+			};
+		}
+	}
+
+	namespace
+	{
+		// An effect material as the pipeline reads IW3 effect materials: an emissive sprite material of one colour map in
+		// the IW3 effect technique set of its blend (feathered, faded edge on), a cloud or a distortion.
+		json export_effect_material(const iw7::Material* material, const std::string& color)
+		{
+			std::vector<std::string_view> tokens;
+			if (material && material->techniqueSet)
+			{
+				for (const auto token : std::views::split(asset_name(material->techniqueSet->name), '_'))
+				{
+					tokens.emplace_back(token.begin(), token.end());
+				}
+			}
+
+			const auto has = [&](const std::string_view token)
+			{
+				return std::ranges::find(tokens, token) != tokens.end();
+			};
+
+			const auto additive = has("add") || has("blendadd");
+			const auto feather = has("zfeather");
+			auto constants = json::array();
+			const auto constant = [&](const std::string_view iw3_name, const std::string_view iw7_name, const std::array<float, 4> fallback)
+			{
+				constants.push_back({{"name", iw3_name}, {"literal", material_constant(material, iw7_name).value_or(fallback)}});
+			};
+
+			std::string technique;
+			auto clamped = false;
+			if (has("distortion"))
+			{
+				technique = "distortion_scale_zfeather";
+				constant("distortionScale", "distortionScale", {1.0f, 1.0f, 0.0f, 0.0f});
+			}
+			else if (has("cloud"))
+			{
+				// IW3 clouds have no constants and clamp their colour map.
+				technique = additive ? "particle_cloud_add" : "particle_cloud";
+				clamped = true;
+			}
+			else
+			{
+				const auto falloff = has("falloff") && material_constant(material, "falloffParms");
+				technique = std::format("effect{}{}{}", feather ? "_zfeather" : "", falloff ? "_falloff" : "", additive ? "_add" : "");
+				constant("colorTint", "colorTint", {1.0f, 1.0f, 1.0f, 1.0f});
+				if (feather)
+				{
+					auto parameters = material_constant(material, "featherParms").value_or(std::array{0.05f, 0.0f, 0.0f, 0.0f});
+					parameters[0] = parameters[0] > 0.0f ? parameters[0] : 0.05f;
+					constants.push_back({{"name", "featherParms"}, {"literal", parameters}});
+				}
+
+				if (falloff)
+				{
+					constant("falloffParms", "falloffParms", {0.0f, 0.0f, 0.0f, 0.0f});
+					constant("falloffBeginColor", "falloffBeginColor", {1.0f, 1.0f, 1.0f, 1.0f});
+					constant("falloffEndColor", "falloffEndColor", {1.0f, 1.0f, 1.0f, 1.0f});
+				}
+			}
+
+			const auto [source, destination] = additive ? std::pair{"one", "one"} : std::pair{"srcalpha", "invsrcalpha"};
+			const json state =
+			{
+				{"alphaTest", additive ? "disabled" : "gt0"},
+				{"blendOpAlpha", "add"},
+				{"blendOpRgb", "add"},
+				{"colorWriteAlpha", false},
+				{"colorWriteRgb", true},
+				{"cullFace", "none"},
+				{"depthTest", "less_equal"},
+				{"depthWrite", false},
+				{"dstBlendAlpha", destination},
+				{"dstBlendRgb", destination},
+				{"polygonOffset", "offset0"},
+				{"polymodeLine", false},
+				{"srcBlendAlpha", source},
+				{"srcBlendRgb", source},
+			};
+
+			auto entries = json::array();
+			for (auto i = 0; i < 34; i++)
+			{
+				entries.push_back(i == 4 ? 0 : -1);
+			}
+
+			const auto rows = material ? std::max<unsigned>(material->info.textureAtlasRowCount, 1) : 1u;
+			const auto columns = material ? std::max<unsigned>(material->info.textureAtlasColumnCount, 1) : 1u;
+			return
+			{
+				{"$schema", "http://openassettools.dev/schema/material.v1.json"},
+				{"_game", "iw3"},
+				{"_type", "material"},
+				{"_version", 1},
+				{"cameraRegion", "emissive"},
+				{"constants", std::move(constants)},
+				{"gameFlags", json::array()},
+				{"sortKey", material ? std::min(material->info.sortKey + 2u, 63u) : 26u},
+				{"stateBits", json::array({state})},
+				{"stateBitsEntry", std::move(entries)},
+				{"stateFlags", 16},
+				{"surfaceTypeBits", 0},
+				{"techniqueSet", technique},
+				{"textureAtlas", {{"columns", std::has_single_bit(columns) ? columns : 1u}, {"rows", std::has_single_bit(columns) ? rows : 1u}}},
+				{"textures", json::array({
+					{
+						{"name", "colorMap"},
+						{"semantic", "colorMap"},
+						{"image", color},
+						{"samplerState", {{"filter", "linear"}, {"mipMap", "linear"}, {"clampU", clamped}, {"clampV", clamped},
+							{"clampW", clamped}}},
+					}})},
 			};
 		}
 	}
@@ -459,8 +720,9 @@ namespace zonetool::convert::iw7_iw8
 			else if (token == "add" || token == "blendadd")
 			{
 				// blendadd adds the colour over the alpha-darkened surface (one, inverse source alpha): additive is the
-				// pipeline's nearest blend.
+				// pipeline's nearest blend, unless the colour holds the alpha (export_materials).
 				result.kind = surface_kind::additive;
+				result.premultiplied = token == "blendadd";
 			}
 			else if (token == "multiply")
 			{
@@ -477,6 +739,28 @@ namespace zonetool::convert::iw7_iw8
 		return result;
 	}
 
+	std::array<float, 4> material_color_tint(const iw7::Material* material)
+	{
+		return material_constant(material, "colorTint").value_or(std::array{1.0f, 1.0f, 1.0f, 1.0f});
+	}
+
+	int material_layer_count(const iw7::Material* material)
+	{
+		if (!material || !material->techniqueSet)
+		{
+			return 1;
+		}
+
+		auto layers = 1;
+		for (const auto token : std::views::split(asset_name(material->techniqueSet->name), '_'))
+		{
+			const std::string_view text(token.begin(), token.end());
+			layers += text.size() > 1 && text[0] == 'b' && text[1] >= '1' && text[1] <= '3';
+		}
+
+		return std::min(layers, 4);
+	}
+
 	std::vector<DirectX::ScratchImage> load_image_faces(const iw7::GfxImage& image, const DXGI_FORMAT format,
 		const std::size_t limit)
 	{
@@ -488,7 +772,7 @@ namespace zonetool::convert::iw7_iw8
 		for (auto i = 0; material && i < material->textureCount; i++)
 		{
 			const auto& texture = material->textureTable[i];
-			if (texture_role(texture.semantic) == image_role::color)
+			if (texture_role(texture) == image_role::color && !texture_layer(texture))
 			{
 				return source.resolve(iw7::ASSET_TYPE_IMAGE, texture.image);
 			}
@@ -540,13 +824,37 @@ namespace zonetool::convert::iw7_iw8
 		std::map<std::string, image_file> files;
 		std::map<std::string, std::array<std::vector<std::string>, image_role_count>> candidates;
 		std::map<std::string, std::array<std::optional<std::string>, image_role_count>> builtins;
+		const auto layer_of = [&](const std::string& name)
+		{
+			const auto found = output.material_layers.find(name);
+			return found != output.material_layers.end() ? found->second : 0;
+		};
+
 		for (const auto& [name, material] : output.materials)
 		{
 			auto& roles = candidates[name];
+			const auto layer = layer_of(name);
+
+			// The alpha of the layer's colour: the first texture of its alpha, reveal and thickness maps that holds one.
+			const iw7::GfxImage* alpha{};
+			std::size_t channel{};
+			for (auto i = 0; material && i < material->textureCount && !alpha; i++)
+			{
+				const auto& texture = material->textureTable[i];
+				const auto image = texture.semantic == iw7::TS_ALPHA_REVEAL_THICKNESS_MAP && texture_layer(texture) == layer
+					? source.resolve(iw7::ASSET_TYPE_IMAGE, texture.image) : nullptr;
+				const auto found = image && image->name ? alpha_channel(asset_name(image->name)) : std::nullopt;
+				if (found)
+				{
+					alpha = image;
+					channel = *found;
+				}
+			}
+
 			for (auto i = 0; material && i < material->textureCount; i++)
 			{
 				const auto& texture = material->textureTable[i];
-				const auto role = texture_role(texture.semantic);
+				const auto role = texture_layer(texture) == layer ? texture_role(texture) : std::nullopt;
 				const auto image = role ? source.resolve(iw7::ASSET_TYPE_IMAGE, texture.image) : nullptr;
 				if (!image || !image->name)
 				{
@@ -561,8 +869,18 @@ namespace zonetool::convert::iw7_iw8
 					continue;
 				}
 
-				const auto file = file_name(asset_name(image->name)) + (*role == image_role::normal ? "_slopes" : "");
-				files.try_emplace(file, image_file{image, *role});
+				auto file = file_name(asset_name(image->name)) + (*role == image_role::normal ? "_slopes" : "");
+				image_file entry{image, *role};
+				if (*role == image_role::color && texture.semantic == iw7::TS_COLOR_SPECULAR_MAP)
+				{
+					// The colour of each alpha is a file of its own; without one, the colour is opaque.
+					entry.alpha = alpha;
+					entry.alpha_channel = channel;
+					entry.opaque = !alpha;
+					file += alpha ? std::format("_a{:08x}", name_hash(asset_name(alpha->name))) : "";
+				}
+
+				files.try_emplace(file, entry);
 				roles[index].push_back(file);
 			}
 		}
@@ -603,7 +921,7 @@ namespace zonetool::convert::iw7_iw8
 				auto& file = files.at(name);
 				try
 				{
-					file.written = write_image(*file.image, file.role, folder / (name + ".dds"));
+					file.written = write_image(file, folder / (name + ".dds"));
 				}
 				catch (const std::exception& e)
 				{
@@ -629,9 +947,26 @@ namespace zonetool::convert::iw7_iw8
 				images[role] = written != role_files.end() ? std::optional(*written) : builtins[name][role];
 			}
 
+			if (output.effect_materials.contains(name))
+			{
+				write_json(output.extracted / "materials" / (name + ".json"),
+					export_effect_material(material, images[static_cast<std::size_t>(image_role::color)].value_or("$white")));
+				continue;
+			}
+
 			// Glass panes blend as the pipeline's glass. Replay maps have no refraction: a distortion layer of a model
-			// adds black.
-			auto kind = classify_material(material);
+			// adds black. The layers of a layered material blend over its surfaces as decals.
+			const auto layer = layer_of(name);
+			auto kind = layer ? material_class{surface_kind::blend} : classify_material(material);
+			// A premultiplied surface whose colour holds its alpha (IW7's patterned glass: the metal of the pattern
+			// covers, the glass between shows through) blends by that alpha.
+			const auto& color = images[static_cast<std::size_t>(image_role::color)];
+			if (kind.kind == surface_kind::additive && kind.premultiplied && color && files.contains(*color) &&
+				!files.at(*color).opaque_alpha)
+			{
+				kind.kind = surface_kind::blend;
+			}
+
 			if (output.glass_materials.contains(name) && kind.kind != surface_kind::opaque)
 			{
 				kind = {surface_kind::blend};
@@ -644,7 +979,8 @@ namespace zonetool::convert::iw7_iw8
 
 			kinds[static_cast<std::size_t>(kind.kind)]++;
 			missing += material == nullptr;
-			write_json(output.extracted / "materials" / (name + ".json"), export_material(material, images, kind));
+			write_json(output.extracted / "materials" / (name + ".json"), export_material(material, images, kind, layer,
+				light_unit_scale(source)));
 		}
 
 		const auto written = std::ranges::count_if(files, [](const auto& entry)

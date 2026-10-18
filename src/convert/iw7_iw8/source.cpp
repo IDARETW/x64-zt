@@ -55,8 +55,10 @@ namespace zonetool::convert::iw7_iw8
 			ZONETOOL_WARNING("iw7: zone \"techsets_%s\" was not found; materials keep default images", this->name_.data());
 		}
 
-		// The multiplayer common zones hold models that maps place (flags, tag_origin) without holding them.
-		for (const auto common : {"common_core_mp", "common_mp"})
+		// The multiplayer common zones hold models that maps place (flags, tag_origin) without holding them, and their
+		// techsets zones the materials of the common effects that map effects use.
+		for (const auto common : {"common_core_mp", "common_mp", "techsets_common", "techsets_common_core_mp", "techsets_common_mp",
+			"techsets_global_core_mp"})
 		{
 			this->load(common);
 		}

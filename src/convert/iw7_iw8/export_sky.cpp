@@ -161,8 +161,9 @@ namespace zonetool::convert::iw7_iw8
 		}
 
 		// Draws the models that are too large for the world (planets) into the sky as the centre of the world sees them:
-		// lit by the sun, the opaque surfaces first and the blended ones over them.
-		void draw_distant_models(const source_map& source, const extraction& output, sky_faces& sky)
+		// lit by the sun, the opaque surfaces first and the blended ones over them. Unlit surfaces emit their colour map
+		// times their tint in IW7's units, which `scale` takes to the sky's.
+		void draw_distant_models(const source_map& source, const extraction& output, sky_faces& sky, const float scale)
 		{
 			if (output.distant_models.empty())
 			{
@@ -184,6 +185,7 @@ namespace zonetool::convert::iw7_iw8
 				const mesh_surface* mesh{};
 				material_class kind{};
 				const texture* colors{};
+				std::array<float, 4> tint{};
 				std::vector<vec3> directions;
 				std::vector<vec3> normals;
 			};
@@ -218,6 +220,7 @@ namespace zonetool::convert::iw7_iw8
 					auto& draw = draws.emplace_back();
 					draw.mesh = &surface;
 					draw.kind = classify_material(surface.material);
+					draw.tint = material_color_tint(surface.material);
 					auto colors = textures.find(surface.material);
 					if (colors == textures.end())
 					{
@@ -291,12 +294,12 @@ namespace zonetool::convert::iw7_iw8
 								return;
 							}
 
-							// Space has almost no ambient light.
-							const auto light = draw.kind.unlit ? 1.0f : 0.03f + std::max(0.0f, dot(normalized(normal), sun));
+							// Space has almost no ambient light; the sun has a luminance of 1 in the sky's units.
+							const auto light = draw.kind.unlit ? scale : 0.03f + std::max(0.0f, dot(normalized(normal), sun));
 							auto& target = sky.colors[face][texel];
 							for (auto channel = 0; channel < 3; channel++)
 							{
-								const auto value = texel_color[channel] * light;
+								const auto value = texel_color[channel] * draw.tint[channel] * light;
 								target[channel] = kind == surface_kind::additive ? target[channel] + value
 									: kind == surface_kind::multiply ? target[channel] * value
 									: kind == surface_kind::blend ? target[channel] * (1.0f - texel_color[3]) + value * texel_color[3]
@@ -341,8 +344,9 @@ namespace zonetool::convert::iw7_iw8
 			}
 
 			// The sky holds high dynamic range colours that IW7's exposure scales; IW3 draws its sky colours as they
-			// are. The exposure takes the sky's mean luminance to a mid grey, and at most its brightest texels (the
-			// stars of a night sky, which is black almost everywhere) to white.
+			// are. The sky and the models that it draws take the units of the converted lights, in which the sun has a
+			// luminance of 1 (Frontier: IW7 shows Neptune, its colour map times 20, at about 4 times the map; these
+			// units put it at 2.1, which Replay draws at about 2.5).
 			const auto size = faces.front().GetMetadata().width;
 			const auto texels = size * size;
 			std::vector<float> luminances;
@@ -359,8 +363,7 @@ namespace zonetool::convert::iw7_iw8
 			const auto mean = std::accumulate(luminances.begin(), luminances.end(), 0.0) / static_cast<double>(luminances.size());
 			const auto bright = luminances.begin() + static_cast<std::ptrdiff_t>(luminances.size() * 999 / 1000);
 			std::ranges::nth_element(luminances, bright);
-			auto exposure = mean > 0.0 ? static_cast<float>(0.2 / mean) : 1.0f;
-			exposure = *bright > 0.0f ? std::min(exposure, 1.0f / *bright) : exposure;
+			const auto exposure = light_unit_scale(source);
 
 			sky_faces sky{size};
 			for (auto face = 0u; face < 6; face++)
@@ -374,7 +377,7 @@ namespace zonetool::convert::iw7_iw8
 				}
 			}
 
-			draw_distant_models(source, output, sky);
+			draw_distant_models(source, output, sky, exposure);
 
 			DirectX::ScratchImage cube;
 			if (FAILED(cube.InitializeCube(DXGI_FORMAT_B8G8R8A8_UNORM, size, size, 1, 1)))
