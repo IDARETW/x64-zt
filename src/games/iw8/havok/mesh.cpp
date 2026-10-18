@@ -1168,6 +1168,9 @@ namespace zonetool::iw8::havok
 
 		auto shared_grid = make_grid(domain, shared_bits);
 		std::vector<bounds> section_geometry(sections.count, empty_bounds);
+		// The bounds of each primitive key, without the convex radius, for the SIMD tree.
+		std::unordered_map<std::uint32_t, bounds> key_bounds;
+		std::unordered_set<std::uint32_t> other_keys;
 		float largest_step = std::max({shared_grid.scale[0], shared_grid.scale[1], shared_grid.scale[2]});
 		for (std::uint32_t s = 0; s < sections.count; s++)
 		{
@@ -1257,6 +1260,7 @@ namespace zonetool::iw8::havok
 					if (indices[2] != 4 || get<std::uint16_t>(table.data, at * 2) != convex_record)
 					{
 						result.custom++;
+						other_keys.insert(key);
 						continue;
 					}
 
@@ -1270,6 +1274,7 @@ namespace zonetool::iw8::havok
 					result.convex_keys[convex] = key;
 					needed[k] = instance_bounds(result.convex_shapes[convex]);
 					include(section_geometry[s], *needed[k]);
+					key_bounds[key] = *needed[k];
 					continue;
 				}
 
@@ -1291,6 +1296,7 @@ namespace zonetool::iw8::havok
 
 				needed[k] = expanded(box, result.convex_radius);
 				include(section_geometry[s], *needed[k]);
+				key_bounds[key] = box;
 			}
 
 			// The tree of the section: odd data = inner node (2 * left leaves + 1), even = leaf (2 * primitive).
@@ -1374,6 +1380,99 @@ namespace zonetool::iw8::havok
 		if (top_leaves != sections.count)
 		{
 			throw std::runtime_error("a compressed mesh tree does not hold each section once");
+		}
+
+		// The SIMD tree: node 1 is the root, leaves hold primitive keys (the first triangle of a quad) with their bounds, and
+		// each inner slot holds the bounds of its child node.
+		const auto* simd = target_of(file, data, member("simdTree.nodes"));
+		if (simd && simd->count > 1)
+		{
+			const auto slot_bounds = [&](const std::uint32_t node, const std::size_t slot)
+			{
+				bounds box{};
+				for (std::size_t axis = 0; axis < 3; axis++)
+				{
+					box[axis] = get<float>(simd->data, node * 128 + axis * 32 + slot * 4);
+					box[axis + 3] = get<float>(simd->data, node * 128 + axis * 32 + 16 + slot * 4);
+				}
+
+				return box;
+			};
+
+			const auto is_leaf = [&](const std::uint32_t node)
+			{
+				return get<std::uint8_t>(simd->data, node * 128 + 112) != 0;
+			};
+
+			std::unordered_set<std::uint32_t> held;
+			std::vector<std::uint32_t> nodes_left{1};
+			while (!nodes_left.empty())
+			{
+				const auto node = nodes_left.back();
+				nodes_left.pop_back();
+				if (node == 0 || node >= simd->count)
+				{
+					throw std::runtime_error("a compressed mesh SIMD tree node is outside the tree");
+				}
+
+				for (std::size_t slot = 0; slot < 4; slot++)
+				{
+					const auto value = get<std::uint32_t>(simd->data, node * 128 + 96 + slot * 4);
+					if (is_leaf(node))
+					{
+						if (value == 0xFFFFFFFF)
+						{
+							continue;
+						}
+
+						const auto found = key_bounds.find(value);
+						if (!held.insert(value).second || (found == key_bounds.end() && !other_keys.contains(value)))
+						{
+							throw std::runtime_error(std::format("a compressed mesh SIMD tree holds key 0x{:X} twice or without a primitive", value));
+						}
+
+						if (found != key_bounds.end() && !holds(slot_bounds(node, slot), found->second, exact ? 0.0f : largest_step))
+						{
+							throw std::runtime_error(std::format("a compressed mesh SIMD tree leaf does not hold key 0x{:X}", value));
+						}
+
+						continue;
+					}
+
+					if (value == 0)
+					{
+						continue;
+					}
+
+					if (value >= simd->count)
+					{
+						throw std::runtime_error("a compressed mesh SIMD tree node is outside the tree");
+					}
+
+					auto children = empty_bounds;
+					for (std::size_t child = 0; child < 4; child++)
+					{
+						const auto data_word = get<std::uint32_t>(simd->data, value * 128 + 96 + child * 4);
+						if (is_leaf(value) ? data_word != 0xFFFFFFFF : data_word != 0)
+						{
+							include(children, slot_bounds(value, child));
+						}
+					}
+
+					if (!holds(slot_bounds(node, slot), children))
+					{
+						throw std::runtime_error("a compressed mesh SIMD tree node does not hold its child");
+					}
+
+					nodes_left.push_back(value);
+				}
+			}
+
+			if (held.size() != key_bounds.size() + other_keys.size())
+			{
+				throw std::runtime_error(std::format("a compressed mesh SIMD tree holds {} of {} primitives", held.size(),
+					key_bounds.size() + other_keys.size()));
+			}
 		}
 
 		return result;
