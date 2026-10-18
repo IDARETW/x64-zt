@@ -35,6 +35,7 @@ namespace zonetool
 		};
 
 		constexpr auto offset_tag_shift = 36;
+		constexpr std::uint64_t relative_offset_tag = 1;
 
 		zone_offset split_offset(const void* pointer)
 		{
@@ -69,6 +70,11 @@ namespace zonetool
 	void zone_reader::set_inline_asset_loader(inline_asset_loader loader)
 	{
 		this->inline_asset_loader_ = std::move(loader);
+	}
+
+	void zone_reader::set_read_trace(read_trace trace)
+	{
+		this->read_trace_ = std::move(trace);
 	}
 
 	void zone_reader::set_script_strings(std::vector<std::uint32_t> ids)
@@ -107,13 +113,13 @@ namespace zonetool
 		const auto state = this->stream_stack_.back();
 		this->stream_stack_.pop_back();
 
-		if (this->current_block_ == XFILE_BLOCK_TEMP)
+		if (this->current_block_ == this->layout_.temp_block)
 		{
-			this->blocks_[XFILE_BLOCK_TEMP].position = state.position_at_push;
+			this->blocks_[this->layout_.temp_block].position = state.position_at_push;
 		}
 		else if (this->current_block_ == this->layout_.pop_aligned_block)
 		{
-			this->align(15);
+			this->align(this->layout_.pop_alignment);
 		}
 
 		this->current_block_ = state.previous_block;
@@ -124,6 +130,33 @@ namespace zonetool
 		auto& block = this->current_block();
 		block.position = ((block.base + block.position + alignment) & ~alignment) - block.base;
 		block.largest_alignment = std::max(block.largest_alignment, alignment);
+	}
+
+	void zone_reader::begin_asset()
+	{
+		std::vector<std::size_t> positions;
+		positions.reserve(this->blocks_.size());
+		for (const auto& block : this->blocks_)
+		{
+			positions.push_back(block.position);
+		}
+
+		this->asset_starts_.push_back(std::move(positions));
+	}
+
+	void zone_reader::end_asset()
+	{
+		if (this->asset_starts_.empty())
+		{
+			throw std::runtime_error("asset stack is empty");
+		}
+
+		this->asset_starts_.pop_back();
+	}
+
+	void zone_reader::unsupported(const char* reader) const
+	{
+		throw std::runtime_error(std::format("the zone reader does not support {}", reader));
 	}
 
 	void zone_reader::set_block_base(const std::uint8_t block, const std::size_t base)
@@ -191,6 +224,11 @@ namespace zonetool
 		}
 		else
 		{
+			if (this->read_trace_)
+			{
+				this->read_trace_(this->data_position_, size, this->current_block_, block.position);
+			}
+
 			this->read_raw(destination, size);
 		}
 
@@ -219,9 +257,15 @@ namespace zonetool
 		// Stock zones leave the bits above the block index clear, and zonetool sets them to the pointer mask.
 		// Any other value is a raw heap pointer that the game ignores.
 		const auto tag = pointer_value(pointer) >> offset_tag_shift;
-		if (tag != 0 && tag != this->layout_.offset_tag)
+		const auto relative = this->layout_.relative_offsets && tag == relative_offset_tag;
+		if (tag != 0 && tag != this->layout_.offset_tag && !relative)
 		{
 			return false;
+		}
+
+		if (relative)
+		{
+			return !this->asset_starts_.empty();
 		}
 
 		const auto [block_index, offset] = split_offset(pointer);
@@ -319,7 +363,12 @@ namespace zonetool
 			throw std::runtime_error(std::format("pointer 0x{:016X} is not a valid zone offset", pointer_value(*field)));
 		}
 
-		const auto [block_index, offset] = split_offset(*field);
+		auto [block_index, offset] = split_offset(*field);
+		if (this->layout_.relative_offsets && (pointer_value(*field) >> offset_tag_shift) == relative_offset_tag)
+		{
+			offset += this->asset_starts_.front()[block_index];
+		}
+
 		if (block_index == this->layout_.end_anchored_block)
 		{
 			this->deferred_offsets_.emplace_back(field, offset, target, this->blocks_[block_index].position);
@@ -360,7 +409,7 @@ namespace zonetool
 
 	void zone_reader::read_asset_pointer(const std::int32_t type, void** field)
 	{
-		this->push_stream(XFILE_BLOCK_TEMP);
+		this->push_stream(this->layout_.temp_block);
 
 		if (*field)
 		{
