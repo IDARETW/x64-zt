@@ -421,7 +421,49 @@ namespace zonetool
 		}
 
 		const auto address = this->offset_address(static_cast<std::uint8_t>(block_index), offset);
+		if (target == offset_target::alias)
+		{
+			this->aliases_.emplace_back(field, reinterpret_cast<void**>(address));
+		}
+
 		*field = target == offset_target::alias ? *reinterpret_cast<void**>(address) : address;
+	}
+
+	std::size_t zone_reader::alias_count() const
+	{
+		return this->aliases_.size();
+	}
+
+	void zone_reader::move_aliases(const void* source, const std::size_t size, void* destination, const std::size_t first)
+	{
+		const auto start = static_cast<const std::uint8_t*>(source);
+		for (auto i = first; i < this->aliases_.size(); i++)
+		{
+			auto& field = this->aliases_[i].first;
+			const auto address = reinterpret_cast<const std::uint8_t*>(field);
+			if (address >= start && address < start + size)
+			{
+				field = reinterpret_cast<void**>(static_cast<std::uint8_t*>(destination) + (address - start));
+			}
+		}
+	}
+
+	void zone_reader::resolve_aliases()
+	{
+		// An alias of an alias resolves once the alias it points at resolves.
+		auto changed = true;
+		for (auto pass = 0; changed && pass < 8; pass++)
+		{
+			changed = false;
+			for (const auto& [field, slot] : this->aliases_)
+			{
+				if (*field != *slot)
+				{
+					*field = *slot;
+					changed = true;
+				}
+			}
+		}
 	}
 
 	char* zone_reader::read_string_data()
