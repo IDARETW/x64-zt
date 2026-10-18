@@ -358,4 +358,40 @@ namespace zonetool::iw8
 		zone_assets_writer writer(assets, strings, options, false);
 		return writer.write(list);
 	}
+
+	written_zone write_zone(const loaded_zone& zone)
+	{
+		std::vector<zone_asset> list;
+		list.reserve(zone.list.size());
+		for (const auto& asset : zone.list)
+		{
+			list.emplace_back(asset.type, asset.header, asset.referenced);
+		}
+
+		std::vector<zone_asset> assets;
+		assets.reserve(zone.assets.size());
+		for (const auto& asset : zone.assets)
+		{
+			assets.emplace_back(asset.type, asset.header, asset.referenced);
+		}
+
+		return write_zone(list, assets, zone.script_strings);
+	}
+
+	xfile::fastfile rewrite_fastfile(const std::string& name, xfile::fastfile file)
+	{
+		xfile::fastfile result{};
+		result.xfile_version = file.xfile_version;
+		result.transient = file.transient;
+		const auto preload_walk_size = file.preload_walk_size;
+
+		auto zone = load_zone(name, std::move(file), {.keep_temp_data = true});
+		auto written = write_zone(*zone);
+		zone.reset();
+
+		result.payload = std::move(written.data);
+		result.block_sizes = std::move(written.block_sizes);
+		result.preload_walk_size = std::max<std::uint64_t>(written.preload_walk_size, preload_walk_size);
+		return result;
+	}
 }

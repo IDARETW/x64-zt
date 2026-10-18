@@ -41,9 +41,11 @@ Without a command, `zonetool.exe` opens an interactive console.
 - `buildzone` never writes to the game folder.
 - `dumpzone <iw3 zone> --target iw8` converts a whole IW3 map into the Replay 1.20 zones in `output/<map>/`. Options:
   `--map <name>`, `--style iw3|iw8`, `--unlinker <exe>`, `--gsc_tool <exe>`, `--replay <exe>` (its folder is the Replay
-  game folder), `--metadata <json>`, `--acts <exe>` (validates the zones), `--havok exe|native|native-check` (Havok data
-  from the Replay executable, built natively, or built natively and checked with the executable), `--dump 1` (also
-  dumps each zone for `buildzone`). Tool paths can also go in `zonetool.json` `tools`.
+  game folder), `--metadata <json>`, `--acts <exe>` (validates the zones), `--havok native|native-check|exe` (Havok data
+  built natively, the default; built natively and checked with the executable; or baked by the executable),
+  `--writer x64-zt|iw8-zonetool` (the IW8 zone writer lays out each zone, the default; or the zone keeps the stream
+  layout of the converter, for byte comparisons with iw8-zonetool builds), `--dump 1` (also dumps each zone for
+  `buildzone`). Tool paths can also go in `zonetool.json` `tools`.
 
 ## Source layout
 
@@ -163,7 +165,8 @@ Run these after a change to a reader, writer or the container code:
 | Container | `inspect --all` | Every zone passes. IW8: 9536 of 9545 (the 9 later-build frontend zones have other xfile versions) |
 | Reader | `verifyzone --all` | H1: 6991 of 6991. IW7: 686 of 687 (`mp_vlobby_room` on disk is a modified file). IW8: 9533 of 9545 (the 12 others are frontend zones that the Replay loader also rejects) |
 | IW8 writer | `IW8_REWRITE=1 verifyzone --all` | Each zone written again with its own pointer markers gives the same data (block sizes can differ: stock zones add slack) |
-| IW8 writer | `IW8_REWRITE=fresh verifyzone --all` | Each zone written with the choices of the writer loads with the same assets |
+| IW8 writer | `IW8_REWRITE=fresh verifyzone --all` | Each zone written with the choices of the writer (as the IW3 converter writes its zones) loads with the same assets |
+| IW3 converter zones | convert, then `IW8_REWRITE=compare IW8_COMPARE_ZONE=<zone built with --writer iw8-zonetool> verifyzone <zone>` | The same asset list and script strings, and each asset the same (Nuketown: 3053 list entries, 178 strings, 2518 assets) |
 | IW8 Havok | `IW8_REWRITE=havok verifyzone --all` | Each compact Havok tagfile writes again to the same bytes, and each self-describing one reads back with the same items (134015 and 1694 in the stock zones) |
 | IW8 convex shapes | `IW8_REWRITE=convex verifyzone --all` | Each convex polytope shape builds again from its vertices without the game, holds the vertices of the original within 1 mm, and writes and reads back the same (485747 shapes) |
 | IW8 compressed meshes | `IW8_REWRITE=mesh verifyzone --all` | Each compressed mesh decodes with trees that hold its primitives, builds again from its triangles and convex shapes without the game, and decodes to the same triangles within its vertex error (77378 meshes, 45.1 million triangles, 898436 convex shapes; 80 meshes with other custom primitives are left out) |

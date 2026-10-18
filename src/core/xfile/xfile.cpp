@@ -1008,7 +1008,8 @@ namespace zonetool::xfile
 			file.preload_walk_size = header.preload_walk_size;
 		}
 
-		std::string write_iw8(const format& format, const fastfile& file)
+		// The header and the stored frame that come before the payload.
+		std::string write_iw8_header(const format& format, const fastfile& file)
 		{
 			if (format.block_count != iw8_block_count || file.block_sizes.size() != iw8_block_count)
 			{
@@ -1034,10 +1035,8 @@ namespace zonetool::xfile
 			std::ranges::copy(file.block_sizes, std::begin(header.block_sizes));
 
 			std::string data;
-			data.reserve(sizeof(header) + header.resident_size);
 			data.append(reinterpret_cast<const char*>(&header), sizeof(header));
 			data.append(stored_frame);
-			data.append(file.payload);
 			return data;
 		}
 	}
@@ -1049,7 +1048,7 @@ namespace zonetool::xfile
 			throw std::runtime_error(std::format("the {} container has no v2 writer", format.unsigned_magic));
 		}
 
-		const auto data = write_iw8(format, file);
+		const auto header = write_iw8_header(format, file);
 		if (path.has_parent_path())
 		{
 			std::filesystem::create_directories(path.parent_path());
@@ -1060,9 +1059,13 @@ namespace zonetool::xfile
 		partial += ".partial";
 		{
 			std::ofstream stream(partial, std::ios::binary | std::ios::trunc);
-			stream.write(data.data(), static_cast<std::streamsize>(data.size()));
+			stream.write(header.data(), static_cast<std::streamsize>(header.size()));
+			stream.write(file.payload.data(), static_cast<std::streamsize>(file.payload.size()));
+			stream.close();
 			if (!stream)
 			{
+				std::error_code ignored;
+				std::filesystem::remove(partial, ignored);
 				throw std::runtime_error(std::format("cannot write {}", partial.string()));
 			}
 		}
