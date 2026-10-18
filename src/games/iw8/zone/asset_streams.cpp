@@ -1404,10 +1404,7 @@ namespace zonetool::iw8
 				for (std::size_t i1 = 0; i1 < count; i1++)
 				{
 					stream.push(1);
-					if (const auto items_3 = stream.array(data[i1], 7, 1))
-					{
-						stream_physicssfxeventasset(stream, *items_3);
-					}
+					stream.asset(ASSET_TYPE_PHYSICS_SFX_EVENT_ASSET, data[i1]);
 					stream.pop();
 				}
 			}
@@ -1421,10 +1418,7 @@ namespace zonetool::iw8
 				for (std::size_t i1 = 0; i1 < count; i1++)
 				{
 					stream.push(1);
-					if (const auto items_3 = stream.array(data[i1], 7, 1))
-					{
-						stream_physicsvfxeventasset(stream, *items_3);
-					}
+					stream.asset(ASSET_TYPE_PHYSICS_VFX_EVENT_ASSET, data[i1]);
 					stream.pop();
 				}
 			}
@@ -1888,10 +1882,7 @@ namespace zonetool::iw8
 				for (std::size_t i1 = 0; i1 < count; i1++)
 				{
 					stream.push(1);
-					if (const auto items_3 = stream.array(data[i1], 7, 1))
-					{
-						stream_material(stream, *items_3);
-					}
+					stream.asset(ASSET_TYPE_MATERIAL, data[i1]);
 					stream.pop();
 				}
 			}
@@ -1971,10 +1962,7 @@ namespace zonetool::iw8
 				for (std::size_t i1 = 0; i1 < count; i1++)
 				{
 					stream.push(1);
-					if (const auto items_3 = stream.array(data[i1], 7, 1))
-					{
-						stream_clothasset(stream, *items_3);
-					}
+					stream.asset(ASSET_TYPE_CLOTHASSET, data[i1]);
 					stream.pop();
 				}
 			}
@@ -3748,10 +3736,7 @@ namespace zonetool::iw8
 				for (std::size_t i1 = 0; i1 < count; i1++)
 				{
 					stream.push(1);
-					if (const auto items_3 = stream.array(data[i1], 15, 1))
-					{
-						stream_gfximage(stream, *items_3);
-					}
+					stream.asset(ASSET_TYPE_IMAGE, data[i1]);
 					stream.pop();
 				}
 			}
@@ -4477,10 +4462,7 @@ namespace zonetool::iw8
 				for (std::size_t i1 = 0; i1 < count; i1++)
 				{
 					stream.push(1);
-					if (const auto items_3 = stream.array(data[i1], 7, 1))
-					{
-						stream_xmodel(stream, *items_3);
-					}
+					stream.asset(ASSET_TYPE_XMODEL, data[i1]);
 					stream.pop();
 				}
 			}
@@ -5112,10 +5094,7 @@ namespace zonetool::iw8
 				for (std::size_t i1 = 0; i1 < count; i1++)
 				{
 					stream.push(1);
-					if (const auto items_3 = stream.array(data[i1], 7, 1))
-					{
-						stream_xanimparts(stream, *items_3);
-					}
+					stream.asset(ASSET_TYPE_XANIMPARTS, data[i1]);
 					stream.pop();
 				}
 			}
@@ -5167,10 +5146,7 @@ namespace zonetool::iw8
 				for (std::size_t i1 = 0; i1 < count; i1++)
 				{
 					stream.push(1);
-					if (const auto items_3 = stream.array(data[i1], 7, 1))
-					{
-						stream_reticledef(stream, *items_3);
-					}
+					stream.asset(ASSET_TYPE_RETICLE, data[i1]);
 					stream.pop();
 				}
 			}
@@ -5739,10 +5715,7 @@ namespace zonetool::iw8
 				for (std::size_t i1 = 0; i1 < count; i1++)
 				{
 					stream.push(1);
-					if (const auto items_3 = stream.array(data[i1], 7, 1))
-					{
-						stream_weaponattachment(stream, *items_3);
-					}
+					stream.asset(ASSET_TYPE_ATTACHMENT, data[i1]);
 					stream.pop();
 				}
 			}
@@ -7944,10 +7917,7 @@ namespace zonetool::iw8
 				for (std::size_t i1 = 0; i1 < count; i1++)
 				{
 					stream.push(1);
-					if (const auto items_3 = stream.array(data[i1], 7, 1))
-					{
-						stream_weaponcompletedef(stream, *items_3);
-					}
+					stream.asset(ASSET_TYPE_WEAPON, data[i1]);
 					stream.pop();
 				}
 			}
@@ -8236,10 +8206,7 @@ namespace zonetool::iw8
 				for (std::size_t i1 = 0; i1 < count; i1++)
 				{
 					stream.push(1);
-					if (const auto items_3 = stream.array(data[i1], 7, 1))
-					{
-						stream_xmodelsurfs(stream, *items_3);
-					}
+					stream.asset(ASSET_TYPE_XMODEL_SURFS, data[i1]);
 					stream.pop();
 				}
 			}
@@ -8607,10 +8574,7 @@ namespace zonetool::iw8
 				for (std::size_t i1 = 0; i1 < count; i1++)
 				{
 					stream.push(1);
-					if (const auto items_3 = stream.array(data[i1], 7, 1))
-					{
-						stream_blendspace2ddef(stream, *items_3);
-					}
+					stream.asset(ASSET_TYPE_BLENDSPACE2D, data[i1]);
 					stream.pop();
 				}
 			}
@@ -10836,123 +10800,123 @@ namespace zonetool::iw8
 	{
 		static const asset_format formats[ASSET_TYPE_COUNT]
 		{
-			{"physicslibrary", 24, 7, stream_physicslibrary_asset<load_stream>},
-			{"physicssfxeventasset", 32, 7, stream_physicssfxeventasset_asset<load_stream>},
-			{"physicsvfxeventasset", 32, 7, stream_physicsvfxeventasset_asset<load_stream>},
-			{"physicsasset", 88, 7, stream_physicsasset_asset<load_stream>},
-			{"physicsfxpipeline", 48, 7, stream_physicsfxpipeline_asset<load_stream>},
-			{"physicsfxshape", 48, 7, stream_physicsfxshape_asset<load_stream>},
-			{"physicsdebugdata", 312, 7, stream_physicsdebugdata_asset<load_stream>},
-			{"xanim", 160, 7, stream_xanim_asset<load_stream>},
-			{"xmodelsurfs", 96, 7, stream_xmodelsurfs_asset<load_stream>},
-			{"xmodel", 688, 7, stream_xmodel_asset<load_stream>},
-			{"mayhem", 80, 7, stream_mayhem_asset<load_stream>},
-			{"material", 120, 7, stream_material_asset<load_stream>},
-			{"computeshader", 40, 7, stream_computeshader_asset<load_stream>},
-			{"libshader", 40, 7, stream_libshader_asset<load_stream>},
-			{"vertexshader", 40, 7, stream_vertexshader_asset<load_stream>},
-			{"hullshader", 40, 7, stream_hullshader_asset<load_stream>},
-			{"domainshader", 40, 7, stream_domainshader_asset<load_stream>},
-			{"pixelshader", 40, 7, stream_pixelshader_asset<load_stream>},
-			{"techset", 64, 7, stream_techset_asset<load_stream>},
-			{"image", 232, 15, stream_image_asset<load_stream>},
-			{"soundglobals", 128, 7, stream_soundglobals_asset<load_stream>},
-			{"soundbank", 512, 7, stream_soundbank_asset<load_stream>},
-			{"soundbanktransient", 512, 7, stream_soundbanktransient_asset<load_stream>},
-			{"col_map", 248, 7, stream_col_map_asset<load_stream>},
-			{"com_map", 168, 7, stream_com_map_asset<load_stream>},
-			{"glass_map", 16, 7, stream_glass_map_asset<load_stream>},
-			{"aipaths", 152, 7, stream_aipaths_asset<load_stream>},
-			{"navmesh", 168, 7, stream_navmesh_asset<load_stream>},
-			{"tacgraph", 24, 7, stream_tacgraph_asset<load_stream>},
-			{"map_ents", 1032, 7, stream_map_ents_asset<load_stream>},
-			{"fx_map", 15568, 7, stream_fx_map_asset<load_stream>},
-			{"gfx_map", 17808, 15, stream_gfx_map_asset<load_stream>},
-			{"gfx_map_trzone", 328, 7, stream_gfx_map_trzone_asset<load_stream>},
-			{"iesprofile", 0, 0, nullptr},
-			{"lightdef", 32, 7, stream_lightdef_asset<load_stream>},
-			{"gradingclut", 24, 7, stream_gradingclut_asset<load_stream>},
-			{"ui_map", 0, 0, nullptr},
-			{"fogspline", 32, 7, stream_fogspline_asset<load_stream>},
-			{"animclass", 80, 7, stream_animclass_asset<load_stream>},
-			{"playeranim", 168, 7, stream_playeranim_asset<load_stream>},
-			{"gesture", 656, 7, stream_gesture_asset<load_stream>},
-			{"localize", 16, 7, stream_localize_asset<load_stream>},
-			{"attachment", 968, 7, stream_attachment_asset<load_stream>},
-			{"weapon", 624, 7, stream_weapon_asset<load_stream>},
-			{"vfx", 128, 15, stream_vfx_asset<load_stream>},
-			{"impactfx", 40, 7, stream_impactfx_asset<load_stream>},
-			{"surfacefx", 40, 7, stream_surfacefx_asset<load_stream>},
-			{"aitype", 0, 0, nullptr},
-			{"mptype", 0, 0, nullptr},
-			{"character", 0, 0, nullptr},
-			{"xmodelalias", 0, 0, nullptr},
-			{"rawfile", 24, 7, stream_rawfile_asset<load_stream>},
-			{"scriptfile", 40, 7, stream_scriptfile_asset<load_stream>},
-			{"scriptdebugdata", 24, 7, stream_scriptdebugdata_asset<load_stream>},
-			{"stringtable", 48, 7, stream_stringtable_asset<load_stream>},
-			{"leaderboarddef", 56, 7, stream_leaderboarddef_asset<load_stream>},
-			{"virtualleaderboarddef", 48, 7, stream_virtualleaderboarddef_asset<load_stream>},
-			{"ddl", 16, 7, stream_ddl_asset<load_stream>},
-			{"tracer", 144, 7, stream_tracer_asset<load_stream>},
-			{"vehicle", 3848, 7, stream_vehicle_asset<load_stream>},
-			{"addon_map_ents", 128, 7, stream_addon_map_ents_asset<load_stream>},
-			{"netconststrings", 32, 7, stream_netconststrings_asset<load_stream>},
-			{"luafile", 24, 7, stream_luafile_asset<load_stream>},
-			{"scriptable", 120, 7, stream_scriptable_asset<load_stream>},
-			{"equipsndtable", 3208, 7, stream_equipsndtable_asset<load_stream>},
-			{"vectorfield", 64, 15, stream_vectorfield_asset<load_stream>},
-			{"particlesimanimation", 120, 31, stream_particlesimanimation_asset<load_stream>},
-			{"streaminginfo", 72, 7, stream_streaminginfo_asset<load_stream>},
-			{"laser", 168, 7, stream_laser_asset<load_stream>},
-			{"ttf", 32, 7, stream_ttf_asset<load_stream>},
-			{"suit", 1824, 7, stream_suit_asset<load_stream>},
-			{"suitanimpackage", 16, 7, stream_suitanimpackage_asset<load_stream>},
-			{"camera", 376, 7, stream_camera_asset<load_stream>},
-			{"hudoutline", 96, 7, stream_hudoutline_asset<load_stream>},
-			{"spaceshiptarget", 136, 7, stream_spaceshiptarget_asset<load_stream>},
-			{"rumble", 56, 7, stream_rumble_asset<load_stream>},
-			{"rumblegraph", 144, 7, stream_rumblegraph_asset<load_stream>},
-			{"animpkg", 64, 7, stream_animpkg_asset<load_stream>},
-			{"sfxpkg", 176, 7, stream_sfxpkg_asset<load_stream>},
-			{"vfxpkg", 16, 7, stream_vfxpkg_asset<load_stream>},
-			{"footstepvfx", 1032, 7, stream_footstepvfx_asset<load_stream>},
-			{"behaviortree", 56, 7, stream_behaviortree_asset<load_stream>},
-			{"aianimset", 64, 7, stream_aianimset_asset<load_stream>},
-			{"aiasm", 80, 7, stream_aiasm_asset<load_stream>},
-			{"proceduralbones", 32, 7, stream_proceduralbones_asset<load_stream>},
-			{"dynamicbones", 88, 7, stream_dynamicbones_asset<load_stream>},
-			{"reticle", 72, 7, stream_reticle_asset<load_stream>},
-			{"xanimcurve", 32, 7, stream_xanimcurve_asset<load_stream>},
-			{"coverselector", 120, 7, stream_coverselector_asset<load_stream>},
-			{"enemyselector", 112, 7, stream_enemyselector_asset<load_stream>},
-			{"clientcharacter", 32, 7, stream_clientcharacter_asset<load_stream>},
-			{"clothasset", 128, 7, stream_clothasset_asset<load_stream>},
-			{"cinematicmotion", 592, 7, stream_cinematicmotion_asset<load_stream>},
-			{"accessory", 48, 7, stream_accessory_asset<load_stream>},
-			{"locdmgtable", 96, 7, stream_locdmgtable_asset<load_stream>},
-			{"bulletpenetration", 1032, 7, stream_bulletpenetration_asset<load_stream>},
-			{"scriptbundle", 40, 7, stream_scriptbundle_asset<load_stream>},
-			{"blendspace2d", 64, 7, stream_blendspace2d_asset<load_stream>},
-			{"xcam", 176, 7, stream_xcam_asset<load_stream>},
-			{"camo", 168, 7, stream_camo_asset<load_stream>},
-			{"xcompositemodel", 24, 7, stream_xcompositemodel_asset<load_stream>},
-			{"xmodeldetailcollision", 40, 7, stream_xmodeldetailcollision_asset<load_stream>},
-			{"streamkey", 64, 7, stream_streamkey_asset<load_stream>},
-			{"streamtreeoverride", 24, 7, stream_streamtreeoverride_asset<load_stream>},
-			{"keyvaluepairs", 24, 7, stream_keyvaluepairs_asset<load_stream>},
-			{"stterrain", 152, 7, stream_stterrain_asset<load_stream>},
-			{"nativescriptpatch", 40, 7, stream_nativescriptpatch_asset<load_stream>},
-			{"collisiontile", 72, 7, stream_collisiontile_asset<load_stream>},
-			{"execution", 104, 7, stream_execution_asset<load_stream>},
-			{"carryobject", 48, 7, stream_carryobject_asset<load_stream>},
-			{"soundbanklist", 24, 7, stream_soundbanklist_asset<load_stream>},
-			{"decalvolumematerial", 104, 7, stream_decalvolumematerial_asset<load_stream>},
-			{"decalvolumemask", 16, 7, stream_decalvolumemask_asset<load_stream>},
-			{"dynentitylist", 64, 7, stream_dynentitylist_asset<load_stream>},
-			{"fx_map_trzone", 160, 7, stream_fx_map_trzone_asset<load_stream>},
-			{"dlogschema", 88, 7, stream_dlogschema_asset<load_stream>},
-			{"edgelist", 160, 7, stream_edgelist_asset<load_stream>},
+			{"physicslibrary", 24, 7, 2, stream_physicslibrary_asset<load_stream>, stream_physicslibrary_asset<write_stream>},
+			{"physicssfxeventasset", 32, 7, 2, stream_physicssfxeventasset_asset<load_stream>, stream_physicssfxeventasset_asset<write_stream>},
+			{"physicsvfxeventasset", 32, 7, 2, stream_physicsvfxeventasset_asset<load_stream>, stream_physicsvfxeventasset_asset<write_stream>},
+			{"physicsasset", 88, 7, 2, stream_physicsasset_asset<load_stream>, stream_physicsasset_asset<write_stream>},
+			{"physicsfxpipeline", 48, 7, 2, stream_physicsfxpipeline_asset<load_stream>, stream_physicsfxpipeline_asset<write_stream>},
+			{"physicsfxshape", 48, 7, 2, stream_physicsfxshape_asset<load_stream>, stream_physicsfxshape_asset<write_stream>},
+			{"physicsdebugdata", 312, 7, 2, stream_physicsdebugdata_asset<load_stream>, stream_physicsdebugdata_asset<write_stream>},
+			{"xanim", 160, 7, 2, stream_xanim_asset<load_stream>, stream_xanim_asset<write_stream>},
+			{"xmodelsurfs", 96, 7, 1, stream_xmodelsurfs_asset<load_stream>, stream_xmodelsurfs_asset<write_stream>},
+			{"xmodel", 688, 7, 2, stream_xmodel_asset<load_stream>, stream_xmodel_asset<write_stream>},
+			{"mayhem", 80, 7, 2, stream_mayhem_asset<load_stream>, stream_mayhem_asset<write_stream>},
+			{"material", 120, 7, 1, stream_material_asset<load_stream>, stream_material_asset<write_stream>},
+			{"computeshader", 40, 7, 1, stream_computeshader_asset<load_stream>, stream_computeshader_asset<write_stream>},
+			{"libshader", 40, 7, 1, stream_libshader_asset<load_stream>, stream_libshader_asset<write_stream>},
+			{"vertexshader", 40, 7, 1, stream_vertexshader_asset<load_stream>, stream_vertexshader_asset<write_stream>},
+			{"hullshader", 40, 7, 1, stream_hullshader_asset<load_stream>, stream_hullshader_asset<write_stream>},
+			{"domainshader", 40, 7, 1, stream_domainshader_asset<load_stream>, stream_domainshader_asset<write_stream>},
+			{"pixelshader", 40, 7, 1, stream_pixelshader_asset<load_stream>, stream_pixelshader_asset<write_stream>},
+			{"techset", 64, 7, 1, stream_techset_asset<load_stream>, stream_techset_asset<write_stream>},
+			{"image", 232, 15, 1, stream_image_asset<load_stream>, stream_image_asset<write_stream>},
+			{"soundglobals", 128, 7, 2, stream_soundglobals_asset<load_stream>, stream_soundglobals_asset<write_stream>},
+			{"soundbank", 512, 7, 1, stream_soundbank_asset<load_stream>, stream_soundbank_asset<write_stream>},
+			{"soundbanktransient", 512, 7, 1, stream_soundbanktransient_asset<load_stream>, stream_soundbanktransient_asset<write_stream>},
+			{"col_map", 248, 7, 2, stream_col_map_asset<load_stream>, stream_col_map_asset<write_stream>},
+			{"com_map", 168, 7, 2, stream_com_map_asset<load_stream>, stream_com_map_asset<write_stream>},
+			{"glass_map", 16, 7, 2, stream_glass_map_asset<load_stream>, stream_glass_map_asset<write_stream>},
+			{"aipaths", 152, 7, 2, stream_aipaths_asset<load_stream>, stream_aipaths_asset<write_stream>},
+			{"navmesh", 168, 7, 2, stream_navmesh_asset<load_stream>, stream_navmesh_asset<write_stream>},
+			{"tacgraph", 24, 7, 2, stream_tacgraph_asset<load_stream>, stream_tacgraph_asset<write_stream>},
+			{"map_ents", 1032, 7, 2, stream_map_ents_asset<load_stream>, stream_map_ents_asset<write_stream>},
+			{"fx_map", 15568, 7, 2, stream_fx_map_asset<load_stream>, stream_fx_map_asset<write_stream>},
+			{"gfx_map", 17808, 15, 2, stream_gfx_map_asset<load_stream>, stream_gfx_map_asset<write_stream>},
+			{"gfx_map_trzone", 328, 7, 2, stream_gfx_map_trzone_asset<load_stream>, stream_gfx_map_trzone_asset<write_stream>},
+			{"iesprofile", 0, 0, 0, nullptr, nullptr},
+			{"lightdef", 32, 7, 2, stream_lightdef_asset<load_stream>, stream_lightdef_asset<write_stream>},
+			{"gradingclut", 24, 7, 2, stream_gradingclut_asset<load_stream>, stream_gradingclut_asset<write_stream>},
+			{"ui_map", 0, 0, 0, nullptr, nullptr},
+			{"fogspline", 32, 7, 2, stream_fogspline_asset<load_stream>, stream_fogspline_asset<write_stream>},
+			{"animclass", 80, 7, 2, stream_animclass_asset<load_stream>, stream_animclass_asset<write_stream>},
+			{"playeranim", 168, 7, 2, stream_playeranim_asset<load_stream>, stream_playeranim_asset<write_stream>},
+			{"gesture", 656, 7, 2, stream_gesture_asset<load_stream>, stream_gesture_asset<write_stream>},
+			{"localize", 16, 7, 2, stream_localize_asset<load_stream>, stream_localize_asset<write_stream>},
+			{"attachment", 968, 7, 2, stream_attachment_asset<load_stream>, stream_attachment_asset<write_stream>},
+			{"weapon", 624, 7, 2, stream_weapon_asset<load_stream>, stream_weapon_asset<write_stream>},
+			{"vfx", 128, 15, 2, stream_vfx_asset<load_stream>, stream_vfx_asset<write_stream>},
+			{"impactfx", 40, 7, 2, stream_impactfx_asset<load_stream>, stream_impactfx_asset<write_stream>},
+			{"surfacefx", 40, 7, 2, stream_surfacefx_asset<load_stream>, stream_surfacefx_asset<write_stream>},
+			{"aitype", 0, 0, 0, nullptr, nullptr},
+			{"mptype", 0, 0, 0, nullptr, nullptr},
+			{"character", 0, 0, 0, nullptr, nullptr},
+			{"xmodelalias", 0, 0, 0, nullptr, nullptr},
+			{"rawfile", 24, 7, 2, stream_rawfile_asset<load_stream>, stream_rawfile_asset<write_stream>},
+			{"scriptfile", 40, 7, 2, stream_scriptfile_asset<load_stream>, stream_scriptfile_asset<write_stream>},
+			{"scriptdebugdata", 24, 7, 2, stream_scriptdebugdata_asset<load_stream>, stream_scriptdebugdata_asset<write_stream>},
+			{"stringtable", 48, 7, 2, stream_stringtable_asset<load_stream>, stream_stringtable_asset<write_stream>},
+			{"leaderboarddef", 56, 7, 2, stream_leaderboarddef_asset<load_stream>, stream_leaderboarddef_asset<write_stream>},
+			{"virtualleaderboarddef", 48, 7, 2, stream_virtualleaderboarddef_asset<load_stream>, stream_virtualleaderboarddef_asset<write_stream>},
+			{"ddl", 16, 7, 2, stream_ddl_asset<load_stream>, stream_ddl_asset<write_stream>},
+			{"tracer", 144, 7, 2, stream_tracer_asset<load_stream>, stream_tracer_asset<write_stream>},
+			{"vehicle", 3848, 7, 2, stream_vehicle_asset<load_stream>, stream_vehicle_asset<write_stream>},
+			{"addon_map_ents", 128, 7, 2, stream_addon_map_ents_asset<load_stream>, stream_addon_map_ents_asset<write_stream>},
+			{"netconststrings", 32, 7, 2, stream_netconststrings_asset<load_stream>, stream_netconststrings_asset<write_stream>},
+			{"luafile", 24, 7, 2, stream_luafile_asset<load_stream>, stream_luafile_asset<write_stream>},
+			{"scriptable", 120, 7, 2, stream_scriptable_asset<load_stream>, stream_scriptable_asset<write_stream>},
+			{"equipsndtable", 3208, 7, 2, stream_equipsndtable_asset<load_stream>, stream_equipsndtable_asset<write_stream>},
+			{"vectorfield", 64, 15, 2, stream_vectorfield_asset<load_stream>, stream_vectorfield_asset<write_stream>},
+			{"particlesimanimation", 120, 31, 2, stream_particlesimanimation_asset<load_stream>, stream_particlesimanimation_asset<write_stream>},
+			{"streaminginfo", 72, 7, 1, stream_streaminginfo_asset<load_stream>, stream_streaminginfo_asset<write_stream>},
+			{"laser", 168, 7, 2, stream_laser_asset<load_stream>, stream_laser_asset<write_stream>},
+			{"ttf", 32, 7, 2, stream_ttf_asset<load_stream>, stream_ttf_asset<write_stream>},
+			{"suit", 1824, 7, 2, stream_suit_asset<load_stream>, stream_suit_asset<write_stream>},
+			{"suitanimpackage", 16, 7, 2, stream_suitanimpackage_asset<load_stream>, stream_suitanimpackage_asset<write_stream>},
+			{"camera", 376, 7, 2, stream_camera_asset<load_stream>, stream_camera_asset<write_stream>},
+			{"hudoutline", 96, 7, 2, stream_hudoutline_asset<load_stream>, stream_hudoutline_asset<write_stream>},
+			{"spaceshiptarget", 136, 7, 2, stream_spaceshiptarget_asset<load_stream>, stream_spaceshiptarget_asset<write_stream>},
+			{"rumble", 56, 7, 2, stream_rumble_asset<load_stream>, stream_rumble_asset<write_stream>},
+			{"rumblegraph", 144, 7, 2, stream_rumblegraph_asset<load_stream>, stream_rumblegraph_asset<write_stream>},
+			{"animpkg", 64, 7, 2, stream_animpkg_asset<load_stream>, stream_animpkg_asset<write_stream>},
+			{"sfxpkg", 176, 7, 2, stream_sfxpkg_asset<load_stream>, stream_sfxpkg_asset<write_stream>},
+			{"vfxpkg", 16, 7, 2, stream_vfxpkg_asset<load_stream>, stream_vfxpkg_asset<write_stream>},
+			{"footstepvfx", 1032, 7, 2, stream_footstepvfx_asset<load_stream>, stream_footstepvfx_asset<write_stream>},
+			{"behaviortree", 56, 7, 2, stream_behaviortree_asset<load_stream>, stream_behaviortree_asset<write_stream>},
+			{"aianimset", 64, 7, 2, stream_aianimset_asset<load_stream>, stream_aianimset_asset<write_stream>},
+			{"aiasm", 80, 7, 2, stream_aiasm_asset<load_stream>, stream_aiasm_asset<write_stream>},
+			{"proceduralbones", 32, 7, 2, stream_proceduralbones_asset<load_stream>, stream_proceduralbones_asset<write_stream>},
+			{"dynamicbones", 88, 7, 2, stream_dynamicbones_asset<load_stream>, stream_dynamicbones_asset<write_stream>},
+			{"reticle", 72, 7, 2, stream_reticle_asset<load_stream>, stream_reticle_asset<write_stream>},
+			{"xanimcurve", 32, 7, 2, stream_xanimcurve_asset<load_stream>, stream_xanimcurve_asset<write_stream>},
+			{"coverselector", 120, 7, 2, stream_coverselector_asset<load_stream>, stream_coverselector_asset<write_stream>},
+			{"enemyselector", 112, 7, 2, stream_enemyselector_asset<load_stream>, stream_enemyselector_asset<write_stream>},
+			{"clientcharacter", 32, 7, 2, stream_clientcharacter_asset<load_stream>, stream_clientcharacter_asset<write_stream>},
+			{"clothasset", 128, 7, 2, stream_clothasset_asset<load_stream>, stream_clothasset_asset<write_stream>},
+			{"cinematicmotion", 592, 7, 2, stream_cinematicmotion_asset<load_stream>, stream_cinematicmotion_asset<write_stream>},
+			{"accessory", 48, 7, 2, stream_accessory_asset<load_stream>, stream_accessory_asset<write_stream>},
+			{"locdmgtable", 96, 7, 2, stream_locdmgtable_asset<load_stream>, stream_locdmgtable_asset<write_stream>},
+			{"bulletpenetration", 1032, 7, 2, stream_bulletpenetration_asset<load_stream>, stream_bulletpenetration_asset<write_stream>},
+			{"scriptbundle", 40, 7, 2, stream_scriptbundle_asset<load_stream>, stream_scriptbundle_asset<write_stream>},
+			{"blendspace2d", 64, 7, 2, stream_blendspace2d_asset<load_stream>, stream_blendspace2d_asset<write_stream>},
+			{"xcam", 176, 7, 2, stream_xcam_asset<load_stream>, stream_xcam_asset<write_stream>},
+			{"camo", 168, 7, 2, stream_camo_asset<load_stream>, stream_camo_asset<write_stream>},
+			{"xcompositemodel", 24, 7, 2, stream_xcompositemodel_asset<load_stream>, stream_xcompositemodel_asset<write_stream>},
+			{"xmodeldetailcollision", 40, 7, 2, stream_xmodeldetailcollision_asset<load_stream>, stream_xmodeldetailcollision_asset<write_stream>},
+			{"streamkey", 64, 7, 1, stream_streamkey_asset<load_stream>, stream_streamkey_asset<write_stream>},
+			{"streamtreeoverride", 24, 7, 2, stream_streamtreeoverride_asset<load_stream>, stream_streamtreeoverride_asset<write_stream>},
+			{"keyvaluepairs", 24, 7, 1, stream_keyvaluepairs_asset<load_stream>, stream_keyvaluepairs_asset<write_stream>},
+			{"stterrain", 152, 7, 2, stream_stterrain_asset<load_stream>, stream_stterrain_asset<write_stream>},
+			{"nativescriptpatch", 40, 7, 2, stream_nativescriptpatch_asset<load_stream>, stream_nativescriptpatch_asset<write_stream>},
+			{"collisiontile", 72, 7, 2, stream_collisiontile_asset<load_stream>, stream_collisiontile_asset<write_stream>},
+			{"execution", 104, 7, 2, stream_execution_asset<load_stream>, stream_execution_asset<write_stream>},
+			{"carryobject", 48, 7, 2, stream_carryobject_asset<load_stream>, stream_carryobject_asset<write_stream>},
+			{"soundbanklist", 24, 7, 2, stream_soundbanklist_asset<load_stream>, stream_soundbanklist_asset<write_stream>},
+			{"decalvolumematerial", 104, 7, 1, stream_decalvolumematerial_asset<load_stream>, stream_decalvolumematerial_asset<write_stream>},
+			{"decalvolumemask", 16, 7, 1, stream_decalvolumemask_asset<load_stream>, stream_decalvolumemask_asset<write_stream>},
+			{"dynentitylist", 64, 7, 2, stream_dynentitylist_asset<load_stream>, stream_dynentitylist_asset<write_stream>},
+			{"fx_map_trzone", 160, 7, 2, stream_fx_map_trzone_asset<load_stream>, stream_fx_map_trzone_asset<write_stream>},
+			{"dlogschema", 88, 7, 2, stream_dlogschema_asset<load_stream>, stream_dlogschema_asset<write_stream>},
+			{"edgelist", 160, 7, 2, stream_edgelist_asset<load_stream>, stream_edgelist_asset<write_stream>},
 		};
 
 		static_assert(sizeof(PhysicsLibrary) == 24);

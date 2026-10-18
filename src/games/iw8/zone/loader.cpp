@@ -25,26 +25,6 @@ namespace zonetool::iw8
 			.relative_offsets = true,
 		};
 
-		struct xasset_entry
-		{
-			std::uint32_t type;
-			std::uint32_t pad;
-			void* header;
-		};
-
-		struct xasset_list
-		{
-			std::uint32_t string_count;
-			std::uint32_t strings_loaded;
-			const char** strings;
-			std::uint32_t asset_count;
-			std::uint32_t assets_loaded;
-			xasset_entry* assets;
-		};
-
-		static_assert(sizeof(xasset_entry) == 16);
-		static_assert(sizeof(xasset_list) == 32);
-
 		std::uint16_t next_zone_index()
 		{
 			static std::atomic_uint16_t index{};
@@ -54,9 +34,10 @@ namespace zonetool::iw8
 		class asset_list_reader
 		{
 		public:
-			asset_list_reader(loaded_zone& zone)
+			asset_list_reader(loaded_zone& zone, const bool keep_markers)
 				: zone_(zone)
 				, reader_(*zone.reader)
+				, keep_markers_(keep_markers)
 			{
 			}
 
@@ -70,9 +51,10 @@ namespace zonetool::iw8
 
 				this->reader_.align(format->alignment);
 				const auto data = this->reader_.read_bytes(format->size);
+				std::vector<std::pair<const void*, std::uint64_t>> markers;
 				try
 				{
-					load_stream stream(this->reader_);
+					load_stream stream(this->reader_, this->keep_markers_ ? &markers : nullptr);
 					format->load(stream, data);
 				}
 				catch (const std::exception& e)
@@ -86,6 +68,14 @@ namespace zonetool::iw8
 				auto header = static_cast<void*>(this->reader_.allocate<std::uint8_t>(format->size));
 				std::memcpy(header, data, format->size);
 
+				const auto start = static_cast<const std::uint8_t*>(data);
+				for (const auto& [marked, value] : markers)
+				{
+					const auto address = static_cast<const std::uint8_t*>(marked);
+					const auto in_header = address >= start && address < start + format->size;
+					this->zone_.markers[in_header ? static_cast<std::uint8_t*>(header) + (address - start) : marked] = value;
+				}
+
 				const auto name = static_cast<const char**>(header);
 				const auto referenced = *name && (*name)[0] == ',';
 				if (referenced)
@@ -93,14 +83,11 @@ namespace zonetool::iw8
 					++*name;
 				}
 
+				// Each use of a referenced asset keeps its own stub: the database names the asset once.
 				const auto existing = *name ? db_find_asset(type, *name) : nullptr;
-				if (referenced && existing)
+				if (!referenced || !existing)
 				{
-					header = existing;
-				}
-				else
-				{
-					this->replaced_assets_.emplace_back(type, *name ? *name : "", db_find_asset(type, *name ? *name : ""));
+					this->replaced_assets_.emplace_back(type, *name ? *name : "", existing);
 					db_add_asset(type, *name ? *name : "", header);
 				}
 
@@ -115,13 +102,18 @@ namespace zonetool::iw8
 		private:
 			loaded_zone& zone_;
 			zone_reader& reader_;
+			bool keep_markers_;
 			std::vector<std::tuple<std::int32_t, std::string, void*>> replaced_assets_;
 		};
 
 		void read_asset_list(loaded_zone& zone, zone_reader& reader, std::ofstream* trace)
 		{
+			// The asset list header stays at the start of block 1 while the zone loads.
+			reader.push_stream(layout.temp_block);
 			xasset_list list{};
-			reader.read_raw(&list, sizeof(list));
+			std::memcpy(&list, reader.read_bytes(sizeof(list)), sizeof(list));
+			zone.strings_marker = reinterpret_cast<std::uint64_t>(list.strings);
+			zone.assets_marker = reinterpret_cast<std::uint64_t>(list.assets);
 
 			reader.push_stream(layout.virtual_block);
 			std::vector<std::uint32_t> ids;
@@ -133,17 +125,18 @@ namespace zonetool::iw8
 				for (auto i = 0u; i < list.string_count; i++)
 				{
 					reader.read_string(strings[i]);
-					ids.push_back(SL_GetString(strings[i] ? strings[i] : ""));
+					ids.push_back(strings[i] ? SL_GetString(strings[i]) : 0);
+					zone.script_strings.push_back(strings[i]);
 				}
 			}
 
-			zone.script_string_count = ids.size();
 			reader.set_script_strings(std::move(ids));
 
 			if (list.assets)
 			{
 				reader.align(7);
 				const auto assets = reader.read<xasset_entry>(list.asset_count);
+				std::vector<std::uint64_t> markers;
 				for (auto i = 0u; i < list.asset_count; i++)
 				{
 					if (trace)
@@ -151,9 +144,25 @@ namespace zonetool::iw8
 						*trace << "# asset " << i << " type " << assets[i].type << "\n";
 					}
 
+					markers.push_back(reinterpret_cast<std::uint64_t>(assets[i].header));
 					reader.read_asset(static_cast<std::int32_t>(assets[i].type), assets[i].header);
 				}
+
+				std::unordered_map<const void*, bool> referenced;
+				for (const auto& asset : zone.assets)
+				{
+					referenced.try_emplace(asset.header, asset.referenced);
+				}
+
+				for (auto i = 0u; i < list.asset_count; i++)
+				{
+					const auto found = referenced.find(assets[i].header);
+					const auto marker = markers[i];
+					zone.list.emplace_back(static_cast<std::int32_t>(assets[i].type), assets[i].header,
+						found != referenced.end() && found->second, marker);
+				}
 			}
+			reader.pop_stream();
 			reader.pop_stream();
 
 			if (reader.remaining())
@@ -163,20 +172,34 @@ namespace zonetool::iw8
 		}
 	}
 
+	const zone_layout& replay_layout()
+	{
+		return layout;
+	}
+
 	const char* get_asset_name(const std::int32_t, const void* header)
 	{
 		return header ? *static_cast<const char* const*>(header) : "";
 	}
 
-	std::unique_ptr<loaded_zone> load_zone(const std::filesystem::path& path)
+	std::unique_ptr<loaded_zone> load_zone(const std::filesystem::path& path, const load_options& options)
+	{
+		return load_zone(path.stem().string(), xfile::read(path, definition().format), options);
+	}
+
+	std::unique_ptr<loaded_zone> load_zone(const std::string& name, xfile::fastfile file, const load_options& options)
 	{
 		auto zone = std::make_unique<loaded_zone>();
-		zone->name = path.stem().string();
-		zone->file = xfile::read(path, definition().format);
+		zone->name = name;
+		zone->file = std::move(file);
 		zone->reader = std::make_unique<zone_reader>(zone->file.payload, zone->file.block_sizes, layout);
 
 		auto& reader = *zone->reader;
 		reader.set_zone_index(next_zone_index());
+		if (options.keep_temp_data)
+		{
+			reader.keep_temp_data();
+		}
 
 		// IW8_READ_TRACE=<file> writes every read of zone data (input offset, size, block, position).
 		std::unique_ptr<std::ofstream> trace;
@@ -191,7 +214,7 @@ namespace zonetool::iw8
 			});
 		}
 
-		asset_list_reader assets(*zone);
+		asset_list_reader assets(*zone, options.keep_markers);
 		reader.set_inline_asset_loader([&assets](const std::int32_t type, void** field, void** insert_slot)
 		{
 			assets.read_inline_asset(type, field, insert_slot);
