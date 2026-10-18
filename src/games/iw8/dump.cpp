@@ -1,5 +1,6 @@
 #include <std_include.hpp>
 #include "iw8.hpp"
+#include "havok/objects.hpp"
 #include "havok/tagfile.hpp"
 #include "zone/asset_files.hpp"
 #include "zone/loader.hpp"
@@ -416,6 +417,146 @@ namespace zonetool::iw8
 				compact, self_describing, other);
 		}
 
+		// IW8_REWRITE=convex builds each convex polytope shape of the zone again from its vertices. The two hulls must hold
+		// each other's vertices, and the built shape must write and read back as the same polytope.
+		void verify_convex(const std::filesystem::path& zone_folder, const loaded_zone& zone)
+		{
+			const auto& compendium = replay_compendium(zone_folder);
+			const auto convex_type = *compendium.find("hknpConvexPolytopeShape");
+			std::set<asset_key> seen;
+			std::size_t shapes{};
+			std::size_t same_counts{};
+			double worst{};
+			for (const auto& asset : zone.assets)
+			{
+				const asset_key key{asset.type, asset_name(asset.type, asset.header)};
+				if (asset.referenced || !seen.emplace(key).second)
+				{
+					continue;
+				}
+
+				if (asset.type == ASSET_TYPE_PHYSICSLIBRARY && static_cast<const PhysicsLibrary*>(asset.header)->isGlobalTypeCompendium)
+				{
+					continue;
+				}
+
+				const auto dump = dump_asset_data(asset.type, asset.header);
+				for (const auto record : tagfile_records(dump))
+				{
+					const std::span bytes(reinterpret_cast<const std::uint8_t*>(record.data()), record.size());
+					if (const auto reference = havok::compendium_reference(bytes); reference && *reference != havok::replay_compendium_signature)
+					{
+						continue;
+					}
+
+					havok::tagfile file;
+					try
+					{
+						file = havok::read_tagfile(bytes, &compendium);
+					}
+					catch (const havok::unknown_type&)
+					{
+						continue;
+					}
+
+					for (std::uint32_t index = 1; index < file.items.size(); index++)
+					{
+						if (file.items[index].type != convex_type)
+						{
+							continue;
+						}
+
+						const auto original = havok::read_convex_polytope_shape(file, compendium, index);
+						havok::polytope built;
+						try
+						{
+							built = havok::convex_hull(original.vertices, 0.0f);
+						}
+						catch (const std::exception&)
+						{
+							char debug[MAX_PATH]{};
+							if (GetEnvironmentVariableA("IW8_DUMP_DEBUG", debug, sizeof(debug)))
+							{
+								std::ofstream(std::filesystem::path(debug) / "convex.hkx", std::ios::binary).write(record.data(), static_cast<std::streamsize>(record.size()));
+								std::ofstream(std::filesystem::path(debug) / "convex_item.txt") << index;
+							}
+
+							throw;
+						}
+
+						// Each hull holds the vertices of the other.
+						const auto outside = [](const havok::polytope& hull, const std::vector<havok::vector3>& points)
+						{
+							double result{};
+							for (const auto& plane : hull.planes)
+							{
+								for (const auto& p : points)
+								{
+									result = std::max(result, static_cast<double>(plane[0]) * p[0] + static_cast<double>(plane[1]) * p[1] +
+										static_cast<double>(plane[2]) * p[2] + plane[3]);
+								}
+							}
+
+							return result;
+						};
+
+						const auto distance = std::max(outside(original, built.vertices), outside(built, original.vertices));
+						worst = std::max(worst, distance);
+						if (distance > 1e-3)
+						{
+							char debug[MAX_PATH]{};
+							if (GetEnvironmentVariableA("IW8_DUMP_DEBUG", debug, sizeof(debug)))
+							{
+								std::ofstream(std::filesystem::path(debug) / "convex.hkx", std::ios::binary).write(record.data(), static_cast<std::streamsize>(record.size()));
+								std::ofstream text(std::filesystem::path(debug) / "convex.txt");
+								for (const auto& v : original.vertices)
+								{
+									text << std::format("v {} {} {}\n", v[0], v[1], v[2]);
+								}
+
+								for (std::size_t f = 0; f < built.faces.size(); f++)
+								{
+									text << "f";
+									for (const auto v : built.faces[f])
+									{
+										text << ' ' << v;
+									}
+
+									text << std::format(" | {} {} {} {}\n", built.planes[f][0], built.planes[f][1], built.planes[f][2], built.planes[f][3]);
+								}
+
+								for (const auto& v : built.vertices)
+								{
+									text << std::format("b {} {} {}\n", v[0], v[1], v[2]);
+								}
+							}
+
+							const auto format = find_asset_format(asset.type);
+							throw std::runtime_error(std::format("{} \"{}\": convex shape {} differs by {:.6f}", format ? format->name : "?",
+								key.second, index, distance));
+						}
+
+						same_counts += built.vertices.size() == original.vertices.size() && built.faces.size() == original.faces.size();
+
+						havok::object_builder builder(compendium);
+						const auto shape = havok::add_convex_polytope_shape(builder, built);
+						const auto written = havok::write_compact_tagfile(builder.finish(file.sdk_version, havok::replay_compendium_signature), compendium);
+						const auto again = havok::read_tagfile(written, &compendium);
+						const auto read = havok::read_convex_polytope_shape(again, compendium, 1);
+						if (shape != 1 || read.vertices != built.vertices || read.faces != built.faces || read.planes != built.planes)
+						{
+							throw std::runtime_error("a built convex shape reads back differently");
+						}
+
+						shapes++;
+					}
+				}
+			}
+
+			ZONETOOL_INFO("%s: %zu convex shapes build again (%zu with the same vertex and face counts), largest distance %.6f",
+				zone.name.data(), shapes, same_counts, worst);
+		}
+
 		// The asset list of the zone: <pool>,<name> for an asset, <pool>,,<name> for a reference.
 		void write_asset_csv(const loaded_zone& zone)
 		{
@@ -508,6 +649,10 @@ namespace zonetool::iw8
 			else if (std::string_view(rewrite) == "havok")
 			{
 				verify_havok(zone_folder, *zone);
+			}
+			else if (std::string_view(rewrite) == "convex")
+			{
+				verify_convex(zone_folder, *zone);
 			}
 			else
 			{
