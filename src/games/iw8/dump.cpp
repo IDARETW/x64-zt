@@ -862,6 +862,35 @@ namespace zonetool::iw8
 						}
 
 						same_orders += our_order == stock_order;
+						if (our_order != stock_order)
+						{
+							char debug[MAX_PATH]{};
+							if (GetEnvironmentVariableA("IW8_DUMP_DEBUG", debug, sizeof(debug)))
+							{
+								std::ofstream text(std::filesystem::path(debug) / "compound_orders.txt", std::ios::app);
+								text << std::format("{} {} n {} stock", key.second, index, elements.count);
+								for (const auto i : stock_order)
+								{
+									text << ' ' << i;
+								}
+
+								text << " ours";
+								for (const auto i : our_order)
+								{
+									text << ' ' << i;
+								}
+
+								const auto& points = file.items.at(item_target(stock, points_at));
+								text << " points";
+								for (std::uint32_t k = 0; k < points.count; k++)
+								{
+									text << std::format(" {:.9g},{:.9g},{:.9g},{:X}", item_value<float>(points, k * 16), item_value<float>(points, k * 16 + 4),
+										item_value<float>(points, k * 16 + 8), item_value<std::uint32_t>(points, k * 16 + 12));
+								}
+
+								text << '\n';
+							}
+						}
 						same_trees += our_nodes.data == stock_nodes.data &&
 							built.items.at(item_target(ours, points_at)).data == file.items.at(item_target(stock, points_at)).data;
 
@@ -1334,8 +1363,9 @@ namespace zonetool::iw8
 					masses = ours;
 					rebuilt.masses++;
 
-					// Some stock shapes keep no inertia.
-					if (stock->inertia != havok::vector3{})
+					// Some stock shapes keep no inertia, and flat ones are thin slabs of their own.
+					const auto flat = havok::inner_radius(hull) <= std::numeric_limits<float>::epsilon();
+					if (stock->inertia != havok::vector3{} && !flat)
 					{
 						rebuilt.mass_error = std::max(rebuilt.mass_error, mass_difference(*stock, ours));
 					}
@@ -1472,6 +1502,7 @@ namespace zonetool::iw8
 		struct physics_counts
 		{
 			std::size_t lists{};
+			std::size_t other_lists{};
 			std::size_t assets{};
 			std::size_t other_assets{};
 			std::size_t other_values{};
@@ -1496,6 +1527,17 @@ namespace zonetool::iw8
 				const auto* list = array_of(name);
 				return list && index < list->count ? item_value<std::uint32_t>(*list, index * 4) : 0u;
 			};
+
+			// Some stock lists keep more rows than shapes; the writer keeps one row per shape.
+			for (const auto name : {"shapeIndices", "shapeNames", "vertCounts", "triCounts", "shapeContents", "convexCounts"})
+			{
+				const auto* list = array_of(name);
+				if ((list ? list->count : 0) != count)
+				{
+					counts.other_lists++;
+					return;
+				}
+			}
 
 			havok::object_builder builder(types);
 			std::unordered_map<std::uint32_t, std::uint32_t> copies;
@@ -1714,6 +1756,11 @@ namespace zonetool::iw8
 					continue;
 				}
 
+				if (asset.type == ASSET_TYPE_PHYSICSLIBRARY && static_cast<const PhysicsLibrary*>(asset.header)->isGlobalTypeCompendium)
+				{
+					continue;
+				}
+
 				const auto dump = dump_asset_data(asset.type, asset.header);
 				for (const auto record : tagfile_records(dump))
 				{
@@ -1763,10 +1810,11 @@ namespace zonetool::iw8
 				}
 			}
 
-			ZONETOOL_INFO("%s: %zu shape lists and %zu one-body physics assets build again (%zu with other values%s%s, %zu of another "
-				"kind); %zu shapes built, %zu copied; %zu mass properties built, largest difference %.6f", zone.name.data(), counts.lists,
-				counts.assets, counts.other_values, counts.first_difference.empty() ? "" : ", first: ", counts.first_difference.data(),
-				counts.other_assets, counts.shapes.built, counts.shapes.copied, counts.shapes.masses, counts.shapes.mass_error);
+			ZONETOOL_INFO("%s: %zu shape lists (%zu with other rows) and %zu one-body physics assets build again (%zu with other values%s%s, "
+				"%zu of another kind); %zu shapes built, %zu copied; %zu mass properties built, largest difference %.6f", zone.name.data(),
+				counts.lists, counts.other_lists, counts.assets, counts.other_values, counts.first_difference.empty() ? "" : ", first: ",
+				counts.first_difference.data(), counts.other_assets, counts.shapes.built, counts.shapes.copied, counts.shapes.masses,
+				counts.shapes.mass_error);
 		}
 
 		struct comparison
