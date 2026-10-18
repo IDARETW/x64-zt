@@ -5,6 +5,10 @@
 #include "fs_util.h"
 #include "log.h"
 
+#include "../havok/compendium.hpp"
+#include "../havok/mesh.hpp"
+#include "../havok/physics.hpp"
+
 #include <Windows.h>
 #include <bcrypt.h>
 
@@ -1320,12 +1324,14 @@ void RequireCompressedMeshTriangleTree(const void *shape, const std::string_view
 }
 
 thread_local std::unique_ptr<ReplayHavok> g_preparedHavok;
+const zonetool::iw8::havok::type_table *g_nativeCompendium = nullptr;
+bool g_checkNativeWithReplay = false;
 
 } // namespace
 
 void PrepareCollisionBaker(const std::filesystem::path &replayExecutable)
 {
-    if (!g_preparedHavok)
+    if (!g_preparedHavok && (!g_nativeCompendium || g_checkNativeWithReplay))
         g_preparedHavok = std::make_unique<ReplayHavok>(replayExecutable);
 }
 
@@ -1798,12 +1804,397 @@ std::vector<std::uint8_t> BuildShapeList(ReplayHavok &havok, const std::vector<H
     return output;
 }
 
+namespace
+{
+
+// Loads a natively built shape list with the Replay executable: its loader must take it and keep the
+// shapes and tags, and the bounds query of each root shape and brush hull must give the bounds of its
+// input.
+void CheckNativeShapeList(ReplayHavok &havok, const std::vector<std::uint8_t> &bytes,
+                          const std::vector<ShapeGroup> &groups, const std::vector<Hull> &hulls,
+                          const std::vector<Mesh> &meshes, const bool compressedRoot,
+                          const std::size_t tagCount)
+{
+    auto *loaded = static_cast<std::uint8_t *>(havok.Load(bytes));
+    if (Read<std::uint32_t>(loaded + 8) != groups.size() || Read<std::uint32_t>(loaded + 112) != tagCount)
+        throw std::runtime_error("Replay loaded the native collision with other shapes or tags");
+
+    auto *bounds = static_cast<float *>(havok.Allocate(32));
+    auto *identity = static_cast<float *>(havok.Allocate(64));
+    const std::array<float, 16> unit{1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1};
+    std::memcpy(identity, unit.data(), sizeof(unit));
+    const auto query = [&](const std::uintptr_t shape, const void *transform) {
+        const auto vtable = Read<std::uintptr_t>(reinterpret_cast<void *>(shape));
+        const auto method = Read<std::uintptr_t>(reinterpret_cast<void *>(vtable + 32));
+        havok.Function<void(void *, const void *, void *)>(method - havok.Base())(
+            reinterpret_cast<void *>(shape), transform, bounds);
+        return std::array<float, 6>{bounds[0], bounds[1], bounds[2], bounds[4], bounds[5], bounds[6]};
+    };
+    const auto compare = [](const std::array<float, 6> &measured, const std::array<float, 6> &expected,
+                            const std::string &what) {
+        for (std::size_t axis = 0; axis < 6; ++axis)
+            if (!std::isfinite(measured[axis]) || std::abs(measured[axis] - expected[axis]) > 1e-3f)
+                throw std::runtime_error("Replay bounds of " + what + " disagree at axis " +
+                                         std::to_string(axis) + ": " + std::to_string(measured[axis]) +
+                                         ", expected " + std::to_string(expected[axis]));
+    };
+
+    const auto shapes = Read<std::uintptr_t>(loaded);
+    std::size_t checked = 0;
+    for (std::size_t groupIndex = 0; groupIndex < groups.size(); ++groupIndex)
+    {
+        const auto &group = groups[groupIndex];
+        const auto root = Read<std::uintptr_t>(reinterpret_cast<void *>(shapes + groupIndex * 8));
+        if (!root)
+            throw std::runtime_error("Replay loaded a native shape list without its shape");
+
+        std::array<float, 6> expected{std::numeric_limits<float>::infinity(), std::numeric_limits<float>::infinity(),
+                                      std::numeric_limits<float>::infinity(), -std::numeric_limits<float>::infinity(),
+                                      -std::numeric_limits<float>::infinity(), -std::numeric_limits<float>::infinity()};
+        const auto include = [&](std::array<float, 6> &box, const std::array<float, 3> &point) {
+            for (std::size_t axis = 0; axis < 3; ++axis)
+            {
+                box[axis] = (std::min)(box[axis], point[axis] / 32.0f);
+                box[axis + 3] = (std::max)(box[axis + 3], point[axis] / 32.0f);
+            }
+        };
+        for (const auto index : group.meshes)
+            for (const auto &vertex : meshes[index].vertices)
+                include(expected, vertex);
+
+        // Brush hulls are children of the world mesh or of the brush model compound.
+        const auto children = Read<std::uintptr_t>(reinterpret_cast<void *>(root + (compressedRoot ? 0x70 : 72)));
+        const auto count = Read<std::uint32_t>(reinterpret_cast<void *>(root + (compressedRoot ? 0x78 : 80)));
+        if (count != group.hulls.size() + (compressedRoot ? 0 : group.meshes.size()))
+            throw std::runtime_error("Replay loaded a native shape with other children");
+        for (std::size_t localIndex = 0; localIndex < group.hulls.size(); ++localIndex)
+        {
+            std::array<float, 6> hullBounds{std::numeric_limits<float>::infinity(), std::numeric_limits<float>::infinity(),
+                                            std::numeric_limits<float>::infinity(), -std::numeric_limits<float>::infinity(),
+                                            -std::numeric_limits<float>::infinity(), -std::numeric_limits<float>::infinity()};
+            for (const auto &point : hulls[group.hulls[localIndex]].points)
+            {
+                include(hullBounds, point);
+                include(expected, point);
+            }
+            const auto instance = children + localIndex * 112;
+            compare(query(Read<std::uintptr_t>(reinterpret_cast<void *>(instance + 80)), reinterpret_cast<void *>(instance)),
+                    hullBounds, group.name + " hull " + std::to_string(localIndex));
+            ++checked;
+        }
+        compare(query(root, identity), expected, group.name);
+    }
+    zt::info("collision: Replay loaded the native shape lists and agreed on the bounds of %zu brush hulls",
+             checked);
+}
+
+// BuildShapeList without the Replay executable: the same groups, tags, counts and bounds, with
+// convex hulls, compressed meshes and compound shapes built natively.
+std::vector<std::uint8_t> BuildShapeListNative(const std::vector<Hull> &hulls,
+                                               const std::vector<Mesh> &meshes,
+                                               const std::vector<ShapeGroup> &groups,
+                                               const FloorMaterials &floors,
+                                               const bool useFloorMaterials,
+                                               const std::vector<ShapeTag> &seedTags = {},
+                                               std::vector<ShapeTag> *builtTags = nullptr)
+{
+    namespace hk = zonetool::iw8::havok;
+    hk::object_builder builder(*g_nativeCompendium);
+
+    std::vector<ShapeTag> tags = seedTags;
+    using ShapeTagKey = std::tuple<std::uint32_t, std::uint32_t, std::uint32_t, std::uint16_t>;
+    std::map<ShapeTagKey, std::uint16_t> tagIndices;
+    for (std::size_t index = 0; index < seedTags.size(); ++index)
+    {
+        const auto &tag = seedTags[index];
+        const auto material = static_cast<std::uint32_t>((tag.userData >> 19) & 0x1FFFu);
+        const auto surfaceFlags = static_cast<std::uint32_t>(tag.userData & 0x7FFFFu);
+        const auto glassId = static_cast<std::uint16_t>(tag.userData >> 32);
+        tagIndices.emplace(ShapeTagKey{tag.contents, material, surfaceFlags, glassId},
+                           static_cast<std::uint16_t>(index));
+    }
+    const auto findTag = [&](const std::uint32_t shapeContents, const std::uint32_t material,
+                             const std::uint32_t surfaceFlags, const std::uint16_t glassId = 0) {
+        if (material > 0x1FFFu || (glassId && shapeContents != kBreakableGlassContents))
+            throw std::runtime_error("Native glass collision tag is invalid");
+        const ShapeTagKey key{shapeContents, material, surfaceFlags, glassId};
+        if (const auto tag = tagIndices.find(key); tag != tagIndices.end())
+            return tag->second;
+        if (tags.size() >= std::numeric_limits<std::uint16_t>::max())
+            throw std::runtime_error("Native collision has too many shape tags");
+        const auto newIndex = static_cast<std::uint16_t>(tags.size());
+        const std::uint64_t tagClass = glassId ? 1 : (shapeContents & 1) ? 0 : 3;
+        const std::uint64_t userData = (tagClass << 48) | (std::uint64_t(glassId) << 32) |
+                                       (std::uint64_t(material) << 19) | surfaceFlags;
+        const auto materialNameCrc =
+            material == 9u || material == kBreakableGlassSurfaceMaterial ? kGlassMaterialNameCrc : 0x1AB7BC33u;
+        tags.push_back({shapeContents, materialNameCrc, 0xFFFFu, {}, userData});
+        tagIndices.emplace(key, newIndex);
+        return newIndex;
+    };
+
+    std::vector<hk::shape_list_entry> entries;
+    std::size_t builtHulls = 0;
+    std::size_t builtMeshTriangles = 0;
+    for (const auto &group : groups)
+    {
+        const bool compressedRoot = useFloorMaterials;
+        Mesh mergedWorldMesh;
+        if (compressedRoot)
+        {
+            for (const auto sourceIndex : group.meshes)
+            {
+                if (sourceIndex >= meshes.size())
+                    throw std::runtime_error("Native world collision has an invalid mesh");
+                const auto &source = meshes[sourceIndex];
+                const auto base = static_cast<std::uint32_t>(mergedWorldMesh.vertices.size());
+                mergedWorldMesh.vertices.insert(mergedWorldMesh.vertices.end(), source.vertices.begin(),
+                                                source.vertices.end());
+                for (auto triangle : source.triangles)
+                {
+                    for (auto &index : triangle.indices)
+                        index += base;
+                    mergedWorldMesh.triangles.push_back(triangle);
+                }
+            }
+        }
+        const std::size_t meshCount = compressedRoot ? 1 : group.meshes.size();
+        if (group.hulls.size() + meshCount == 0)
+            throw std::runtime_error("Native collision shape group is empty");
+
+        hk::shape_list_entry entry;
+        entry.name = group.name;
+        entry.minimum.fill(std::numeric_limits<float>::infinity());
+        entry.maximum.fill(-std::numeric_limits<float>::infinity());
+        const auto include = [&](const std::array<float, 3> &point) {
+            for (std::size_t axis = 0; axis < 3; ++axis)
+            {
+                entry.minimum[axis] = (std::min)(entry.minimum[axis], point[axis] / 32.0f);
+                entry.maximum[axis] = (std::max)(entry.maximum[axis], point[axis] / 32.0f);
+            }
+        };
+
+        // Brush hulls: centred, in metres, as instances that carry their tag.
+        std::vector<hk::compound_instance> instances;
+        for (const auto sourceIndex : group.hulls)
+        {
+            if (sourceIndex >= hulls.size())
+                throw std::runtime_error("Native collision shape group has an invalid hull");
+            const auto &hull = hulls[sourceIndex];
+            std::array<float, 3> center{};
+            for (const auto &point : hull.points)
+                for (std::size_t axis = 0; axis < 3; ++axis)
+                    center[axis] += point[axis];
+            for (auto &value : center)
+                value /= static_cast<float>(hull.points.size());
+            const auto highest = std::max_element(
+                hull.points.begin(), hull.points.end(),
+                [](const auto &left, const auto &right) { return left[2] < right[2]; });
+            const auto material = hull.glassId ? kBreakableGlassSurfaceMaterial
+                                  : hull.materialOverride ? hull.materialOverride
+                                  : useFloorMaterials ? floors.At(center[0], center[1], (*highest)[2])
+                                                      : 5u;
+            std::vector<hk::vector3> points;
+            for (const auto &point : hull.points)
+            {
+                points.push_back({(point[0] - center[0]) / 32.0f, (point[1] - center[1]) / 32.0f,
+                                  (point[2] - center[2]) / 32.0f});
+                include(point);
+            }
+            hk::polytope polytope;
+            try
+            {
+                polytope = hk::convex_hull(points, 0.0f);
+            }
+            catch (const std::exception &e)
+            {
+                throw std::runtime_error("Native convex construction failed at hull " +
+                                         std::to_string(sourceIndex) + ": " + e.what());
+            }
+            hk::compound_instance instance;
+            instance.shape = hk::add_convex_polytope_shape(builder, polytope);
+            instance.translation = {center[0] / 32.0f, center[1] / 32.0f, center[2] / 32.0f};
+            instance.shape_tag = findTag(hull.contents, material, hull.surfaceFlags, hull.glassId);
+            instance.vertices = polytope.vertices;
+            instances.push_back(std::move(instance));
+            entry.contents |= hull.contents;
+            entry.vertex_count += static_cast<std::uint32_t>(hull.points.size());
+            entry.triangle_count += static_cast<std::uint32_t>(hull.points.size() * 2 - 4);
+            ++builtHulls;
+        }
+
+        const auto meshShape = [&](const Mesh &mesh, const std::vector<hk::compound_instance> &convex) {
+            hk::compressed_mesh compressed;
+            for (const auto &vertex : mesh.vertices)
+            {
+                compressed.vertices.push_back({vertex[0] / 32.0f, vertex[1] / 32.0f, vertex[2] / 32.0f});
+                include(vertex);
+            }
+            for (const auto &triangle : mesh.triangles)
+            {
+                // Material zero: take the rendered floor surface under the triangle.
+                auto material = triangle.material;
+                if (!material)
+                {
+                    std::array<float, 3> center{};
+                    float highest = -std::numeric_limits<float>::infinity();
+                    for (const auto index : triangle.indices)
+                    {
+                        for (std::size_t axis = 0; axis < 3; ++axis)
+                            center[axis] += mesh.vertices[index][axis] / 3.0f;
+                        highest = (std::max)(highest, mesh.vertices[index][2]);
+                    }
+                    material = useFloorMaterials ? floors.At(center[0], center[1], highest) : 5u;
+                }
+                compressed.triangles.push_back(
+                    {triangle.indices, findTag(triangle.contents, material, triangle.surfaceFlags)});
+                entry.contents |= triangle.contents;
+            }
+            compressed.convex_shapes = convex;
+            entry.vertex_count += static_cast<std::uint32_t>(mesh.vertices.size());
+            entry.triangle_count += static_cast<std::uint32_t>(mesh.triangles.size());
+            builtMeshTriangles += mesh.triangles.size();
+            return hk::add_compressed_mesh_shape(builder, compressed);
+        };
+
+        if (compressedRoot)
+        {
+            // The world root keeps a compressed mesh with the brush hulls in it.
+            entry.shape = meshShape(mergedWorldMesh, instances);
+            entry.convex_count = static_cast<std::uint32_t>(group.hulls.size());
+        }
+        else
+        {
+            for (const auto sourceIndex : group.meshes)
+            {
+                if (sourceIndex >= meshes.size())
+                    throw std::runtime_error("Native collision shape group has an invalid mesh");
+                const auto &mesh = meshes[sourceIndex];
+                hk::compound_instance instance;
+                instance.shape = meshShape(mesh, {});
+                instance.shape_tag = 0xFFFF;
+                instance.shape_keys = static_cast<std::uint32_t>(mesh.triangles.size());
+                for (const auto &vertex : mesh.vertices)
+                    instance.vertices.push_back({vertex[0] / 32.0f, vertex[1] / 32.0f, vertex[2] / 32.0f});
+                instances.push_back(std::move(instance));
+            }
+            entry.shape = hk::add_compound_shape(builder, instances);
+            entry.convex_count = static_cast<std::uint32_t>(instances.size());
+        }
+        entries.push_back(std::move(entry));
+    }
+
+    std::vector<hk::shape_tag> shapeTags;
+    for (const auto &tag : tags)
+        shapeTags.push_back({tag.contents, tag.hash, tag.collisionFilterInfo, tag.userData});
+    const auto list = hk::add_shape_list(builder, entries, shapeTags);
+    auto output = hk::write_self_describing_tagfile(builder.finish("20180200", {}, list), *g_nativeCompendium);
+    zt::info("collision: built %zu hulls and %zu mesh triangles natively in %zu shape lists and %zu tags "
+             "into %zu bytes",
+             builtHulls, builtMeshTriangles, groups.size(), tags.size(), output.size());
+    if (builtTags)
+        *builtTags = tags;
+    return output;
+}
+
+PhysicsAsset BakePhysicsAssetNative(std::string name, const Mesh &mesh, const PhysicsMesh &source,
+                                    const std::uint32_t useCategory,
+                                    const std::uint32_t simulationCategory, const bool keyframedBody,
+                                    const ClutterBody *clutter)
+{
+    namespace hk = zonetool::iw8::havok;
+    hk::object_builder builder(*g_nativeCompendium);
+    const std::uint64_t shapeUserData = std::uint64_t{source.surfaceType} << 19;
+    std::vector<hk::vector3> vertices;
+    for (const auto &vertex : mesh.vertices)
+        vertices.push_back({vertex[0] / 32.0f, vertex[1] / 32.0f, vertex[2] / 32.0f});
+
+    std::uint32_t shape = 0;
+    if (clutter)
+    {
+        // Simulated bodies are convex hulls with mass properties, as shipped clutter.
+        const auto polytope = hk::convex_hull(vertices, 0.0f);
+        shape = hk::add_convex_polytope_shape(builder, polytope, {.user_data = shapeUserData});
+        hk::add_mass_properties(builder, shape, hk::convex_mass_properties(polytope, clutter->mass));
+    }
+    else
+    {
+        // Model meshes store no tag (0xFFFF): the body or static-model instance filter applies.
+        hk::compressed_mesh compressed;
+        compressed.vertices = vertices;
+        for (const auto &triangle : mesh.triangles)
+            compressed.triangles.push_back({triangle.indices, 0xFFFF});
+        compressed.user_data = shapeUserData;
+        shape = hk::add_compressed_mesh_shape(builder, compressed);
+    }
+
+    const bool staticModel = useCategory == 0 && simulationCategory == 0;
+    const bool glass = useCategory == 7 && simulationCategory == 9;
+    if (keyframedBody && (staticModel || glass))
+        throw std::runtime_error("Keyframed model physics needs the entity categories");
+    const bool serializedBodyPolicy = glass || staticModel || keyframedBody || clutter;
+
+    hk::physics_asset asset;
+    asset.use_category = static_cast<std::int32_t>(useCategory);
+    asset.body_quality_crc = clutter ? (clutter->debris ? 0x98996C20u : 0x7923E35Cu)
+                             : staticModel ? 0xD0452309u
+                             : glass       ? 0x98996C20u
+                                           : 0x7923E35Cu;
+    asset.material_crc = clutter ? clutter->materialCrc : glass ? 0xF728E572u : 0x4B02BC9Du;
+    asset.motion_properties_crc = clutter ? (clutter->debris ? 0x8B8AA36Fu : 0x9F53AC92u)
+                                  : staticModel ? 0xC356EC46u
+                                  : glass       ? 0x8B8AA36Fu
+                                                : 0xE9D0CCAFu;
+    asset.simulation_category = static_cast<std::int32_t>(simulationCategory);
+    asset.system_properties = !clutter;
+    asset.body.shape = shape;
+    asset.body.name = glass ? "fxglassdummy" : "tag_origin";
+    if (serializedBodyPolicy)
+    {
+        asset.body.collision_filter_info = source.contents;
+        asset.body.material_id = 0xFFFF;
+        asset.body.quality_id = 0xFF;
+        asset.body.motion_properties_id = 0xFFFF;
+    }
+    if (clutter)
+    {
+        asset.body.motion_type = 2;
+        asset.body.mass = clutter->mass;
+        asset.body.activation_priority = 2;
+    }
+    const auto root = hk::add_physics_asset(builder, asset);
+
+    PhysicsAsset result;
+    result.name = std::move(name);
+    result.contents = source.contents;
+    result.useCategory = useCategory;
+    result.simulationCategory = simulationCategory;
+    result.havokData = hk::write_compact_tagfile(
+        builder.finish("20180200", hk::replay_compendium_signature, root), *g_nativeCompendium);
+    zt::info("collision: built native PhysicsAsset '%s' (%zu vertices, %zu triangles, surface %u, %zu bytes)",
+             result.name.c_str(), mesh.vertices.size(), mesh.triangles.size(), source.surfaceType,
+             result.havokData.size());
+    return result;
+}
+} // namespace
+
+void UseNativeHavok(const std::filesystem::path &zoneFolder, const bool checkWithReplay)
+{
+    g_nativeCompendium = &zonetool::iw8::havok::replay_compendium(zoneFolder);
+    g_checkNativeWithReplay = checkWithReplay;
+}
+
+bool UsesNativeHavok()
+{
+    return g_nativeCompendium != nullptr;
+}
+
 BakeResult BakeCollision(const BakeInput &input)
 {
     std::unique_ptr<ReplayHavok> localHavok;
-    if (!g_preparedHavok)
+    if (!g_preparedHavok && (!g_nativeCompendium || g_checkNativeWithReplay))
         localHavok = std::make_unique<ReplayHavok>(input.replayExecutable);
-    auto &havok = g_preparedHavok ? *g_preparedHavok : *localHavok;
+    auto *havok = g_preparedHavok ? g_preparedHavok.get() : localHavok.get();
     const auto collision = ReadCollision(input.collision);
     const FloorMaterials floors(input.footsteps);
 
@@ -1895,10 +2286,29 @@ BakeResult BakeCollision(const BakeInput &input)
     }
 
     std::vector<ShapeTag> worldTags;
-    result.world = BuildShapeList(havok, collision.hulls, collision.meshes, {std::move(world)},
-                                  floors, true, {}, &worldTags);
-    result.entities = BuildShapeList(havok, collision.hulls, collision.meshes, entities, floors,
-                                     false, worldTags);
+    if (g_nativeCompendium)
+    {
+        const std::vector<ShapeGroup> worldGroups{std::move(world)};
+        std::vector<ShapeTag> entityTags;
+        result.world = BuildShapeListNative(collision.hulls, collision.meshes, worldGroups, floors, true, {},
+                                            &worldTags);
+        result.entities = BuildShapeListNative(collision.hulls, collision.meshes, entities, floors, false,
+                                               worldTags, &entityTags);
+        if (g_checkNativeWithReplay)
+        {
+            CheckNativeShapeList(*havok, result.world, worldGroups, collision.hulls, collision.meshes, true,
+                                 worldTags.size());
+            CheckNativeShapeList(*havok, result.entities, entities, collision.hulls, collision.meshes, false,
+                                 entityTags.size());
+        }
+    }
+    else
+    {
+        result.world = BuildShapeList(*havok, collision.hulls, collision.meshes, {std::move(world)},
+                                      floors, true, {}, &worldTags);
+        result.entities = BuildShapeList(*havok, collision.hulls, collision.meshes, entities, floors,
+                                         false, worldTags);
+    }
     zt::info("collision: retained %zu source brush models (%zu collision shapes)",
              result.models.size(), entities.size());
     if (!result.ladders.empty())
@@ -1914,7 +2324,7 @@ PhysicsAsset BakePhysicsAsset(std::string name, const PhysicsMesh &source,
     if (clutter && (useCategory != 3 || keyframedBody || !std::isfinite(clutter->mass) ||
                     clutter->mass <= 0.0f || clutter->mass > 10000.0f))
         throw std::runtime_error("Native clutter physics input is invalid");
-    if (!g_preparedHavok)
+    if (!g_preparedHavok && !g_nativeCompendium)
         throw std::runtime_error("PrepareCollisionBaker must be called before model physics");
     if (name.empty() || source.vertices.size() < 3 || source.triangles.empty() ||
         source.vertices.size() > std::numeric_limits<std::int32_t>::max() ||
@@ -1952,6 +2362,9 @@ PhysicsAsset BakePhysicsAsset(std::string name, const PhysicsMesh &source,
     }
     if (mesh.triangles.empty())
         throw std::runtime_error("Native model physics has no non-degenerate triangles");
+    if (g_nativeCompendium)
+        return BakePhysicsAssetNative(std::move(name), mesh, source, useCategory, simulationCategory,
+                                      keyframedBody, clutter);
 
     auto &havok = *g_preparedHavok;
     // Model meshes resolve tags through the global MapEnts codec (shape +56 is
