@@ -2245,7 +2245,7 @@ namespace zonetool::iw8
 		}
 	}
 
-	void dump_zone(const std::filesystem::path& zone_folder, const std::filesystem::path& zone_path, const asset_dumper converter)
+	void dump_zone(const std::filesystem::path& zone_folder, const std::filesystem::path& zone_path, const converter* converter)
 	{
 		const auto _ = gsl::finally(db_clear);
 
@@ -2267,7 +2267,7 @@ namespace zonetool::iw8
 			{
 				if (converter)
 				{
-					converter(asset.type, asset.header);
+					converter->dump_asset(asset.type, asset.header);
 				}
 				else
 				{
@@ -2282,7 +2282,58 @@ namespace zonetool::iw8
 		}
 
 		write_asset_csv(*zone);
+		if (converter && converter->finish)
+		{
+			converter->finish(zone->name);
+		}
 		ZONETOOL_INFO("Zone \"%s\" dumped to %s", zone->name.data(), filesystem::get_dump_path().data());
+	}
+
+	void dump_asset(const std::filesystem::path& zone_folder, const std::filesystem::path& zone_path, const std::string& type_name,
+		const std::string& name, const converter* converter)
+	{
+		std::int32_t type = -1;
+		for (std::int32_t i = 0; i < ASSET_TYPE_COUNT && type < 0; i++)
+		{
+			const auto format = find_asset_format(i);
+			type = format && format->name == type_name ? i : -1;
+		}
+
+		if (type < 0)
+		{
+			throw std::runtime_error(std::format("unknown asset type \"{}\"", type_name));
+		}
+
+		const auto _ = gsl::finally(db_clear);
+
+		filesystem::set_zone_folder(zone_folder);
+		filesystem::set_fastfile(zone_path.stem().string());
+		const auto zone = load_zone(zone_path, {.keep_temp_data = true});
+		const auto asset = std::ranges::find_if(zone->assets, [&](const loaded_asset& entry)
+		{
+			return entry.type == type && !entry.referenced && name == asset_name(entry.type, entry.header);
+		});
+
+		if (asset == zone->assets.end())
+		{
+			throw std::runtime_error(std::format("{} \"{}\" is not in zone \"{}\"", type_name, name, zone->name));
+		}
+
+		filesystem::set_dump_folder("assets");
+		if (converter)
+		{
+			converter->dump_asset(asset->type, asset->header);
+			if (converter->finish)
+			{
+				converter->finish(zone->name);
+			}
+		}
+		else
+		{
+			dump_asset(asset->type, asset->header);
+		}
+
+		ZONETOOL_INFO("%s \"%s\" dumped to %s", type_name.data(), name.data(), filesystem::get_dump_path().data());
 	}
 
 	void verify_zone(const std::filesystem::path& zone_folder, const std::filesystem::path& zone_path)

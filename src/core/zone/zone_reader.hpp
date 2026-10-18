@@ -1,6 +1,7 @@
 #pragma once
 
 #include "../game_mode.hpp"
+#include "../xfile/structs.hpp"
 
 namespace zonetool
 {
@@ -15,10 +16,14 @@ namespace zonetool
 		// IW7 zones place the data of this block at its end, so offsets count from (block size - data size).
 		std::optional<std::uint8_t> end_anchored_block;
 		// The block that pop_stream rewinds and that asset pointers load into.
-		std::uint8_t temp_block = 0;
+		std::uint8_t temp_block{};
 		std::size_t pop_alignment = 15;
 		// IW8 offsets with bit 36 set count from the start of the outermost asset.
 		bool relative_offsets = false;
+		// S2 reserves the memory of this block but reads no file bytes and does not clear it.
+		std::optional<std::uint8_t> unread_block;
+		std::size_t asset_alignment = 3;
+		bool untagged_offsets = true;
 	};
 
 	class zone_reader
@@ -44,6 +49,9 @@ namespace zonetool
 		void set_script_strings(std::vector<std::uint32_t> ids);
 		void set_zone_index(std::uint16_t index);
 		std::uint16_t zone_index() const;
+		void set_shared_stream_keys(std::span<const XStreamFileKey> keys);
+		XStreamFileKey next_shared_stream_key();
+		std::size_t shared_stream_keys_read() const;
 		void set_block_base(std::uint8_t block, std::size_t base);
 		std::size_t end_anchored_data_start() const;
 		std::size_t end_anchored_alignment() const;
@@ -326,6 +334,8 @@ namespace zonetool
 
 		std::vector<std::uint32_t> script_strings_;
 		std::uint16_t zone_index_{};
+		std::span<const XStreamFileKey> shared_stream_keys_;
+		std::size_t shared_stream_key_index_{};
 		inline_asset_loader inline_asset_loader_;
 		read_trace read_trace_;
 

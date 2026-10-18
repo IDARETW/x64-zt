@@ -109,14 +109,30 @@ namespace zonetool::cli
 		return this->game_path / "zone";
 	}
 
-	std::optional<std::filesystem::path> settings::game_path_of(const std::string_view name) const
+	std::filesystem::path settings::game_folder(const zonetool::game& target_game) const
 	{
-		if (!this->config.contains("paths") || !this->config["paths"].contains(name))
+		if (&target_game == this->game)
 		{
-			return {};
+			return this->game_path;
 		}
 
-		return this->config["paths"][name].get<std::string>();
+		auto requested = this->target_path;
+		if (!requested)
+		{
+			requested = config_game_path(this->config, target_game);
+		}
+
+		if (requested)
+		{
+			return std::filesystem::path(*requested).make_preferred();
+		}
+
+		if (target_game.steam_folder.empty())
+		{
+			throw std::runtime_error(std::format("set the {} game folder with -target_path or zonetool.json", target_game.name));
+		}
+
+		return std::filesystem::path(steam_common) / target_game.steam_folder;
 	}
 
 	settings load_settings(std::vector<std::string>& args)
@@ -140,6 +156,8 @@ namespace zonetool::cli
 		}
 
 		result.game_path = select_game_path(*result.game, requested_path).make_preferred();
+		result.target_path = take_option(args, "-target_path");
+		result.config = config;
 
 		game_files::set(result.game->open_files
 			? result.game->open_files(result.game_path)

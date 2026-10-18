@@ -10,19 +10,20 @@ namespace zonetool
 		namespace
 		{
 			std::string fastfile;
+			std::string dump_folder;
 			std::string zone_folder = "zone\\";
 			std::string language_name = "english";
 			std::string language_code = "en";
-
-			std::filesystem::path long_path(const std::filesystem::path& path)
-			{
-				return LR"(\\?\)" + std::filesystem::absolute(path).lexically_normal().wstring();
-			}
 
 			errno_t open_long_path(FILE*& fp, const std::filesystem::path& path, const std::string& mode)
 			{
 				return _wfopen_s(&fp, long_path(path).c_str(), std::wstring(mode.begin(), mode.end()).data());
 			}
+		}
+
+		std::filesystem::path long_path(const std::filesystem::path& path)
+		{
+			return LR"(\\?\)" + std::filesystem::absolute(path).lexically_normal().wstring();
 		}
 
 		file::file(const std::string& filepath_)
@@ -226,7 +227,9 @@ namespace zonetool
 		{
 			if (this->fp)
 			{
-				return fclose(this->fp);
+				const auto result = fclose(this->fp);
+				this->fp = nullptr;
+				return result;
 			}
 			return -1;
 		}
@@ -333,6 +336,7 @@ namespace zonetool
 			add_paths_from_directory("zonetool_paths");
 
 			fastfile = ff;
+			dump_folder.clear();
 		}
 
 		const std::string& get_fastfile()
@@ -391,10 +395,19 @@ namespace zonetool
 			return "";
 		}
 
+		void set_dump_folder(const std::string& name)
+		{
+			dump_folder = name;
+		}
+
 		std::string get_dump_path()
 		{
 			auto fastfile_dir = fastfile;
-			if (fastfile.starts_with("mp_wm_") || fastfile.starts_with("mp_vm_"))
+			if (!dump_folder.empty())
+			{
+				fastfile_dir = dump_folder;
+			}
+			else if (fastfile.starts_with("mp_wm_") || fastfile.starts_with("mp_vm_"))
 			{
 				fastfile_dir = "weapon_models";
 			}
@@ -414,9 +427,8 @@ namespace zonetool
 
 		std::string get_output_path()
 		{
-			const std::string path = "output\\";
-			create_directory(path);
-			return path;
+			create_directory(zone_folder);
+			return zone_folder;
 		}
 
 		bool create_directory(const std::string& name)

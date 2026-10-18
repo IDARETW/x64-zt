@@ -1,5 +1,6 @@
 #pragma once
 #include "../game_mode.hpp"
+#include "../xfile/structs.hpp"
 
 #include <stack>
 #include <bitset>
@@ -47,7 +48,7 @@ namespace zonetool
 		template <typename T>
 		T* get_zone_pointer(const std::uint8_t stream, const std::size_t ptr)
 		{
-			if (this->mode == game::iw7)
+			if (this->mode == game::iw7 || this->mode == game::s2)
 			{
 				return reinterpret_cast<T*>(create_data_ptr(0x0, stream, 0x0) | ((ptr + 1) & 0x0FFFFFFFFFFFFFF));
 			}
@@ -62,19 +63,23 @@ namespace zonetool
 		}
 
 		template <typename T>
-		T* find_sub_buffer(const T* data)
+		T* find_sub_buffer(const T* data, const std::size_t size = 0)
 		{
 			const auto ptr = reinterpret_cast<std::size_t>(data);
-			for (const auto& buffer : this->sub_zone_buffers_)
+			auto buffer = this->sub_zone_buffers_.upper_bound(ptr);
+			if (buffer == this->sub_zone_buffers_.begin())
 			{
-				if (ptr >= buffer.start && ptr < buffer.end)
-				{
-					const auto offset = ptr - buffer.start;
-					return this->get_zone_pointer<T>(buffer.stream, buffer.ptr + offset);
-				}
+				return nullptr;
 			}
 
-			return nullptr;
+			--buffer;
+			if (ptr >= buffer->second.end || ptr + size > buffer->second.end)
+			{
+				return nullptr;
+			}
+
+			const auto offset = ptr - buffer->second.start;
+			return this->get_zone_pointer<T>(buffer->second.stream, buffer->second.ptr + offset);
 		}
 
 		template <typename T>
@@ -85,7 +90,19 @@ namespace zonetool
 			buffer.end = buffer.start + size * count;
 			buffer.ptr = this->zone_streams_[this->stream_];
 			buffer.stream = this->stream_;
-			this->sub_zone_buffers_.emplace_back(buffer);
+			if (buffer.start == buffer.end || this->find_sub_buffer(data, size * count))
+			{
+				return;
+			}
+
+			// no range contains another, so find_sub_buffer only needs the nearest start
+			auto contained = this->sub_zone_buffers_.lower_bound(buffer.start);
+			while (contained != this->sub_zone_buffers_.end() && contained->second.end <= buffer.end)
+			{
+				contained = this->sub_zone_buffers_.erase(contained);
+			}
+
+			this->sub_zone_buffers_.insert_or_assign(buffer.start, buffer);
 		}
 
 		template <typename T>
@@ -163,6 +180,9 @@ namespace zonetool
 		void align(const std::size_t alignment);
 		void inc_stream(const std::uint8_t stream, const std::size_t size);
 		void push_stream(const std::uint8_t stream);
+		void set_temp_stream(const std::uint8_t stream);
+		void set_unread_stream(const std::uint8_t stream);
+		bool writes_file_bytes() const;
 		void pop_stream();
 
 		std::uint8_t current_stream();
@@ -185,6 +205,9 @@ namespace zonetool
 		std::size_t get_streamfile(const std::size_t idx);
 		std::size_t streamfile_count();
 
+		void write_shared_stream_key(const XStreamFileKey& key);
+		const std::vector<XStreamFileKey>& shared_stream_keys() const;
+
 		std::uint8_t write_ppas(const std::uint32_t sz);
 		std::uint32_t get_ppas(const std::size_t idx);
 		std::size_t ppas_count();
@@ -192,6 +215,10 @@ namespace zonetool
 		std::uint8_t write_poas(const std::uint32_t sz);
 		std::uint32_t get_poas(const std::size_t idx);
 		std::size_t poas_count();
+
+		std::uint8_t write_vas(const std::uint32_t sz);
+		std::uint32_t get_vas(const std::size_t idx);
+		std::size_t vas_count();
 
 		std::uint8_t write_sas(const std::uint32_t sz);
 		std::uint32_t get_sas(const std::size_t idx);
@@ -221,6 +248,10 @@ namespace zonetool
 		std::size_t length_;
 
 		std::uint8_t stream_;
+		std::optional<std::uint8_t> temp_stream_;
+		std::optional<std::uint8_t> unread_stream_;
+		std::size_t temp_peak_ = 0;
+		std::vector<std::size_t> temp_saved_positions_;
 
 		std::int32_t shift_size_;
 		std::size_t stream_count_;
@@ -235,16 +266,18 @@ namespace zonetool
 
 		std::vector<std::uint32_t> ppas_;
 		std::vector<std::uint32_t> poas_;
+		std::vector<std::uint32_t> vas_;
 		std::vector<std::uint32_t> sas_;
 
 		std::vector<std::size_t> stream_files_;
+		std::vector<XStreamFileKey> shared_stream_keys_;
 
 		void write_data(const void* data, const std::size_t size, const std::size_t count);
 		void write_data(const void* data, const std::size_t size);
 
 		void init_script_strings();
 
-		std::vector<sub_zone_buffer> sub_zone_buffers_;
+		std::map<std::size_t, sub_zone_buffer> sub_zone_buffers_;
 
 	};
 }

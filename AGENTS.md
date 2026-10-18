@@ -4,9 +4,9 @@ Guide for humans and agents who work on x64-zt. Read it before you change code.
 
 ## What x64-zt is
 
-x64-zt is a fastfile unlinker and linker for x64 Call of Duty titles. It reads `.ff` zones, dumps their assets to disk, builds new zones from those dumps, and converts assets from one game to another.
+x64-zt is a fastfile unlinker and linker for x64 Call of Duty titles. It reads `.ff` zones that every Call of Duty game uses, dumps their assets to disk, and enables building new zones from those dumps or adding new assets into it no problem. It can dual-purpose convert assets from one game to another as well.
 
-The `v2` branch is a standalone rewrite. It reads fastfiles directly and never loads a game exe via runtime methodology. v1 (`main`) loaded the game binary and hooked its zone loader. v2 keeps the v1 asset logic and the v1 dump formats. Current scope is H1 (MWR 1.15), IW7 and IW8 (Modern Warfare 2019, Replay 1.20). Other games are currently not supported, but can be done with due time easily.
+The `v2` branch is a standalone rewrite of x64-zt with the assistance of AI to help add new games and keep a cleaner codebase. It reads fastfiles directly, and never loads a game exe via runtime methodology anymore like the main branch. v1 (`main`) loaded the game binary and hooked its zone loader. v2 keeps the v1 asset logic and the v1 dump formats. Current scope is H1 (MWR 1.15), IW6, IW7 and IW8 (Modern Warfare 2019, Replay 1.20). See `docs/IW6_SUPPORT.md` for IW6. Other games are currently not supported as they need to be re-added, but can be done with due time easily.
 
 ## Build
 
@@ -29,16 +29,19 @@ zonetool.exe -game h1 dumpzone mp_shipment
 | `inspect <zone>`, `inspect --all` | Quick inspect a fastfile container and its data |
 | `verifyzone <zone>`, `verifyzone --all` | Reads every asset and checks that the reader consumed the zone exactly |
 | `dumpzone <zone> [--target <game>]` | Writes `dump/<zone>/` and `dump/<zone>/<zone>.csv`. `--target` converts the assets |
-| `buildzone <zone>` | Reads `zone_source/<zone>.csv` and the files in `zonetool/<zone>/`, then writes `output/<zone>.ff` |
+| `dumpasset <type> <name> <zone> [--target <game>]` | Reads `<zone>` and writes one asset to `dump/assets/`. `--target` converts the asset |
+| `buildzone <zone>` | Reads `zone_source/<zone>.csv` and the files in `zonetool/<zone>/`, then writes `<game folder>/zone/<zone>.ff` |
 
 Without a command, `zonetool.exe` opens an interactive console.
 
 - Game selection: `-game <name>`, then `zonetool.json` `game`.
 - Game folder: `-path <folder>`, then `zonetool.json` `paths.<game>`, then the exe folder if it has `zone/`, then the Steam default folder.
 - `zonetool.json` example: `{"game": "h1", "paths": {"h1": "D:/Games/MWR"}}`.
+- `dumpasset` finds only assets that the zone holds, not referenced ones (`type,,name` rows in the CSV). Type names are the CSV type names.
 - Flags for `dumpzone`: `-dds` writes DDS images. `-dump_streamed_image` reads `imagefile*.pak` and writes streamed images.
 - The `require` row in a build CSV loads another zone into the asset database. There is no `loadzone` command.
-- `buildzone` never writes to the game folder.
+- `buildzone` writes `<zone>.ff` and `<zone>.pak` to the `zone/` folder of the game folder. It replaces a zone of the same name.
+- `-no_cache` writes every output again and ignores the build cache.
 - `dumpzone <iw3 zone> --target iw8` converts a whole IW3 map into the Replay 1.20 zones in `output/<map>/`. Options:
   `--map <name>`, `--style iw3|iw8`, `--unlinker <exe>`, `--gsc_tool <exe>`, `--replay <exe>` (its folder is the Replay
   game folder), `--metadata <json>`, `--acts <exe>` (validates the zones), `--havok native|native-check|exe` (Havok data
@@ -46,6 +49,16 @@ Without a command, `zonetool.exe` opens an interactive console.
   `--writer x64-zt|iw8-zonetool` (the IW8 zone writer lays out each zone, the default; or the zone keeps the stream
   layout of the converter, for byte comparisons with iw8-zonetool builds), `--dump 1` (also dumps each zone for
   `buildzone`). Tool paths can also go in `zonetool.json` `tools`.
+
+## Build cache
+
+The cache makes a second `dumpzone` or `buildzone` of the same zone faster. It does not change the asset files, so v1 and tools without the cache read the output.
+
+- `dump/<zone>/.zonetool_cache` records a fingerprint and a file stamp (size and write time) for each cached dump file. If both match, the dumper skips the file.
+- `zonetool_cache/<zone>.pak.streams` records the stream offsets of the last `.pak`. If the streamed image files and the `.pak` did not change, `buildzone` reuses the `.pak`.
+- `zonetool_cache/h1_techsets.txt` holds the H1 techset catalog of the S2 to H1 converter.
+- Zlib zones of 8 MB or more compress in 4 MB chunks on all threads. The result is one valid zlib stream.
+- The revision values are in `cache_revision` in `src/core/io/output_cache.hpp`. If you change the output of a cached asset, increment its revision.
 
 ## Source layout
 
@@ -154,7 +167,7 @@ IW8 asset code is generated, not written by hand. Do not edit the generated file
 - Keep working v1 logic. x64-zt asset code is studied and tested since 2021. If it works, do not change it.
 - Keep the v1 dump formats. A dump from v1 must parse in v2. Change a format only when it is necessary, and tell the user.
 - v2 has no game runtime. A database lookup can return null where v1 got a game default asset. Add a null check, not a fake default.
-- Known v2 differences from v1: `dumpzone <zone> --target <game>` replaces `dumpzone <target> <zone>`, IW7 `proceduralbones` has a dump format, built zones share arrays the way stock zones do, and output goes to `output/`.
+- Known v2 differences from v1: `dumpzone <zone> --target <game>` replaces `dumpzone <target> <zone>`, IW7 `proceduralbones` has a dump format, built zones share arrays the way stock zones do, and output goes to the `zone/` folder of the game folder.
 
 ## Verification
 
@@ -163,7 +176,7 @@ Run these after a change to a reader, writer or the container code:
 | Check | Command | Pass condition |
 |---|---|---|
 | Container | `inspect --all` | Every zone passes. IW8: 9536 of 9545 (the 9 later-build frontend zones have other xfile versions) |
-| Reader | `verifyzone --all` | H1: 6991 of 6991. IW7: 686 of 687 (`mp_vlobby_room` on disk is a modified file). IW8: 9533 of 9545 (the 12 others are frontend zones that the Replay loader also rejects) |
+| Reader | `verifyzone --all` | H1: 6991 of 6991. IW6: 878 of 878. IW7: 686 of 687 (`mp_vlobby_room` on disk is a modified file). IW8: 9533 of 9545 (the 12 others are frontend zones that the Replay loader also rejects) |
 | IW8 writer | `IW8_REWRITE=1 verifyzone --all` | Each zone written again with its own pointer markers gives the same data (block sizes can differ: stock zones add slack) |
 | IW8 writer | `IW8_REWRITE=fresh verifyzone --all` | Each zone written with the choices of the writer (as the IW3 converter writes its zones) loads with the same assets |
 | IW3 converter zones | convert, then `IW8_REWRITE=compare IW8_COMPARE_ZONE=<zone built with --writer iw8-zonetool> verifyzone <zone>` | The same asset list and script strings, and each asset the same (Nuketown: 3053 list entries, 178 strings, 2518 assets) |
@@ -176,7 +189,18 @@ Run these after a change to a reader, writer or the container code:
 | IW8 dumps | `IW8_REWRITE=dump verifyzone --all` | Each zone dumps, parses, writes, loads and dumps again to the same files. The log names each asset of a shared type that keeps a `.iw8` file (17 string tables) |
 | Writer | `dumpzone X`, `buildzone X`, `verifyzone X`, then `dumpzone` the built zone | The two dumps are equal, except pointer values and the known differences |
 
-Good round-trip zones: H1 `mp_shipment`, `mp_crash`. IW7 `mp_frontend`, `mp_afghan`. IW8 `mp_shipment`, `common_mp`.
+Good round-trip zones: H1 `mp_shipment`, `mp_crash`. IW6 `mp_battery3`. IW7 `mp_frontend`, `mp_afghan`. IW8 `mp_shipment`, `common_mp`.
+
+## Strict ground rules to follow
+
+These rules apply to agents more than humans, but it is good practice for humans to also do the following if you advice them or do the code:
+
+- Do not write hacky or sloppy shortcut code. Fix the cause, not the symptom.
+- Put engine structs in the game `structs.hpp`. Do not declare structs inline in an asset file or a converter file, as that makes it hacky and less ideal to maintain overall in the codebase.
+- Keep code readable for humans. x64-zt was a human project before AI, and code that only a machine can follow is not accepted at all. Furthermore, comments do not fix sloppy or weird code. Use named struct fields, not raw offsets and byte casts.
+- To add onto comments, they should be inlined and short summaries and not over-yapped to keep explaining something. The code itself explains the logic and what we do with it, so a comment used in the codebase is for something we are unsure about, TODO, or could cause issues later. Even "hacky" code contains comments for the future, but it's there because a human most likely tested it at one point and deemed it necessary to note down for other contributors.
+- Trust `re_reference/` as the source of truth. Its `ship_asm.txt` and `.asm` files show what each game does that this project supports. When the code and the asm disagree, the asm decides as assembly will show everything truly happening.
+- During the process, you may want to test launch the game, receive crashdumps, or even take screenshots. Focus on only screenshotting a game window itself and nothing else to give away stuff you don't need to know. Most Call of Duty clients have `map` and `devmap` available in order to get you in game to test, and you may need to select a team & class in order to also keep going. And in order to receive crashdumps, look for a `minidumps` folder inside of the game folder(s) that may contain the crash you're looking for. It has a .dmp file usually, and a .info txt file to quickly figure out what's going on. The .dmp file is extremely helpful as to figuring out what went wrong, and the info.txt will also do wonders. If no crashdump is found, your last fallback is to find a process minidump Windows generates in %CRASHDUMPS%.
 
 ## Code style
 
@@ -194,6 +218,9 @@ Default: no comment. Code must explain itself through naming and structure. A co
 - a deliberate deviation that a reader would want to "fix" back;
 - a hack or workaround that can break later, with the reason;
 - a reference that saves a research session.
+- multiple lines that are single commented trying to express something
+- comments showing above function definitions (put them in the function body - we dont need functions explained as comments unless the code cannot explain itself)
+- comments showing above variable definitions (put them to the side as one liners, short and sweet unless you absolutely need to explain more and the definition doesn't explain itself)
 
 Never write restatements, section banners, edit narration or commented-out code. If unsure whether a comment qualifies, it does not. Example of a valid comment: the raw heap pointer note in `zone_reader::read_array`.
 
@@ -218,3 +245,4 @@ Docs, commit messages and user-facing text use ASD-STE100 style:
 - If Python is not installed on the main dev machine, use shell tools, node, or the edit tools.
 - `core.autocrlf` is `true`. Some files are CRLF in the working tree. Keep the line endings of the file you edit.
 - To test H1 in the game, copy `zonetool.exe` to the user's MWR 1.15 folder (if you don't know where it is, prompt a question and ask the user so you know - this will help save so much time), or build with `--copy-to`.
+- Anything you don't know how to do, but is listed in this file as advice for you, ask the user for questions and try to figure out how to get there if you are lost. This is mainly for non-Claude models that may get stuck easier.

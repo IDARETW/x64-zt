@@ -8,6 +8,7 @@ namespace zonetool::xfile
 	{
 		s1,
 		iw7,
+		s2,
 		iw8,
 		unsupported,
 	};
@@ -19,6 +20,9 @@ namespace zonetool::xfile
 		std::string_view signed_magic;
 		std::uint32_t version;
 		std::size_t block_count;
+		std::string (*zone_key)();
+		std::size_t auth_block_size = 0x4000;
+		std::size_t auth_blocks_per_group = 512;
 	};
 
 	struct fastfile
@@ -29,6 +33,8 @@ namespace zonetool::xfile
 		std::vector<std::uint64_t> block_sizes;
 		std::vector<XStreamFile> stream_files;
 		std::vector<XStreamFile> shared_stream_files;
+		std::vector<XStreamFileKey> stream_keys;
+		std::vector<XStreamFileKey> shared_stream_keys;
 		std::string payload;
 		// IW8: the xfile revision, the transient flag and the capacity of the map preload plan.
 		std::uint32_t xfile_version{};
@@ -39,4 +45,8 @@ namespace zonetool::xfile
 	fastfile read(const std::filesystem::path& path, const format& format);
 	// Writes an unsigned zone with the payload stored (not compressed).
 	void write(const std::filesystem::path& path, const format& format, const fastfile& file);
+
+	std::string write_s2(const format& format, const fastfile& file, std::string_view payload);
+
+	std::string decompress_s2_stream(std::string_view data);
 }
