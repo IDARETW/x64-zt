@@ -96,6 +96,12 @@ namespace zonetool
 		}
 
 		void resolve_deferred_offsets();
+		// Resolves the alias fields again: an alias can point at an inserted pointer that a later asset fills.
+		void resolve_aliases();
+		// The alias fields of a record that the caller copies move with it. `first` is the alias_count() before the
+		// record loaded: only the aliases after it can be in the record.
+		std::size_t alias_count() const;
+		void move_aliases(const void* source, std::size_t size, void* destination, std::size_t first);
 		std::size_t count_misplaced_strings() const;
 		void move_deferred_offsets(const void* source, std::size_t size, void* destination);
 		void** insert_pointer();
@@ -326,6 +332,7 @@ namespace zonetool
 		std::vector<std::unique_ptr<std::uint8_t[]>> allocations_;
 		std::map<std::pair<std::type_index, std::string_view>, void*> reference_stubs_;
 		std::vector<deferred_offset> deferred_offsets_;
+		std::vector<std::pair<void**, void**>> aliases_;
 		std::vector<std::size_t> string_positions_;
 		std::vector<std::vector<std::size_t>> asset_starts_;
 		bool keep_temp_data_{};
