@@ -9899,10 +9899,9 @@ namespace zonetool::iw8
 		BlendShapeWeightMap* weightMaps;
 	};
 
-	// Not traversed by the native asset loader
 	struct Replay_XModelRuntimeWord
 	{
-		std::uint8_t data[8];
+		std::uint64_t value;
 	};
 
 	struct MdaoVolume
@@ -11998,10 +11997,10 @@ namespace zonetool::iw8
 		GfxSurfaceFlags flags;
 	};
 
-	// Replay E306FF loads 56-byte surface bounds; trailing scalar semantics are not yet verified
 	struct Replay_SurfaceBoundsExtra
 	{
-		std::uint8_t data[32];
+		float scalar;
+		std::uint32_t reserved[7];
 	};
 
 	struct GfxSurfaceBounds
@@ -13061,10 +13060,11 @@ namespace zonetool::iw8
 		std::uint16_t lightListAddress;
 	};
 
-	// Native runtime tail; no serialized pointer fixups
 	struct Replay_VoxelRuntimeState
 	{
-		std::uint8_t data[24];
+		std::uint32_t* voxelInternalNodeDynamicLightList;
+		GfxVoxelTreeHeader* voxelTreeHeaderCPU;
+		GfxVoxelTopDownViewNode* voxelTopDownViewNodeArrayCPU;
 	};
 
 	struct GfxVoxelTree
@@ -15560,10 +15560,11 @@ namespace zonetool::iw8
 		std::uint8_t pad_0[1];
 	};
 
-	// Native player condition mask bytes; bit semantics not yet verified
 	struct Replay_PlayerConditionMask
 	{
-		std::uint8_t data[48];
+		bool invalidMask;
+		bool usesNotetrackEvents;
+		std::uint32_t bits[11];
 	};
 
 	struct PlayerAnimsetState_BakedAliasesPerConditionType
@@ -22193,6 +22194,7 @@ namespace zonetool::iw8
 	static_assert(offsetof(XModelBlendShapeInfo, weightNames) == 0x8);
 	static_assert(offsetof(XModelBlendShapeInfo, weightMaps) == 0x10);
 	static_assert(sizeof(Replay_XModelRuntimeWord) == 8);
+	static_assert(offsetof(Replay_XModelRuntimeWord, value) == 0x0);
 	static_assert(sizeof(MdaoVolume) == 40);
 	static_assert(offsetof(MdaoVolume, bounds) == 0x0);
 	static_assert(offsetof(MdaoVolume, cellCount) == 0x18);
@@ -23490,6 +23492,8 @@ namespace zonetool::iw8
 	static_assert(offsetof(GfxSurface, lightmapIndex) == 0x1E);
 	static_assert(offsetof(GfxSurface, flags) == 0x20);
 	static_assert(sizeof(Replay_SurfaceBoundsExtra) == 32);
+	static_assert(offsetof(Replay_SurfaceBoundsExtra, scalar) == 0x0);
+	static_assert(offsetof(Replay_SurfaceBoundsExtra, reserved) == 0x4);
 	static_assert(sizeof(GfxSurfaceBounds) == 56);
 	static_assert(offsetof(GfxSurfaceBounds, bounds) == 0x0);
 	static_assert(offsetof(GfxSurfaceBounds, serializedExtra) == 0x18);
@@ -24168,6 +24172,9 @@ namespace zonetool::iw8
 	static_assert(sizeof(GfxVoxelLeafNode) == 2);
 	static_assert(offsetof(GfxVoxelLeafNode, lightListAddress) == 0x0);
 	static_assert(sizeof(Replay_VoxelRuntimeState) == 24);
+	static_assert(offsetof(Replay_VoxelRuntimeState, voxelInternalNodeDynamicLightList) == 0x0);
+	static_assert(offsetof(Replay_VoxelRuntimeState, voxelTreeHeaderCPU) == 0x8);
+	static_assert(offsetof(Replay_VoxelRuntimeState, voxelTopDownViewNodeArrayCPU) == 0x10);
 	static_assert(sizeof(GfxVoxelTree) == 112);
 	static_assert(offsetof(GfxVoxelTree, zoneBound) == 0x0);
 	static_assert(offsetof(GfxVoxelTree, voxelTopDownViewNodeCount) == 0x18);
@@ -25792,6 +25799,9 @@ namespace zonetool::iw8
 	static_assert(sizeof(AnimsetStateType) == 1);
 	static_assert(sizeof(AIAnimsetState) == 1);
 	static_assert(sizeof(Replay_PlayerConditionMask) == 48);
+	static_assert(offsetof(Replay_PlayerConditionMask, invalidMask) == 0x0);
+	static_assert(offsetof(Replay_PlayerConditionMask, usesNotetrackEvents) == 0x1);
+	static_assert(offsetof(Replay_PlayerConditionMask, bits) == 0x4);
 	static_assert(sizeof(PlayerAnimsetState_BakedAliasesPerConditionType) == 16);
 	static_assert(offsetof(PlayerAnimsetState_BakedAliasesPerConditionType, aliases) == 0x0);
 	static_assert(offsetof(PlayerAnimsetState_BakedAliasesPerConditionType, numConditionValues) == 0x8);

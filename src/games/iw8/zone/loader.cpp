@@ -110,10 +110,9 @@ namespace zonetool::iw8
 
 		void read_asset_list(loaded_zone& zone, zone_reader& reader, std::ofstream* trace)
 		{
-			// The asset list header stays at the start of block 1 while the zone loads.
-			reader.push_stream(layout.temp_block);
+			// The game reads the asset list header outside the blocks: zones that declare no block 1 load.
 			xasset_list list{};
-			std::memcpy(&list, reader.read_bytes(sizeof(list)), sizeof(list));
+			reader.read_raw(&list, sizeof(list));
 			zone.strings_marker = reinterpret_cast<std::uint64_t>(list.strings);
 			zone.assets_marker = reinterpret_cast<std::uint64_t>(list.assets);
 
@@ -164,7 +163,6 @@ namespace zonetool::iw8
 						found != referenced.end() && found->second, marker);
 				}
 			}
-			reader.pop_stream();
 			reader.pop_stream();
 
 			if (reader.remaining())
