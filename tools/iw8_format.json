@@ -6443,9 +6443,7 @@
        "pmoveSampleHitCounts"
       ]
      },
-     "align": {
-      "const": 0
-     },
+     "align": null,
      "markers": [
       0
      ],
@@ -6566,9 +6564,7 @@
        "bulletSampleHitCounts"
       ]
      },
-     "align": {
-      "const": 0
-     },
+     "align": null,
      "markers": [
       0
      ],
@@ -7414,9 +7410,7 @@
        "dataByte"
       ]
      },
-     "align": {
-      "const": 0
-     },
+     "align": null,
      "markers": [
       0
      ],
@@ -7578,9 +7572,7 @@
        "randomDataByte"
       ]
      },
-     "align": {
-      "const": 0
-     },
+     "align": null,
      "markers": [
       0
      ],
@@ -7730,9 +7722,7 @@
            "indices"
           ]
          },
-         "align": {
-          "const": 0
-         },
+         "align": null,
          "markers": [
           0
          ],
@@ -8306,7 +8296,8 @@
      "count": {
       "opaque": "unknown(rdx)"
      },
-     "type": null
+     "type": "XAnimDynamicIndices",
+     "fn": "Load_XAnimDynamicIndicesTrans@XAnimDynamicIndices"
     },
     {
      "op": "inline",
@@ -8639,6 +8630,150 @@
     "const": 32
    }
   },
+  "Load_XAnimDynamicIndicesTrans@XAnimDynamicIndices": {
+   "name": "Load_XAnimDynamicIndicesTrans",
+   "rva": 14551040,
+   "type": "XAnimDynamicIndices",
+   "kind": "loader",
+   "ops": [
+    {
+     "op": "if",
+     "cond": {
+      "compare": "ae",
+      "args": [
+       {
+        "field": {
+         "root": "outer",
+         "type": "XAnimParts",
+         "var": 97790792,
+         "path": [
+          "numframes"
+         ]
+        },
+        "width": 2,
+        "signed": false,
+        "type": "unsigned __int16"
+       },
+       {
+        "const": 256
+       }
+      ],
+      "width": 2
+     },
+     "then": [
+      {
+       "op": "align",
+       "mask": {
+        "const": 1
+       }
+      },
+      {
+       "op": "load",
+       "name": "sub_140DD2980",
+       "target": {
+        "root": "self",
+        "path": []
+       },
+       "at_start": {
+        "const": 0
+       },
+       "count": {
+        "op": "+",
+        "args": [
+         {
+          "field": {
+           "root": "outer",
+           "type": "XAnimPartTrans",
+           "var": 97790776,
+           "path": []
+          },
+          "width": 2,
+          "signed": false,
+          "type": "unsigned __int16"
+         },
+         {
+          "const": 1
+         }
+        ]
+       },
+       "type": "XAnimDynamicIndices",
+       "fn": "sub_140DD2980@XAnimDynamicIndices"
+      }
+     ],
+     "else": [
+      {
+       "op": "load",
+       "name": "Load_byteArray",
+       "target": {
+        "root": "self",
+        "path": []
+       },
+       "at_start": {
+        "const": 0
+       },
+       "count": {
+        "op": "+",
+        "args": [
+         {
+          "field": {
+           "root": "outer",
+           "type": "XAnimPartTrans",
+           "var": 97790776,
+           "path": []
+          },
+          "width": 2,
+          "signed": false,
+          "type": "unsigned __int16"
+         },
+         {
+          "const": 1
+         }
+        ]
+       },
+       "type": "unsigned __int8[1]",
+       "fn": "Load_byteArray@unsigned __int8[1]"
+      }
+     ]
+    }
+   ],
+   "errors": [],
+   "var": 97790728,
+   "self": {
+    "const": 0
+   }
+  },
+  "sub_140DD2980@XAnimDynamicIndices": {
+   "name": "sub_140DD2980",
+   "rva": 14494080,
+   "type": "XAnimDynamicIndices",
+   "kind": "loader",
+   "ops": [],
+   "errors": [],
+   "var": 97785760,
+   "self": {
+    "op": "+",
+    "args": [
+     {
+      "param": "count"
+     },
+     {
+      "param": "count"
+     }
+    ]
+   }
+  },
+  "Load_byteArray@unsigned __int8[1]": {
+   "name": "Load_byteArray",
+   "rva": 14497776,
+   "type": "unsigned __int8[1]",
+   "kind": "loader",
+   "ops": [],
+   "errors": [],
+   "var": 97785304,
+   "self": {
+    "param": "count"
+   }
+  },
   "Load_XAnimDeltaPartQuat2@XAnimDeltaPartQuat2": {
    "name": "Load_XAnimDeltaPartQuat2",
    "rva": 14549792,
@@ -8746,7 +8881,8 @@
      "count": {
       "opaque": "unknown(rdx)"
      },
-     "type": null
+     "type": "XAnimDynamicIndices",
+     "fn": "Load_XAnimDynamicIndicesDeltaQuat2@XAnimDynamicIndices"
     },
     {
      "op": "pointer",
@@ -8832,6 +8968,118 @@
    "var": 97790664,
    "self": {
     "const": 8
+   }
+  },
+  "Load_XAnimDynamicIndicesDeltaQuat2@XAnimDynamicIndices": {
+   "name": "Load_XAnimDynamicIndicesDeltaQuat2",
+   "rva": 14550688,
+   "type": "XAnimDynamicIndices",
+   "kind": "loader",
+   "ops": [
+    {
+     "op": "if",
+     "cond": {
+      "compare": "ae",
+      "args": [
+       {
+        "field": {
+         "root": "outer",
+         "type": "XAnimParts",
+         "var": 97790792,
+         "path": [
+          "numframes"
+         ]
+        },
+        "width": 2,
+        "signed": false,
+        "type": "unsigned __int16"
+       },
+       {
+        "const": 256
+       }
+      ],
+      "width": 2
+     },
+     "then": [
+      {
+       "op": "align",
+       "mask": {
+        "const": 1
+       }
+      },
+      {
+       "op": "load",
+       "name": "sub_140DD2980",
+       "target": {
+        "root": "self",
+        "path": []
+       },
+       "at_start": {
+        "const": 0
+       },
+       "count": {
+        "op": "+",
+        "args": [
+         {
+          "field": {
+           "root": "outer",
+           "type": "XAnimDeltaPartQuat2",
+           "var": 97790680,
+           "path": []
+          },
+          "width": 2,
+          "signed": false,
+          "type": "unsigned __int16"
+         },
+         {
+          "const": 1
+         }
+        ]
+       },
+       "type": "XAnimDynamicIndices",
+       "fn": "sub_140DD2980@XAnimDynamicIndices"
+      }
+     ],
+     "else": [
+      {
+       "op": "load",
+       "name": "Load_byteArray",
+       "target": {
+        "root": "self",
+        "path": []
+       },
+       "at_start": {
+        "const": 0
+       },
+       "count": {
+        "op": "+",
+        "args": [
+         {
+          "field": {
+           "root": "outer",
+           "type": "XAnimDeltaPartQuat2",
+           "var": 97790680,
+           "path": []
+          },
+          "width": 2,
+          "signed": false,
+          "type": "unsigned __int16"
+         },
+         {
+          "const": 1
+         }
+        ]
+       },
+       "type": "unsigned __int8[1]",
+       "fn": "Load_byteArray@unsigned __int8[1]"
+      }
+     ]
+    }
+   ],
+   "errors": [],
+   "var": 97790656,
+   "self": {
+    "const": 0
    }
   },
   "Load_XQuat2Array@__int16[2]": {
@@ -8961,7 +9209,8 @@
      "count": {
       "opaque": "unknown(rdx)"
      },
-     "type": null
+     "type": "XAnimDynamicIndices",
+     "fn": "Load_XAnimDynamicIndicesDeltaQuat@XAnimDynamicIndices"
     },
     {
      "op": "pointer",
@@ -9047,6 +9296,118 @@
    "var": 97790696,
    "self": {
     "const": 8
+   }
+  },
+  "Load_XAnimDynamicIndicesDeltaQuat@XAnimDynamicIndices": {
+   "name": "Load_XAnimDynamicIndicesDeltaQuat",
+   "rva": 14550864,
+   "type": "XAnimDynamicIndices",
+   "kind": "loader",
+   "ops": [
+    {
+     "op": "if",
+     "cond": {
+      "compare": "ae",
+      "args": [
+       {
+        "field": {
+         "root": "outer",
+         "type": "XAnimParts",
+         "var": 97790792,
+         "path": [
+          "numframes"
+         ]
+        },
+        "width": 2,
+        "signed": false,
+        "type": "unsigned __int16"
+       },
+       {
+        "const": 256
+       }
+      ],
+      "width": 2
+     },
+     "then": [
+      {
+       "op": "align",
+       "mask": {
+        "const": 1
+       }
+      },
+      {
+       "op": "load",
+       "name": "sub_140DD2980",
+       "target": {
+        "root": "self",
+        "path": []
+       },
+       "at_start": {
+        "const": 0
+       },
+       "count": {
+        "op": "+",
+        "args": [
+         {
+          "field": {
+           "root": "outer",
+           "type": "XAnimDeltaPartQuat",
+           "var": 97790712,
+           "path": []
+          },
+          "width": 2,
+          "signed": false,
+          "type": "unsigned __int16"
+         },
+         {
+          "const": 1
+         }
+        ]
+       },
+       "type": "XAnimDynamicIndices",
+       "fn": "sub_140DD2980@XAnimDynamicIndices"
+      }
+     ],
+     "else": [
+      {
+       "op": "load",
+       "name": "Load_byteArray",
+       "target": {
+        "root": "self",
+        "path": []
+       },
+       "at_start": {
+        "const": 0
+       },
+       "count": {
+        "op": "+",
+        "args": [
+         {
+          "field": {
+           "root": "outer",
+           "type": "XAnimDeltaPartQuat",
+           "var": 97790712,
+           "path": []
+          },
+          "width": 2,
+          "signed": false,
+          "type": "unsigned __int16"
+         },
+         {
+          "const": 1
+         }
+        ]
+       },
+       "type": "unsigned __int8[1]",
+       "fn": "Load_byteArray@unsigned __int8[1]"
+      }
+     ]
+    }
+   ],
+   "errors": [],
+   "var": 97790688,
+   "self": {
+    "const": 0
    }
   },
   "Load_XQuatArray@__int16[4]": {
@@ -11315,9 +11676,7 @@
        "parentList"
       ]
      },
-     "align": {
-      "const": 0
-     },
+     "align": null,
      "markers": [
       -2,
       -1,
@@ -11604,9 +11963,7 @@
        "partClassification"
       ]
      },
-     "align": {
-      "const": 0
-     },
+     "align": null,
      "markers": [
       -2,
       -1,
@@ -17123,9 +17480,7 @@
       "root": "self",
       "path": []
      },
-     "align": {
-      "const": 0
-     },
+     "align": null,
      "markers": [
       -2,
       -1,
@@ -23334,9 +23689,7 @@
        "packedAtlasData"
       ]
      },
-     "align": {
-      "const": 0
-     },
+     "align": null,
      "markers": [
       -2,
       -1,
@@ -23633,9 +23986,7 @@
        "constantBufferIndex"
       ]
      },
-     "align": {
-      "const": 0
-     },
+     "align": null,
      "markers": [
       -2,
       -1,
@@ -23984,7 +24335,7 @@
       "root": "pointee",
       "value": [
        "cursor",
-       374,
+       514,
        4
       ],
       "path": []
@@ -24003,7 +24354,7 @@
           {
            "field": {
             "root": "unknown",
-            "what": "((g5d44028 + (elem((374, 1),('const', 0),1,rax) * 8)) + 0x18)",
+            "what": "((g5d44028 + (elem((514, 1),('const', 0),1,rax) * 8)) + 0x18)",
             "path": []
            },
            "width": 8,
@@ -24037,7 +24388,7 @@
           {
            "field": {
             "root": "unknown",
-            "what": "((g5d44028 + (elem((374, 1),('const', 0),1,rax) * 8)) + 0x18)",
+            "what": "((g5d44028 + (elem((514, 1),('const', 0),1,rax) * 8)) + 0x18)",
             "path": []
            },
            "width": 8,
@@ -24057,7 +24408,7 @@
           {
            "field": {
             "root": "unknown",
-            "what": "((g5d44028 + (elem((374, 1),('const', 0),1,rax) * 8)) + 0x18)",
+            "what": "((g5d44028 + (elem((514, 1),('const', 0),1,rax) * 8)) + 0x18)",
             "path": []
            },
            "width": 8,
@@ -24084,7 +24435,7 @@
           {
            "field": {
             "root": "unknown",
-            "what": "((g5d44028 + (elem((374, 1),('const', 0),1,rax) * 8)) + 0x18)",
+            "what": "((g5d44028 + (elem((514, 1),('const', 0),1,rax) * 8)) + 0x18)",
             "path": []
            },
            "width": 8,
@@ -24099,7 +24450,7 @@
           "root": "pointee",
           "value": [
            "cursor",
-           374,
+           514,
            4
           ],
           "path": []
@@ -24116,7 +24467,7 @@
           "root": "pointee",
           "value": [
            "cursor",
-           374,
+           514,
            4
           ],
           "path": [
@@ -35390,9 +35741,7 @@
        "hitLocPriorityMap"
       ]
      },
-     "align": {
-      "const": 0
-     },
+     "align": null,
      "markers": [
       -2,
       -1,
@@ -57876,9 +58225,7 @@
        "entityString"
       ]
      },
-     "align": {
-      "const": 0
-     },
+     "align": null,
      "markers": [
       0
      ],
@@ -59484,9 +59831,7 @@
        "triggerString"
       ]
      },
-     "align": {
-      "const": 0
-     },
+     "align": null,
      "markers": [
       0
      ],
@@ -60454,68 +60799,59 @@
           -1,
           0
          ],
-         "body": []
-        },
-        {
-         "op": "asset_begin",
-         "type": {
-          "const": 22
-         }
-        },
-        {
-         "op": "data",
-         "target": {
-          "root": "pointee",
-          "value": [
-           "cursor",
-           1096,
-           3
-          ],
-          "path": []
-         },
-         "size": {
-          "const": 512
-         },
-         "at_start": {
-          "const": 0
-         }
-        },
-        {
-         "op": "push",
-         "block": {
-          "const": 5
-         }
-        },
-        {
-         "op": "load",
-         "name": "Load_SndBank",
-         "target": {
-          "root": "pointee",
-          "value": [
-           "cursor",
-           1096,
-           3
-          ],
-          "path": []
-         },
-         "at_start": {
-          "const": 1
-         },
-         "count": {
-          "opaque": "unknown(rdx)"
-         },
-         "type": "SndBank",
-         "fn": "Load_SndBank@SndBank"
-        },
-        {
-         "op": "pop"
-        },
-        {
-         "op": "asset_end"
-        },
-        {
-         "op": "register",
-         "name": "Load_SndBankTransientAsset"
+         "body": [
+          {
+           "op": "asset_begin",
+           "type": {
+            "const": 22
+           }
+          },
+          {
+           "op": "data",
+           "target": {
+            "root": "item",
+            "path": []
+           },
+           "size": {
+            "const": 512
+           },
+           "at_start": {
+            "const": 0
+           }
+          },
+          {
+           "op": "push",
+           "block": {
+            "const": 5
+           }
+          },
+          {
+           "op": "load",
+           "name": "Load_SndBank",
+           "target": {
+            "root": "item",
+            "path": []
+           },
+           "at_start": {
+            "const": 1
+           },
+           "count": {
+            "opaque": "unknown(rdx)"
+           },
+           "type": "SndBank",
+           "fn": "Load_SndBank@SndBank"
+          },
+          {
+           "op": "pop"
+          },
+          {
+           "op": "asset_end"
+          },
+          {
+           "op": "register",
+           "name": "Load_SndBankTransientAsset"
+          }
+         ]
         },
         {
          "op": "pop"
@@ -60609,9 +60945,7 @@
       "root": "self",
       "path": []
      },
-     "align": {
-      "const": 0
-     },
+     "align": null,
      "markers": [
       -2,
       -1,
@@ -67249,9 +67583,7 @@
        "pathVis"
       ]
      },
-     "align": {
-      "const": 0
-     },
+     "align": null,
      "markers": [
       0
      ],
@@ -67504,9 +67836,7 @@
        "pathExposure"
       ]
      },
-     "align": {
-      "const": 0
-     },
+     "align": null,
      "markers": [
       0
      ],
@@ -67545,9 +67875,7 @@
        "pathNoPeekVis"
       ]
      },
-     "align": {
-      "const": 0
-     },
+     "align": null,
      "markers": [
       0
      ],
@@ -67586,9 +67914,7 @@
        "pathZones"
       ]
      },
-     "align": {
-      "const": 0
-     },
+     "align": null,
      "markers": [
       0
      ],
@@ -67627,9 +67953,7 @@
        "pathDynStates"
       ]
      },
-     "align": {
-      "const": 0
-     },
+     "align": null,
      "markers": [
       0
      ],
@@ -70457,9 +70781,7 @@
              "m_Vis"
             ]
            },
-           "align": {
-            "const": 0
-           },
+           "align": null,
            "markers": [
             0
            ],
@@ -75531,9 +75853,7 @@
        "instanceFlags"
       ]
      },
-     "align": {
-      "const": 0
-     },
+     "align": null,
      "markers": [
       0
      ],
@@ -76675,9 +76995,7 @@
        "collectionVisRefCount"
       ]
      },
-     "align": {
-      "const": 0
-     },
+     "align": null,
      "markers": [
       0
      ],
@@ -77325,9 +77643,7 @@
        "compressedSunShadow"
       ]
      },
-     "align": {
-      "const": 0
-     },
+     "align": null,
      "markers": [
       0
      ],
@@ -79350,10 +79666,6 @@
     },
     {
      "op": "hook",
-     "name": "DB_Zones_GetCurrentZoneLoadHandleUnique"
-    },
-    {
-     "op": "hook",
      "name": "sub_140D90340"
     },
     {
@@ -81192,10 +81504,6 @@
     },
     {
      "op": "hook",
-     "name": "DB_Zones_GetCurrentZoneLoadHandleUnique"
-    },
-    {
-     "op": "hook",
      "name": "DB_ScheduleBackendCallback_GfxLightGridVolumeAtlasDataTemp_"
     },
     {
@@ -81878,10 +82186,6 @@
     },
     {
      "op": "hook",
-     "name": "DB_Zones_GetCurrentZoneLoadHandleUnique"
-    },
-    {
-     "op": "hook",
      "name": "sub_140D90140"
     },
     {
@@ -82003,9 +82307,7 @@
        "tilesData"
       ]
      },
-     "align": {
-      "const": 0
-     },
+     "align": null,
      "markers": [
       0
      ],
@@ -83641,9 +83943,7 @@
        "selfVis"
       ]
      },
-     "align": {
-      "const": 0
-     },
+     "align": null,
      "markers": [
       0
      ],
@@ -84089,9 +84389,7 @@
        "indices"
       ]
      },
-     "align": {
-      "const": 0
-     },
+     "align": null,
      "markers": [
       0
      ],
@@ -96746,9 +97044,7 @@
        "buffer"
       ]
      },
-     "align": {
-      "const": 0
-     },
+     "align": null,
      "markers": [
       0
      ],
@@ -96912,9 +97208,7 @@
        "buffer"
       ]
      },
-     "align": {
-      "const": 0
-     },
+     "align": null,
      "markers": [
       0
      ],
@@ -96962,9 +97256,7 @@
        "bytecode"
       ]
      },
-     "align": {
-      "const": 0
-     },
+     "align": null,
      "markers": [
       0
      ],
@@ -98814,9 +99106,7 @@
        "serializedByte"
       ]
      },
-     "align": {
-      "const": 0
-     },
+     "align": null,
      "markers": [
       -2,
       -1,
@@ -101784,9 +102074,7 @@
        "entityString"
       ]
      },
-     "align": {
-      "const": 0
-     },
+     "align": null,
      "markers": [
       0
      ],
@@ -104425,33 +104713,56 @@
      "markers": [
       0
      ],
-     "body": []
-    },
-    {
-     "op": "hook",
-     "name": "DB_StreamingInfo_CalcUIntsForImageFlags"
-    },
-    {
-     "op": "load",
-     "name": "Load_uintArray",
-     "target": {
-      "root": "pointee",
-      "value": [
-       "ret",
-       14482416,
-       1634,
-       6
-      ],
-      "path": []
-     },
-     "at_start": {
-      "const": 0
-     },
-     "count": {
-      "opaque": "ret(14218496,1634,7)"
-     },
-     "type": "unsigned int",
-     "fn": "Load_uintArray@unsigned int"
+     "body": [
+      {
+       "op": "load",
+       "name": "Load_uintArray",
+       "target": {
+        "root": "item",
+        "path": []
+       },
+       "at_start": {
+        "const": 0
+       },
+       "count": {
+        "op": ">>",
+        "args": [
+         {
+          "op": "+",
+          "args": [
+           {
+            "op": "*",
+            "args": [
+             {
+              "field": {
+               "root": "self",
+               "path": [
+                "imageCount"
+               ]
+              },
+              "width": 4,
+              "signed": false,
+              "type": "unsigned int"
+             },
+             {
+              "const": 4
+             }
+            ]
+           },
+           {
+            "const": 31
+           }
+          ]
+         },
+         {
+          "const": 5
+         }
+        ]
+       },
+       "type": "unsigned int",
+       "fn": "Load_uintArray@unsigned int"
+      }
+     ]
     }
    ],
    "errors": [],
@@ -105893,33 +106204,36 @@
            "markers": [
             0
            ],
-           "body": []
-          },
-          {
-           "op": "hook",
-           "name": "sub_140D8F930"
-          },
-          {
-           "op": "load",
-           "name": "Load_ushortArray",
-           "target": {
-            "root": "pointee",
-            "value": [
-             "ret",
-             14482448,
-             1646,
-             11
-            ],
-            "path": []
-           },
-           "at_start": {
-            "const": 0
-           },
-           "count": {
-            "opaque": "ret(14219568,1646,12)"
-           },
-           "type": "unsigned __int16",
-           "fn": "Load_ushortArray@unsigned __int16"
+           "body": [
+            {
+             "op": "load",
+             "name": "Load_ushortArray",
+             "target": {
+              "root": "item",
+              "path": []
+             },
+             "at_start": {
+              "const": 0
+             },
+             "count": {
+              "field": {
+               "root": "self",
+               "path": [
+                "contentCounts",
+                {
+                 "index": 1,
+                 "stride": 2
+                }
+               ]
+              },
+              "width": 2,
+              "signed": false,
+              "type": "unsigned __int16"
+             },
+             "type": "unsigned __int16",
+             "fn": "Load_ushortArray@unsigned __int16"
+            }
+           ]
           }
          ]
         }
@@ -106036,9 +106350,7 @@
        "file"
       ]
      },
-     "align": {
-      "const": 0
-     },
+     "align": null,
      "markers": [
       0
      ],
@@ -114648,9 +114960,7 @@
        "strPool"
       ]
      },
-     "align": {
-      "const": 0
-     },
+     "align": null,
      "markers": [
       0
      ],
@@ -119014,9 +119324,7 @@
        "havokTileShapePointer"
       ]
      },
-     "align": {
-      "const": 0
-     },
+     "align": null,
      "markers": [
       0
      ],

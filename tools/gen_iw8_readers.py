@@ -41,6 +41,9 @@ def entry(name):
     e = definition(name)
     if e is None and name.endswith('*'):
         return {'kind': 'pointer', 'size': 8, 'target': name[:-1].strip()}
+    if e is None and '(*)' in name:
+        # Pointer to an array: "T (*)[N]" points at T[N].
+        return {'kind': 'pointer', 'size': 8, 'target': re.sub(r'\s*\(\*\)', '', name)}
     return e
 
 
@@ -329,6 +332,12 @@ def access(ctx, ref):
         elif isinstance(part, int) or (isinstance(part, dict) and 'index' in part):
             stride = part.get('stride') if isinstance(part, dict) else None
             element, _ = array_element(type_name)
+            if element is None and (entry(type_name) or {}).get('kind') == 'pointer':
+                # Index the data a pointer member points to (read earlier by the same loader).
+                element = pointer_target(type_name)
+                element_of_target, _ = array_element(element)
+                if element_of_target is not None:
+                    element = element_of_target
             if element is None:
                 # Index through a record or union whose first array member holds the elements.
                 found = descend(expr, type_name, lambda t: array_element(t)[0] is not None and (
@@ -462,6 +471,8 @@ def condition(ctx, cond):
 
 def divide(expr, k):
     """expr / k for a size expression that is a multiple of k."""
+    if 'select' in expr:
+        return {'select': expr['select'], 'then': divide(expr['then'], k), 'else': divide(expr['else'], k)}
     terms = linear(expr)
     if terms is None:
         raise Unsupported('size is not linear')
@@ -568,7 +579,8 @@ def emit_load(ctx, op, out):
         size = self_size(fid, op['count'])
         if size is None:
             raise Unsupported('inline load without a size: %s' % op['name'])
-        ctx.line('reader.read_bytes(%s);' % expression(ctx, size), out)
+        if size != {'const': 0}:
+            ctx.line('reader.read_bytes(%s);' % expression(ctx, size), out)
         if f in ('empty',):
             return
         op = dict(op, at_start={'const': 1})
@@ -611,8 +623,9 @@ def emit_string_loop(ctx, items, count, out):
     ctx.line('}', out)
 
 
-def union_arm(type_name, element, size):
-    """The pointer arm of a union whose target matches `element` (or its size)."""
+def union_arm(type_name, element, size, size_expr=None):
+    """The pointer arm of a union whose target matches `element`, its size, or (for a variable data size)
+    the largest target size that divides the byte count."""
     arms = [m for m in members(type_name) if (entry(m['type']) or {}).get('kind') == 'pointer']
     for m in arms:
         if element and pointer_target(m['type']) == element:
@@ -620,6 +633,18 @@ def union_arm(type_name, element, size):
     for m in arms:
         if size and size_of(pointer_target(m['type'])) == size:
             return m
+    if size_expr is not None:
+        dividing = []
+        for m in arms:
+            target_size = size_of(pointer_target(m['type']))
+            try:
+                if target_size:
+                    divide(size_expr, target_size)
+                    dividing.append((target_size, m))
+            except Unsupported:
+                pass
+        if dividing:
+            return max(dividing, key=lambda d: d[0])[1]
     if len(arms) == 1:
         return arms[0]
     raise Unsupported('no union arm of %s for %s' % (type_name, element))
@@ -631,6 +656,21 @@ def emit_pointer(ctx, op, out):
     while body and body[0]['op'] == 'temp':
         emit_ops(ctx, [body[0]], out)
         body = body[1:]
+    # if (c) {} else { data n }: the pointee holds n bytes or none.
+    if body and body[0]['op'] == 'if':
+        first_if = body[0]
+        then_ops, else_ops = first_if['then'], first_if['else']
+        if len(then_ops) == 1 and len(else_ops) == 1 and then_ops[0]['op'] == 'data' and \
+                else_ops[0]['op'] == 'data' and then_ops[0]['target'] == else_ops[0]['target']:
+            data = dict(then_ops[0], size={'select': first_if['cond'], 'then': then_ops[0]['size'],
+                                           'else': else_ops[0]['size']})
+            body = [data] + body[1:]
+        elif not then_ops and else_ops and else_ops[0]['op'] == 'data':
+            data = dict(else_ops[0], size={'select': first_if['cond'], 'then': {'const': 0}, 'else': else_ops[0]['size']})
+            body = [data] + else_ops[1:] + body[1:]
+        elif not else_ops and then_ops and then_ops[0]['op'] == 'data':
+            data = dict(then_ops[0], size={'select': first_if['cond'], 'then': then_ops[0]['size'], 'else': {'const': 0}})
+            body = [data] + then_ops[1:] + body[1:]
     expr, type_name = access(ctx, op['member'])
     found = descend(expr, type_name, is_kind('pointer', 'union'))
     if found is not None:
@@ -642,15 +682,24 @@ def emit_pointer(ctx, op, out):
         element = canonical(S['split_cv'](first['type'])[1])
     if kind == 'union':
         size = None
-        if first and first['op'] == 'data' and 'const' in first['size']:
-            size = first['size']['const']
-        arm = union_arm(type_name, element, size)
+        size_expr = None
+        if first and first['op'] == 'data':
+            size_expr = first['size']
+            if 'const' in first['size']:
+                size = first['size']['const']
+        arm = union_arm(type_name, element, size, size_expr)
         expr, type_name = '%s.%s' % (expr, arm['cxx']), canonical(arm['type'])
         kind = 'pointer'
     if kind != 'pointer':
         raise Unsupported('pointer op on %s (%s)' % (expr, type_name))
     target = pointer_target(type_name)
     align = op['align']['const'] if op['align'] and 'const' in op['align'] else 0
+    # An asset pointer loader inlined into its caller: the pointee begins an asset of a known type.
+    if -3 in op['markers']:
+        begins = [o for o in walk(body) if o['op'] == 'asset_begin' and 'const' in o['type']]
+        if begins:
+            ctx.line('reader.read_asset(%s, %s);' % (asset_enum(begins[0]['type']['const']), expr), out)
+            return
     if first is None:
         # No pointee data (a null-checked pointer whose target loads nothing).
         ctx.line('reader.read_single(%s, %d);' % (expr, align), out)
@@ -770,7 +819,11 @@ def emit_ops(ctx, ops, out):
             expr, _ = access_as(ctx, op['member'], is_type('scr_string_t'))
             ctx.line('reader.read_script_string(%s);' % expr, out)
             continue
-        if kind == 'push':
+        if kind == 'align':
+            mask = op['mask'].get('const') if isinstance(op['mask'], dict) else op['mask']
+            if mask:
+                ctx.line('reader.align(%d);' % mask, out)
+        elif kind == 'push':
             ctx.line('reader.push_stream(%s);' % expression(ctx, op['block']), out)
         elif kind == 'pop':
             ctx.line('reader.pop_stream();', out)
