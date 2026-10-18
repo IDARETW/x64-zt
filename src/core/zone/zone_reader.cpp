@@ -263,13 +263,18 @@ namespace zonetool
 			return false;
 		}
 
+		const auto [block_index, offset] = split_offset(pointer);
+		if (block_index >= this->blocks_.size())
+		{
+			return false;
+		}
+
 		if (relative)
 		{
 			return !this->asset_starts_.empty();
 		}
 
-		const auto [block_index, offset] = split_offset(pointer);
-		return block_index < this->blocks_.size() && offset < this->blocks_[block_index].size;
+		return offset < this->blocks_[block_index].size;
 	}
 
 	bool zone_reader::contains(const void* pointer) const
@@ -373,6 +378,12 @@ namespace zonetool
 		{
 			this->deferred_offsets_.emplace_back(field, offset, target, this->blocks_[block_index].position);
 			return;
+		}
+
+		const auto block_size = this->blocks_[block_index].size;
+		if (offset >= block_size || (target == offset_target::alias && block_size - offset < sizeof(void*)))
+		{
+			throw std::runtime_error(std::format("pointer 0x{:016X} points past the end of block {}", pointer_value(*field), block_index));
 		}
 
 		const auto address = this->offset_address(static_cast<std::uint8_t>(block_index), offset);
