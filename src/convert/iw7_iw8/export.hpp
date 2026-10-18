@@ -116,9 +116,25 @@ namespace zonetool::convert::iw7_iw8
 	std::string export_default_probe(extraction& output);
 	// Writes the sky cube map of the world and returns its image name, or an empty name (the pipeline's dark sky).
 	std::string export_sky(const source_map& source, extraction& output);
-	// Writes the lightmaps of the world as IW3 lightmap files and returns their entries for the world export. The
-	// lightmap index of a surface converts when it is below their count.
-	json export_lightmaps(const source_map& source, extraction& output);
+	// The lightmaps of the world: their entries for the world export (the lightmap index of a surface converts when
+	// it is below their count), and for the static models, which take the light of the floor under them, the ambient
+	// light (A + B / 2, in IW7 units) and the sun visibility of each texel.
+	struct world_lightmaps
+	{
+		struct page
+		{
+			std::size_t width{};
+			std::size_t height{};
+			std::vector<std::array<float, 3>> ambient;
+			std::vector<std::uint8_t> visibility;
+		};
+
+		json entries = json::array();
+		std::vector<page> pages;
+	};
+
+	// Writes the lightmaps of the world as IW3 lightmap files.
+	world_lightmaps export_lightmaps(const source_map& source, extraction& output);
 
 	// The level that IW3 lightmaps and probes take for an IW7 irradiance or radiance (a soft knee above 0.5).
 	float light_level(float value);

@@ -98,10 +98,10 @@ namespace zonetool::convert::iw7_iw8
 	// |y| from the 2 * rg - 1 of a texel), in the tangent space of the surface. Its primary image holds the sun
 	// visibility as a signed field (2 * r - 1, the edge at 0). Both games light a texel with the layers as
 	// A + B * saturate(dot(normal, direction)); IW3 takes A * normal.z, which is the same for an unmapped normal.
-	json export_lightmaps(const source_map& source, extraction& output)
+	world_lightmaps export_lightmaps(const source_map& source, extraction& output)
 	{
 		const auto& world = *source.world();
-		auto result = json::array();
+		world_lightmaps result;
 		for (auto i = 0u; i < world.draw.lightMapCount; i++)
 		{
 			const auto lightmap = source.resolve(iw7::ASSET_TYPE_GFXLIGHTMAP, world.draw.lightMaps[i]);
@@ -132,6 +132,10 @@ namespace zonetool::convert::iw7_iw8
 			const auto count = width * height;
 			std::vector<std::uint8_t> visibility(count);
 			std::vector<std::uint8_t> two_layers(count * 8);
+			auto& page = result.pages.emplace_back();
+			page.width = width;
+			page.height = height;
+			page.ambient.resize(count);
 			for (std::size_t t = 0; t < count; t++)
 			{
 				// The sun visibility: lit above the edge of the signed field, with the softness of a few texels.
@@ -148,6 +152,11 @@ namespace zonetool::convert::iw7_iw8
 				const std::array<std::uint8_t, 2> slopes{encode_slope(z > 0.0f ? x / z : 0.0f, 4.07999992f, 2.07999992f),
 					encode_slope(z > 0.0f ? y / z : 0.0f, 4.06451607f, 2.06451607f)};
 
+				for (auto channel = 0; channel < 3; channel++)
+				{
+					page.ambient[t][channel] = layers[t * 4 + channel] + layers[(count + t) * 4 + channel] * 0.5f;
+				}
+
 				// The layers: blue, green, red and alpha bytes, layer A over layer B.
 				for (auto layer = 0u; layer < 2; layer++)
 				{
@@ -163,7 +172,8 @@ namespace zonetool::convert::iw7_iw8
 			const auto stem = bsp_name(source) + std::format(".lightmap_{}", i);
 			write_file(output.extracted / (stem + "_0.bin"), visibility);
 			write_file(output.extracted / (stem + "_1.bin"), two_layers);
-			result.push_back(json::array(
+			page.visibility = visibility;
+			result.entries.push_back(json::array(
 			{
 				{{"bytes", visibility.size()}, {"file", stem + "_0.bin"}, {"format", format_l8}, {"height", height}, {"levels", 1},
 					{"width", width}},
@@ -174,9 +184,9 @@ namespace zonetool::convert::iw7_iw8
 			ZONETOOL_INFO("iw7: lightmap %u: %zux%zu", i, width, height);
 		}
 
-		if (result.size() != world.draw.lightMapCount)
+		if (result.entries.size() != world.draw.lightMapCount)
 		{
-			ZONETOOL_WARNING("iw7: %zu of %u lightmaps convert; surfaces of the others have no lightmap", result.size(),
+			ZONETOOL_WARNING("iw7: %zu of %u lightmaps convert; surfaces of the others have no lightmap", result.entries.size(),
 				world.draw.lightMapCount);
 		}
 
