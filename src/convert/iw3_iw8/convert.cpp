@@ -2113,6 +2113,11 @@ int buildIw3(const Args &args)
 
 } // namespace
 
+namespace zonetool::iw8
+{
+	const game& definition();
+}
+
 namespace zonetool::convert::iw3_iw8
 {
 	void convert_zone(const std::filesystem::path& zone_path, const zone_conversion& conversion)
@@ -2146,7 +2151,7 @@ namespace zonetool::convert::iw3_iw8
 			}
 
 			// The type compendium comes from the zone folder of the game.
-			iw8::havok::UseNativeHavok(std::filesystem::path(args.replayExecutable).parent_path() / "zone", havok == "native-check");
+			::iw8::havok::UseNativeHavok(std::filesystem::path(args.replayExecutable).parent_path() / "zone", havok == "native-check");
 		}
 		args.unlinkerExecutable = option("unlinker");
 		args.gscTool = option("gsc_tool");
@@ -2184,6 +2189,19 @@ namespace zonetool::convert::iw3_iw8
 		if (buildIw3(args) != 0)
 		{
 			throw std::runtime_error(std::format("could not convert \"{}\" to iw8", zone_path.string()));
+		}
+
+		// --dump 1 also dumps the IW8 zones of the map (dump/<zone>/ and its csv), which buildzone builds again.
+		if (const auto dump = option("dump"); !dump.empty() && dump != "0")
+		{
+			const auto zone_folder = std::filesystem::path(args.replayExecutable).parent_path() / "zone";
+			for (const auto& entry : std::filesystem::directory_iterator(args.outputDirectory))
+			{
+				if (entry.path().extension() == ".ff")
+				{
+					zonetool::iw8::definition().dump_zone(zone_folder, entry.path(), nullptr);
+				}
+			}
 		}
 	}
 }

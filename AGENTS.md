@@ -39,6 +39,11 @@ Without a command, `zonetool.exe` opens an interactive console.
 - Flags for `dumpzone`: `-dds` writes DDS images. `-dump_streamed_image` reads `imagefile*.pak` and writes streamed images.
 - The `require` row in a build CSV loads another zone into the asset database. There is no `loadzone` command.
 - `buildzone` never writes to the game folder.
+- `dumpzone <iw3 zone> --target iw8` converts a whole IW3 map into the Replay 1.20 zones in `output/<map>/`. Options:
+  `--map <name>`, `--style iw3|iw8`, `--unlinker <exe>`, `--gsc_tool <exe>`, `--replay <exe>` (its folder is the Replay
+  game folder), `--metadata <json>`, `--acts <exe>` (validates the zones), `--havok exe|native|native-check` (Havok data
+  from the Replay executable, built natively, or built natively and checked with the executable), `--dump 1` (also
+  dumps each zone for `buildzone`). Tool paths can also go in `zonetool.json` `tools`.
 
 ## Source layout
 
