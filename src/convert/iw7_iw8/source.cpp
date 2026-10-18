@@ -55,17 +55,28 @@ namespace zonetool::convert::iw7_iw8
 			ZONETOOL_WARNING("iw7: zone \"techsets_%s\" was not found; materials keep default images", this->name_.data());
 		}
 
-		this->load_shared_streams();
+		// The multiplayer common zones hold models that maps place (flags, tag_origin) without holding them.
+		for (const auto common : {"common_core_mp", "common_mp"})
+		{
+			this->load(common);
+		}
+
+		for (const auto& zone : this->zones_)
+		{
+			this->load_shared_streams(*zone);
+		}
+
+		ZONETOOL_INFO("iw7: %zu model surfaces streamed from shared stream files", this->streamed_.size());
 	}
 
 	// IW7 streams the surfaces of models from shared stream files (assetfile<N>.pak). Each stream holds one asset entry
 	// and its data in the zone stream format: behind an asset list of one entry it loads as a zone of its own. The
 	// surfaces are copied, so that each stream zone can go.
-	void source_map::load_shared_streams()
+	void source_map::load_shared_streams(const iw7::loaded_zone& source_zone)
 	{
 		std::set<std::uint16_t> missing;
 		std::size_t surfaces{};
-		for (const auto& file : this->zones_.front()->file.shared_stream_files)
+		for (const auto& file : source_zone.file.shared_stream_files)
 		{
 			std::string chunk(file.offsetEnd - file.offset, '\0');
 			const auto pak = std::format("assetfile{}.pak", file.fileIndex);
@@ -89,7 +100,7 @@ namespace zonetool::convert::iw7_iw8
 			zone_file.payload += stream;
 			zone_file.block_sizes.assign(block_count, zone_file.payload.size() * 2 + 0x10000);
 
-			const auto zone = iw7::load_zone(std::format("{}_stream_{}", this->name_, surfaces), std::move(zone_file));
+			const auto zone = iw7::load_zone(std::format("{}_stream_{}", source_zone.name, surfaces), std::move(zone_file));
 			for (const auto& asset : zone->assets)
 			{
 				if (asset.type != iw7::ASSET_TYPE_XMODEL_SURFS || asset.referenced)
@@ -98,7 +109,13 @@ namespace zonetool::convert::iw7_iw8
 				}
 
 				const auto model_surfaces = static_cast<const iw7::XModelSurfs*>(asset.header);
-				auto& copies = this->streamed_[std::string(asset_name(model_surfaces->name))];
+				auto [found, inserted] = this->streamed_.try_emplace(std::string(asset_name(model_surfaces->name)));
+				if (!inserted)
+				{
+					continue;
+				}
+
+				auto& copies = found->second;
 				for (auto i = 0u; i < model_surfaces->numsurfs && model_surfaces->surfs; i++)
 				{
 					const auto& surface = model_surfaces->surfs[i];
@@ -119,8 +136,6 @@ namespace zonetool::convert::iw7_iw8
 
 			surfaces++;
 		}
-
-		ZONETOOL_INFO("iw7: %zu model surfaces streamed from shared stream files", this->streamed_.size());
 	}
 
 	const std::string& source_map::name() const
