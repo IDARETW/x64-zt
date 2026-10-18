@@ -393,6 +393,19 @@ namespace zonetool::iw8
 		return stream.finish();
 	}
 
+	std::vector<std::pair<std::int32_t, std::string>> asset_dependencies(const std::int32_t type, const void* header)
+	{
+		std::vector<std::pair<std::int32_t, std::string>> dependencies;
+		const auto& format = format_of(type);
+		dump_stream stream([&dependencies](const std::int32_t dependency, const void* dependency_header)
+		{
+			return dependencies.emplace_back(dependency, name_of(dependency, dependency_header)).second;
+		});
+		stream.begin(type, header, format.size);
+		format.dump(stream, const_cast<void*>(header));
+		return dependencies;
+	}
+
 	asset_file dump_asset_file(const std::int32_t type, const void* header)
 	{
 		const auto name = name_of(type, header);

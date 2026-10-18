@@ -320,18 +320,23 @@ namespace zonetool::iw8
 				}
 			}
 
+			// A referenced asset keeps the header bytes of its zone. An asset that the zone does not hold (an asset of
+			// a required zone) gets a header with only its name.
 			void* stub(const asset_format& format, const void* header, const std::string& name)
 			{
 				auto& data = this->stubs_.emplace_back(format.size);
-				std::memcpy(data.data(), header, format.size);
-				this->stub_sources_[reinterpret_cast<std::uintptr_t>(data.data())] = {format.size, static_cast<const std::uint8_t*>(header)};
-
-				// A loaded stub names the asset past its ',': keep the zone string, so that sharing stays the same.
-				const auto loaded_name = *static_cast<const char* const*>(header);
-				if (this->references_.contains(header) && loaded_name && loaded_name[-1] == ',')
+				if (this->references_.contains(header))
 				{
-					*reinterpret_cast<const char**>(data.data()) = loaded_name - 1;
-					return data.data();
+					std::memcpy(data.data(), header, format.size);
+					this->stub_sources_[reinterpret_cast<std::uintptr_t>(data.data())] = {format.size, static_cast<const std::uint8_t*>(header)};
+
+					// A loaded stub names the asset past its ',': keep the zone string, so that sharing stays the same.
+					const auto loaded_name = *static_cast<const char* const*>(header);
+					if (loaded_name && loaded_name[-1] == ',')
+					{
+						*reinterpret_cast<const char**>(data.data()) = loaded_name - 1;
+						return data.data();
+					}
 				}
 
 				const auto& stub_name = this->stub_names_.emplace_back("," + name);
