@@ -38,6 +38,9 @@ namespace zonetool
 
 		void set_inline_asset_loader(inline_asset_loader loader);
 		void set_read_trace(read_trace trace);
+		// Keeps the data of the temp block: pop_stream does not rewind it, so every temp read gets its own memory.
+		// Call it before the first read. Dumps and writers need the data that the game drops after each asset.
+		void keep_temp_data();
 		void set_script_strings(std::vector<std::uint32_t> ids);
 		void set_zone_index(std::uint16_t index);
 		std::uint16_t zone_index() const;
@@ -325,6 +328,8 @@ namespace zonetool
 		std::vector<deferred_offset> deferred_offsets_;
 		std::vector<std::size_t> string_positions_;
 		std::vector<std::vector<std::size_t>> asset_starts_;
+		bool keep_temp_data_{};
+		std::size_t temp_committed_{};
 
 		template <typename T>
 		static void** field_address(T*& field)
