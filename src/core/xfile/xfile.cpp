@@ -5,6 +5,7 @@
 
 #include <zlib.h>
 #include <lz4.h>
+#include <xxhash.h>
 #include <zstd.h>
 
 namespace zonetool::xfile
@@ -396,10 +397,13 @@ namespace zonetool::xfile
 	namespace
 	{
 		constexpr std::size_t iw8_block_count = 11;
-		constexpr std::uint32_t iw8_xfile_version = 0xFF7;
+		// The Replay 1.20 install also holds zones from earlier revisions, with the same asset data.
+		constexpr std::array<std::uint32_t, 12> iw8_xfile_versions{0xFCD, 0xFCF, 0xFD0, 0xFD1, 0xFD5, 0xFDA, 0xFE1, 0xFE3, 0xFEE,
+			0xFF3, 0xFF5, 0xFF7};
 		constexpr std::size_t iw8_signature_size = 0x8000;
 		constexpr std::size_t iw8_signed_chunk_size = 0x800000;
 		constexpr std::size_t iw8_rsa_block_size = 0x4000;
+		constexpr std::uint32_t iw8_patch_version = 6;
 
 #pragma pack(push, 1)
 		struct iw8_file_header
@@ -425,10 +429,22 @@ namespace zonetool::xfile
 			std::uint32_t decompressed_size;
 			std::uint32_t encryption_counter;
 		};
+
+		struct iw8_patch_header
+		{
+			char magic[8];
+			std::uint32_t version;
+			std::uint8_t unknown[0x1C];
+			std::uint64_t data_size;
+			std::uint64_t delta_size;
+			iw8_file_header base;
+			iw8_file_header patched;
+		};
 #pragma pack(pop)
 
 		static_assert(sizeof(iw8_file_header) == 0x88);
 		static_assert(sizeof(iw8_compressed_block) == 0xC);
+		static_assert(sizeof(iw8_patch_header) == 0x148);
 
 		enum iw8_codec : std::uint8_t
 		{
@@ -635,6 +651,326 @@ namespace zonetool::xfile
 			return result;
 		}
 
+		std::size_t read_vcdiff_integer(byte_reader& reader)
+		{
+			std::size_t value{};
+			std::uint8_t byte{};
+			do
+			{
+				if (value >> 57)
+				{
+					throw std::runtime_error("VCDIFF integer is too large");
+				}
+
+				byte = reader.read<std::uint8_t>();
+				value = (value << 7) | (byte & 0x7F);
+			} while (byte & 0x80);
+
+			return value;
+		}
+
+		enum class vcdiff_op : std::uint8_t
+		{
+			none,
+			add,
+			run,
+			copy,
+		};
+
+		struct vcdiff_instruction
+		{
+			vcdiff_op op;
+			std::uint8_t mode;
+			std::uint8_t size;
+		};
+
+		using vcdiff_code = std::array<vcdiff_instruction, 2>;
+
+		// The default code table of RFC 3284 section 5.6.
+		constexpr auto vcdiff_code_table = []
+		{
+			std::array<vcdiff_code, 256> table{};
+			std::size_t code{};
+			table[code++] = {{{vcdiff_op::run, 0, 0}}};
+			for (std::uint8_t size = 0; size <= 17; size++)
+			{
+				table[code++] = {{{vcdiff_op::add, 0, size}}};
+			}
+
+			for (std::uint8_t mode = 0; mode <= 8; mode++)
+			{
+				table[code++] = {{{vcdiff_op::copy, mode, 0}}};
+				for (std::uint8_t size = 4; size <= 18; size++)
+				{
+					table[code++] = {{{vcdiff_op::copy, mode, size}}};
+				}
+			}
+
+			for (std::uint8_t mode = 0; mode <= 5; mode++)
+			{
+				for (std::uint8_t add_size = 1; add_size <= 4; add_size++)
+				{
+					for (std::uint8_t copy_size = 4; copy_size <= 6; copy_size++)
+					{
+						table[code++] = {{{vcdiff_op::add, 0, add_size}, {vcdiff_op::copy, mode, copy_size}}};
+					}
+				}
+			}
+
+			for (std::uint8_t mode = 6; mode <= 8; mode++)
+			{
+				for (std::uint8_t add_size = 1; add_size <= 4; add_size++)
+				{
+					table[code++] = {{{vcdiff_op::add, 0, add_size}, {vcdiff_op::copy, mode, 4}}};
+				}
+			}
+
+			for (std::uint8_t mode = 0; mode <= 8; mode++)
+			{
+				table[code++] = {{{vcdiff_op::copy, mode, 4}, {vcdiff_op::add, 0, 1}}};
+			}
+
+			return table;
+		}();
+
+		class vcdiff_address_cache
+		{
+		public:
+			std::size_t decode(byte_reader& addresses, const std::size_t here, const std::uint8_t mode)
+			{
+				std::size_t address{};
+				if (mode == 0)
+				{
+					address = read_vcdiff_integer(addresses);
+				}
+				else if (mode == 1)
+				{
+					address = here - read_vcdiff_integer(addresses);
+				}
+				else if (mode < 2 + near_size)
+				{
+					address = this->near_[mode - 2] + read_vcdiff_integer(addresses);
+				}
+				else
+				{
+					address = this->same_[(mode - 2 - near_size) * 256 + addresses.read<std::uint8_t>()];
+				}
+
+				this->near_[this->next_near_] = address;
+				this->next_near_ = (this->next_near_ + 1) % near_size;
+				this->same_[address % this->same_.size()] = address;
+				return address;
+			}
+
+		private:
+			static constexpr std::size_t near_size = 4;
+
+			std::array<std::size_t, near_size> near_{};
+			std::array<std::size_t, 3 * 256> same_{};
+			std::size_t next_near_{};
+		};
+
+		void copy_vcdiff(std::string& target, const std::size_t window_start, const std::string_view segment,
+			std::size_t address, std::size_t count)
+		{
+			if (address >= segment.size() + target.size() - window_start)
+			{
+				throw std::runtime_error("VCDIFF copy reads data that is not decoded");
+			}
+
+			if (address < segment.size())
+			{
+				const auto part = std::min(count, segment.size() - address);
+				target.append(segment.substr(address, part));
+				address += part;
+				count -= part;
+				if (!count)
+				{
+					return;
+				}
+			}
+
+			const auto position = window_start + address - segment.size();
+			const auto end = target.size();
+			if (position + count <= end)
+			{
+				target.resize(end + count);
+				std::memcpy(target.data() + end, target.data() + position, count);
+				return;
+			}
+
+			for (std::size_t i = 0; i < count; i++)
+			{
+				target.push_back(target[position + i]);
+			}
+		}
+
+		// Replay patches are VCDIFF deltas (RFC 3284) with two window indicator bits added. Bit 2 adds an integer
+		// after the source segment position. Bit 3 adds a checksum after the window: XXH64 of the target window,
+		// seeded with the previous checksum and folded to 32 bits.
+		std::string decode_vcdiff(const std::string_view source, const std::string_view delta, const std::size_t size)
+		{
+			byte_reader reader(delta);
+			const auto header = reader.read_view(5);
+			if (header.substr(0, 3) != "\xD6\xC3\xC4" || (header[4] & 0xF3) != 0)
+			{
+				throw std::runtime_error("patch delta has no VCDIFF header");
+			}
+
+			std::string target;
+			target.reserve(size);
+
+			std::uint32_t checksum{};
+			while (reader.remaining())
+			{
+				const auto indicator = reader.read<std::uint8_t>();
+				if (indicator & 0xF2)
+				{
+					throw std::runtime_error(std::format("VCDIFF window indicator 0x{:X} is not supported", indicator));
+				}
+
+				std::string_view segment;
+				if (indicator & 1)
+				{
+					const auto segment_size = read_vcdiff_integer(reader);
+					const auto segment_position = read_vcdiff_integer(reader);
+					if (indicator & 4)
+					{
+						read_vcdiff_integer(reader);
+					}
+
+					if (segment_position > source.size() || segment_size > source.size() - segment_position)
+					{
+						throw std::runtime_error("VCDIFF source segment is outside the zone");
+					}
+
+					segment = source.substr(segment_position, segment_size);
+				}
+
+				byte_reader window(reader.read_view(read_vcdiff_integer(reader)));
+				const auto window_size = read_vcdiff_integer(window);
+				if (window.read<std::uint8_t>() != 0)
+				{
+					throw std::runtime_error("compressed VCDIFF sections are not supported");
+				}
+
+				const auto data_size = read_vcdiff_integer(window);
+				const auto instructions_size = read_vcdiff_integer(window);
+				const auto addresses_size = read_vcdiff_integer(window);
+				byte_reader data(window.read_view(data_size));
+				byte_reader instructions(window.read_view(instructions_size));
+				byte_reader addresses(window.read_view(addresses_size));
+
+				const auto window_start = target.size();
+				vcdiff_address_cache cache;
+				while (instructions.remaining())
+				{
+					for (const auto& instruction : vcdiff_code_table[instructions.read<std::uint8_t>()])
+					{
+						if (instruction.op == vcdiff_op::none)
+						{
+							continue;
+						}
+
+						const auto count = instruction.size ? instruction.size : read_vcdiff_integer(instructions);
+						switch (instruction.op)
+						{
+						case vcdiff_op::add:
+							target.append(data.read_view(count));
+							break;
+						case vcdiff_op::run:
+							target.append(count, data.read<char>());
+							break;
+						case vcdiff_op::copy:
+						{
+							const auto here = segment.size() + target.size() - window_start;
+							copy_vcdiff(target, window_start, segment, cache.decode(addresses, here, instruction.mode), count);
+							break;
+						}
+						case vcdiff_op::none:
+							break;
+						}
+					}
+				}
+
+				if (target.size() - window_start != window_size || window.remaining() || data.remaining() || addresses.remaining())
+				{
+					throw std::runtime_error(std::format("VCDIFF window at target offset 0x{:X} is not valid", window_start));
+				}
+
+				if (indicator & 8)
+				{
+					const auto expected = reader.read<std::uint32_t>();
+					const auto hash = XXH64(target.data() + window_start, window_size, checksum);
+					if (static_cast<std::uint32_t>(hash ^ (hash >> 32)) != expected)
+					{
+						throw std::runtime_error(std::format("VCDIFF window at target offset 0x{:X} has a bad checksum", window_start));
+					}
+
+					checksum = expected;
+				}
+			}
+
+			return target;
+		}
+
+		std::string apply_iw8_patch(const std::filesystem::path& zone_path, iw8_file_header& header, std::string payload)
+		{
+			auto patch_path = zone_path;
+			patch_path.replace_extension(".fp");
+
+			std::string data;
+			if (!game_files::read(patch_path, data))
+			{
+				return payload;
+			}
+
+			byte_reader reader(data);
+			const auto patch = reader.read<iw8_patch_header>();
+			if (std::string_view(patch.magic, sizeof(patch.magic)) != "IWffd100" || patch.version != iw8_patch_version)
+			{
+				throw std::runtime_error(std::format("{} is not a Replay patch", patch_path.filename().string()));
+			}
+
+			if (std::memcmp(&patch.base, &header, sizeof(header)))
+			{
+				throw std::runtime_error(std::format("{} patches another version of the zone", patch_path.filename().string()));
+			}
+
+			header = patch.patched;
+			if (!reader.remaining())
+			{
+				if (header.size != payload.size())
+				{
+					throw std::runtime_error("patch without a delta changes the zone size");
+				}
+
+				return payload;
+			}
+
+			auto frame = reader.read_view(patch.data_size);
+			std::string unsigned_frame;
+			if (frame.starts_with("IWffs100"))
+			{
+				if (frame.size() < iw8_signature_size)
+				{
+					throw std::runtime_error("signed patch has no signature header");
+				}
+
+				unsigned_frame = strip_iw8_rsa_blocks(frame.substr(iw8_signature_size));
+				frame = unsigned_frame;
+			}
+
+			const auto delta = decompress_iw8_frame(patch_path, frame, patch.delta_size);
+			auto patched = decode_vcdiff(payload, delta, header.size);
+			if (patched.size() != header.size)
+			{
+				throw std::runtime_error(std::format("patched zone holds 0x{:X} bytes, not 0x{:X}", patched.size(), header.size));
+			}
+
+			return patched;
+		}
+
 		void read_iw8(byte_reader& reader, const std::filesystem::path& path, const format& format, fastfile& file)
 		{
 			if (format.block_count != iw8_block_count)
@@ -642,27 +978,31 @@ namespace zonetool::xfile
 				throw std::runtime_error(std::format("IW8 zones have {} blocks", iw8_block_count));
 			}
 
-			const auto header = reader.read<iw8_file_header>();
-			if (header.xfile_version != iw8_xfile_version)
+			auto header = reader.read<iw8_file_header>();
+
+			std::string payload;
+			if (!file.is_signed)
 			{
-				throw std::runtime_error(std::format("xfile version 0x{:X} is not 0x{:X}", header.xfile_version, iw8_xfile_version));
+				payload = decompress_iw8_frame(path, reader.rest(), header.size);
+			}
+			else
+			{
+				if (reader.remaining() < iw8_signature_size || reader.read_view(8) != "IWffs100")
+				{
+					throw std::runtime_error("signed zone has no IWffs100 signature header");
+				}
+
+				reader.skip(iw8_signature_size - 8);
+				payload = decompress_iw8_frame(path, strip_iw8_rsa_blocks(reader.rest()), header.size);
+			}
+
+			file.payload = apply_iw8_patch(path, header, std::move(payload));
+			if (std::ranges::find(iw8_xfile_versions, header.xfile_version) == iw8_xfile_versions.end())
+			{
+				throw std::runtime_error(std::format("xfile version 0x{:X} is not a Replay 1.20 version", header.xfile_version));
 			}
 
 			file.block_sizes.assign(std::begin(header.block_sizes), std::end(header.block_sizes));
-
-			if (!file.is_signed)
-			{
-				file.payload = decompress_iw8_frame(path, reader.rest(), header.size);
-				return;
-			}
-
-			if (reader.remaining() < iw8_signature_size || reader.read_view(8) != "IWffs100")
-			{
-				throw std::runtime_error("signed zone has no IWffs100 signature header");
-			}
-
-			reader.skip(iw8_signature_size - 8);
-			file.payload = decompress_iw8_frame(path, strip_iw8_rsa_blocks(reader.rest()), header.size);
 		}
 	}
 
