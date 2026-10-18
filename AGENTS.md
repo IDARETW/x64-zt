@@ -153,7 +153,7 @@ Run these after a change to a reader, writer or the container code:
 
 | Check | Command | Pass condition |
 |---|---|---|
-| Container | `inspect --all` | Every zone passes |
+| Container | `inspect --all` | Every zone passes. IW8: 9536 of 9545 (the 9 later-build frontend zones have other xfile versions) |
 | Reader | `verifyzone --all` | H1: 6991 of 6991. IW7: 686 of 687 (`mp_vlobby_room` on disk is a modified file). IW8: 9533 of 9545 (the 12 others are frontend zones that the Replay loader also rejects) |
 | IW8 writer | `IW8_REWRITE=1 verifyzone --all` | Each zone written again with its own pointer markers gives the same data (block sizes can differ: stock zones add slack) |
 | IW8 writer | `IW8_REWRITE=fresh verifyzone --all` | Each zone written with the choices of the writer loads with the same assets |
