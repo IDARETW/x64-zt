@@ -949,6 +949,314 @@ namespace zonetool::convert::iw7_iw8
 
 			return std::nullopt;
 		}
+
+		// The index after the parenthesis that closes the one at `open`, or npos.
+		std::size_t closing(const std::string_view text, const std::size_t open)
+		{
+			auto depth = 0;
+			auto string = false;
+			for (auto i = open; i < text.size(); i++)
+			{
+				if (string)
+				{
+					string = text[i] != '"' || text[i - 1] == '\\';
+					continue;
+				}
+
+				string = text[i] == '"';
+				depth += text[i] == '(' ? 1 : text[i] == ')' ? -1 : 0;
+				if (depth == 0 && text[i] == ')')
+				{
+					return i + 1;
+				}
+			}
+
+			return std::string_view::npos;
+		}
+
+		// The arguments of a call, split at the commas outside nested parentheses, brackets and strings.
+		std::vector<std::string> call_arguments(const std::string_view inner)
+		{
+			std::vector<std::string> arguments;
+			auto depth = 0;
+			auto string = false;
+			std::size_t start{};
+			for (std::size_t i = 0; i < inner.size(); i++)
+			{
+				if (string)
+				{
+					string = inner[i] != '"' || inner[i - 1] == '\\';
+					continue;
+				}
+
+				string = inner[i] == '"';
+				depth += inner[i] == '(' || inner[i] == '[' ? 1 : inner[i] == ')' || inner[i] == ']' ? -1 : 0;
+				if (depth == 0 && inner[i] == ',')
+				{
+					arguments.push_back(trim(inner.substr(start, i - start)));
+					start = i + 1;
+				}
+			}
+
+			arguments.push_back(trim(inner.substr(start)));
+			return arguments;
+		}
+
+		struct script_function
+		{
+			std::string name;
+			std::string parameters;
+			std::string body;
+		};
+
+		// The functions of a decompiled script, as gsc-tool writes them: "name( parameters )" at the start of a line,
+		// then the body in braces.
+		std::vector<script_function> script_functions(const std::string& text)
+		{
+			static const std::regex header(R"re(^(\w+)\(([^)]*)\)\s*$)re");
+			std::vector<script_function> functions;
+			std::istringstream lines(text);
+			std::string line;
+			std::optional<script_function> current;
+			auto depth = 0;
+			while (std::getline(lines, line))
+			{
+				if (!line.empty() && line.back() == '\r')
+				{
+					line.pop_back();
+				}
+
+				std::smatch match;
+				if (!current)
+				{
+					if (std::regex_match(line, match, header))
+					{
+						current = script_function{match[1].str(), trim(match[2].str())};
+						depth = 0;
+					}
+
+					continue;
+				}
+
+				for (const auto c : line)
+				{
+					depth += c == '{' ? 1 : c == '}' ? -1 : 0;
+				}
+
+				current->body += line + "\n";
+				if (depth == 0 && line.find('}') != std::string::npos)
+				{
+					functions.push_back(std::move(*current));
+					current.reset();
+				}
+			}
+
+			return functions;
+		}
+
+		// Rewrites the calls of `name(` in a script body with `rewrite(arguments)`, which returns their replacement.
+		std::string rewrite_calls(const std::string& body, const std::string_view name,
+			const std::function<std::string(const std::vector<std::string>&)>& rewrite)
+		{
+			std::string result;
+			std::size_t at{};
+			for (auto found = body.find(name); found != std::string::npos; found = body.find(name, at))
+			{
+				const auto open = found + name.size();
+				const auto starts_word = found == 0 || !(std::isalnum(static_cast<unsigned char>(body[found - 1])) ||
+					body[found - 1] == '_' || body[found - 1] == '\\' || body[found - 1] == ':');
+				if (!starts_word || open >= body.size() || body[open] != '(')
+				{
+					result += body.substr(at, open - at);
+					at = open;
+					continue;
+				}
+
+				const auto end = closing(body, open);
+				if (end == std::string::npos)
+				{
+					break;
+				}
+
+				result += body.substr(at, found - at);
+				result += rewrite(call_arguments(std::string_view(body).substr(open + 1, end - open - 2)));
+				at = end;
+			}
+
+			return result + body.substr(std::min(at, body.size()));
+		}
+
+		std::string join(const std::vector<std::string>& values)
+		{
+			std::string result;
+			for (std::size_t i = 0; i < values.size(); i++)
+			{
+				result += (i ? ", " : "") + values[i];
+			}
+
+			return result;
+		}
+
+		// The IW3 versions of the IW7 utilities that map scripts call.
+		constexpr std::string_view map_script_helpers = R"gsc(
+iw7_getstruct( name, key )
+{
+	structs = common_scripts\utility::getstructarray( name, key );
+	if ( structs.size )
+		return structs[ 0 ];
+	return undefined;
+}
+
+iw7_waittill_either( first, second )
+{
+	self endon( first );
+	self waittill( second );
+}
+
+iw7_waittill_any_return( a, b, c, d, e, f )
+{
+	ent = spawnstruct();
+	if ( isdefined( a ) )
+		self thread iw7_waittill_string( a, ent );
+	if ( isdefined( b ) )
+		self thread iw7_waittill_string( b, ent );
+	if ( isdefined( c ) )
+		self thread iw7_waittill_string( c, ent );
+	if ( isdefined( d ) )
+		self thread iw7_waittill_string( d, ent );
+	if ( isdefined( e ) )
+		self thread iw7_waittill_string( e, ent );
+	if ( isdefined( f ) )
+		self thread iw7_waittill_string( f, ent );
+	ent waittill( "returned", message );
+	ent notify( "die" );
+	return message;
+}
+
+iw7_waittill_string( message, ent )
+{
+	ent endon( "die" );
+	self waittill( message );
+	ent notify( "returned", message );
+}
+
+iw7_unsupported( a, b, c, d, e, f )
+{
+}
+)gsc";
+
+		// The map's own script (scripts\mp\maps\<map>\<map>) as the IW3 map script that the pipeline translates: the
+		// functions that its main runs, with IW7's utilities replaced by the IW3 ones or their IW3 versions. Calls
+		// of other IW7 scripts drop out in the pipeline. The converted models have one bone (tag_origin), which the
+		// effects on their tags take; sounds, animations, cinematics and scriptable states do not convert. Adds the
+		// effects that it loads.
+		std::string translate_map_script(const std::string& map, const std::string& text, std::set<std::string>& effects)
+		{
+			const auto functions = script_functions(text);
+			std::map<std::string, const script_function*> by_name;
+			for (const auto& function : functions)
+			{
+				by_name.emplace(function.name, &function);
+			}
+
+			// The functions that main reaches.
+			std::set<std::string> reached;
+			std::vector<std::string> pending{"main"};
+			static const std::regex reference(R"re((?:^|[^\w\\:])(\w+)\s*\(|::(\w+))re");
+			while (!pending.empty())
+			{
+				const auto name = pending.back();
+				pending.pop_back();
+				const auto found = by_name.find(name);
+				if (found == by_name.end() || !reached.insert(name).second)
+				{
+					continue;
+				}
+
+				const auto& body = found->second->body;
+				for (auto it = std::sregex_iterator(body.begin(), body.end(), reference); it != std::sregex_iterator(); ++it)
+				{
+					pending.push_back((*it)[1].matched ? (*it)[1].str() : (*it)[2].str());
+				}
+			}
+
+			static const std::regex dropped_main(
+				R"re(\s*scripts\\mp\\(?:maps\\\w+\\[\w\\]+|load|compass)::\w+\([^;]*\);)re");
+			static const std::regex loaded(R"re(loadfx\(\s*"([^"]+?)(?:\.vfx)?"\s*\))re");
+			std::string result = std::format("// The map script (IW7 scripts\\mp\\maps\\{0}\\{0}).\n\n", map);
+			for (const auto& function : functions)
+			{
+				if (!reached.contains(function.name))
+				{
+					continue;
+				}
+
+				auto body = function.body;
+				if (function.name == "main")
+				{
+					body = std::regex_replace(body, dropped_main, "");
+					const auto open = body.find('{');
+					body.insert(open + 1, std::format("\n    maps\\mp\\{0}_fx::main();\n    maps\\createfx\\{0}_fx::main();\n"
+						"    maps\\mp\\_load::main();", map));
+				}
+
+				body = rewrite_calls(body, "scripts\\engine\\utility::getfx", [](const std::vector<std::string>& arguments)
+				{
+					return "level._effect[ " + join(arguments) + " ]";
+				});
+
+				for (const auto& [from, to] : std::initializer_list<std::pair<std::string_view, std::string_view>>{
+					{"scripts\\engine\\utility::getstructarray(", "common_scripts\\utility::getstructarray("},
+					{"scripts\\engine\\utility::getstruct(", "iw7_getstruct("},
+					{"scripts\\engine\\utility::waittill_either(", "iw7_waittill_either("},
+					{"scripts\\engine\\utility::waittill_any_return(", "iw7_waittill_any_return("},
+					{"scripts\\engine\\utility::waitframe(", "waitframe("},
+					{"scripts\\engine\\utility::array_thread(", "common_scripts\\utility::array_thread("},
+				})
+				{
+					for (auto at = body.find(from); at != std::string::npos; at = body.find(from, at + to.size()))
+					{
+						body.replace(at, from.size(), to);
+					}
+				}
+
+				for (const auto name : {"playfxontag", "stopfxontag"})
+				{
+					body = rewrite_calls(body, name, [&](std::vector<std::string> arguments)
+					{
+						if (arguments.size() == 3 && arguments[2].starts_with('"'))
+						{
+							arguments[2] = "\"tag_origin\"";
+						}
+
+						return std::format("{}( {} )", name, join(arguments));
+					});
+				}
+
+				for (const auto name : {"playsoundonmovingent", "playcinematicforalllooping", "scriptmodelplayanim",
+					"precachempanim", "setscriptablepartstate"})
+				{
+					body = rewrite_calls(body, name, [](const std::vector<std::string>& arguments)
+					{
+						return "iw7_unsupported( " + join(arguments) + " )";
+					});
+				}
+
+				for (auto it = std::sregex_iterator(body.begin(), body.end(), loaded); it != std::sregex_iterator(); ++it)
+				{
+					effects.insert((*it)[1].str());
+				}
+
+				body = std::regex_replace(body, loaded, "loadfx( \"$1\" )");
+				result += std::format("{}({})\n{}\n", function.name, function.parameters.empty() ? "" : " " + function.parameters + " ",
+					body);
+			}
+
+			// gsc-tool writes the names that it has no text for as their IW7 token ids (_id_XXXX), which compile to the
+			// unrelated IW8 tokens of those ids: the script's own functions and fields take names of their own.
+			static const std::regex token_name(R"re(\b_id_([0-9A-Fa-f]+)\b)re");
+			return std::regex_replace(result, token_name, "iw7_$1") + std::string(map_script_helpers);
+		}
 	}
 
 	// IW7 places the ambient effects of a map with the createfx script of the map (scripts\mp\maps\<map>\gen\<map>_fx,
@@ -1028,7 +1336,7 @@ namespace zonetool::convert::iw7_iw8
 			}
 		}
 
-		// The particle systems of the placed effects.
+		// The particle systems of the placed effects, and of the effects that the map's own script loads.
 		std::set<std::string> placed;
 		for (const auto& entry : placements)
 		{
@@ -1036,6 +1344,15 @@ namespace zonetool::convert::iw7_iw8
 			{
 				placed.insert(found->second);
 			}
+		}
+
+		std::string map_script;
+		if (const auto found = scripts.find(std::format("scripts/mp/maps/{0}/{0}", source.name())); found != scripts.end())
+		{
+			std::set<std::string> loaded;
+			map_script = translate_map_script(source.name(), found->second, loaded);
+			ZONETOOL_INFO("iw7: translated the map script (%zu bytes) with %zu effects of its own", map_script.size(), loaded.size());
+			placed.insert(loaded.begin(), loaded.end());
 		}
 
 		export_effect_graphs(source, output, {placed.begin(), placed.end()});
@@ -1078,8 +1395,15 @@ namespace zonetool::convert::iw7_iw8
 
 		{
 			std::ofstream file(folder / "mp" / (source.name() + ".gsc"), std::ios::binary | std::ios::trunc);
-			file << std::format("// The map script (IW7 maps run their effects and createfx scripts first).\nmain()\n{{\n"
-				"\tmaps\\mp\\{0}_fx::main();\n\tmaps\\createfx\\{0}_fx::main();\n\tmaps\\mp\\_load::main();\n}}\n", source.name());
+			if (!map_script.empty())
+			{
+				file << map_script;
+			}
+			else
+			{
+				file << std::format("// The map script (IW7 maps run their effects and createfx scripts first).\nmain()\n{{\n"
+					"\tmaps\\mp\\{0}_fx::main();\n\tmaps\\createfx\\{0}_fx::main();\n\tmaps\\mp\\_load::main();\n}}\n", source.name());
+			}
 		}
 
 		ZONETOOL_INFO("iw7: %zu effect placements of %zu effects (%zu effect ids, %zu createfx calls of other kinds)", placements.size(),
