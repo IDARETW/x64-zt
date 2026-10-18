@@ -135,6 +135,8 @@ IW8 asset code is generated, not written by hand. Do not edit the generated file
 - `tools/gen_iw8_streams.py` writes `src/games/iw8/zone/asset_streams.{hpp,cpp}`: one traversal per record, the `IW8_ASSETS(x)` list and the asset table.
 - A traversal is a template over a stream (`zone/streams.hpp`). `load_stream`, `write_stream`, `dump_stream` and `parse_stream` run the same steps, so `read()` and `write()` cannot disagree.
 - `dumpzone` writes `<pool>/<name>.iw8` for each asset and `<zone>.csv`. `buildzone` reads `zone_source/<zone>.csv` and the dumps, and writes `output/<zone>.ff`.
+- Raw files, script files (`<name>.gscbin`), string tables, localized strings, Lua files and fonts use the files of the other games (`src/core/assets`), so their dumps build into IW8 zones. A dump writes the `.iw8` file only when the shared file does not hold the asset (a string table cell with `"`, or a last column that is empty in each row). A build reads the shared file first.
+- `localize,<file>` adds the entries of `localizedstrings/<file>.str` or `.json`, as in the other games. IW8 localized string names are lowercase.
 - The writer reserves the block 2 header of each asset that the map preload (`Preload_*Ptr`) loads there. The asset table holds that block per type.
 
 ## Compatibility rules
@@ -154,7 +156,7 @@ Run these after a change to a reader, writer or the container code:
 | Reader | `verifyzone --all` | H1: 6991 of 6991. IW7: 686 of 687 (`mp_vlobby_room` on disk is a modified file). IW8: 9533 of 9545 (the 12 others are frontend zones that the Replay loader also rejects) |
 | IW8 writer | `IW8_REWRITE=1 verifyzone --all` | Each zone written again with its own pointer markers gives the same data (block sizes can differ: stock zones add slack) |
 | IW8 writer | `IW8_REWRITE=fresh verifyzone --all` | Each zone written with the choices of the writer loads with the same assets |
-| IW8 dumps | `IW8_REWRITE=dump verifyzone --all` | Each zone dumps, parses, writes, loads and dumps again to the same dumps |
+| IW8 dumps | `IW8_REWRITE=dump verifyzone --all` | Each zone dumps, parses, writes, loads and dumps again to the same files. The log names each asset of a shared type that keeps a `.iw8` file (17 string tables) |
 | Writer | `dumpzone X`, `buildzone X`, `verifyzone X`, then `dumpzone` the built zone | The two dumps are equal, except pointer values and the known differences |
 
 Good round-trip zones: H1 `mp_shipment`, `mp_crash`. IW7 `mp_frontend`, `mp_afghan`. IW8 `mp_shipment`, `common_mp`.

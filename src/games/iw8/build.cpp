@@ -5,6 +5,7 @@
 #include "zone/writer.hpp"
 
 #include <formats/csv.hpp>
+#include <formats/localized_strings.hpp>
 #include <game.hpp>
 
 namespace zonetool::iw8
@@ -86,6 +87,42 @@ namespace zonetool::iw8
 			return entry->second;
 		}
 
+		// localize,<file> adds the entries of localizedstrings/<file>.str or .json when there is such a file. An entry
+		// keeps the first value of its name.
+		bool add_localized_strings(build_context& context, const std::string& file_name)
+		{
+			const auto add = [&context](const std::string& entry_name, const std::string& value)
+			{
+				const auto name = localize_name(entry_name);
+				const auto [entry, added] = context.parsed.try_emplace({ASSET_TYPE_LOCALIZE_ENTRY, name}, nullptr);
+				if (!added && entry->second)
+				{
+					return;
+				}
+
+				auto& localize = *context.parser.allocate<LocalizeEntry>();
+				localize.name = context.parser.duplicate(name);
+				localize.value = context.parser.duplicate(value);
+				entry->second = &localize;
+				context.assets.emplace_back(ASSET_TYPE_LOCALIZE_ENTRY, &localize, false);
+				context.list.emplace_back(ASSET_TYPE_LOCALIZE_ENTRY, &localize, false);
+			};
+
+			if (filesystem::file("localizedstrings/" + file_name + ".str").exists())
+			{
+				localized_strings::parse_str(file_name, add);
+				return true;
+			}
+
+			if (filesystem::file("localizedstrings/" + file_name + ".json").exists())
+			{
+				localized_strings::parse_json(file_name, add);
+				return true;
+			}
+
+			return false;
+		}
+
 		void add_asset(build_context& context, const csv::row* row)
 		{
 			const auto type = type_of(field(row, 0));
@@ -97,11 +134,21 @@ namespace zonetool::iw8
 
 			// <pool>,<name> adds an asset, and <pool>,,<name> a reference to an asset of another zone.
 			auto name = std::string(field(row, 1));
+			if (type == ASSET_TYPE_LOCALIZE_ENTRY && !name.empty() && add_localized_strings(context, name))
+			{
+				return;
+			}
+
 			auto referenced = context.is_referencing;
 			if (name.empty())
 			{
 				name = field(row, 2);
 				referenced = true;
+			}
+
+			if (type == ASSET_TYPE_LOCALIZE_ENTRY)
+			{
+				name = localize_name(name);
 			}
 
 			if (referenced)
@@ -113,8 +160,13 @@ namespace zonetool::iw8
 			const auto header = parse_asset(context, type, name);
 			if (!header)
 			{
-				throw std::runtime_error(std::format("there is no dump of {} \"{}\" ({})", field(row, 0), name,
-					asset_file_path(type, name)));
+				std::string paths;
+				for (const auto& file : asset_file_locations(type, name))
+				{
+					paths += std::format("{}{}", paths.empty() ? "" : " or ", file.path);
+				}
+
+				throw std::runtime_error(std::format("there is no dump of {} \"{}\" ({})", field(row, 0), name, paths));
 			}
 
 			context.list.emplace_back(type, header, false);
