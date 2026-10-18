@@ -290,7 +290,8 @@ patch Replay::WeaponAttachment
 
 # q_Load_AttProjectile (RVA 0xE1EDB0) loads 0xF0: the model at +0x28 and every effect and sound
 # 24 bytes before its game-test offset. The ten leading values (not read by the loader) keep the
-# game-test order without the six stepped explosion values (inferred).
+# game-test order without the six stepped explosion values (inferred). The Replay WeaponDef of the
+# ACTS schema also has useSteppedExplosionDamage without the six stepped values.
 struct Replay::AttProjectile 240
   0 explosionRadius : int
   4 explosionForceRadius : int
@@ -394,7 +395,8 @@ struct Replay::PlayerAnimsetAlias 136
   121 padding : unsigned __int8[12]
 
 # The player animation script loader (RVA 0xDDEAB0) strides the entries 0x58 and maps the script
-# strings at +0, +4 and +8. Four move type words, as in PlayerAnimsetAlias (inferred).
+# strings at +0, +4 and +8. The game test build has eight move type words in 104 bytes; Replay has
+# 16 bytes less, so four words, as in PlayerAnimsetAlias (inferred).
 struct Replay::PlayerAnimEntry 88
   0 entryName : scr_string_t
   4 animName : scr_string_t
@@ -423,7 +425,8 @@ struct Replay::PlayerAnimEntry 88
 
 # The music set loader (RVA 0xDF46F0) strides the states 0x150 and loads the loop assets at
 # +0x138 (count +0x134, 0x78 bytes each). The asset drops one 4-byte value (the last one,
-# inferred); the state drops the runtime reference count and status.
+# sampleRate in the game test build, inferred); the state drops the runtime reference count and
+# status. mp_shipment and mp_frontend3 hold no music sets to check this with.
 struct Replay::SndMusicAsset 120
   0 alias : char[64]
   64 aliasId : unsigned int
