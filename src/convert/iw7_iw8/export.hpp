@@ -112,6 +112,51 @@ namespace zonetool::convert::iw7_iw8
 	// The surfaces of the first level of detail of a model.
 	std::vector<mesh_surface> model_mesh(const source_map& source, const iw7::XModel& model);
 
+	// The collision that the Havok data of an IW7 clip map or map entities holds: a HavokPhysicsShapeList of shapes
+	// with their shape tags, which give the contents, the surface type and flags (the encoding of Replay's tags) and the
+	// glass piece (one-based) of each piece.
+	struct havok_tag
+	{
+		std::uint32_t contents{};
+		std::uint32_t surface_type{};
+		std::uint32_t surface_flags{};
+		std::uint16_t glass_id{};
+	};
+
+	// A convex piece (the brushes of the map), by its points, in the space of its shape (game units).
+	struct havok_convex
+	{
+		std::vector<std::array<float, 3>> points;
+		std::uint16_t tag{};
+	};
+
+	// Seen from the front, (b - a) x (c - a) points out (Havok's winding).
+	struct havok_triangle
+	{
+		std::array<std::array<float, 3>, 3> corners{};
+		std::uint16_t tag{};
+	};
+
+	struct havok_shape
+	{
+		std::vector<havok_convex> convexes;
+		std::vector<havok_triangle> triangles;
+	};
+
+	struct havok_shapes
+	{
+		std::vector<havok_tag> tags;
+		// By entry of the shape list; an entry without a shape is empty.
+		std::vector<havok_shape> shapes;
+		// The pieces and shapes of forms that the reader does not know, which it leaves out.
+		std::size_t unknown{};
+		// The points that lie outside the bounds of their mesh section (a layout that the reader does not know).
+		std::size_t misplaced{};
+	};
+
+	// Reads the Havok data of an IW7 clip map or map entities: a binary packfile of Havok 2014 (hk_2014.2.5-r1).
+	havok_shapes read_havok_shapes(const char* data, std::size_t size);
+
 	std::string bsp_name(const source_map& source);
 
 	// The primary light that is the sun (light 0 is empty), in IW7 and IW3 worlds.

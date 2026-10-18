@@ -5895,6 +5895,12 @@ CollisionData ReadCollision(const Json &collision)
         hull.slabs = BuildTriggerSlabs(hull.points, planes);
         hull.contents = contents;
         hull.model = owner.at(brushIndex);
+        // Extractions of games that name Replay's surface types (IW7) give each brush its
+        // type and the low 19 bits of its surface flags; IW3 brushes have materials.
+        if (const auto type = brush.find("surface_type"); type != brush.end())
+            hull.materialOverride = type->get<std::uint32_t>();
+        if (const auto flags = brush.find("surface_flags"); flags != brush.end())
+            hull.surfaceFlags |= flags->get<std::uint32_t>() & 0x7FFFFu;
         bool mixedMaterials = false;
         std::array<std::array<unsigned, 3>, 2> axialMaterials{};
         std::vector<unsigned> sideMaterials;
@@ -6051,6 +6057,13 @@ CollisionData ReadCollision(const Json &collision)
          collision.value("triangle_contents_schema", std::string{}) !=
              "material-partitions-v1"))
         throw std::runtime_error("invalid IW3 collision triangle contents");
+    // [Replay surface type, surface flags] per triangle, in extractions of games that name
+    // Replay's surface types (IW7); type zero takes the rendered floor's.
+    const auto sourceTriangleSurfaces = collision.find("triangle_surfaces");
+    if (sourceTriangleSurfaces != collision.end() &&
+        (!sourceTriangleSurfaces->is_array() ||
+         sourceTriangleSurfaces->size() != sourceTriangles.size()))
+        throw std::runtime_error("invalid collision triangle surfaces");
     std::size_t unsupportedTriangleContents = 0;
     std::size_t unreferencedTriangles = 0;
     // Terrain and patch collision stays a triangle mesh, as in shipped maps. Thin
@@ -6101,6 +6114,12 @@ CollisionData ReadCollision(const Json &collision)
         meshTriangle.contents = contents;
         // Zero asks the baker for the rendered floor material, like terrain hulls.
         meshTriangle.material = 0;
+        if (sourceTriangleSurfaces != collision.end())
+        {
+            const auto &surface = sourceTriangleSurfaces->at(triangleIndex);
+            meshTriangle.material = surface.at(0).get<std::uint32_t>();
+            meshTriangle.surfaceFlags = surface.at(1).get<std::uint32_t>() & 0x7FFFFu;
+        }
         for (std::size_t corner = 0; corner < 3; ++corner)
         {
             const auto [found, inserted] = terrainVertices.try_emplace(
@@ -6129,7 +6148,7 @@ CollisionData ReadCollision(const Json &collision)
     if (unreferencedTriangles)
         zt::info("iw3: omitted %zu source collision triangles not referenced by a clip-map partition",
                  unreferencedTriangles);
-    // A world can be a triangle mesh alone (an IW7 extraction has no brushes).
+    // A world can be a triangle mesh alone (an IW7 world without Havok data).
     constexpr std::size_t maximumHulls = 262144;
     if ((result.hulls.empty() && result.meshes.empty()) || result.hulls.size() > maximumHulls)
     {
@@ -10392,6 +10411,8 @@ PreparedMap PrepareFastfile(const ImportOptions &options)
         // opening that its GSC never removed. Native glass blocks players
         // while intact and frees the opening when shattered, so drop
         // non-solid world clips overlapping a pane to allow mantling through.
+        // Extractions of games with native glass (IW7) made their clips for it.
+        const bool keepWindowClips = collision.value("keep_window_clips", false);
         std::vector<std::pair<Vec3, Vec3>> paneBoxes;
         for (const auto &hull : nativeCollision.hulls)
         {
@@ -10407,8 +10428,8 @@ PreparedMap PrepareFastfile(const ImportOptions &options)
             paneBoxes.emplace_back(low, high);
         }
         const std::size_t windowClips = std::erase_if(nativeCollision.hulls, [&](const CollisionHull &hull) {
-            if (hull.glassId || hull.model != 0 || (hull.contents & 1u) || hull.points.empty() ||
-                !(hull.contents & 0x10000u))
+            if (keepWindowClips || hull.glassId || hull.model != 0 || (hull.contents & 1u) ||
+                hull.points.empty() || !(hull.contents & 0x10000u))
                 return false;
             Vec3 low = hull.points.front(), high = hull.points.front();
             for (const auto &point : hull.points)

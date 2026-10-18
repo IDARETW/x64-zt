@@ -57,9 +57,13 @@ Without a command, `zonetool.exe` opens an interactive console.
   images, the lightmaps, the reflection probes, the sky, the sun, the local lights, the breakable glass, spawn points,
   triggers and entities; the sky also shows the models that are too large for Replay model bounds (planets). The
   light grid and the lighting of static models come from the lightmaps of the floors under them, not from IW7's own
-  light grid. It does not have effects, sounds, scripts or the Havok collision of the map: the collision comes from
-  the solid render surfaces. `IW7_EXPORT_ONLY=1` stops after the extraction, and `IW7_REUSE_EXTRACTION=1` converts
-  the complete extraction of an earlier run again.
+  light grid. The collision comes from IW7's Havok data (`havok.cpp` reads its Havok 2014 packfiles): the convex
+  pieces of the world's compressed mesh and of the brush models' compound shapes become brushes, the other
+  primitives the world's collision triangles, with the contents, surface types and surface flags of their shape tags
+  (the encoding of Replay's), and each glass piece the hull of its pane. Positions are in units of 32 game units. A
+  map without Havok data collides by its solid render surfaces. It does not have effects, sounds or scripts.
+  `IW7_EXPORT_ONLY=1` stops after the extraction, and `IW7_REUSE_EXTRACTION=1` converts the complete extraction of
+  an earlier run again.
 
 ## Build cache
 
