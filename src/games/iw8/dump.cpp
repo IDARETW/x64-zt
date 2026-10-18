@@ -557,6 +557,346 @@ namespace zonetool::iw8
 				zone.name.data(), shapes, same_counts, worst);
 		}
 
+		template <typename T>
+		T item_value(const havok::item& item, const std::size_t offset)
+		{
+			if (offset + sizeof(T) > item.data.size())
+			{
+				throw std::runtime_error("a Havok item is shorter than its members");
+			}
+
+			T value{};
+			std::memcpy(&value, item.data.data() + offset, sizeof(T));
+			return value;
+		}
+
+		std::uint32_t item_target(const havok::item& item, const std::uint32_t offset)
+		{
+			const auto found = std::ranges::find(item.pointers, offset, &havok::pointer_field::offset);
+			return found != item.pointers.end() ? found->target : 0;
+		}
+
+		// The instances that the leaves of a SIMD tree hold, leaf by leaf from the left. With check_bounds, each inner slot must
+		// hold the bounds of its child node.
+		std::vector<std::uint32_t> tree_instances(const havok::item& nodes, const bool check_bounds)
+		{
+			const auto bound = [&](const std::uint32_t node, const std::size_t side, const std::size_t slot)
+			{
+				return item_value<float>(nodes, node * 128 + side * 16 + slot * 4);
+			};
+
+			const auto is_leaf = [&](const std::uint32_t node)
+			{
+				return item_value<std::uint8_t>(nodes, node * 128 + 112) != 0;
+			};
+
+			// The used slots of a node.
+			const auto slots = [&](const std::uint32_t node)
+			{
+				std::vector<std::pair<std::size_t, std::uint32_t>> used;
+				for (std::size_t slot = 0; slot < 4; slot++)
+				{
+					const auto data = item_value<std::uint32_t>(nodes, node * 128 + 96 + slot * 4);
+					if (is_leaf(node) ? data != 0xFFFFFFFF : data != 0)
+					{
+						used.emplace_back(slot, data);
+					}
+				}
+
+				return used;
+			};
+
+			std::vector<std::uint32_t> instances;
+			std::vector<std::uint32_t> pending{1};
+			while (!pending.empty())
+			{
+				const auto node = pending.back();
+				pending.pop_back();
+				if (node == 0 || node >= nodes.count)
+				{
+					throw std::runtime_error("a SIMD tree node is outside the tree");
+				}
+
+				const auto used = slots(node);
+				if (is_leaf(node))
+				{
+					for (const auto& [slot, instance] : used)
+					{
+						instances.push_back(instance);
+					}
+
+					continue;
+				}
+
+				for (auto entry = used.rbegin(); entry != used.rend(); ++entry)
+				{
+					const auto [slot, child] = *entry;
+					if (child >= nodes.count)
+					{
+						throw std::runtime_error("a SIMD tree node is outside the tree");
+					}
+
+					for (std::size_t side = 0; side < 6 && check_bounds; side++)
+					{
+						std::optional<float> expected;
+						for (const auto& [child_slot, data] : slots(child))
+						{
+							const auto value = bound(child, side, child_slot);
+							expected = !expected ? value : side % 2 ? std::max(*expected, value) : std::min(*expected, value);
+						}
+
+						if (expected != bound(node, side, slot))
+						{
+							throw std::runtime_error("a SIMD tree node does not hold the bounds of its child");
+						}
+					}
+
+					pending.push_back(child);
+				}
+			}
+
+			return instances;
+		}
+
+		// IW8_REWRITE=compound builds each compound shape of the zone again from its instances and child shapes. The built
+		// shape must have the same header, instances, bounds and radius, and a tree that holds each instance once.
+		void verify_compound(const std::filesystem::path& zone_folder, const loaded_zone& zone)
+		{
+			const auto& compendium = replay_compendium(zone_folder);
+			const auto compound_type = *compendium.find("hknpCompoundShape");
+			const auto convex_type = *compendium.find("hknpConvexShape");
+			const auto polytope_type = *compendium.find("hknpConvexPolytopeShape");
+			const auto offset_of = [&](const std::uint32_t type, const std::string_view name)
+			{
+				const auto found = compendium.member(type, name);
+				if (!found)
+				{
+					throw std::runtime_error(std::format("{} has no member {}", compendium.identity(type), name));
+				}
+
+				return found->first;
+			};
+
+			// Capsules and spheres are convex shapes with a radius about their vertices, and the Replay tools give them
+			// larger bounds than the radius (0.0314788 for a radius of 0.03125).
+			const auto is_polytope = [&](std::uint32_t type)
+			{
+				for (std::size_t depth = 0; type && depth < 64; depth++)
+				{
+					if (type == polytope_type)
+					{
+						return true;
+					}
+
+					type = compendium.at(type).parent;
+				}
+
+				return false;
+			};
+
+			const auto elements_at = offset_of(compound_type, "instances.elements");
+			const auto aabb_at = offset_of(compound_type, "aabb");
+			const auto radius_at = offset_of(compound_type, "boundingRadius");
+			const auto volume_type_at = offset_of(compound_type, "boundingVolumeData.type");
+			const auto nodes_at = offset_of(compound_type, "boundingVolumeData.simdTree.nodes");
+			const auto points_at = offset_of(compound_type, "boundingVolumeData.simdTree.points");
+			const auto vertices_at = offset_of(convex_type, "vertices");
+			const auto convex_radius_at = offset_of(convex_type, "convexRadius");
+
+			std::set<asset_key> seen;
+			std::size_t shapes{};
+			std::size_t other_children{};
+			std::size_t other_volumes{};
+			std::size_t same_trees{};
+			std::size_t same_orders{};
+			std::size_t same_bounds{};
+			double worst_bounds{};
+			double worst_radius{};
+			for (const auto& asset : zone.assets)
+			{
+				const asset_key key{asset.type, asset_name(asset.type, asset.header)};
+				if (asset.referenced || !seen.emplace(key).second)
+				{
+					continue;
+				}
+
+				if (asset.type == ASSET_TYPE_PHYSICSLIBRARY && static_cast<const PhysicsLibrary*>(asset.header)->isGlobalTypeCompendium)
+				{
+					continue;
+				}
+
+				const auto dump = dump_asset_data(asset.type, asset.header);
+				for (const auto record : tagfile_records(dump))
+				{
+					const std::span bytes(reinterpret_cast<const std::uint8_t*>(record.data()), record.size());
+					if (const auto reference = havok::compendium_reference(bytes); reference && *reference != havok::replay_compendium_signature)
+					{
+						continue;
+					}
+
+					havok::tagfile file;
+					try
+					{
+						file = havok::read_tagfile(bytes, &compendium);
+					}
+					catch (const havok::unknown_type&)
+					{
+						continue;
+					}
+
+					for (std::uint32_t index = 1; index < file.items.size(); index++)
+					{
+						const auto& stock = file.items[index];
+						if (stock.type != compound_type)
+						{
+							continue;
+						}
+
+						const auto format = find_asset_format(asset.type);
+						const auto fail = [&](const std::string& what)
+						{
+							char debug[MAX_PATH]{};
+							if (GetEnvironmentVariableA("IW8_DUMP_DEBUG", debug, sizeof(debug)))
+							{
+								std::ofstream(std::filesystem::path(debug) / "compound.hkx", std::ios::binary).write(record.data(), static_cast<std::streamsize>(record.size()));
+								std::ofstream(std::filesystem::path(debug) / "compound_item.txt") << index;
+							}
+
+							return std::runtime_error(std::format("{} \"{}\": compound shape {}: {}", format ? format->name : "?", key.second, index, what));
+						};
+
+						if (item_value<std::uint8_t>(stock, volume_type_at) != 2)
+						{
+							other_volumes++;
+							continue;
+						}
+
+						const auto& elements = file.items.at(item_target(stock, elements_at));
+						havok::object_builder builder(compendium);
+						std::unordered_map<std::uint32_t, std::uint32_t> copies;
+						std::vector<havok::compound_instance> instances;
+						auto convex_children = true;
+						for (std::uint32_t i = 0; i < elements.count && convex_children; i++)
+						{
+							const auto child_index = item_target(elements, i * 112 + 80);
+							const auto& child = file.items.at(child_index);
+							if (!is_polytope(child.type))
+							{
+								convex_children = false;
+								break;
+							}
+
+							havok::compound_instance instance;
+							for (std::size_t column = 0; column < 3; column++)
+							{
+								for (std::size_t axis = 0; axis < 3; axis++)
+								{
+									instance.rotation[column][axis] = item_value<float>(elements, i * 112 + column * 16 + axis * 4);
+								}
+							}
+
+							for (std::size_t axis = 0; axis < 3; axis++)
+							{
+								instance.translation[axis] = item_value<float>(elements, i * 112 + 48 + axis * 4);
+							}
+
+							instance.shape_tag = item_value<std::uint16_t>(elements, i * 112 + 88);
+							instance.convex_radius = item_value<float>(child, convex_radius_at);
+							const auto& vertices = file.items.at(item_target(child, vertices_at));
+							for (std::uint32_t v = 0; v < vertices.count; v++)
+							{
+								instance.vertices.push_back({item_value<float>(vertices, v * 16), item_value<float>(vertices, v * 16 + 4),
+									item_value<float>(vertices, v * 16 + 8)});
+							}
+
+							instance.shape = havok::copy_item(builder, file, child_index, copies);
+							instances.push_back(std::move(instance));
+						}
+
+						if (!convex_children)
+						{
+							other_children++;
+							continue;
+						}
+
+						const auto shape = havok::add_compound_shape(builder, instances);
+						const auto built = builder.finish(file.sdk_version, havok::replay_compendium_signature, shape);
+						const auto& ours = built.items[1];
+
+						// flags, type, numShapeKeyBits, dispatchType, convexRadius, userData; shapeTagCodecInfo; instances
+						// firstFree and numAllocated; isMutable, estimatedNumShapeKeys; isCompact and the volume type.
+						for (const auto [begin, end] : {std::pair(24, 48), std::pair(56, 60), std::pair(88, 96), std::pair(148, 156),
+							std::pair(256, 257), std::pair(280, 281)})
+						{
+							if (!std::equal(ours.data.begin() + begin, ours.data.begin() + end, stock.data.begin() + begin))
+							{
+								throw fail(std::format("bytes 0x{:X}-0x{:X} differ", begin, end));
+							}
+						}
+
+						const auto& our_elements = built.items.at(item_target(ours, elements_at));
+						for (std::uint32_t i = 0; i < elements.count; i++)
+						{
+							// All but the shape pointer and the tree position in the w of the translation.
+							for (const auto [begin, end] : {std::pair(0u, 60u), std::pair(64u, 80u), std::pair(88u, 112u)})
+							{
+								if (!std::equal(our_elements.data.begin() + i * 112 + begin, our_elements.data.begin() + i * 112 + end,
+									elements.data.begin() + i * 112 + begin))
+								{
+									throw fail(std::format("instance {} differs in bytes 0x{:X}-0x{:X}", i, begin, end));
+								}
+							}
+						}
+
+						auto bounds_equal = true;
+						for (std::size_t k = 0; k < 8; k++)
+						{
+							const auto a = item_value<float>(ours, aabb_at + k * 4);
+							const auto b = item_value<float>(stock, aabb_at + k * 4);
+							bounds_equal &= a == b;
+							worst_bounds = std::max(worst_bounds, static_cast<double>(std::abs(a - b)));
+						}
+
+						same_bounds += bounds_equal;
+						const auto radius = item_value<float>(stock, radius_at);
+						const auto radius_error = std::abs(static_cast<double>(item_value<float>(ours, radius_at)) - radius) / std::max(radius, 1e-6f);
+						worst_radius = std::max(worst_radius, radius_error);
+						if (worst_bounds > 1e-4 || radius_error > 1e-5)
+						{
+							throw fail(std::format("the bounds differ by {:.7f}, the radius by {:.7f} of it", worst_bounds, radius_error));
+						}
+
+						const auto& our_nodes = built.items.at(item_target(ours, nodes_at));
+						const auto& stock_nodes = file.items.at(item_target(stock, nodes_at));
+						const auto our_order = tree_instances(our_nodes, true);
+						const auto stock_order = tree_instances(stock_nodes, false);
+						auto held = our_order;
+						std::ranges::sort(held);
+						if (held.size() != elements.count || std::ranges::adjacent_find(held) != held.end() || held.back() >= elements.count)
+						{
+							throw fail("the tree does not hold each instance once");
+						}
+
+						same_orders += our_order == stock_order;
+						same_trees += our_nodes.data == stock_nodes.data &&
+							built.items.at(item_target(ours, points_at)).data == file.items.at(item_target(stock, points_at)).data;
+
+						const auto written = havok::write_compact_tagfile(built, compendium);
+						if (havok::write_compact_tagfile(havok::read_tagfile(written, &compendium), compendium) != written)
+						{
+							throw fail("the built shape reads back differently");
+						}
+
+						shapes++;
+					}
+				}
+			}
+
+			ZONETOOL_INFO("%s: %zu compound shapes build again (%zu with the same tree, %zu the same leaf order, %zu the same bounds); "
+				"largest bounds difference %.7f, radius %.7f; %zu with other children, %zu with other trees", zone.name.data(), shapes, same_trees,
+				same_orders, same_bounds, worst_bounds, worst_radius, other_children, other_volumes);
+		}
+
 		// The asset list of the zone: <pool>,<name> for an asset, <pool>,,<name> for a reference.
 		void write_asset_csv(const loaded_zone& zone)
 		{
@@ -619,7 +959,7 @@ namespace zonetool::iw8
 	{
 		const auto _ = gsl::finally(db_clear);
 
-		char rewrite[8]{};
+		char rewrite[16]{};
 		const auto check_rewrite = GetEnvironmentVariableA("IW8_REWRITE", rewrite, sizeof(rewrite)) != 0;
 		const auto zone = load_zone(zone_path, {.keep_temp_data = check_rewrite, .keep_markers = check_rewrite});
 		std::map<std::string, std::size_t> counts;
@@ -653,6 +993,10 @@ namespace zonetool::iw8
 			else if (std::string_view(rewrite) == "convex")
 			{
 				verify_convex(zone_folder, *zone);
+			}
+			else if (std::string_view(rewrite) == "compound")
+			{
+				verify_compound(zone_folder, *zone);
 			}
 			else
 			{

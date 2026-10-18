@@ -670,21 +670,44 @@ namespace zonetool::iw8::havok
 
 	std::optional<std::pair<std::uint32_t, std::uint32_t>> type_table::member(std::uint32_t index, const std::string_view name) const
 	{
-		for (std::size_t depth = 0; index && depth < 64; depth++)
+		const auto own = [this](std::uint32_t type, const std::string_view part) -> std::optional<std::pair<std::uint32_t, std::uint32_t>>
 		{
-			const auto& info = this->types_.at(index);
-			for (const auto& entry : info.members)
+			for (std::size_t depth = 0; type && depth < 64; depth++)
 			{
-				if (entry.name == name)
+				const auto& info = this->types_.at(type);
+				for (const auto& entry : info.members)
 				{
-					return std::pair(entry.offset, entry.type);
+					if (entry.name == part)
+					{
+						return std::pair(entry.offset, entry.type);
+					}
 				}
+
+				type = info.parent;
 			}
 
-			index = info.parent;
-		}
+			return {};
+		};
 
-		return {};
+		std::uint32_t offset{};
+		for (std::size_t start = 0;;)
+		{
+			const auto end = name.find('.', start);
+			const auto found = own(index, name.substr(start, end == std::string_view::npos ? std::string_view::npos : end - start));
+			if (!found)
+			{
+				return {};
+			}
+
+			offset += found->first;
+			index = found->second;
+			if (end == std::string_view::npos)
+			{
+				return std::pair(offset, index);
+			}
+
+			start = end + 1;
+		}
 	}
 
 	std::uint32_t type_table::size_of(std::uint32_t index) const
