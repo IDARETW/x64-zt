@@ -51,14 +51,15 @@ Without a command, `zonetool.exe` opens an interactive console.
   `buildzone`). Tool paths can also go in `zonetool.json` `tools`.
 - `dumpzone <iw7 map zone> --target iw8` converts an IW7 map with the same options. `convert/iw7_iw8` writes the map
   to `output/.iw7-extract/<zone>/` in the layout of the IW3 extraction cache, and the IW3 map pipeline converts that
-  extraction. The zone folder must hold `techsets_<zone>.ff` (the map's materials) and the `imagefile<N>.pak` and
-  `assetfile<N>.pak` files that the map streams its images and model surfaces from. The extraction has the world
-  surfaces, static and entity models, materials with their colour, normal and specular images, the lightmaps, the
-  reflection probes, the sky, the sun, the local lights, spawn points, triggers and entities; the sky also shows the
-  models that are too large for Replay model bounds (planets). The light grid and the lighting of static models
-  come from the lightmaps of the floors under them, not from IW7's own light grid. It does not have effects, sounds,
-  scripts or the Havok collision of the map: the collision comes from the solid render surfaces. `IW7_EXPORT_ONLY=1` stops after the extraction, and `IW7_REUSE_EXTRACTION=1` converts the
-  complete extraction of an earlier run again.
+  extraction. The zone folder must hold `techsets_<zone>.ff` (the map's materials), the multiplayer common zones and
+  the `imagefile<N>.pak` and `assetfile<N>.pak` files that the map streams its images and model surfaces from. The
+  extraction has the world surfaces, static and entity models, materials with their colour, normal and specular
+  images, the lightmaps, the reflection probes, the sky, the sun, the local lights, the breakable glass, spawn points,
+  triggers and entities; the sky also shows the models that are too large for Replay model bounds (planets). The
+  light grid and the lighting of static models come from the lightmaps of the floors under them, not from IW7's own
+  light grid. It does not have effects, sounds, scripts or the Havok collision of the map: the collision comes from
+  the solid render surfaces. `IW7_EXPORT_ONLY=1` stops after the extraction, and `IW7_REUSE_EXTRACTION=1` converts
+  the complete extraction of an earlier run again.
 
 ## Build cache
 
