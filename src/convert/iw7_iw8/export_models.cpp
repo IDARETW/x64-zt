@@ -162,7 +162,10 @@ namespace zonetool::convert::iw7_iw8
 				{"_game", "iw3"},
 				{"_type", "xmodel"},
 				{"_version", 2},
-				{"collLod", model->collLod < model->numLods ? static_cast<int>(model->collLod) : -1},
+				// IW7 points collLod at a model's coarsest LOD (Frontier: 130 of its 163 three-LOD models name LOD 2), and
+				// a collision mesh of that LOD let bullets pass parts of models that LOD0 shows (owner test 2026-10-18):
+				// models collide with the LOD that players see up close.
+				{"collLod", 0},
 				{"flags", 0},
 				{"lods", std::move(table_lods)},
 				{"rootBoneName", ""},
@@ -178,6 +181,26 @@ namespace zonetool::convert::iw7_iw8
 
 			return true;
 		}
+	}
+
+	bool model_has_surfaces(const source_map& source, const iw7::XModel* model)
+	{
+		if (!model || !model->numLods)
+		{
+			return false;
+		}
+
+		for (auto lod = 0; lod < model->numLods && lod < 6; lod++)
+		{
+			const auto& info = model->lodInfo[lod];
+			const auto surfaces = source.resolve(iw7::ASSET_TYPE_XMODEL_SURFS, info.modelSurfs);
+			if ((!surfaces || !surfaces->surfs) && !(info.modelSurfs && source.streamed_surfaces(asset_name(info.modelSurfs->name))))
+			{
+				return false;
+			}
+		}
+
+		return true;
 	}
 
 	std::vector<mesh_surface> model_mesh(const source_map& source, const iw7::XModel& model)

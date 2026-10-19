@@ -882,6 +882,8 @@ namespace zonetool::convert::iw7_iw8
 				{"intensity", 1.0f}}},
 			{"sun_primary_light_index", sun_index},
 			{"primary_light_count", light_count},
+			// Blended world surfaces draw after the sky (the roof glass of Frontier shows the sky through it).
+			{"translucent_glass", true},
 			{"surfaces", std::move(surfaces)},
 			{"models", std::move(models)},
 			{"brush_models", std::move(brush_models)},

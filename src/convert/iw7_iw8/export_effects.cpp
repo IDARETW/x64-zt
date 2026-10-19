@@ -617,10 +617,19 @@ namespace zonetool::convert::iw7_iw8
 					const auto& list = data.initModel.m_linkedAssetList;
 					for (auto a = 0; a < list.numAssets; a++)
 					{
-						if (const auto* model = list.assetList[a].model)
+						// A model whose surfaces are in no loaded zone or stream file would not export.
+						const auto* model = list.assetList[a].model;
+						if (model && model_has_surfaces(this->source_, this->source_.resolve(iw7::ASSET_TYPE_XMODEL,
+							const_cast<iw7::XModel*>(model))))
 						{
 							entries.push_back(linked_asset("xmodel", this->output_.add_model(this->source_, const_cast<iw7::XModel*>(model))));
 						}
+					}
+
+					if (entries.empty())
+					{
+						this->drop("model module without models");
+						return std::nullopt;
 					}
 
 					result.list(offsetof(iw7::ParticleModuleInitModel, m_linkedAssetList), std::move(entries));
@@ -1481,6 +1490,17 @@ iw7_unsupported( a, b, c, d, e, f )
 					}
 				}
 			}
+		}
+
+		// The effects of the scriptables' first states, as one-shot effects that start with the map (IW7's createfx delay).
+		for (const auto& effect : output.scriptable_effects)
+		{
+			effects.try_emplace(effect.effect, effect.effect);
+			effect_placement scripted{"createoneshoteffect", effect.effect};
+			scripted.origin = std::format("{}, {}, {}", effect.origin[0], effect.origin[1], effect.origin[2]);
+			scripted.angles = std::format("{}, {}, {}", effect.angles[0], effect.angles[1], effect.angles[2]);
+			scripted.values.emplace_back("delay", "-4");
+			placements.push_back(std::move(scripted));
 		}
 
 		// The particle systems of the placed effects, and of the effects that the map's own script loads.

@@ -95,6 +95,12 @@ Without a command, `zonetool.exe` opens an interactive console.
   about the 37 dynamic-shadow spots of stock mp_hideout): Replay shadows at most 64 spots of the view cone a frame
   and renders at most 16 of their shadows again, and a converted world lets every spot in the view cone compete. A
   spot left out of a frame keeps its light without a shadow.
+- The w of each light-volume vertex is its packed inward normal (10 bits a component, top two bits set), as in stock
+  volumes: the binning vertex shader moves each vertex out along it by a tile-sized expansion. A w of 1.0 decoded a
+  normal of (-1, -1, 0.99) and shifted whole volumes with the view.
+- A shadowed spot inside its fixture (IW7 lamps) starts its shadow map past the casters within 32 units of it
+  (`ComPrimaryLight` shadowNearPlaneBias, 8 to 60 in shipped worlds); one whose cone those casters close within 64
+  units on most rays keeps its light without a shadow map (`dropEnclosedShadowedSpots`).
 - Light volumes (GfxWorld `frustumLights`, which the forward+ light binning rasterizes) stay as small as stock ones:
   spots of 8 sides with cap rings of at most 30 degrees (26 vertices at most), omnis a sphere of 6 sides and 6 bands
   (32 vertices, like stock). A spot's volume starts at the apex of the shader's cone, which lies the bulb radius
@@ -105,6 +111,17 @@ Without a command, `zonetool.exe` opens an interactive console.
   one section, keys keep 8 bits for the primitive and its triangle (Replay takes the section from above bit 8, as
   every stock multi-section mesh does; narrower keys crashed the shape-tag lookup at 0x141E30200).
 - An IW7 effect material without its colour map (an image in a pak that is not in the zone folder) adds nothing.
+- IW7 `psfalloff` unlit materials (the ops table's hologram planes) take the IW3 falloff constants: without them their
+  tints of 17 drew as solid white discs.
+- The extraction's world JSON sets `translucent_glass`: the pipeline then draws blended BSP surfaces in the
+  translucent camera region (3, 26), after the sky. In the opaque region the sky covered Frontier's roof glass.
+  IW3 conversions do not set it.
+- IW7 models take their collision from LOD 0 (`collLod` 0): IW7 names its coarsest LOD, which left parts of models
+  (the lower units of a server rack) without collision.
+- The effects that the first state of each part of a placed scriptable plays (the ops table's planets and asteroids)
+  become createfx one-shot effects on the tags of its model at the bind pose; their animation does not convert.
+- The zone folder needs the `assetfile<N>.pak` files that the map's models stream their surfaces from. A model whose
+  surfaces are in none is left out, and so is an effect module that names only such models.
 
 ## Build cache
 

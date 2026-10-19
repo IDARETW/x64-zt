@@ -38,6 +38,17 @@ namespace zonetool::convert::iw7_iw8
 		// writes the aliases of the map's sound bank among them.
 		std::set<std::string> sound_names;
 
+		// The effects that the first states of the placed scriptables play (IW7's ops table: its planets and asteroids on
+		// the tags of the solar system model), at the bind pose of their tags: export_effects places them as createfx
+		// one-shot effects.
+		struct scriptable_effect
+		{
+			std::string effect;
+			std::array<float, 3> origin{};
+			std::array<float, 3> angles{};
+		};
+		std::vector<scriptable_effect> scriptable_effects;
+
 		// Adds the material or model of a header and returns its name in the extraction.
 		std::string add_material(const source_map& source, iw7::Material* header);
 		// Adds a layer (1 to 3) of a layered material as a material of its own.
@@ -134,6 +145,8 @@ namespace zonetool::convert::iw7_iw8
 
 	// The surfaces of the first level of detail of a model.
 	std::vector<mesh_surface> model_mesh(const source_map& source, const iw7::XModel& model);
+	// Whether the loaded zones or the stream files hold the surfaces of every LOD of a model, as export_models needs.
+	bool model_has_surfaces(const source_map& source, const iw7::XModel* model);
 
 	// The collision that the Havok data of an IW7 clip map or map entities holds: a HavokPhysicsShapeList of shapes
 	// with their shape tags, which give the contents, the surface type and flags (the encoding of Replay's tags) and the
