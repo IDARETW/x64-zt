@@ -66,10 +66,10 @@ namespace zonetool::convert::iw7_iw8
 		}
 
 		// Replay particle element types: IW7 draws clouds and spark clouds as sprites in Replay's element list, which has
-		// no cloud.
+		// no cloud. Spot lights convert as omni lights (Replay's spot module is not checked against stock effects).
 		std::optional<std::uint32_t> replay_element(const std::uint32_t element)
 		{
-			static constexpr std::array<std::uint32_t, 15> elements{0, 1, 0, 0, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12};
+			static constexpr std::array<std::uint32_t, 15> elements{0, 1, 0, 0, 2, 3, 4, 5, 5, 7, 8, 9, 10, 11, 12};
 			return element < elements.size() ? std::optional(elements[element]) : std::nullopt;
 		}
 
@@ -274,15 +274,32 @@ namespace zonetool::convert::iw7_iw8
 				std::memcpy(&root.gameTweakRotation, &system.gameTweakRotation, 16);
 
 				auto emitters = json::array();
+				std::vector<int> kept(system.numEmitters, -1);
 				for (auto e = 0; e < system.numEmitters; e++)
 				{
-					emitters.push_back(this->convert_emitter(system.emitterDefs[e]));
+					if (auto converted = this->convert_emitter(system.emitterDefs[e]))
+					{
+						kept[e] = static_cast<int>(emitters.size());
+						emitters.push_back(std::move(*converted));
+					}
+				}
+
+				if (emitters.empty())
+				{
+					return std::nullopt;
+				}
+
+				// The emitter that overrides the occlusion keeps its new index, or none when it was left out.
+				if (system.occlusionOverrideEmitterIndex >= 0 && system.occlusionOverrideEmitterIndex < system.numEmitters)
+				{
+					root.occlusionOverrideEmitterIndex = static_cast<decltype(root.occlusionOverrideEmitterIndex)>(
+						kept[system.occlusionOverrideEmitterIndex]);
 				}
 
 				return json{{"schema", 1}, {"name", asset_name(system.name)}, {"system", hex(root)}, {"emitters", std::move(emitters)}};
 			}
 
-			json convert_emitter(const iw7::ParticleEmitterDef& emitter)
+			std::optional<json> convert_emitter(const iw7::ParticleEmitterDef& emitter)
 			{
 				focus::ParticleEmitterDef record{};
 				std::memcpy(&record.particleSpawnRate, &emitter.particleSpawnRate, 8);
@@ -308,9 +325,16 @@ namespace zonetool::convert::iw7_iw8
 
 				auto states = json::array();
 				std::set<std::uint16_t> types;
+				auto complete = true;
 				for (auto s = 0; s < emitter.numStates; s++)
 				{
-					states.push_back(this->convert_state(emitter.stateDefs[s], types));
+					states.push_back(this->convert_state(emitter.stateDefs[s], types, complete));
+				}
+
+				// An emitter with a state that would read a missing module is left out.
+				if (!complete)
+				{
+					return std::nullopt;
 				}
 
 				// The particle streams of the modules (rules that the stock emitters follow).
@@ -326,10 +350,27 @@ namespace zonetool::convert::iw7_iw8
 				record.dataFlags |= any({55, 56, 57, 58, 59, 60, 61}) ? data_module_tests : 0;
 				record.dataFlags |= any({39, 40, 41, 45, 46}) ? data_ray_cast_handle : 0;
 				record.dataFlags |= any({13}) ? data_previous_placement : 0;
-				return {{"emitter", hex(record)}, {"fade_curve", curve_points(emitter.fadeCurveDef)}, {"states", std::move(states)}};
+				return json{{"emitter", hex(record)}, {"fade_curve", curve_points(emitter.fadeCurveDef)}, {"states", std::move(states)}};
 			}
 
-			json convert_state(const iw7::ParticleStateDef& state, std::set<std::uint16_t>& emitter_types)
+			// The module that each Replay element draws from (Replay types): a state without it reads a null pointer when its
+			// particles update (Breakneck: a spot light whose module did not convert crashed the map load at 0x141BA67BA).
+			static std::optional<std::uint16_t> required_module(const std::uint32_t element)
+			{
+				switch (element)
+				{
+				case 1: return replay_module(iw7::PARTICLE_MODULE_INIT_BEAM);
+				case 2: return replay_module(iw7::PARTICLE_MODULE_INIT_DECAL);
+				case 3: return replay_module(iw7::PARTICLE_MODULE_INIT_FLARE);
+				case 4: return replay_module(iw7::PARTICLE_MODULE_INIT_GEO_TRAIL);
+				case 5: return replay_module(iw7::PARTICLE_MODULE_INIT_LIGHT_OMNI);
+				case 7: return replay_module(iw7::PARTICLE_MODULE_INIT_MODEL);
+				case 9: return replay_module(iw7::PARTICLE_MODULE_INIT_RUNNER);
+				default: return std::nullopt;
+				}
+			}
+
+			json convert_state(const iw7::ParticleStateDef& state, std::set<std::uint16_t>& emitter_types, bool& complete)
 			{
 				focus::ParticleStateDef record{};
 				const auto element = replay_element(state.elementType);
@@ -396,6 +437,12 @@ namespace zonetool::convert::iw7_iw8
 				if (!element)
 				{
 					this->drop(std::format("element {}", state.elementType));
+				}
+
+				if (const auto needed = required_module(record.elementType); needed && !types.contains(*needed))
+				{
+					this->drop(std::format("state of element {} without its module {}", record.elementType, *needed));
+					complete = false;
 				}
 
 				return {{"state", hex(record)}, {"groups", std::move(groups)}};
@@ -660,6 +707,37 @@ namespace zonetool::convert::iw7_iw8
 					}
 
 					result.list(offsetof(focus::ParticleModuleInitRunner, linkedAssets), std::move(entries));
+					return result;
+				}
+				case iw7::PARTICLE_MODULE_INIT_LIGHT_SPOT:
+				{
+					// An omni light of the spot's intensity and shadow values (its state draws an omni light).
+					focus::ParticleModuleInitLightOmni light{};
+					const auto& source = data.initLightSpot;
+					result.record.moduleType = replay_module(iw7::PARTICLE_MODULE_INIT_LIGHT_OMNI);
+					light.fovOuter = 0.7853981852531433f;
+					light.bulbRadius = 2.0f;
+					light.bulbLength = 1.0f / 255.0f;
+					light.distanceFalloff = 1.0f;
+					light.brightness = 1.0f;
+					// The IW7 spot layout is not checked: values outside their range take the shipped local-light defaults.
+					const auto value = [](const float v, const float low, const float high, const float fallback)
+					{
+						return std::isfinite(v) && v >= low && v <= high ? v : fallback;
+					};
+
+					light.intensityIR = value(source.m_intensityIR, 0.0f, 1000.0f, 0.0f);
+					light.shadowSoftness = value(source.m_shadowSoftness, 0.0f, 10.0f, 0.55f);
+					light.shadowBias = value(source.m_shadowBias, 0.0f, 10.0f, 0.75f);
+					light.shadowArea = value(source.m_shadowArea, 0.0f, 10.0f, 0.0018f);
+					light.toneMappingScaleFactor = value(source.m_toneMappingScaleFactor, 0.0f, 100.0f, 1.0f);
+					light.disableVolumetric = source.m_disableVolumetric ? 1 : 0;
+					light.disableDynamicShadows = 1;
+					light.scriptScale = 1;
+					result.set(0, light);
+					base();
+					result.list(offsetof(focus::ParticleModuleInitLightOmni, linkedAssets),
+						json::array({linked_asset("lightdef", "light_fx_default")}));
 					return result;
 				}
 				case iw7::PARTICLE_MODULE_INIT_LIGHT_OMNI:

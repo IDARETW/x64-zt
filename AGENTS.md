@@ -125,6 +125,13 @@ Without a command, `zonetool.exe` opens an interactive console.
 - The extraction's world JSON sets `translucent_glass`: the pipeline then draws blended BSP surfaces in the
   translucent camera region (3, 26), after the sky. In the opaque region the sky covered Frontier's roof glass.
   IW3 conversions do not set it.
+- Each Replay particle element draws from its module: beam, decal, flare, geo trail, omni light, model and runner states
+  read it at their particles' update (`sub_141BA52C0` dispatches by element; every stock state has its module). An emitter
+  with a state whose module did not convert is left out: Breakneck's `vfx_rivet_spotlight_orange` kept its spot element
+  without the spot module and crashed the map load (null read at 0x141BA67BA). IW7 spot lights convert as omni lights.
+- A crash of the game with no dialog still leaves a full dump in `%LOCALAPPDATA%\CrashDumps` and an Application event
+  (1000/1001) with the fault offset. The DW executable's `.text` sits 0x4A000 above the stock one; its `.map` names each
+  function after its stock address (`sub_141BA6670`).
 - IW7 colour maps of `TS_COLOR_SPECULAR_MAP` keep the linear reflectance at normal incidence (F0 x 255) in alpha: plastics
   and tiles 10, floors 5, metals 250, chrome 125. The extraction writes each as an IW3 specular map too (`<colour>_f0[_g<hash>]`:
   the reflectance gamma encoded in RGB, the gloss of the material's packed normal map, its red, in alpha). Without them every
