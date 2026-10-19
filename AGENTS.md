@@ -125,6 +125,10 @@ Without a command, `zonetool.exe` opens an interactive console.
 - The extraction's world JSON sets `translucent_glass`: the pipeline then draws blended BSP surfaces in the
   translucent camera region (3, 26), after the sky. In the opaque region the sky covered Frontier's roof glass.
   IW3 conversions do not set it.
+- IW7 colour maps of `TS_COLOR_SPECULAR_MAP` keep the linear reflectance at normal incidence (F0 x 255) in alpha: plastics
+  and tiles 10, floors 5, metals 250, chrome 125. The extraction writes each as an IW3 specular map too (`<colour>_f0[_g<hash>]`:
+  the reflectance gamma encoded in RGB, the gloss of the material's packed normal map, its red, in alpha). Without them every
+  surface was matte and glass, which shows only by its reflection, was missing (Frontier's patterned roof glass).
 - IW7 models take their collision from LOD 0 (`collLod` 0): IW7 names its coarsest LOD, which left parts of models
   (the lower units of a server rack) without collision.
 - The effects that the first state of each part of a placed scriptable plays (the ops table's planets and asteroids)

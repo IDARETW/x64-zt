@@ -33,6 +33,9 @@ namespace zonetool::convert::iw7_iw8
 			const iw7::GfxImage* alpha{};
 			std::size_t alpha_channel{};
 			bool opaque{};
+			// A specular map made of the colour's alpha (IW7's F0) and the gloss in the red of a packed normal map.
+			bool derived_specular{};
+			const iw7::GfxImage* gloss{};
 			std::optional<bool> written;
 			// The written colour's alpha is 1 everywhere.
 			bool opaque_alpha{};
@@ -272,6 +275,69 @@ namespace zonetool::convert::iw7_iw8
 			}
 		}
 
+		// An IW3 specular map of an IW7 colour map of TS_COLOR_SPECULAR_MAP: its alpha is the linear reflectance at normal
+		// incidence (F0 x 255: plastics and tiles 10, floors 5, metals 250, chrome 125). IW3 specular maps hold the reflectance
+		// gamma encoded in RGB (the pipeline decodes it to Replay's specular intensity) and the gloss in alpha, which is the
+		// red of IW7's packed normal maps (128 without one). Without it every converted surface was matte and glass, which
+		// shows only by its reflection, was missing (Frontier's patterned roof glass).
+		bool derive_specular(DirectX::ScratchImage& pixels, const iw7::GfxImage* gloss)
+		{
+			const auto& metadata = pixels.GetMetadata();
+			DirectX::ScratchImage resized;
+			const DirectX::Image* source{};
+			std::vector<DirectX::ScratchImage> faces;
+			if (gloss)
+			{
+				faces = load_faces(*gloss, DXGI_FORMAT_R8G8B8A8_UNORM);
+				if (faces.size() == 1)
+				{
+					source = faces.front().GetImage(0, 0, 0);
+					if (source->width != metadata.width || source->height != metadata.height)
+					{
+						if (FAILED(DirectX::Resize(*source, metadata.width, metadata.height, DirectX::TEX_FILTER_LINEAR |
+							DirectX::TEX_FILTER_FORCE_NON_WIC, resized)))
+						{
+							return false;
+						}
+
+						source = resized.GetImage(0, 0, 0);
+					}
+				}
+				else
+				{
+					ZONETOOL_WARNING("iw7: gloss image \"%s\" (format %d) cannot be read", gloss->name, gloss->imageFormat);
+				}
+			}
+
+			static const auto encoded = []
+			{
+				std::array<std::uint8_t, 256> table{};
+				for (std::size_t value = 0; value < table.size(); value++)
+				{
+					const auto linear = static_cast<float>(value) / 255.0f;
+					const auto srgb = linear <= 0.0031308f ? linear * 12.92f : 1.055f * std::pow(linear, 1.0f / 2.4f) - 0.055f;
+					table[value] = static_cast<std::uint8_t>(std::clamp(std::lround(srgb * 255.0f), 0l, 255l));
+				}
+
+				return table;
+			}();
+
+			const auto* target = pixels.GetImage(0, 0, 0);
+			for (std::size_t y = 0; y < metadata.height; y++)
+			{
+				auto* row = target->pixels + y * target->rowPitch;
+				const auto* gloss_row = source ? source->pixels + y * source->rowPitch : nullptr;
+				for (std::size_t x = 0; x < metadata.width; x++)
+				{
+					auto* pixel = row + x * 4;
+					pixel[0] = pixel[1] = pixel[2] = encoded[pixel[3]];
+					pixel[3] = gloss_row ? gloss_row[x * 4] : 128;
+				}
+			}
+
+			return true;
+		}
+
 		// Replaces the alpha of a colour image: with the channel of an alpha texture (at the colour's size), or opaque.
 		bool replace_alpha(DirectX::ScratchImage& pixels, const iw7::GfxImage* alpha, const std::size_t channel)
 		{
@@ -329,6 +395,11 @@ namespace zonetool::convert::iw7_iw8
 			}
 
 			auto& pixels = faces.front();
+			if (file.derived_specular && !derive_specular(pixels, file.gloss))
+			{
+				return false;
+			}
+
 			if (role == image_role::normal)
 			{
 				encode_normal_slopes(pixels);
@@ -912,6 +983,51 @@ namespace zonetool::convert::iw7_iw8
 
 				files.try_emplace(file, entry);
 				roles[index].push_back(file);
+			}
+
+			// The specular map that IW7 keeps in the colour's alpha, after any specular map of the material's own.
+			const iw7::GfxImage* specular_color{};
+			const iw7::GfxImage* gloss{};
+			for (auto i = 0; material && i < material->textureCount; i++)
+			{
+				const auto& texture = material->textureTable[i];
+				if (texture_layer(texture) != layer)
+				{
+					continue;
+				}
+
+				const auto image = source.resolve(iw7::ASSET_TYPE_IMAGE, texture.image);
+				if (!image || !image->name)
+				{
+					continue;
+				}
+
+				const auto role = texture_role(texture);
+				if (role == image_role::color && texture.semantic == iw7::TS_COLOR_SPECULAR_MAP && !specular_color)
+				{
+					specular_color = image;
+				}
+				else if (role == image_role::normal && !gloss)
+				{
+					// Packed normal maps (n, o, g after "_packed_") keep the gloss in red.
+					const auto image_name = asset_name(image->name);
+					const auto packed = image_name.rfind("_packed_n");
+					if (packed != std::string_view::npos && image_name.substr(packed + 9).find('g') != std::string_view::npos)
+					{
+						gloss = image;
+					}
+				}
+			}
+
+			if (specular_color && !builtin_image(asset_name(specular_color->name), image_role::color))
+			{
+				auto file = file_name(asset_name(specular_color->name)) + "_f0" +
+					(gloss ? std::format("_g{:08x}", name_hash(asset_name(gloss->name))) : std::string{});
+				image_file entry{specular_color, image_role::specular};
+				entry.derived_specular = true;
+				entry.gloss = gloss;
+				files.try_emplace(file, entry);
+				roles[static_cast<std::size_t>(image_role::specular)].push_back(file);
 			}
 		}
 
