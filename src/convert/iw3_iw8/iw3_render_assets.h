@@ -184,6 +184,10 @@ struct RenderPlan
     std::unordered_map<std::string, unsigned> modelShadowMaterials;
 };
 
+// Block compresses the world and model images when `mode` is 1, keeps them RGBA8 when 0, and follows the extraction
+// ("bc7_images", set by IW7 maps) when negative.
+void UseBc7Images(int mode);
+
 RenderPlan PrepareRenderAssets(const std::filesystem::path &exportRoot,
                                const nlohmann::json &world,
                                const std::vector<std::string> &surfaceMaterials,

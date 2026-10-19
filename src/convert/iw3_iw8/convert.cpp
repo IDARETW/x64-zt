@@ -10,6 +10,7 @@
 #include <iw8/dump/xmodel_dump.h>
 #include "iw3_fastfile.h"
 #include "iw3_ledger.h"
+#include "iw3_render_assets.h"
 #include "iw3_vision.h"
 #include "iw3_scripts.h"
 #include <iw8/zone/iw8_ffheader.h>
@@ -786,6 +787,12 @@ bool writeZone(const std::string &outputPath, const std::vector<uint8_t> &body, 
             std::filesystem::path(outputPath).stem().string(), std::move(file));
         zonetool::xfile::write(outputPath, zonetool::iw8::definition().format, written);
         info("iw8: wrote %s (%zu bytes of zone data)", outputPath.c_str(), written.payload.size());
+        // Stock zones stay under 1.1 GB and IW7 Frontier (2.06 GB) loads, but nothing above 2 GiB
+        // has been checked: block sizes and offsets may pass through signed 32-bit values in the loader.
+        if (written.payload.size() > 0x7FFFFFFFull)
+            warn("iw8: %s holds %zu bytes of zone data, more than 2 GiB: no zone that large has loaded in Replay; "
+                 "--detail_collision 0 saves about 3%%, but bullets then miss models near the player",
+                 outputPath.c_str(), written.payload.size());
         return true;
     }
     catch (const std::exception &e)
@@ -2421,6 +2428,16 @@ namespace zonetool::convert::iw3_iw8
 		}
 
 		::iw8::havok::UseDetailCollision(havok != "exe" && detail == "1");
+
+		// World and model images are block compressed (BC7) when the extraction asks for it (IW7 maps do: their zones are
+		// twice the size of IW3 ones). --bc7_images 0 keeps them RGBA8, 1 compresses them for any map.
+		const auto bc7 = option("bc7_images");
+		if (!bc7.empty() && bc7 != "0" && bc7 != "1")
+		{
+			throw std::runtime_error(std::format("--bc7_images must be 0 or 1, not \"{}\"", bc7));
+		}
+
+		iw3::UseBc7Images(bc7.empty() ? -1 : bc7 == "1" ? 1 : 0);
 
 		// The x64-zt zone writer lays out the zones. --writer iw8-zonetool keeps the stream layout of the converter.
 		const auto writer = option("writer");

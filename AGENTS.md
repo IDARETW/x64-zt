@@ -49,7 +49,9 @@ Without a command, `zonetool.exe` opens an interactive console.
   `--writer x64-zt|iw8-zonetool` (the IW8 zone writer lays out each zone, the default; or the zone keeps the stream
   layout of the converter, for byte comparisons with iw8-zonetool builds), `--dump 1` (also dumps each zone for
   `buildzone`), `--detail_collision 0|1` (each static model also gets an `XModelDetailCollision` LOD baked natively,
-  as shipped zones have; the default is 1 with native Havok, and it is always off with `--havok exe`). Tool paths can also go in `zonetool.json` `tools`.
+  as shipped zones have; the default is 1 with native Havok, and it is always off with `--havok exe`), `--bc7_images 0|1` (the world and model
+  images of each material are block compressed with the BC7 mode 6 encoder when the encoding keeps their detail (PSNR of 38 dB for colour,
+  40 for the others, else they stay RGBA8); the default follows the extraction, which IW7 maps turn on). Tool paths can also go in `zonetool.json` `tools`.
 - `dumpzone <iw7 map zone> --target iw8` converts an IW7 map with the same options. `convert/iw7_iw8` writes the map
   to `output/.iw7-extract/<zone>/` in the layout of the IW3 extraction cache, and the IW3 map pipeline converts that
   extraction. The zone folder must hold `techsets_<zone>.ff` (the map's materials), the multiplayer common zones and
@@ -123,6 +125,11 @@ Without a command, `zonetool.exe` opens an interactive console.
   become createfx one-shot effects on the tags of its model at the bind pose; their animation does not convert.
 - The zone folder needs the `assetfile<N>.pak` files that the map's models stream their surfaces from. A model whose
   surfaces are in none is left out, and so is an effect module that names only such models.
+- IW7 zones are about twice the size of the largest stock zone (1.0 GB): Frontier's holds 2.12 GB of zone data with detail
+  collision (images 73%: the RGBA8 world and model images are 1.1 GB of it). The writer warns above 2 GiB, and nothing that large
+  has loaded in Replay. The IW7 extraction sets `bc7_images`, which block compresses those images (about a quarter of the size).
+  `IW8_READ_TRACE=<file>` on a `verifyzone` also writes an `A <type> <name>` line after each asset, so the reads between two of
+  them are the data of the second one (the byte count of each asset type).
 - Breakneck's main zone is 2.05 GB. ACTS test mode loads all its assets with no read errors, but reports one failure: the 
   world (`gfx_map_trzone`, 146 MB) "exceeds the output budget" of its structured export. That is a limit of the ACTS exporter, not a reader error.
 
