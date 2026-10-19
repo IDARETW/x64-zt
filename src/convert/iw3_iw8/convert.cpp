@@ -970,19 +970,21 @@ iw8::MapSun loadLighting(const Args &args, const std::string &dumpDirectory,
 // panels) has its shadow map covered by the fixture beyond the shadow near plane (sub_141985070
 // places it shadowNearPlaneBias, 8 for converted lights, in front of the light): the light then
 // goes dark whenever it gets a shadow map, which Replay gives the spots near the camera, and
-// IW7 Frontier's lamps switched off as the owner came close (2026-10-18). A spot whose cone the
-// shadow casters close within 64 units on most rays keeps its light without a shadow map.
+// IW7 Frontier's lamps switched off as the owner came close or turned (2026-10-18). Each shadowed
+// spot's shadow map starts past the casters within 32 units of it; a spot whose cone the casters
+// beyond that close within 64 units on most rays keeps its light without a shadow map.
 void dropEnclosedShadowedSpots(iw8::MapSun &lighting, const std::vector<float> &solidTriangles,
                                const replaysunshadow::Scene *casters)
 {
-    constexpr double kNearPlane = 8.0; // emitComWorldBody's shadowNearPlaneBias
+    constexpr double kNearPlane = 8.0; // emitComWorldBody's default shadowNearPlaneBias
+    constexpr double kFixtureZone = 32.0;
     constexpr double kReach = 64.0;
     std::vector<float> triangles = solidTriangles;
     if (casters)
         for (const auto &surface : casters->surfaces)
             for (const auto &vertex : surface.vertices)
                 triangles.insert(triangles.end(), vertex.position.begin(), vertex.position.end());
-    size_t dropped = 0;
+    size_t dropped = 0, moved = 0;
     for (size_t index = 0; index < lighting.primaryLights.size(); ++index)
     {
         auto &light = lighting.primaryLights[index];
@@ -1020,7 +1022,8 @@ void dropEnclosedShadowedSpots(iw8::MapSun &lighting, const std::vector<float> &
         const double v[3]{axis[1] * u[2] - axis[2] * u[1], axis[2] * u[0] - axis[0] * u[2],
                           axis[0] * u[1] - axis[1] * u[0]};
         const double outer = std::acos(std::clamp<double>(light.cosHalfFovOuter, -1.0, 1.0));
-        unsigned rays = 0, blocked = 0;
+        // The distances along the axis of every caster hit of each ray within reach.
+        std::vector<std::vector<double>> hits;
         for (const double fraction : {0.0, 0.3, 0.6, 0.9})
             for (unsigned k = 0; k < (fraction == 0.0 ? 1u : 8u); ++k)
             {
@@ -1029,7 +1032,7 @@ void dropEnclosedShadowedSpots(iw8::MapSun &lighting, const std::vector<float> &
                 for (unsigned c = 0; c < 3; ++c)
                     d[c] = std::cos(polar) * axis[c] +
                            std::sin(polar) * (std::cos(azimuth) * u[c] + std::sin(azimuth) * v[c]);
-                ++rays;
+                auto &ray = hits.emplace_back();
                 for (const size_t t : candidates)
                 {
                     const float *p = &triangles[t];
@@ -1050,14 +1053,21 @@ void dropEnclosedShadowedSpots(iw8::MapSun &lighting, const std::vector<float> &
                     if (b < 0.0 || a + b > 1.0)
                         continue;
                     const double distance = (e2[0] * q[0] + e2[1] * q[1] + e2[2] * q[2]) / det;
-                    // The near plane clips what is closer to the light along its axis.
-                    if (distance * std::cos(polar) > kNearPlane && distance <= reach)
-                    {
-                        ++blocked;
-                        break;
-                    }
+                    if (distance > 0.0 && distance <= reach)
+                        ray.push_back(distance * std::cos(polar));
                 }
             }
+        // The fixture: casters within kFixtureZone of the light along its axis (housings, the wall a
+        // lamp is mounted on). The shadow map starts past them, as shipped lights' biases (8 to 60) do.
+        double nearPlane = kNearPlane;
+        for (const auto &ray : hits)
+            for (const double hit : ray)
+                if (hit <= kFixtureZone)
+                    nearPlane = std::max(nearPlane, std::min(hit + 1.0, kFixtureZone));
+        unsigned blocked = 0;
+        for (const auto &ray : hits)
+            blocked += std::ranges::any_of(ray, [&](const double hit) { return hit > nearPlane; });
+        const auto rays = static_cast<unsigned>(hits.size());
         if (blocked * 5 >= rays * 3)
         {
             light.canUseShadowMap = false;
@@ -1065,7 +1075,14 @@ void dropEnclosedShadowedSpots(iw8::MapSun &lighting, const std::vector<float> &
             info("local light %zu: shadow casters close %u of %u cone rays within %.0f units; no shadow map",
                  index, blocked, rays, reach);
         }
+        else if (nearPlane > kNearPlane)
+        {
+            light.shadowNearPlaneBias = static_cast<float>(nearPlane);
+            ++moved;
+        }
     }
+    if (moved)
+        info("local lights: %zu shadowed spot(s) start their shadow maps past their fixture", moved);
     if (dropped)
         info("local lights: %zu shadowed spot(s) enclosed by their fixture keep no shadow map", dropped);
 }

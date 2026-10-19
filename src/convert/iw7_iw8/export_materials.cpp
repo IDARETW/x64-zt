@@ -526,6 +526,20 @@ namespace zonetool::convert::iw7_iw8
 					constants.push_back({{"name", "emissionScale"}, {"literal", {std::min(emission, 64.0f), std::min(emission, 64.0f),
 						std::min(emission, 64.0f), 1.0f}}});
 				}
+
+				// IW3's falloff is IW7's: f = saturate((N.V)^2 * falloffParms.z + falloffParms.w), colour * f * lerp(falloffEndColor,
+				// falloffBeginColor, f). Without it the ops table's hologram planes (tint 17) drew as solid white discs.
+				if (kind.falloff)
+				{
+					if (const auto parms = material_constant(material, "falloffParms"))
+					{
+						constants.push_back({{"name", "falloffParms"}, {"literal", *parms}});
+						constants.push_back({{"name", "falloffBeginColor"},
+							{"literal", material_constant(material, "falloffBeginColor").value_or(std::array{1.0f, 1.0f, 1.0f, 1.0f})}});
+						constants.push_back({{"name", "falloffEndColor"},
+							{"literal", material_constant(material, "falloffEndColor").value_or(std::array{1.0f, 1.0f, 1.0f, 1.0f})}});
+					}
+				}
 			}
 
 			std::string cull = "back";
@@ -616,7 +630,7 @@ namespace zonetool::convert::iw7_iw8
 			}
 			else
 			{
-				const auto falloff = has("falloff") && material_constant(material, "falloffParms");
+				const auto falloff = (has("falloff") || has("psfalloff")) && material_constant(material, "falloffParms");
 				technique = std::format("effect{}{}{}", feather ? "_zfeather" : "", falloff ? "_falloff" : "", additive ? "_add" : "");
 				constant("colorTint", "colorTint", {1.0f, 1.0f, 1.0f, 1.0f});
 				if (feather)
@@ -721,7 +735,8 @@ namespace zonetool::convert::iw7_iw8
 		}
 
 		result.unlit = has("unlit");
-		result.falloff = has("falloff");
+		// "psfalloff": the falloff of the pixel shader (the ops table's hologram planes).
+		result.falloff = has("falloff") || has("psfalloff");
 		for (const auto token : tokens)
 		{
 			if (token == "atest")

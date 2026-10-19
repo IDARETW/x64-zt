@@ -4844,6 +4844,18 @@ RenderPlan PrepareRenderAssets(const std::filesystem::path &exportRoot, const Js
                 ApplyDepthBias(variant["techset"]);
                 variant["material"]["techset"] = variant.at("techset").at("name");
             }
+            if (name.starts_with("glass") && world.value("translucent_glass", false))
+            {
+                // Blended BSP surfaces draw in the translucent camera region, after the sky, as
+                // native panes do (3, 26). In the lit opaque region (0) of the world material the
+                // sky drew over them wherever they were in front of it: IW7 Frontier's roof glass
+                // was missing (owner test 2026-10-18). Extractions opt in ("translucent_glass"),
+                // so IW3 maps keep their output until this is checked on them.
+                auto info = Unhex(variant.at("material").at("info").get<std::string>());
+                info[0x10] = 3;
+                info[0x11] = 26;
+                variant["material"]["info"] = Hex(info);
+            }
         }
         WriteJson(mapDirectory / variant.at("definition").get<std::string>(),
                   variant.at("material"));

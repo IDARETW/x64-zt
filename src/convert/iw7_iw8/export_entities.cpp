@@ -182,6 +182,151 @@ namespace zonetool::convert::iw7_iw8
 		{
 			return std::format("{} {} {}", values[0], values[1], values[2]);
 		}
+
+		using axes = std::array<std::array<double, 3>, 3>;
+
+		// AnglesToAxis: the forward, left and up axes of pitch, yaw and roll (degrees).
+		axes angles_to_axes(const float* angles)
+		{
+			constexpr auto radians = std::numbers::pi / 180.0;
+			const auto sp = std::sin(angles[0] * radians), cp = std::cos(angles[0] * radians);
+			const auto sy = std::sin(angles[1] * radians), cy = std::cos(angles[1] * radians);
+			const auto sr = std::sin(angles[2] * radians), cr = std::cos(angles[2] * radians);
+			return {{{cp * cy, cp * sy, -sp}, {sr * sp * cy - cr * sy, sr * sp * sy + cr * cy, sr * cp},
+				{cr * sp * cy + sr * sy, cr * sp * sy - sr * cy, cr * cp}}};
+		}
+
+		// The angles of forward, left and up axes (the inverse of angles_to_axes).
+		std::array<float, 3> axes_to_angles(const axes& axis)
+		{
+			constexpr auto degrees = 180.0 / std::numbers::pi;
+			const auto& forward = axis[0];
+			const auto yaw = std::atan2(forward[1], forward[0]);
+			const auto pitch = std::atan2(-forward[2], std::sqrt(forward[0] * forward[0] + forward[1] * forward[1]));
+			// The left axis turns from the left of the unrolled axes toward their up.
+			const std::array unrolled_left{-std::sin(yaw), std::cos(yaw), 0.0};
+			const std::array unrolled_up{std::sin(pitch) * std::cos(yaw), std::sin(pitch) * std::sin(yaw), std::cos(pitch)};
+			const auto dot = [](const std::array<double, 3>& a, const std::array<double, 3>& b)
+			{
+				return a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
+			};
+
+			const auto roll = std::atan2(dot(axis[1], unrolled_up), dot(axis[1], unrolled_left));
+			return {static_cast<float>(pitch * degrees), static_cast<float>(yaw * degrees), static_cast<float>(roll * degrees)};
+		}
+
+		// The world placement of a tag of a model at an instance's origin and angles, in the model's bind pose (DObjAnimMat
+		// base poses are in model space). An empty tag or tag_origin is the model's origin.
+		std::optional<extraction::scriptable_effect> tag_placement(const iw7::XModel* model, const std::string& tag, const float* origin,
+			const float* angles)
+		{
+			const auto instance = angles_to_axes(angles);
+			std::array<double, 3> position{};
+			axes rotation{{{1.0, 0.0, 0.0}, {0.0, 1.0, 0.0}, {0.0, 0.0, 1.0}}};
+			if (!tag.empty() && tag != "tag_origin")
+			{
+				const iw7::DObjAnimMat* pose{};
+				for (auto bone = 0u; model && model->boneNames && model->baseMat && bone < model->numBones; bone++)
+				{
+					if (script_string(model->boneNames[bone]) == tag)
+					{
+						pose = &model->baseMat[bone];
+						break;
+					}
+				}
+
+				if (!pose)
+				{
+					return {};
+				}
+
+				const double length = std::sqrt(pose->quat[0] * pose->quat[0] + pose->quat[1] * pose->quat[1] +
+					pose->quat[2] * pose->quat[2] + pose->quat[3] * pose->quat[3]);
+				if (!(length > 0.0))
+				{
+					return {};
+				}
+
+				const auto x = pose->quat[0] / length, y = pose->quat[1] / length, z = pose->quat[2] / length, w = pose->quat[3] / length;
+				rotation = {{{1 - 2 * (y * y + z * z), 2 * (x * y + w * z), 2 * (x * z - w * y)},
+					{2 * (x * y - w * z), 1 - 2 * (x * x + z * z), 2 * (y * z + w * x)},
+					{2 * (x * z + w * y), 2 * (y * z - w * x), 1 - 2 * (x * x + y * y)}}};
+				position = {pose->trans[0], pose->trans[1], pose->trans[2]};
+			}
+
+			extraction::scriptable_effect result;
+			axes world{};
+			for (auto c = 0u; c < 3; c++)
+			{
+				result.origin[c] = static_cast<float>(origin[c] + position[0] * instance[0][c] + position[1] * instance[1][c] +
+					position[2] * instance[2][c]);
+				for (auto k = 0u; k < 3; k++)
+				{
+					world[k][c] = rotation[k][0] * instance[0][c] + rotation[k][1] * instance[1][c] + rotation[k][2] * instance[2][c];
+				}
+			}
+
+			result.angles = axes_to_angles(world);
+			return result;
+		}
+
+		// The effects that the first state of each part of a scriptable plays, on the tags of the instance's model.
+		void add_scriptable_effects(const source_map& source, const iw7::ScriptableDef& def, const iw7::XModel* model,
+			const iw7::ScriptableInstanceContext& context, extraction& output)
+		{
+			for (auto p = 0u; def.parts && p < def.numParts; p++)
+			{
+				const auto& part = def.parts[p];
+				if (!part.states || !part.numStates)
+				{
+					continue;
+				}
+
+				const auto& state = part.states[0];
+				for (auto e = 0u; state.base.events && e < state.base.numEvents; e++)
+				{
+					const auto& event = state.base.events[e];
+					if (event.type != iw7::Scriptable_EventType_PFX)
+					{
+						continue;
+					}
+
+					const auto& fx = event.data.particleFX;
+					const auto vfx = fx.effectDef.type == iw7::FX_COMBINED_VFX ? source.resolve(iw7::ASSET_TYPE_VFX, fx.effectDef.u.vfx)
+						: nullptr;
+					if (!vfx)
+					{
+						continue;
+					}
+
+					std::vector<std::string> tags;
+					for (auto t = 0u; fx.scrTagNames && t < fx.scrTagCount; t++)
+					{
+						tags.push_back(script_string(fx.scrTagNames[t]));
+					}
+
+					if (tags.empty())
+					{
+						tags.push_back(part.tagName ? part.tagName : "");
+					}
+
+					const auto effect = std::string(asset_name(iw7::get_asset_name(iw7::ASSET_TYPE_VFX, vfx)));
+					for (const auto& tag : tags)
+					{
+						auto placement = tag_placement(model, tag, context.initialOrigin, context.initialAngles);
+						if (!placement)
+						{
+							ZONETOOL_WARNING("iw7: scriptable %s: its model has no tag %s for effect %s", def.name ? def.name : "?", tag.data(),
+								effect.data());
+							continue;
+						}
+
+						placement->effect = effect;
+						output.scriptable_effects.push_back(std::move(*placement));
+					}
+				}
+			}
+		}
 	}
 
 	float light_unit_scale(const source_map& source)
@@ -376,8 +521,9 @@ namespace zonetool::convert::iw7_iw8
 		}
 
 		// IW7's scriptables (screens, displays, lamps and props with states): an IW3 script model of each instance's
-		// model at its initial placement (the first model of its definition when the instance names none). Their
-		// states, animations and events (effects, lights, sounds) do not convert.
+		// model at its initial placement (the first model of its definition when the instance names none), and the
+		// effects of the first state of each of its parts on their tags. Their other states, animations and other
+		// events (lights, sounds) do not convert.
 		const auto& scriptables = map_ents->scriptableMapEnts;
 		std::size_t placed{};
 		for (auto i = 0u; scriptables.instances && i < scriptables.totalInstanceCount; i++)
@@ -413,10 +559,15 @@ namespace zonetool::convert::iw7_iw8
 			entities += "}\n";
 			output.models.try_emplace(file_name(name), model);
 			placed++;
+			if (def)
+			{
+				add_scriptable_effects(source, *def, model, context, output);
+			}
 		}
 
-		ZONETOOL_INFO("iw7: placed %zu of %u scriptables (%u runtime, %u reserved) as script models", placed,
-			scriptables.totalInstanceCount, scriptables.runtimeInstanceCount, scriptables.reservedInstanceCount);
+		ZONETOOL_INFO("iw7: placed %zu of %u scriptables (%u runtime, %u reserved) as script models, with %zu effects of their first states",
+			placed, scriptables.totalInstanceCount, scriptables.runtimeInstanceCount, scriptables.reservedInstanceCount,
+			output.scriptable_effects.size());
 
 		// IW7's breakable glass: an IW3 glass entity for each pane.
 		const auto panes = glass_panes(source);

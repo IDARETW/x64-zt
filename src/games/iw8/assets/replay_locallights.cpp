@@ -2,6 +2,7 @@
 #include "replay_locallights.h"
 
 #include <algorithm>
+#include <bit>
 #include <cmath>
 #include <cstring>
 #include <limits>
@@ -172,6 +173,43 @@ void VolumeMesh(const Light &light, std::vector<Vec3> &points, std::vector<uint1
     }
 }
 
+// The w of a light-volume vertex: its inward normal (the sum of its faces' normals, which point
+// into the volume) in 10, 10 and 10 bits of (n + 1) * 1023 / 2, and the top two bits set, as every
+// shipped vertex holds. The light binning's vertex shader (code_post_gfx eebe7cf8, techniques
+// frustum_lights_tile and _inside) moves each vertex by -expansion * normal, out of the volume, so
+// that every touched screen tile gets the light. With w = 1.0f each vertex decoded the normal
+// (-1, -1, 0.986): the whole volume shifted with the expansion, and lights went on and off as the
+// camera turned (IW7 Frontier, owner test 2026-10-18).
+uint32_t PackedInwardNormal(const std::vector<Vec3> &points, const std::vector<uint16_t> &triangles,
+                            const size_t vertex)
+{
+    Vec3 sum{};
+    for (size_t t = 0; t + 2 < triangles.size(); t += 3)
+    {
+        if (triangles[t] != vertex && triangles[t + 1] != vertex && triangles[t + 2] != vertex)
+            continue;
+        const auto &a = points[triangles[t]], &b = points[triangles[t + 1]], &c = points[triangles[t + 2]];
+        const Vec3 e1{b[0] - a[0], b[1] - a[1], b[2] - a[2]};
+        const Vec3 e2{c[0] - a[0], c[1] - a[1], c[2] - a[2]};
+        const Vec3 n{e1[1] * e2[2] - e1[2] * e2[1], e1[2] * e2[0] - e1[0] * e2[2],
+                     e1[0] * e2[1] - e1[1] * e2[0]};
+        const double length = std::sqrt(Dot(n, n));
+        if (length > 0)
+            for (unsigned k = 0; k < 3; ++k)
+                sum[k] += float(n[k] / length);
+    }
+    const double length = std::sqrt(Dot(sum, sum));
+    if (!(length > 0))
+        throw std::runtime_error("GfxWorld frustum-light vertex has no faces");
+    uint32_t packed = 3u << 30;
+    for (unsigned k = 0; k < 3; ++k)
+    {
+        const auto quantized = std::clamp(std::lround((sum[k] / length + 1.0) * 1023.0 / 2.0), 0l, 1023l);
+        packed |= static_cast<uint32_t>(quantized) << (10 * k);
+    }
+    return packed;
+}
+
 // Shadow view frustum of a spot: square pyramid circumscribing the outer cone,
 // from one unit past the light to its radius. Planes keep the inside positive
 // (n.p + w >= 0), as R_PrimaryLightFrustumTestSphere requires.
@@ -295,8 +333,11 @@ Data Build(const std::vector<Light> &lights, const uint32_t lastSunPrimaryLightI
         data.indexCounts[index] = static_cast<uint16_t>(triangles.size());
         data.vertexCounts[index] = static_cast<uint16_t>(points.size());
         data.indices.insert(data.indices.end(), triangles.begin(), triangles.end());
-        for (const auto &p : points)
-            data.vertices.push_back({p[0], p[1], p[2], 1.0f});
+        for (size_t vertex = 0; vertex < points.size(); ++vertex)
+        {
+            const auto &p = points[vertex];
+            data.vertices.push_back({p[0], p[1], p[2], std::bit_cast<float>(PackedInwardNormal(points, triangles, vertex))});
+        }
         lightBounds[index] = BoundsOf(points);
         data.umbraLights.push_back(index);
         if (NeedsDynamicShadows(light))

@@ -802,6 +802,8 @@ struct MapSun
         float intensity = 1.0f; // ComPrimaryLight +0x10 (local lights: see main CalibrateLocalLights)
         // The source gives the intensity (in light units), so calibration only scales it.
         bool authoredIntensity = false;
+        // How far in front of the light its shadow map starts (ComPrimaryLight +0x74; shipped lights 8 to 60).
+        float shadowNearPlaneBias = 8.0f;
         std::string definition;
     };
 
@@ -880,11 +882,12 @@ inline void emitComWorldBody(ZoneBuffer &zb, const char *assetName, const MapSun
                 // include entities, so its shadowed spots qualify.
                 light[3] = source->type == 2 && source->canUseShadowMap ? 1 : 0;
                 // Shipped local-light defaults (mp_hideout, 124 lights): IW3 lights
-                // are points (smallest shipped bulb 1), shadow near-plane bias 8,
+                // are points (smallest shipped bulb 1), shadow near-plane bias 8 (or past
+                // the light's fixture, dropEnclosedShadowedSpots),
                 // softness 0.55, bias 0.75, area 0.0018, distance falloff 0.2, and
                 // collimation cos(90 deg) = no collimation.
                 stampf(light, 0x5C, 1.0f);
-                stampf(light, 0x74, 8.0f);
+                stampf(light, 0x74, source->shadowNearPlaneBias);
                 stampf(light, 0x78, 0.55f);
                 stampf(light, 0x7C, 0.75f);
                 stampf(light, 0x80, 0.0018f);
