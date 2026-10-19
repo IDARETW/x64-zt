@@ -193,6 +193,14 @@ void writePhysicsAssetReference(ZoneWriter &zw, const std::string &name)
     });
 }
 
+void writeXModelDetailCollision(ZoneWriter &zw, const havok::XModelDetailCollision &asset)
+{
+    const auto bodyName = zw.internScriptString(asset.bodyName);
+    zw.add(ASSET_TYPE_XMODEL_DETAIL_COLLISION, asset.name, [asset, bodyName](ZoneWriter &writer) {
+        emitXModelDetailCollisionBody(writer, asset, bodyName);
+    });
+}
+
 void writeXModel(ZoneWriter &zw, const cx::Iw8XModelRecord &rec)
 {
     if (rec.name.empty())

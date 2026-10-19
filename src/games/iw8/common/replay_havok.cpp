@@ -2318,26 +2318,9 @@ BakeResult BakeCollision(const BakeInput &input)
     return result;
 }
 
-PhysicsAsset BakePhysicsAsset(std::string name, const PhysicsMesh &source,
-                               const std::uint32_t useCategory,
-                               const std::uint32_t simulationCategory, const bool keyframedBody,
-                               const ClutterBody *clutter)
+// The triangles of a model's collision mesh that have an area, with their vertices checked against Replay's bounds.
+static Mesh ModelPhysicsMesh(const PhysicsMesh &source)
 {
-    if (clutter && (useCategory != 3 || keyframedBody || !std::isfinite(clutter->mass) ||
-                    clutter->mass <= 0.0f || clutter->mass > 10000.0f))
-        throw std::runtime_error("Native clutter physics input is invalid");
-    if (!g_preparedHavok && !g_nativeCompendium)
-        throw std::runtime_error("PrepareCollisionBaker must be called before model physics");
-    if (name.empty() || source.vertices.size() < 3 || source.triangles.empty() ||
-        source.vertices.size() > std::numeric_limits<std::int32_t>::max() ||
-        source.triangles.size() > std::numeric_limits<std::int32_t>::max() || !source.contents ||
-        source.surfaceType > 63 ||
-        !((useCategory == 0 && simulationCategory == 0) ||
-          (useCategory == 3 && simulationCategory == 1) ||
-          (useCategory == 7 && simulationCategory == 9) ||
-          (clutter && useCategory == 3 && (simulationCategory == 4 || simulationCategory == 5))))
-        throw std::runtime_error("Native model physics input is invalid");
-
     Mesh mesh;
     mesh.vertices = source.vertices;
     mesh.triangles.reserve(source.triangles.size());
@@ -2364,6 +2347,30 @@ PhysicsAsset BakePhysicsAsset(std::string name, const PhysicsMesh &source,
     }
     if (mesh.triangles.empty())
         throw std::runtime_error("Native model physics has no non-degenerate triangles");
+    return mesh;
+}
+
+PhysicsAsset BakePhysicsAsset(std::string name, const PhysicsMesh &source,
+                               const std::uint32_t useCategory,
+                               const std::uint32_t simulationCategory, const bool keyframedBody,
+                               const ClutterBody *clutter)
+{
+    if (clutter && (useCategory != 3 || keyframedBody || !std::isfinite(clutter->mass) ||
+                    clutter->mass <= 0.0f || clutter->mass > 10000.0f))
+        throw std::runtime_error("Native clutter physics input is invalid");
+    if (!g_preparedHavok && !g_nativeCompendium)
+        throw std::runtime_error("PrepareCollisionBaker must be called before model physics");
+    if (name.empty() || source.vertices.size() < 3 || source.triangles.empty() ||
+        source.vertices.size() > std::numeric_limits<std::int32_t>::max() ||
+        source.triangles.size() > std::numeric_limits<std::int32_t>::max() || !source.contents ||
+        source.surfaceType > 63 ||
+        !((useCategory == 0 && simulationCategory == 0) ||
+          (useCategory == 3 && simulationCategory == 1) ||
+          (useCategory == 7 && simulationCategory == 9) ||
+          (clutter && useCategory == 3 && (simulationCategory == 4 || simulationCategory == 5))))
+        throw std::runtime_error("Native model physics input is invalid");
+
+    const Mesh mesh = ModelPhysicsMesh(source);
     if (g_nativeCompendium)
         return BakePhysicsAssetNative(std::move(name), mesh, source, useCategory, simulationCategory,
                                       keyframedBody, clutter);
@@ -2732,6 +2739,51 @@ PhysicsAsset BakePhysicsAsset(std::string name, const PhysicsMesh &source,
              "%u, %zu bytes)",
              result.name.c_str(), mesh.vertices.size(), mesh.triangles.size(),
              source.surfaceType, result.havokData.size());
+    return result;
+}
+
+static bool g_detailCollision = false;
+
+void UseDetailCollision(const bool enabled)
+{
+    g_detailCollision = enabled && g_nativeCompendium != nullptr;
+}
+
+bool UsesDetailCollision()
+{
+    return g_detailCollision;
+}
+
+XModelDetailCollision BakeXModelDetailCollision(std::string name, const PhysicsMesh &source)
+{
+    namespace hk = zonetool::iw8::havok;
+    if (!g_nativeCompendium)
+        throw std::runtime_error("Detail collision needs native Havok");
+    if (name.empty() || source.vertices.size() < 3 || source.triangles.empty() ||
+        source.vertices.size() > std::numeric_limits<std::int32_t>::max() ||
+        source.triangles.size() > std::numeric_limits<std::int32_t>::max() || !source.contents ||
+        source.surfaceType > 63)
+        throw std::runtime_error("Native detail collision input is invalid");
+
+    const Mesh mesh = ModelPhysicsMesh(source);
+    hk::object_builder builder(*g_nativeCompendium);
+    hk::compressed_mesh compressed;
+    for (const auto &vertex : mesh.vertices)
+        compressed.vertices.push_back({vertex[0] / 32.0f, vertex[1] / 32.0f, vertex[2] / 32.0f});
+    // The primitives name tag 0 of the LOD's tag data, which holds the surface and the contents.
+    for (const auto &triangle : mesh.triangles)
+        compressed.triangles.push_back({triangle.indices, 0});
+
+    hk::xmodel_lod_body body;
+    body.shape = hk::add_compressed_mesh_shape(builder, compressed);
+    body.surface_flags = source.surfaceType << 19;
+    body.collision_filter_info = source.contents;
+
+    XModelDetailCollision result;
+    result.name = std::move(name);
+    result.bodyName = body.name;
+    result.havokData = hk::write_compact_tagfile(
+        builder.finish("20180200", hk::replay_compendium_signature, hk::add_xmodel_lod(builder, body)), *g_nativeCompendium);
     return result;
 }
 

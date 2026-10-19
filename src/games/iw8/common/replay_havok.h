@@ -124,4 +124,19 @@ PhysicsAsset BakePhysicsAsset(std::string name, const PhysicsMesh &mesh,
                               bool keyframedBody = false,
                               const ClutterBody *clutter = nullptr);
 
+// The Havok data of an XModelDetailCollision asset: a HavokPhysicsXModelLOD with the model's collision mesh, which the
+// detail physics world holds for bullet and melee traces (shipped static models carry one beside their PhysicsAsset).
+struct XModelDetailCollision
+{
+    std::string name;
+    std::string bodyName;
+    std::vector<std::uint8_t> havokData;
+};
+
+// Native Havok only (UseNativeHavok). The mesh takes the contents and surface type of its PhysicsMesh.
+XModelDetailCollision BakeXModelDetailCollision(std::string name, const PhysicsMesh &mesh);
+// Whether static models get a detail collision (only with native Havok).
+void UseDetailCollision(bool enabled);
+bool UsesDetailCollision();
+
 } // namespace iw8::havok

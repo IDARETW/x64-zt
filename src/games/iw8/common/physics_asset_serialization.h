@@ -82,4 +82,54 @@ void emitPhysicsAssetReferenceBody(Writer &writer, const std::string &name)
     writer.popStream();
 }
 
+// An XModelDetailCollision (Load_XModelDetailCollision 0xE2A3A0): the struct, then the name, the Havok data (16-aligned)
+// and the script strings that name its bodies.
+template <typename Writer>
+void emitXModelDetailCollisionBody(Writer &writer, const havok::XModelDetailCollision &asset,
+                                   const std::uint32_t bodyNameString)
+{
+    if (asset.name.empty() || asset.havokData.empty() ||
+        asset.havokData.size() > std::numeric_limits<std::uint32_t>::max())
+        throw std::runtime_error("emitXModelDetailCollisionBody: invalid detail collision");
+
+    std::array<std::uint8_t, iw8sz::XMODEL_DETAIL_COLLISION> body{};
+    const auto put = [&](const std::size_t offset, const auto value) {
+        std::memcpy(body.data() + offset, &value, sizeof(value));
+    };
+    put(0x00, PTR_FOLLOWS);
+    put(0x08, static_cast<std::uint32_t>(asset.havokData.size()));
+    put(0x10, PTR_FOLLOWS);
+    put(0x18, std::uint32_t{1});
+    put(0x20, PTR_FOLLOWS);
+
+    writer.pushStream(XFILE_BLOCK_TEMP_PRELOAD);
+    writer.align(7);
+    writer.write(body.data(), body.size());
+    writer.pushStream(XFILE_BLOCK_VIRTUAL);
+    writer.writeStr(asset.name.c_str());
+    writer.align(15);
+    writer.write(asset.havokData.data(), asset.havokData.size());
+    writer.align(3);
+    writer.writeT(bodyNameString);
+    writer.popStream();
+    writer.popStream();
+}
+
+template <typename Writer>
+void emitXModelDetailCollisionReferenceBody(Writer &writer, const std::string &name)
+{
+    if (name.empty() || name.front() == ',' || name.find('\0') != std::string::npos)
+        throw std::runtime_error("invalid XModelDetailCollision reference name");
+    std::array<std::uint8_t, iw8sz::XMODEL_DETAIL_COLLISION> body{};
+    const std::uint64_t follows = PTR_FOLLOWS;
+    std::memcpy(body.data(), &follows, sizeof(follows));
+    writer.pushStream(XFILE_BLOCK_TEMP_PRELOAD);
+    writer.align(7);
+    writer.write(body.data(), body.size());
+    writer.pushStream(XFILE_BLOCK_VIRTUAL);
+    writer.writeStr(("," + name).c_str());
+    writer.popStream();
+    writer.popStream();
+}
+
 } // namespace iw8

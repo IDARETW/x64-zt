@@ -159,6 +159,7 @@ class ZoneWriter;
 namespace havok
 {
 struct PhysicsAsset;
+struct XModelDetailCollision;
 }
 } // namespace iw8
 
@@ -171,6 +172,7 @@ namespace iw8
 void writeXModel(ZoneWriter &zw, const convert::xmodel::Iw8XModelRecord &rec);
 void writePhysicsAsset(ZoneWriter &zw, const havok::PhysicsAsset &asset);
 void writePhysicsAssetReference(ZoneWriter &zw, const std::string &name);
+void writeXModelDetailCollision(ZoneWriter &zw, const havok::XModelDetailCollision &asset);
 
 // Convenience: read <dumpDir>/XModel/<name>.xme6 -> convert -> register. Returns false if the .xme6
 // is missing or unparseable; the caller logs and skips that asset.

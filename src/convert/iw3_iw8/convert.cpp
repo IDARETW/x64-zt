@@ -1261,6 +1261,7 @@ std::vector<OutputLedgerRow> outputLedgerRows(
             for (const auto &lod : model.lods)
                 set(ASSET_TYPE_XMODELSURFS, lod.name, "LOD of " + origin);
             set(ASSET_TYPE_PHYSICSASSET, model.physicsAsset.name, "physics of " + origin);
+            set(ASSET_TYPE_XMODEL_DETAIL_COLLISION, model.detailCollision.name, "detail collision of " + origin);
         }
         for (const auto &effect : prepared->vfxEffects)
             set(ASSET_TYPE_VFX, effect.name, "IW3 effect");
@@ -1622,6 +1623,10 @@ int writeMapPackage(const Args &args, const std::string &map, const std::string 
                 if (!model.physicsAsset.name.empty())
                 {
                     iw8::writePhysicsAsset(writer, model.physicsAsset);
+                }
+                if (!model.detailCollision.name.empty())
+                {
+                    iw8::writeXModelDetailCollision(writer, model.detailCollision);
                 }
                 for (const auto &lod : model.lods)
                     iw8xs_dump::writeXModelSurfs(writer, lod.name, lod);
@@ -2407,6 +2412,15 @@ namespace zonetool::convert::iw3_iw8
 			// The type compendium comes from the zone folder of the game.
 			::iw8::havok::UseNativeHavok(std::filesystem::path(args.replayExecutable).parent_path() / "zone", havok == "native-check");
 		}
+
+		// Static models also get an XModelDetailCollision, as shipped ones have (native Havok only). --detail_collision 0 leaves it out.
+		const auto detail = option("detail_collision").empty() ? std::string("1") : option("detail_collision");
+		if (detail != "0" && detail != "1")
+		{
+			throw std::runtime_error(std::format("--detail_collision must be 0 or 1, not \"{}\"", detail));
+		}
+
+		::iw8::havok::UseDetailCollision(havok != "exe" && detail == "1");
 
 		// The x64-zt zone writer lays out the zones. --writer iw8-zonetool keeps the stream layout of the converter.
 		const auto writer = option("writer");

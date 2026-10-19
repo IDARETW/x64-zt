@@ -33,6 +33,8 @@ struct Model
     // Keep this exactly equal to the emitted PhysicsAsset asset name. The current
     // IW3 static-model converter uses the XModel identity for both names.
     std::string physicsAssetName;
+    // The XModelDetailCollision asset that bullet and melee traces hit (the detail physics world); empty for none.
+    std::string detailCollisionName;
     std::vector<Instance> instances;
 };
 
