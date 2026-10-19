@@ -25,6 +25,9 @@ namespace zonetool::iw8
 			.relative_offsets = true,
 		};
 
+		// The IW8_READ_TRACE stream of the zone being loaded: it also gets a line "A <type> <name>" after each asset.
+		std::ofstream* asset_trace{};
+
 		std::uint16_t next_zone_index()
 		{
 			static std::atomic_uint16_t index{};
@@ -94,6 +97,11 @@ namespace zonetool::iw8
 				}
 
 				this->zone_.assets.emplace_back(type, header, referenced);
+				if (asset_trace)
+				{
+					*asset_trace << "A " << type << ' ' << (*name ? *name : "") << '\n';
+				}
+
 				*field = header;
 				if (insert_slot)
 				{
@@ -201,7 +209,8 @@ namespace zonetool::iw8
 			reader.keep_temp_data();
 		}
 
-		// IW8_READ_TRACE=<file> writes every read of zone data (input offset, size, block, position).
+		// IW8_READ_TRACE=<file> writes every read of zone data (input offset, size, block, position) and a line
+		// "A <type> <name>" after each asset: the reads between two such lines are the data of the second asset.
 		std::unique_ptr<std::ofstream> trace;
 		char trace_path[MAX_PATH]{};
 		if (GetEnvironmentVariableA("IW8_READ_TRACE", trace_path, sizeof(trace_path)))
@@ -214,6 +223,8 @@ namespace zonetool::iw8
 			});
 		}
 
+		asset_trace = trace.get();
+		const auto clear_trace = gsl::finally([] { asset_trace = nullptr; });
 		asset_list_reader assets(*zone, options.keep_markers);
 		reader.set_inline_asset_loader([&assets](const std::int32_t type, void** field, void** insert_slot)
 		{

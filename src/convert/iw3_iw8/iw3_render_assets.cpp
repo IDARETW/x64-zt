@@ -3126,8 +3126,8 @@ std::vector<std::uint8_t> MipChain(Image image, const unsigned levels, const boo
 
 // Fast BC7 mode 6 block (one subset, 7-bit RGBA endpoints with p-bits,
 // 4-bit indices): principal-axis endpoints, all four p-bit pairs scored.
-// DirectXTex's reference BC7 search took hours for an 8192 atlas.
-void EncodeBc7Mode6Block(const std::uint8_t (&pixels)[16][4], std::uint8_t *out)
+// DirectXTex's reference BC7 search took hours for an 8192 atlas. Returns the squared error of the block.
+int EncodeBc7Mode6Block(const std::uint8_t (&pixels)[16][4], std::uint8_t *out)
 {
     static constexpr int weights[16]{0, 4, 9, 13, 17, 21, 26, 30, 34, 38, 43, 47, 51, 55, 60, 64};
     float mean[4]{};
@@ -3251,6 +3251,46 @@ void EncodeBc7Mode6Block(const std::uint8_t (&pixels)[16][4], std::uint8_t *out)
     put(bestIndex[0], 3);
     for (int pixel = 1; pixel < 16; ++pixel)
         put(bestIndex[pixel], 4);
+    return bestError;
+}
+
+// BC7 mode 6 encoding of a RGBA8 mip chain laid out by MipChain (any size, down to 1x1): a level under four
+// texels across fills its block with its edge texels repeated, as the block grid of a smaller mip does.
+// `error` receives the squared error over every coded channel.
+std::vector<std::uint8_t> EncodeBc7Rectangle(const std::vector<std::uint8_t> &rgba, const unsigned width,
+                                             const unsigned height, const unsigned levels, double &error)
+{
+    std::vector<std::uint8_t> output;
+    std::size_t source = 0;
+    error = 0;
+    for (unsigned level = 0; level < levels; ++level)
+    {
+        const unsigned levelWidth = std::max(1u, width >> level), levelHeight = std::max(1u, height >> level);
+        if (source + std::size_t{levelWidth} * levelHeight * 4 > rgba.size())
+            throw std::runtime_error("BC7 image input does not match its mip chain");
+        const unsigned blocksWide = (levelWidth + 3) / 4, blocksHigh = (levelHeight + 3) / 4;
+        const std::size_t target = output.size();
+        output.resize(target + std::size_t{blocksWide} * blocksHigh * 16);
+        std::uint8_t block[16][4];
+        for (unsigned blockY = 0; blockY < blocksHigh; ++blockY)
+            for (unsigned blockX = 0; blockX < blocksWide; ++blockX)
+            {
+                for (unsigned y = 0; y < 4; ++y)
+                    for (unsigned x = 0; x < 4; ++x)
+                        std::memcpy(block[y * 4 + x],
+                                    rgba.data() + source +
+                                        (std::size_t{std::min(blockY * 4 + y, levelHeight - 1)} * levelWidth +
+                                         std::min(blockX * 4 + x, levelWidth - 1)) *
+                                            4,
+                                    4);
+                error += EncodeBc7Mode6Block(block, output.data() + target +
+                                                        (std::size_t{blockY} * blocksWide + blockX) * 16);
+            }
+        source += (std::size_t{levelWidth} * levelHeight * 4 + 15) & ~std::size_t{15};
+    }
+    if (source != rgba.size())
+        throw std::runtime_error("BC7 image input does not match its mip chain");
+    return output;
 }
 
 // Encoded caches are keyed by the input digest and the encoder that wrote them.
@@ -3556,6 +3596,16 @@ Json BuildFxMaterialDefinition(const SourceFxMaterial &source)
             {"imageDefinitions", Json::array()}};
 }
 } // namespace
+
+namespace
+{
+int g_bc7Images = -1;
+}
+
+void UseBc7Images(const int mode)
+{
+    g_bc7Images = mode;
+}
 
 RenderPlan PrepareRenderAssets(const std::filesystem::path &exportRoot, const Json &world,
                                const std::vector<std::string> &surfaceMaterials,
@@ -4446,6 +4496,14 @@ RenderPlan PrepareRenderAssets(const std::filesystem::path &exportRoot, const Js
     plan.instanceLightingCount = staticModelInstances;
     plan.materialDefinition = stem + ".material.json";
     std::set<std::string> writtenResidentImages;
+    // World and model images of extractions that opt in ("bc7_images") are block compressed when the encoding
+    // keeps their detail: RGBA8 images fill most of a large map's zone (IW7 Frontier: 1.1 of 2.1 GB).
+    const bool bc7Images = g_bc7Images >= 0 ? g_bc7Images == 1 : world.value("bc7_images", false);
+    struct Bc7Stats
+    {
+        std::size_t compressed{}, kept{}, rawBytes{}, packedBytes{};
+        std::array<double, 3> lowest{200.0, 200.0, 200.0}; // by channel: colour, normal, response
+    } bc7Stats;
     const auto residentImage = [&](Json &definition, const unsigned channel, Image source,
                                    const std::array<float, 4> &tint,
                                    const std::string_view domain,
@@ -4486,13 +4544,43 @@ RenderPlan PrepareRenderAssets(const std::filesystem::path &exportRoot, const Js
         }
         const auto digest = Sha256(pixels);
         const std::string id = Hex(std::span(digest).first(8));
-        const std::string filename = map + "_" + std::string(domain) + "_" +
-                                     std::to_string(channel) + "_" + id + ".rgba";
-        const std::string name = "mw120r/" + map + "_" + std::string(domain) + "_" +
-                                 std::to_string(channel) + "_" + id;
+        const std::string stemName = map + "_" + std::string(domain) + "_" + std::to_string(channel) + "_" + id;
+        const std::string name = "mw120r/" + stemName;
+        definition["textures"][channel]["image"] = name;
+        if (bc7Images && (domain == "world" || domain == "model") && sourceWidth >= 4 && sourceHeight >= 4 &&
+            sourceWidth % 4 == 0 && sourceHeight % 4 == 0)
+        {
+            // The cut-off is the mean squared error of a channel over the whole chain: the sources were
+            // BC1 or BC3 files (or 8-bit normals), so a PSNR in the high thirties adds no visible change.
+            double error = 0;
+            auto encoded = EncodeBc7Rectangle(pixels, sourceWidth, sourceHeight, levels, error);
+            double texels = 0;
+            for (unsigned level = 0; level < levels; ++level)
+                texels += double(std::max(1u, sourceWidth >> level)) * std::max(1u, sourceHeight >> level);
+            const double psnr = error > 0 ? 10.0 * std::log10(255.0 * 255.0 * texels * 4.0 / error) : 200.0;
+            auto &lowest = bc7Stats.lowest[std::min(channel, 2u)];
+            if (psnr >= (channel == 0 ? 38.0 : 40.0))
+            {
+                lowest = std::min(lowest, psnr);
+                ++bc7Stats.compressed;
+                bc7Stats.rawBytes += pixels.size();
+                bc7Stats.packedBytes += encoded.size();
+                const std::string filename = stemName + ".bc7";
+                if (writtenResidentImages.insert(filename).second)
+                    WriteBytes(mapDirectory / filename, encoded);
+                definition["imageDefinitions"].push_back({{"name", name},
+                                                          {"width", sourceWidth},
+                                                          {"height", sourceHeight},
+                                                          {"bc7", filename},
+                                                          {"format", colour ? 45 : 44},
+                                                          {"mipCount", levels}});
+                return;
+            }
+            ++bc7Stats.kept;
+        }
+        const std::string filename = stemName + ".rgba";
         if (writtenResidentImages.insert(filename).second)
             WriteBytes(mapDirectory / filename, pixels);
-        definition["textures"][channel]["image"] = name;
         definition["imageDefinitions"].push_back({{"name", name},
                                                   {"width", sourceWidth},
                                                   {"height", sourceHeight},
@@ -5528,6 +5616,11 @@ RenderPlan PrepareRenderAssets(const std::filesystem::path &exportRoot, const Js
         if (const auto data = FxParticleMaterialData(source))
             plan.fxParticleMaterialData.emplace(name, *data);
     }
+    if (bc7Images)
+        zt::info("iw3: %zu resident image(s) block compressed (%.0f MB to %.0f MB; lowest PSNR %.1f colour, %.1f normal, "
+                 "%.1f response dB), %zu kept uncompressed",
+                 bc7Stats.compressed, bc7Stats.rawBytes / 1048576.0, bc7Stats.packedBytes / 1048576.0,
+                 bc7Stats.lowest[0], bc7Stats.lowest[1], bc7Stats.lowest[2], bc7Stats.kept);
     return plan;
 }
 std::vector<std::uint8_t> BuildLoadscreenPreview(const std::filesystem::path &exportRoot,

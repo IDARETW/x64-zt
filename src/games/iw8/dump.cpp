@@ -1270,6 +1270,8 @@ namespace zonetool::iw8
 		{
 			// Built item -> the largest vertex error of a built compressed mesh.
 			std::unordered_map<std::uint32_t, float> mesh_errors;
+			// Built item -> the triangles that the vertex grids of a built compressed mesh collapse (left out).
+			std::unordered_map<std::uint32_t, std::size_t> mesh_collapsed;
 			std::size_t built{};
 			std::size_t copied{};
 			std::size_t masses{};
@@ -1386,6 +1388,7 @@ namespace zonetool::iw8
 					havok::compressed_mesh_stats stats;
 					built = havok::add_compressed_mesh_shape(builder, mesh, &stats);
 					rebuilt.mesh_errors[*built] = stats.largest_error;
+					rebuilt.mesh_collapsed[*built] = stats.collapsed;
 				}
 			}
 			else if (identity == "hknpCompoundShape" &&
@@ -1449,7 +1452,7 @@ namespace zonetool::iw8
 		// The geometry of two shapes must agree: compressed meshes their triangles (within the vertex error of the built mesh)
 		// and convex shapes, compound shapes their instances, convex polytopes their bounds.
 		void compare_shapes(const havok::tagfile& stock_file, const std::uint32_t stock, const havok::tagfile& built_file, const std::uint32_t built,
-			const havok::type_table& types, const float tolerance)
+			const havok::type_table& types, const float tolerance, const std::size_t collapsed = 0)
 		{
 			const auto& a = stock_file.items.at(stock);
 			const auto& b = built_file.items.at(built);
@@ -1469,7 +1472,8 @@ namespace zonetool::iw8
 				}
 
 				const auto matched = matching_triangles(expected, found, tolerance * 1.01f + 1e-6f);
-				if (matched != expected.triangles.size() || found.triangles.size() != expected.triangles.size() ||
+				// The writer leaves out the triangles that its vertex grids collapse.
+				if (matched + collapsed != expected.triangles.size() || found.triangles.size() + collapsed != expected.triangles.size() ||
 					found.convex_shapes.size() != expected.convex_shapes.size())
 				{
 					throw std::runtime_error(std::format("a compressed mesh has {} of {} triangles and {} of {} convex shapes", matched,
@@ -1612,7 +1616,8 @@ namespace zonetool::iw8
 
 				const auto built_shape = item_target(built_shapes, i * 8);
 				const auto error = counts.shapes.mesh_errors.contains(entries[i].shape) ? counts.shapes.mesh_errors.at(entries[i].shape) : 0.0f;
-				compare_shapes(file, item_target(*shapes, i * 8), again, built_shape, types, error);
+				const auto collapsed = counts.shapes.mesh_collapsed.contains(entries[i].shape) ? counts.shapes.mesh_collapsed.at(entries[i].shape) : std::size_t{};
+				compare_shapes(file, item_target(*shapes, i * 8), again, built_shape, types, error, collapsed);
 			}
 
 			counts.lists++;
@@ -1689,6 +1694,7 @@ namespace zonetool::iw8
 			const auto stock_shape = item_target(*bodies, body_member("shape"));
 			body.shape = rebuild_shape(builder, file, types, stock_shape, copies, counts.shapes);
 			const auto error = counts.shapes.mesh_errors.contains(body.shape) ? counts.shapes.mesh_errors.at(body.shape) : 0.0f;
+			const auto collapsed = counts.shapes.mesh_collapsed.contains(body.shape) ? counts.shapes.mesh_collapsed.at(body.shape) : std::size_t{};
 			const auto built_root = havok::add_physics_asset(builder, asset);
 			const auto written = havok::write_compact_tagfile(builder.finish(file.sdk_version, havok::replay_compendium_signature, built_root), types);
 			const auto again = havok::read_tagfile(written, &types);
@@ -1739,7 +1745,7 @@ namespace zonetool::iw8
 				}
 			}
 
-			compare_shapes(file, stock_shape, again, item_target(*built_body, body_member("shape")), types, error);
+			compare_shapes(file, stock_shape, again, item_target(*built_body, body_member("shape")), types, error, collapsed);
 			counts.assets++;
 		}
 
@@ -1777,6 +1783,7 @@ namespace zonetool::iw8
 			const auto stock_shape = item_target(*shapes, 0);
 			body.shape = rebuild_shape(builder, file, types, stock_shape, copies, counts.shapes);
 			const auto error = counts.shapes.mesh_errors.contains(body.shape) ? counts.shapes.mesh_errors.at(body.shape) : 0.0f;
+			const auto collapsed = counts.shapes.mesh_collapsed.contains(body.shape) ? counts.shapes.mesh_collapsed.at(body.shape) : std::size_t{};
 			const auto built_root = havok::add_xmodel_lod(builder, body);
 			const auto written = havok::write_compact_tagfile(builder.finish(file.sdk_version, havok::replay_compendium_signature, built_root), types);
 			const auto again = havok::read_tagfile(written, &types);
@@ -1821,7 +1828,7 @@ namespace zonetool::iw8
 				}
 			}
 
-			compare_shapes(file, stock_shape, again, item_target(*built_target("shapes"), 0), types, error);
+			compare_shapes(file, stock_shape, again, item_target(*built_target("shapes"), 0), types, error, collapsed);
 			counts.lods++;
 		}
 
