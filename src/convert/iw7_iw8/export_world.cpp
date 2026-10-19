@@ -872,6 +872,16 @@ namespace zonetool::convert::iw7_iw8
 		const auto sun_index = 1u;
 		const auto light_count = com_world ? com_world->primaryLightCount : 0u;
 
+		// The broken models of the scriptables that break, which only the map script sets.
+		auto script_models = json::array();
+		for (const auto& [targetname, kind] : output.scriptable_destructibles)
+		{
+			if (!kind.dead_model.empty())
+			{
+				script_models.push_back(file_name(kind.dead_model));
+			}
+		}
+
 		json value =
 		{
 			{"schema", 1},
@@ -886,6 +896,7 @@ namespace zonetool::convert::iw7_iw8
 			{"translucent_glass", true},
 			// IW7 zones are twice the size of IW3 ones: the pipeline block compresses the images that keep their detail.
 			{"bc7_images", true},
+			{"script_models", script_models},
 			{"surfaces", std::move(surfaces)},
 			{"models", std::move(models)},
 			{"brush_models", std::move(brush_models)},

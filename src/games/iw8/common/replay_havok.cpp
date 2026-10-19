@@ -2368,7 +2368,10 @@ PhysicsAsset BakePhysicsAsset(std::string name, const PhysicsMesh &source,
           (useCategory == 3 && simulationCategory == 1) ||
           (useCategory == 7 && simulationCategory == 9) ||
           (clutter && useCategory == 3 && (simulationCategory == 4 || simulationCategory == 5))))
-        throw std::runtime_error("Native model physics input is invalid");
+        throw std::runtime_error("Native model physics input is invalid: " + name + " (" +
+                                 std::to_string(source.vertices.size()) + " vertices, " +
+                                 std::to_string(source.triangles.size()) + " triangles, contents " +
+                                 std::to_string(source.contents) + ")");
 
     const Mesh mesh = ModelPhysicsMesh(source);
     if (g_nativeCompendium)
