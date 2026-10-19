@@ -74,8 +74,13 @@ Without a command, `zonetool.exe` opens an interactive console.
   `global_mp`) must be in the zone folder too: a map zone holds some shared images without their pixels (format 0),
   and an image of the same name with its pixels in another loaded zone replaces such an image. Sound,
   cloud, physics light and emissive graph modules do not convert yet. The map's scriptables become script models of
-  each instance's model at its initial placement (their states, animations and events do not convert; the game
-  modes' own, such as Hardpoint's chevrons, are left out), which the pipeline makes static when no script uses them.
+  each instance's model at its initial placement (the game modes' own, such as Hardpoint's chevrons, are left out),
+  which the pipeline makes static when no script uses them. The kinds that break (one part: a health state, then a
+  state that swaps the model and plays effects and a sound; Frontier: 172 cups, bottles, screens and clocks of 41
+  kinds) take a targetname `iw7_destructible_<kind>`, and the map script (`iw7_destructibles`) breaks each when it has
+  taken its health in damage: the broken model (or none), the first effect, the sound. A script model that is all
+  glass keeps its glass in its collision, and a model with no solid collision keeps no physics. Their other states,
+  animations (Frontier's rising floor panels) and events do not convert.
   The map's own script (`scripts\mp\maps\<map>\<map>`) becomes the IW3 map script: the functions that its main
   reaches, with IW7's utilities replaced by IW3 ones or their IW3 versions, the names that gsc-tool writes as IW7
   token ids (`_id_XXXX`) renamed, and the effects that it plays on the tags of converted models (which have one bone)

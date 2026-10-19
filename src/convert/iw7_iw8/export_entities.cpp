@@ -270,6 +270,70 @@ namespace zonetool::convert::iw7_iw8
 			return result;
 		}
 
+		// A scriptable that breaks: one part whose first state takes damage (a health state) and whose second and last state
+		// swaps the model, plays effects or a sound. Other kinds (swinging frames, multi-stage carts) do not convert.
+		std::optional<extraction::scriptable_destructible> destructible_of(const source_map& source, const iw7::ScriptableDef& def,
+			extraction& output)
+		{
+			if (!def.parts || def.numParts != 1 || !def.parts[0].states || def.parts[0].numStates != 2)
+			{
+				return std::nullopt;
+			}
+
+			const auto& healthy = def.parts[0].states[0];
+			const auto& broken = def.parts[0].states[1];
+			if (healthy.type != iw7::Scriptable_StateType_Health || healthy.data.health.health <= 0 ||
+				healthy.data.health.health > 100000 || broken.type != iw7::Scriptable_StateType_Simple)
+			{
+				return std::nullopt;
+			}
+
+			extraction::scriptable_destructible result;
+			result.health = healthy.data.health.health;
+			auto changes = false;
+			for (auto e = 0u; broken.base.events && e < broken.base.numEvents; e++)
+			{
+				const auto& event = broken.base.events[e];
+				if (event.type == iw7::Scriptable_EventType_Model)
+				{
+					changes = true;
+					const auto model = source.resolve(iw7::ASSET_TYPE_XMODEL, event.data.model.model);
+					if (model && result.dead_model.empty())
+					{
+						result.dead_model = asset_name(iw7::get_asset_name(iw7::ASSET_TYPE_XMODEL, model));
+						output.models.try_emplace(file_name(result.dead_model), model);
+					}
+				}
+				else if (event.type == iw7::Scriptable_EventType_PFX)
+				{
+					const auto& fx = event.data.particleFX;
+					const auto vfx = fx.effectDef.type == iw7::FX_COMBINED_VFX ? source.resolve(iw7::ASSET_TYPE_VFX, fx.effectDef.u.vfx) : nullptr;
+					if (vfx)
+					{
+						changes = true;
+						result.effects.emplace_back(asset_name(iw7::get_asset_name(iw7::ASSET_TYPE_VFX, vfx)));
+					}
+				}
+				else if (event.type == iw7::Scriptable_EventType_Sound && event.data.sound.soundAlias && result.sound.empty())
+				{
+					result.sound = asset_name(event.data.sound.soundAlias);
+				}
+			}
+
+			if (!changes)
+			{
+				return std::nullopt;
+			}
+
+			std::string kind(def.name ? asset_name(def.name) : std::string_view{"scriptable"});
+			std::ranges::transform(kind, kind.begin(), [](const unsigned char c)
+			{
+				return std::isalnum(c) ? static_cast<char>(std::tolower(c)) : '_';
+			});
+			result.targetname = "iw7_destructible_" + kind;
+			return result;
+		}
+
 		// The effects that the first state of each part of a scriptable plays, on the tags of the instance's model.
 		void add_scriptable_effects(const source_map& source, const iw7::ScriptableDef& def, const iw7::XModel* model,
 			const iw7::ScriptableInstanceContext& context, extraction& output)
@@ -522,10 +586,11 @@ namespace zonetool::convert::iw7_iw8
 
 		// IW7's scriptables (screens, displays, lamps and props with states): an IW3 script model of each instance's
 		// model at its initial placement (the first model of its definition when the instance names none), and the
-		// effects of the first state of each of its parts on their tags. Their other states, animations and other
-		// events (lights, sounds) do not convert.
+		// effects of the first state of each of its parts on their tags. The kinds that break (destructible_of) take a
+		// targetname that the map script breaks them by. Their other states, animations and other events do not convert.
 		const auto& scriptables = map_ents->scriptableMapEnts;
 		std::size_t placed{};
+		std::size_t destructibles{};
 		for (auto i = 0u; scriptables.instances && i < scriptables.totalInstanceCount; i++)
 		{
 			const auto& context = scriptables.instances[i].contextHeader.context;
@@ -555,6 +620,12 @@ namespace zonetool::convert::iw7_iw8
 			{
 				entities += std::format("\"targetname\" \"{}\"\n", targetname);
 			}
+			else if (const auto destructible = def ? destructible_of(source, *def, output) : std::nullopt)
+			{
+				entities += std::format("\"targetname\" \"{}\"\n", destructible->targetname);
+				output.scriptable_destructibles.try_emplace(destructible->targetname, *destructible);
+				destructibles++;
+			}
 
 			entities += "}\n";
 			output.models.try_emplace(file_name(name), model);
@@ -568,6 +639,8 @@ namespace zonetool::convert::iw7_iw8
 		ZONETOOL_INFO("iw7: placed %zu of %u scriptables (%u runtime, %u reserved) as script models, with %zu effects of their first states",
 			placed, scriptables.totalInstanceCount, scriptables.runtimeInstanceCount, scriptables.reservedInstanceCount,
 			output.scriptable_effects.size());
+		ZONETOOL_INFO("iw7: %zu of them break (%zu kinds: a health state, then the broken model, its effects and sound)", destructibles,
+			output.scriptable_destructibles.size());
 
 		// IW7's breakable glass: an IW3 glass entity for each pane.
 		const auto panes = glass_panes(source);

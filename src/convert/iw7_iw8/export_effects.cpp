@@ -205,6 +205,8 @@ namespace zonetool::convert::iw7_iw8
 
 				// A cycle of child effects converts once.
 				this->results_[name] = true;
+				const auto parent = std::exchange(this->current_, name);
+				const auto _ = gsl::finally([&] { this->current_ = parent; });
 				const auto* system = static_cast<const iw7::ParticleSystemDef*>(this->source_.find(iw7::ASSET_TYPE_VFX, name));
 				if (!system)
 				{
@@ -247,10 +249,12 @@ namespace zonetool::convert::iw7_iw8
 			std::set<std::string> missing_;
 			std::map<std::string, std::size_t> dropped_;
 			std::size_t converted_{};
+			std::string current_;
 
 			void drop(const std::string& what)
 			{
 				this->dropped_[what]++;
+				ZONETOOL_INFO("iw7: effect \"%s\" leaves out a %s", this->current_.data(), what.data());
 			}
 
 			std::optional<json> convert_system(const iw7::ParticleSystemDef& system)
@@ -1529,6 +1533,72 @@ iw7_unsupported( a, b, c, d, e, f )
 			});
 			ZONETOOL_INFO("iw7: translated the map script (%zu bytes) with %zu effects of its own", map_script.size(), loaded.size());
 			placed.insert(loaded.begin(), loaded.end());
+		}
+
+		// The scriptables that break (export_entities): the map script breaks each when it took its health in damage. Their
+		// effects load by their own names.
+		if (!output.scriptable_destructibles.empty())
+		{
+			std::string calls;
+			for (const auto& [targetname, kind] : output.scriptable_destructibles)
+			{
+				for (const auto& effect : kind.effects)
+				{
+					effects.try_emplace(effect, effect);
+					placed.insert(effect);
+				}
+
+				calls += std::format("\tiw7_destructible( \"{}\", \"{}\", \"{}\", \"{}\", {} );\n", targetname, kind.dead_model,
+					kind.effects.empty() ? std::string{} : kind.effects.front(), kind.sound, kind.health);
+			}
+
+			if (map_script.empty())
+			{
+				map_script = std::format("// The map script (IW7 maps run their effects and createfx scripts first).\nmain()\n{{\n"
+					"\tmaps\\mp\\{0}_fx::main();\n\tmaps\\createfx\\{0}_fx::main();\n\tmaps\\mp\\_load::main();\n}}\n", source.name());
+			}
+
+			const std::string load = "maps\\mp\\_load::main();";
+			if (const auto at = map_script.find(load); at != std::string::npos)
+			{
+				map_script.insert(at + load.size(), "\n    thread iw7_destructibles();");
+			}
+
+			map_script += "\n// The scriptables that break: IW7 swaps their model, plays an effect and a sound when their health runs out.\n"
+				"iw7_destructibles()\n{\n" + calls + "}\n" + std::string(R"gsc(
+iw7_destructible( name, model, effect, sound, health )
+{
+    pieces = getentarray( name, "targetname" );
+    foreach ( piece in pieces )
+        piece thread iw7_destructible_think( model, effect, sound, health );
+}
+
+iw7_destructible_think( model, effect, sound, health )
+{
+    self endon( "death" );
+    self.maxhealth = 1000000;
+    self.health = 1000000;
+    self setcandamage( 1 );
+    total = 0;
+    while ( total < health )
+    {
+        self waittill( "damage", amount );
+        self.health = 1000000;
+        total = total + amount;
+    }
+
+    self setcandamage( 0 );
+    if ( effect != "" && isdefined( level._effect[effect] ) )
+        playfx( level._effect[effect], self.origin + ( 0, 0, 4 ) );
+    if ( sound != "" )
+        self playsound( sound );
+    if ( model == "" )
+        self delete();
+    else
+        self setmodel( model );
+}
+)gsc");
+			ZONETOOL_INFO("iw7: the map script breaks %zu kinds of scriptables", output.scriptable_destructibles.size());
 		}
 
 		// The strings that can name sound aliases: the aliases of the loop sounds and the map script's strings.

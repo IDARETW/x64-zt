@@ -49,6 +49,19 @@ namespace zonetool::convert::iw7_iw8
 		};
 		std::vector<scriptable_effect> scriptable_effects;
 
+		// The kinds of placed scriptables that break (cups, bottles, screens): a health state, then a state that swaps the model
+		// (none: the piece goes away), plays effects and a sound. Their instances are script models of this targetname, and the
+		// map script breaks them when they took the health in damage.
+		struct scriptable_destructible
+		{
+			std::string targetname;
+			std::string dead_model;
+			std::vector<std::string> effects;
+			std::string sound;
+			int health{};
+		};
+		std::map<std::string, scriptable_destructible> scriptable_destructibles;
+
 		// Adds the material or model of a header and returns its name in the extraction.
 		std::string add_material(const source_map& source, iw7::Material* header);
 		// Adds a layer (1 to 3) of a layered material as a material of its own.

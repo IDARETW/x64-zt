@@ -4294,18 +4294,29 @@ void BuildPreparedStaticModels(const SourceStaticModels &source, const RenderPla
             // Replay carries one surface type per model mesh (shipped assets do
             // the same); take the IW3 type covering the most collision area.
             std::map<unsigned, float> surfaceAreas;
+            const auto glassSurface = [&](const Surface &surface) {
+                const auto material = plan.materials.find(surface.material);
+                return (material != plan.materials.end() && material->second.kind == SurfaceKind::glass) ||
+                       Lowercase(surface.material).find("glass") != std::string::npos;
+            };
+            // Script-model glass (car windows, lights) breaks by hiding its
+            // part, which cannot remove a mesh shape: keep glass out of the
+            // keyframed body so bullets pass windows as they do once broken.
+            // A model that is all glass (IW7 bottles that break) keeps it.
+            bool keepGlass = !scriptModelPhysics;
+            if (!keepGlass)
+            {
+                keepGlass = true;
+                for (const Surface &surface : sourceModel.lods.at(physicsLod).surfaces)
+                    if ((!visualCollision || solidSurface(surface)) && !glassSurface(surface) && !surface.indices.empty())
+                        keepGlass = false;
+            }
             for (const Surface &surface : sourceModel.lods.at(physicsLod).surfaces)
             {
                 if (visualCollision && !solidSurface(surface))
                     continue;
                 const auto material = plan.materials.find(surface.material);
-                // Script-model glass (car windows, lights) breaks by hiding its
-                // part, which cannot remove a mesh shape: keep glass out of the
-                // keyframed body so bullets pass windows as they do once broken.
-                if (scriptModelPhysics &&
-                    ((material != plan.materials.end() &&
-                      material->second.kind == SurfaceKind::glass) ||
-                     Lowercase(surface.material).find("glass") != std::string::npos))
+                if (!keepGlass && glassSurface(surface))
                     continue;
                 const unsigned surfaceType =
                     material == plan.materials.end()
@@ -4339,18 +4350,26 @@ void BuildPreparedStaticModels(const SourceStaticModels &source, const RenderPla
             const auto dominant = std::ranges::max_element(
                 surfaceAreas, {}, [](const auto &entry) { return entry.second; });
             physics.surfaceType = dominant == surfaceAreas.end() ? 0 : dominant->first;
-            prepared.physicsAsset =
-                collisionModels ? iw8::havok::BakePhysicsAsset(assetName, physics, 0, 0)
-                : clutter       ? iw8::havok::BakePhysicsAsset(assetName, physics, 3,
-                                                               sourceModel.clutter->debris ? 5 : 4,
-                                                               false, &*sourceModel.clutter)
-                          : iw8::havok::BakePhysicsAsset(assetName, physics, 3, 1, scriptModelPhysics);
-            prepared.model.physicsAssetName = assetName;
-            // Shipped static models carry a detail collision beside their PhysicsAsset: bullets and melee trace
-            // the detail world, which holds only models that have one (a converted model without it was hit
-            // from far away and passed from near).
-            if (collisionModels && iw8::havok::UsesDetailCollision())
-                prepared.detailCollision = iw8::havok::BakeXModelDetailCollision(assetName, physics);
+            // A model whose collision is all glass (the shards of a broken IW7 cup) or has no contents keeps no physics.
+            if (physics.triangles.empty() || physics.vertices.size() < 3 || !physics.contents)
+            {
+                zt::info("iw3: model %s has no solid collision surfaces; it keeps no physics", assetName.c_str());
+            }
+            else
+            {
+                prepared.physicsAsset =
+                    collisionModels ? iw8::havok::BakePhysicsAsset(assetName, physics, 0, 0)
+                    : clutter       ? iw8::havok::BakePhysicsAsset(assetName, physics, 3,
+                                                                   sourceModel.clutter->debris ? 5 : 4,
+                                                                   false, &*sourceModel.clutter)
+                              : iw8::havok::BakePhysicsAsset(assetName, physics, 3, 1, scriptModelPhysics);
+                prepared.model.physicsAssetName = assetName;
+                // Shipped static models carry a detail collision beside their PhysicsAsset: bullets and melee trace
+                // the detail world, which holds only models that have one (a converted model without it was hit
+                // from far away and passed from near).
+                if (collisionModels && iw8::havok::UsesDetailCollision())
+                    prepared.detailCollision = iw8::havok::BakeXModelDetailCollision(assetName, physics);
+            }
         }
         if (collisionModels && !prepared.model.physicsAssetName.empty())
         {
@@ -9333,6 +9352,10 @@ PreparedMap PrepareFastfile(const ImportOptions &options)
             if (name != entity.end() && name->second == "interactive_tv" && model != entity.end())
                 extraModels.insert(model->second + "_d");
         }
+        // The models that an extraction's map script sets (the broken models of IW7 scriptables).
+        for (const auto &model : world.value("script_models", Json::array()))
+            if (exportedModel(model.get<std::string>()))
+                extraModels.insert(model.get<std::string>());
         // IW3 maps\mp\_destructible_types: every vehicle type (sedan, wagon,
         // hatchbacks, small cars) plays %vehicle_80s_sedan1_destroy with
         // setanimknob when it explodes. The XAnimParts lives in common_mp.
