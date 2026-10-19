@@ -94,10 +94,11 @@ Without a command, `zonetool.exe` opens an interactive console.
   the occlusion in blue). Unlit materials emit their tint in the units of the converted lights: below the sun's
   level the tint itself, above it the hue of their tint and an `emissionScale` constant, which the pipeline gives the world shader (`MAP_EMISSION`, flag bit 20) and the model
   shaders (a technique set variant for each gain, `MAP_MODEL_EMISSION`). The sky and the models that it draws (planets) take the units of the converted lights.
-- The pipeline keeps shadow maps for the 40 most important shadowed spot lights of a map (`limitShadowedSpotLights`,
-  about the 37 dynamic-shadow spots of stock mp_hideout): Replay shadows at most 64 spots of the view cone a frame
-  and renders at most 16 of their shadows again, and a converted world lets every spot in the view cone compete. A
-  spot left out of a frame keeps its light without a shadow.
+- The pipeline keeps shadow maps for the 16 most important shadowed spot lights of a map (`limitShadowedSpotLights`).
+  Replay lists at most 64 spots of the view cone a frame, each with a shadow-map cache entry and its atlas slot, but it
+  renders a missing shadow only for the first 16 in score order: a later spot is deferred and keeps a slot that holds
+  no shadow of it. A converted world lets every spot in the view cone compete, walls or not, so with 40 the spots past
+  the 16th went dark or lit as the view turned (owner tests of Frontier). Stock mp_hideout has 37, culled by Umbra.
 - The w of each light-volume vertex is its packed inward normal (10 bits a component, top two bits set), as in stock
   volumes: the binning vertex shader moves each vertex out along it by a tile-sized expansion. A w of 1.0 decoded a
   normal of (-1, -1, 0.99) and shifted whole volumes with the view.

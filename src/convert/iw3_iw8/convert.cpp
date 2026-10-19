@@ -1096,16 +1096,20 @@ void dropEnclosedShadowedSpots(iw8::MapSun &lighting, const std::vector<float> &
 
 // Replay picks the shadowed spots of each frame (sub_141959080): R_AddPotentiallyShadowedLight
 // keeps the best scores of the spots in the view cone (radius * intensity / distance) in a list
-// of at most 64 (0x10C794F4, 0x40 at init) less the dynamic lights, and renders the shadow of at
-// most 16 of them a frame (an int dvar of default and maximum 16, 0x1055A448) when something
-// moved in it. A spot left out keeps its light for that frame without a shadow: its GPU record
-// keeps shadow slot 0xFF (0x1419A95D0 sets the slots of the frame's list) and the forward+ shader
-// then skips the shadow lookup. Every Umbra object of a converted world spans the scene, so every
-// shadowed spot in the view cone competes, walls or not. Keep about as many as the 37 dynamic-shadow
-// spots of stock mp_hideout (IW7 Frontier has 90); the others keep their light without a shadow map.
+// of at most 64 (0x10C794F4, 0x40 at init) less the dynamic lights. Each listed spot holds one of
+// 64 shadow-map cache entries (0x11740FA0, 0x70 bytes, per-light entry byte at +0x1C18), and every
+// entry is in the frame's shadow list with its atlas slot (sub_1419860D0), rendered or not. A spot
+// whose entry is not valid is rendered only when it is among the first 16 of the score order (an
+// int dvar of default and maximum 16, 0x1055A448); a later one is deferred (flag 0x400) and its
+// entry stays invalid, but it keeps its slot in the list: the shader samples a slot that holds no
+// shadow of that light (inferred from the code; the slot contents were not traced). Every Umbra
+// object of a converted world spans the scene, so every shadowed spot in the view cone competes,
+// walls or not: with more than 16 shadowed spots the ones past the 16th went dark or lit as the view
+// turned (owner tests of IW7 Frontier, 40 of 90 kept). Keep 16, the most important; the others
+// keep their light without a shadow map.
 void limitShadowedSpotLights(iw8::MapSun &lighting)
 {
-    constexpr size_t kMaxShadowedSpots = 40;
+    constexpr size_t kMaxShadowedSpots = 16;
     std::vector<size_t> shadowed;
     for (size_t index = 0; index < lighting.primaryLights.size(); ++index)
     {
