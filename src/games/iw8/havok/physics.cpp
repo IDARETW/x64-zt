@@ -214,4 +214,28 @@ namespace zonetool::iw8::havok
 		builder.set(body, "attachedBody", std::int32_t{-1});
 		return root;
 	}
+
+	std::uint32_t add_xmodel_lod(object_builder& builder, const xmodel_lod_body& body)
+	{
+		const auto root = builder.object("HavokPhysicsXModelLOD");
+
+		const auto shapes = builder.array("T*<hknpShape>", 1, std::vector<std::uint8_t>(8));
+		builder.pointer(shapes, 0, type_of(builder, "T*<hknpShape>"), body.shape);
+		builder.point(root, "shapes", shapes);
+		builder.point(root, "bodyNames", add_strings(builder, {add_string(builder, body.name)}));
+
+		std::vector<std::uint8_t> pose;
+		for (const auto value : body.bind_pose)
+		{
+			put(pose, value);
+		}
+
+		builder.point(root, "bodyBindPoses", builder.array("hkTransform", 1, pose));
+
+		std::vector<std::uint8_t> tag;
+		put(tag, body.surface_flags);
+		put(tag, body.collision_filter_info);
+		builder.point(root, "shapeTagData", builder.array("HavokPhysicsXModelLOD::XModelCollisionTagData", 1, tag));
+		return root;
+	}
 }

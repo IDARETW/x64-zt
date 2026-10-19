@@ -60,4 +60,20 @@ namespace zonetool::iw8::havok
 
 	// Returns the asset item.
 	std::uint32_t add_physics_asset(object_builder& builder, const physics_asset& asset);
+
+	// A HavokPhysicsXModelLOD with one body, the Havok data of an XModelDetailCollision: the shape that bullets and melee
+	// hit, in the detail world.
+	struct xmodel_lod_body
+	{
+		std::uint32_t shape{};
+		std::string name = "tag_origin";
+		// The shape tag that the primitives of a compressed mesh name by index.
+		std::uint32_t surface_flags{};
+		std::uint32_t collision_filter_info{};
+		// The three rotation columns and the translation of the bind pose (hkTransform).
+		std::array<float, 16> bind_pose{1.0f, 0.0f, 0.0f, 0.0f, 0.0f, 1.0f, 0.0f, 0.0f, 0.0f, 0.0f, 1.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f};
+	};
+
+	// Returns the root item.
+	std::uint32_t add_xmodel_lod(object_builder& builder, const xmodel_lod_body& body);
 }

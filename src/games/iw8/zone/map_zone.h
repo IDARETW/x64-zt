@@ -109,6 +109,26 @@ inline void emitPhysicsAssetReference(ZoneBuffer &zb,
     zb.popStream();
 }
 
+// The inline stub of an XModelDetailCollision that a static-model collision row names: Replay loads it through
+// Preload_XModelDetailCollisionPtr (0xE2F540) into stream 2 and Load_XModelDetailCollisionPtr (0xE2A4B0) into stream 1,
+// so the struct (0x28) is reserved in both, as the PhysicsAsset stub is.
+inline void emitXModelDetailCollisionReference(ZoneBuffer &zb, const char *name)
+{
+    uint8_t asset[iw8sz::XMODEL_DETAIL_COLLISION]{};
+    stamp64(asset, 0, PTR_FOLLOWS);
+    zb.pushStream(XFILE_BLOCK_TEMP_PRELOAD);
+    zb.align(7);
+    zb.write(asset, sizeof(asset));
+    zb.pushStream(XFILE_BLOCK_VIRTUAL);
+    zb.writeStr(name);
+    zb.popStream();
+    zb.popStream();
+    zb.pushStream(XFILE_BLOCK_TEMP_POSTLOAD);
+    zb.align(7);
+    zb.reserveCalc(sizeof(asset));
+    zb.popStream();
+}
+
 inline void emitStaticModelCollisionModelLists(
     ZoneBuffer &zb, const staticmodelcollision::Plan &plan)
 {
@@ -121,6 +141,8 @@ inline void emitStaticModelCollisionModelLists(
 
     std::vector<uint64_t> physicsPointers(plan.models.size());
     std::unordered_map<std::string, uint64_t> physicsAliases;
+    std::vector<uint64_t> detailPointers(plan.models.size(), PTR_NULL);
+    std::unordered_map<std::string, uint64_t> detailAliases;
     uint64_t virtualCursor = 0;
 
     zb.align(7);
@@ -169,6 +191,33 @@ inline void emitStaticModelCollisionModelLists(
             virtualCursor += nameBytes;
         }
 
+        if (!source.detailCollisionName.empty())
+        {
+            if (source.detailCollisionName.front() == ',' ||
+                source.detailCollisionName.find('\0') != std::string::npos)
+                throw std::runtime_error("Replay static-model collision has an invalid XModelDetailCollision name");
+            const auto existingDetail = detailAliases.find(source.detailCollisionName);
+            if (existingDetail != detailAliases.end())
+            {
+                detailPointers[index] = existingDetail->second;
+            }
+            else
+            {
+                if (virtualCursor > std::numeric_limits<uint32_t>::max() - 7)
+                    throw std::runtime_error("Replay XModelDetailCollision insertion offset exceeds 32 bits");
+                virtualCursor = (~uint64_t{7}) & (virtualCursor + 7);
+                detailAliases.emplace(source.detailCollisionName,
+                                      packOffset(XFILE_BLOCK_VIRTUAL, virtualCursor));
+                detailPointers[index] = PTR_INSERT;
+                virtualCursor += 8;
+                const uint64_t nameBytes = static_cast<uint64_t>(source.detailCollisionName.size()) + 2;
+                if (virtualCursor > std::numeric_limits<uint32_t>::max() ||
+                    nameBytes > std::numeric_limits<uint32_t>::max() - virtualCursor)
+                    throw std::runtime_error("Replay XModelDetailCollision name offset exceeds 32 bits");
+                virtualCursor += nameBytes;
+            }
+        }
+
         if (virtualCursor > std::numeric_limits<uint32_t>::max() - 3)
             throw std::runtime_error("Replay static-model collision instance offset exceeds 32 bits");
         virtualCursor = (~uint64_t{3}) & (virtualCursor + 3);
@@ -195,7 +244,7 @@ inline void emitStaticModelCollisionModelLists(
         maps::StaticModelCollisionModel model{};
         model.name = planned.scriptString;
         model.physicsAsset = reinterpret_cast<void *>(physicsPointers[index]);
-        model.detailCollision = reinterpret_cast<void *>(PTR_NULL);
+        model.detailCollision = reinterpret_cast<void *>(detailPointers[index]);
         model.numInstances = static_cast<uint32_t>(source.instances.size());
         model.instances = reinterpret_cast<void *>(PTR_FOLLOWS);
         models.push_back(model);
@@ -203,6 +252,7 @@ inline void emitStaticModelCollisionModelLists(
     zb.write(models.data(), models.size() * sizeof(models.front()));
 
     std::unordered_map<std::string, uint64_t> emittedAliases;
+    std::unordered_map<std::string, uint64_t> emittedDetailAliases;
     for (const auto &planned : plan.models)
     {
         const auto &source = *planned.source;
@@ -218,6 +268,20 @@ inline void emitStaticModelCollisionModelLists(
             emittedAliases.emplace(source.physicsAssetName, alias);
             const std::string referenceName = "," + source.physicsAssetName;
             emitPhysicsAssetReference(zb, referenceName.c_str());
+        }
+
+        if (!source.detailCollisionName.empty() &&
+            !emittedDetailAliases.contains(source.detailCollisionName))
+        {
+            zb.align(7);
+            const uint64_t alias = packOffset(XFILE_BLOCK_VIRTUAL,
+                                              zb.streamSize(XFILE_BLOCK_VIRTUAL));
+            if (alias != detailAliases.at(source.detailCollisionName))
+                throw std::runtime_error("Replay XModelDetailCollision insertion alias drifted");
+            zb.reserveCalc(8);
+            emittedDetailAliases.emplace(source.detailCollisionName, alias);
+            const std::string referenceName = "," + source.detailCollisionName;
+            emitXModelDetailCollisionReference(zb, referenceName.c_str());
         }
 
         zb.align(3);

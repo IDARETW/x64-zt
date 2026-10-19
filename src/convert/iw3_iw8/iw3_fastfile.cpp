@@ -4346,12 +4346,18 @@ void BuildPreparedStaticModels(const SourceStaticModels &source, const RenderPla
                                                                false, &*sourceModel.clutter)
                           : iw8::havok::BakePhysicsAsset(assetName, physics, 3, 1, scriptModelPhysics);
             prepared.model.physicsAssetName = assetName;
+            // Shipped static models carry a detail collision beside their PhysicsAsset: bullets and melee trace
+            // the detail world, which holds only models that have one (a converted model without it was hit
+            // from far away and passed from near).
+            if (collisionModels && iw8::havok::UsesDetailCollision())
+                prepared.detailCollision = iw8::havok::BakeXModelDetailCollision(assetName, physics);
         }
         if (collisionModels && !prepared.model.physicsAssetName.empty())
         {
             iw8::staticmodelcollision::Model collisionModel;
             collisionModel.name = assetName;
             collisionModel.physicsAssetName = prepared.model.physicsAssetName;
+            collisionModel.detailCollisionName = prepared.detailCollision.name;
             collisionModelIndices[modelIndex] = collisionModels->size();
             collisionModels->push_back(std::move(collisionModel));
         }

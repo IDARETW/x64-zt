@@ -49,6 +49,8 @@ struct PreparedXModel
     convert::xmodel::Iw8XModelRecord model;
     std::vector<conv_xsurf::Iw8Surfs> lods;
     iw8::havok::PhysicsAsset physicsAsset;
+    // The detail collision of a static model (native Havok): bullets and melee hit it in the detail physics world.
+    iw8::havok::XModelDetailCollision detailCollision;
 };
 
 struct PreparedFxDependency

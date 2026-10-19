@@ -1506,6 +1506,10 @@ namespace zonetool::iw8
 			std::size_t other_lists{};
 			std::size_t assets{};
 			std::size_t other_assets{};
+			std::size_t lods{};
+			std::size_t other_lods{};
+			std::size_t lod_differences{};
+			std::string first_lod_difference;
 			std::size_t other_values{};
 			std::string first_difference;
 			rebuilt_shapes shapes;
@@ -1739,6 +1743,88 @@ namespace zonetool::iw8
 			counts.assets++;
 		}
 
+		// A one-body HavokPhysicsXModelLOD built again from its values: the objects other than the shape must have the same bytes.
+		void verify_xmodel_lod(const havok::tagfile& file, const havok::type_table& types, physics_counts& counts)
+		{
+			const auto& root = file.items.at(1);
+			const auto target_of = [&](const havok::item& owner, const std::string_view name) -> const havok::item*
+			{
+				const auto target = item_target(owner, member_offset(types, owner.type, name));
+				return target ? &file.items.at(target) : nullptr;
+			};
+
+			const auto* shapes = target_of(root, "shapes");
+			const auto* names = target_of(root, "bodyNames");
+			const auto* poses = target_of(root, "bodyBindPoses");
+			const auto* tags = target_of(root, "shapeTagData");
+			if (!shapes || shapes->count != 1 || !names || names->count != 1 || !poses || poses->count != 1 || !tags || tags->count != 1)
+			{
+				counts.other_lods++;
+				return;
+			}
+
+			havok::xmodel_lod_body body;
+			body.name = item_string(file, item_target(*names, 0));
+			body.surface_flags = item_value<std::uint32_t>(*tags, 0);
+			body.collision_filter_info = item_value<std::uint32_t>(*tags, 4);
+			for (std::size_t i = 0; i < body.bind_pose.size(); i++)
+			{
+				body.bind_pose[i] = item_value<float>(*poses, i * 4);
+			}
+
+			havok::object_builder builder(types);
+			std::unordered_map<std::uint32_t, std::uint32_t> copies;
+			const auto stock_shape = item_target(*shapes, 0);
+			body.shape = rebuild_shape(builder, file, types, stock_shape, copies, counts.shapes);
+			const auto error = counts.shapes.mesh_errors.contains(body.shape) ? counts.shapes.mesh_errors.at(body.shape) : 0.0f;
+			const auto built_root = havok::add_xmodel_lod(builder, body);
+			const auto written = havok::write_compact_tagfile(builder.finish(file.sdk_version, havok::replay_compendium_signature, built_root), types);
+			const auto again = havok::read_tagfile(written, &types);
+
+			const auto bytes_of = [](const havok::item* object)
+			{
+				if (!object)
+				{
+					return std::vector<std::uint8_t>{};
+				}
+
+				auto data = object->data;
+				for (const auto& pointer : object->pointers)
+				{
+					std::fill_n(data.begin() + pointer.offset, std::min<std::size_t>(8, data.size() - pointer.offset), 0);
+				}
+
+				return data;
+			};
+
+			const auto& built = again.items.at(1);
+			const auto built_target = [&](const std::string_view name) -> const havok::item*
+			{
+				const auto target = item_target(built, member_offset(types, built.type, name));
+				return target ? &again.items.at(target) : nullptr;
+			};
+
+			for (const auto& [name, x, y] : {std::tuple("root", &root, &built), std::tuple("bind pose", poses, built_target("bodyBindPoses")),
+				std::tuple("tag data", tags, built_target("shapeTagData"))})
+			{
+				const auto a = bytes_of(x);
+				const auto b = bytes_of(y);
+				if (a != b)
+				{
+					if (counts.first_lod_difference.empty())
+					{
+						counts.first_lod_difference = std::format("{} ({} and {} bytes)", name, a.size(), b.size());
+					}
+
+					counts.lod_differences++;
+					return;
+				}
+			}
+
+			compare_shapes(file, stock_shape, again, item_target(*built_target("shapes"), 0), types, error);
+			counts.lods++;
+		}
+
 		// IW8_REWRITE=physics builds the Havok data of the zone again without the game: each HavokPhysicsShapeList (col_map,
 		// map_ents) and each one-body HavokPhysicsAsset, with their shapes. Lists must keep their entries and tags, assets the
 		// bytes of their objects, and shapes their geometry.
@@ -1747,6 +1833,7 @@ namespace zonetool::iw8
 			const auto& compendium = replay_compendium(zone_folder);
 			const auto list_type = *compendium.find("HavokPhysicsShapeList");
 			const auto asset_type = *compendium.find("HavokPhysicsAsset");
+			const auto lod_type = *compendium.find("HavokPhysicsXModelLOD");
 			std::set<asset_key> seen;
 			physics_counts counts;
 			for (const auto& asset : zone.assets)
@@ -1781,7 +1868,7 @@ namespace zonetool::iw8
 						continue;
 					}
 
-					if (file.items.size() < 2 || (file.items[1].type != list_type && file.items[1].type != asset_type))
+					if (file.items.size() < 2 || (file.items[1].type != list_type && file.items[1].type != asset_type && file.items[1].type != lod_type))
 					{
 						continue;
 					}
@@ -1791,6 +1878,10 @@ namespace zonetool::iw8
 						if (file.items[1].type == list_type)
 						{
 							verify_shape_list(file, compendium, counts);
+						}
+						else if (file.items[1].type == lod_type)
+						{
+							verify_xmodel_lod(file, compendium, counts);
 						}
 						else
 						{
@@ -1811,11 +1902,13 @@ namespace zonetool::iw8
 				}
 			}
 
-			ZONETOOL_INFO("%s: %zu shape lists (%zu with other rows) and %zu one-body physics assets build again (%zu with other values%s%s, "
-				"%zu of another kind); %zu shapes built, %zu copied; %zu mass properties built, largest difference %.6f", zone.name.data(),
-				counts.lists, counts.other_lists, counts.assets, counts.other_values, counts.first_difference.empty() ? "" : ", first: ",
-				counts.first_difference.data(), counts.other_assets, counts.shapes.built, counts.shapes.copied, counts.shapes.masses,
-				counts.shapes.mass_error);
+			ZONETOOL_INFO("%s: %zu shape lists (%zu with other rows), %zu one-body physics assets and %zu one-body detail collision LODs "
+				"(%zu with other bodies, %zu with other values%s%s) build again (%zu physics assets with other values%s%s, %zu of another kind); "
+				"%zu shapes built, %zu copied; %zu mass properties built, largest difference %.6f", zone.name.data(), counts.lists,
+				counts.other_lists, counts.assets, counts.lods, counts.other_lods, counts.lod_differences,
+				counts.first_lod_difference.empty() ? "" : ", first: ", counts.first_lod_difference.data(), counts.other_values,
+				counts.first_difference.empty() ? "" : ", first: ", counts.first_difference.data(), counts.other_assets,
+				counts.shapes.built, counts.shapes.copied, counts.shapes.masses, counts.shapes.mass_error);
 		}
 
 		struct comparison

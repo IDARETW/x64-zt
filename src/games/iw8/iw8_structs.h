@@ -52,6 +52,7 @@ enum IW8_XAssetType : int32_t
     ASSET_TYPE_NET_CONST_STRINGS = 61,
     ASSET_TYPE_LUAFILE = 62,
     ASSET_TYPE_VECTORFIELD = 65,
+    ASSET_TYPE_XMODEL_DETAIL_COLLISION = 101,
     ASSET_TYPE_STREAMKEY = 102,
     ASSET_TYPE_DECAL_VOLUME_MATERIAL = 111,
     ASSET_TYPE_DYNENTITYLIST = 113,
@@ -64,6 +65,7 @@ enum IW8_XAssetType : int32_t
 namespace iw8sz
 {
 constexpr size_t PHYSICSASSET = 0x58;
+constexpr size_t XMODEL_DETAIL_COLLISION = 0x28;
 constexpr size_t XANIM = 0xA0;
 constexpr size_t XMODELSURFS = 0x60;
 constexpr size_t XMODEL = 0x2B0;
@@ -163,6 +165,8 @@ inline const char *type_name(int t)
         return "dynentitylist";
     case ASSET_TYPE_EDGELIST:
         return "edgelist";
+    case ASSET_TYPE_XMODEL_DETAIL_COLLISION:
+        return "xmodeldetailcollision";
     default:
         return "unknown";
     }
