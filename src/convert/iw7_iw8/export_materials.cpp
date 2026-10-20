@@ -935,6 +935,11 @@ namespace zonetool::convert::iw7_iw8
 		{
 			auto& roles = candidates[name];
 			const auto layer = layer_of(name);
+			// The sky's cube map converts with the sky (export_sky); the sky material takes no image of its own.
+			if (classify_material(material).kind == surface_kind::sky)
+			{
+				continue;
+			}
 
 			// The alpha of the layer's colour: the first texture of its alpha, reveal and thickness maps that holds one.
 			const iw7::GfxImage* alpha{};
@@ -1091,6 +1096,11 @@ namespace zonetool::convert::iw7_iw8
 				});
 
 				images[role] = written != role_files.end() ? std::optional(*written) : builtins[name][role];
+				if (written == role_files.end() && !role_files.empty())
+				{
+					ZONETOOL_INFO("iw7: material \"%s\" loses its image %s (role %zu), which cannot be read", name.data(),
+						files.at(role_files.front()).image->name, role);
+				}
 			}
 
 			if (output.decal_materials.contains(name))

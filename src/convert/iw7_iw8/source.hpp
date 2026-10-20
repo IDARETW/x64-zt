@@ -20,6 +20,9 @@ namespace zonetool::convert::iw7_iw8
 		// The rigid vertex lists (bone, vertex count; they cover the vertices in order) and whether vertices blend bones.
 		std::vector<std::pair<std::uint16_t, std::uint16_t>> rigid_lists;
 		bool blended{};
+		// The blended vertices: their counts by number of bones (1 to 8) and IW7's blend data (XSurface blendVerts).
+		std::array<std::uint16_t, 8> blend_counts{};
+		std::vector<std::uint16_t> blend_data;
 	};
 
 	// The zones of an IW7 map: the map zone, the transient zones of its world and any zone that holds an asset that the

@@ -142,6 +142,11 @@ namespace zonetool::convert::iw7_iw8
 					}
 
 					copy.blended = std::ranges::any_of(surface.blendVertCounts, [](const auto count) { return count != 0; });
+					std::ranges::copy(surface.blendVertCounts, copy.blend_counts.begin());
+					if (surface.blendVerts)
+					{
+						copy.blend_data.assign(surface.blendVerts, surface.blendVerts + surface.blendVertSize / 2);
+					}
 				}
 			}
 

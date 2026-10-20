@@ -159,6 +159,11 @@ float3 SourceIndirect(float2 uv, float3 first, float3 tangentNormal) {
     float4 secondary = lightmapSecondary.SampleLevel(colorSampler, lightmapUV, 0);
     first = primary.rgb;
     float3 second = secondary.rgb;
+#ifdef MAP_LIGHTMAP_LOG
+    // The layers' high range (iw3_render_assets: the extraction's lightmap_encoding).
+    first = (exp2(first * MAP_LIGHTMAP_LOG.y) - 1) / MAP_LIGHTMAP_LOG.x;
+    second = (exp2(second * MAP_LIGHTMAP_LOG.y) - 1) / MAP_LIGHTMAP_LOG.x;
+#endif
     float2 raw = float2(primary.a, secondary.a);
 #else
     float4 responseData = sourceResponseAtlas.SampleLevel(colorSampler, uv, 0);

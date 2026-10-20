@@ -279,6 +279,7 @@ namespace zonetool::convert::iw7_iw8
 	// skeletons of their models (skeleton/: an XMODEL_EXPORT of each LOD), which the pipeline reads for entity models.
 	// A scriptable whose model or animation does not convert keeps its bind pose and its tag effects their bind pose.
 	void export_animations(const source_map& source, extraction& output);
+	void export_skeletons(const source_map& source, extraction& output);
 	// Removes the model of each entity whose model did not export (it is in a zone that the map does not load).
 	void remove_missing_entity_models(const source_map& source, const extraction& output);
 	// Writes a neutral cube map for the reflection probe of the world and returns its image name.
@@ -307,6 +308,11 @@ namespace zonetool::convert::iw7_iw8
 
 	// The level that IW3 lightmaps and probes take for an IW7 irradiance or radiance (a soft knee above 0.5).
 	float light_level(float value);
+	// The lightmap layers keep IW7's range: log2(1 + scale * value) / log2(1 + scale * maximum) in a byte, which the
+	// pipeline's world shader decodes (MAP_LIGHTMAP_LOG; the world's "lightmap_encoding").
+	constexpr float lightmap_log_scale = 8.0f;
+	constexpr float lightmap_maximum = 16.0f;
+	float lightmap_level(float value);
 	float linear_to_srgb(float value);
 
 	// The reflection probes of the world: entry 0 is a neutral probe at the origin, as in IW3 worlds, then a probe

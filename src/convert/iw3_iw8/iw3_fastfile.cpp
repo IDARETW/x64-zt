@@ -71,6 +71,8 @@ struct Surface
     std::vector<std::uint32_t> indices;
     // Source bone per vertex for skinned entity models (empty: one root bone).
     std::vector<std::uint8_t> vertexBones;
+    // The bones that each vertex blends, strongest first, with their weights (empty: every vertex on its bone alone).
+    std::vector<std::vector<std::pair<std::uint8_t, float>>> vertexWeights;
 };
 
 struct BrushModel
@@ -2365,6 +2367,8 @@ struct SourceSkeletonLod
     {
         Vec3 position{};
         std::uint8_t bone{};
+        // The bones that the vertex blends (at most 4, IW3's limit), strongest first.
+        std::vector<std::pair<std::uint8_t, float>> weights;
     };
     std::vector<SourceBone> bones;
     std::vector<std::vector<std::array<Corner, 3>>> objects;
@@ -2463,7 +2467,7 @@ SourceSkeletonLod ReadXModelExport(const std::filesystem::path &path)
         const std::size_t weights = readCount(read("BONES"), 16);
         if (!weights)
             throw fail("unweighted vertex");
-        float strongest = -1.0f;
+        auto &influences = vertices[index].weights;
         for (std::size_t weight = 0; weight < weights; ++weight)
         {
             auto fields = read("BONE");
@@ -2472,12 +2476,15 @@ SourceSkeletonLod ReadXModelExport(const std::filesystem::path &path)
             fields >> bone >> value;
             if (!fields || bone >= boneCount || !std::isfinite(value))
                 throw fail("invalid vertex weight");
-            if (value > strongest)
-            {
-                strongest = value;
-                vertices[index].bone = static_cast<std::uint8_t>(bone);
-            }
+            if (value > 0.0f)
+                influences.emplace_back(static_cast<std::uint8_t>(bone), value);
         }
+        std::ranges::stable_sort(influences, std::greater<>{}, &std::pair<std::uint8_t, float>::second);
+        if (influences.size() > 4)
+            influences.resize(4);
+        if (influences.empty())
+            throw fail("unweighted vertex");
+        vertices[index].bone = influences.front().first;
     }
 
     const std::size_t faceCount = readCount(seek("NUMFACES"), 1u << 24);
@@ -2563,6 +2570,7 @@ bool AssignSourceBones(const SourceSkeletonLod &skeleton, const std::size_t obje
         return false;
     constexpr std::uint8_t unassigned = UINT8_MAX;
     surface.vertexBones.assign(surface.vertices.size(), unassigned);
+    std::vector<std::vector<std::pair<std::uint8_t, float>>> weights(surface.vertices.size());
     for (std::size_t triangle = 0; triangle < triangles.size(); ++triangle)
         for (std::size_t corner = 0; corner < 3; ++corner)
         {
@@ -2579,13 +2587,23 @@ bool AssignSourceBones(const SourceSkeletonLod &skeleton, const std::size_t obje
             if (match == triangles[triangle].end())
                 return false;
             if (surface.vertexBones[index] == unassigned)
+            {
                 surface.vertexBones[index] = match->bone;
+                weights[index] = match->weights;
+            }
         }
     // Vertices no triangle uses follow the surface's first bone.
     const std::uint8_t fallback = surface.vertexBones[surface.indices.front()];
-    for (auto &bone : surface.vertexBones)
-        if (bone == unassigned)
-            bone = fallback;
+    for (std::size_t vertex = 0; vertex < surface.vertexBones.size(); ++vertex)
+        if (surface.vertexBones[vertex] == unassigned)
+        {
+            surface.vertexBones[vertex] = fallback;
+            weights[vertex] = {{fallback, 1.0f}};
+        }
+    // A surface keeps its blend weights when a vertex blends bones.
+    surface.vertexWeights.clear();
+    if (std::ranges::any_of(weights, [](const auto &influences) { return influences.size() > 1; }))
+        surface.vertexWeights = std::move(weights);
     return true;
 }
 
@@ -2898,6 +2916,8 @@ void RespaceLadderRungs(SourceStaticModels &models)
                         surface.vertices.push_back(std::move(vertex));
                         if (!surface.vertexBones.empty())
                             surface.vertexBones.push_back(surface.vertexBones.front());
+                        if (!surface.vertexWeights.empty())
+                            surface.vertexWeights.push_back(surface.vertexWeights.front());
                     }
                     surface.indices.insert(surface.indices.end(), {first, first + 1, first + 2});
                 }
@@ -4023,7 +4043,17 @@ void BuildPreparedStaticModels(const SourceStaticModels &source, const RenderPla
                 std::iota(vertexOrder.begin(), vertexOrder.end(), 0u);
                 std::vector<std::size_t> triangleOrder(renderSurface->indices.size() / 3);
                 std::iota(triangleOrder.begin(), triangleOrder.end(), std::size_t{0});
-                if (skinned)
+                // A surface whose vertices blend bones is deformed: its vertices grouped by their number of
+                // bones (IW3's blend tiers), each described by the blend data.
+                const bool deformed = skinned && !renderSurface->vertexWeights.empty();
+                const auto tierOf = [&](const std::uint32_t vertex) {
+                    return renderSurface->vertexWeights[vertex].size() - 1;
+                };
+                if (deformed)
+                    std::ranges::stable_sort(vertexOrder, [&](const std::uint32_t a, const std::uint32_t b) {
+                        return std::pair(tierOf(a), boneOf(a)) < std::pair(tierOf(b), boneOf(b));
+                    });
+                else if (skinned)
                 {
                     std::ranges::stable_sort(vertexOrder, {}, boneOf);
                     std::ranges::stable_sort(triangleOrder, {}, [&](const std::size_t triangle) {
@@ -4085,9 +4115,35 @@ void BuildPreparedStaticModels(const SourceStaticModels &source, const RenderPla
                     for (std::size_t corner = 0; corner < 3; ++corner)
                         converted.triIndices.push_back(static_cast<std::uint16_t>(
                             remap[renderSurface->indices[triangle * 3 + corner]]));
+                if (deformed)
+                {
+                    // IW3 blend words: the first bone's matrix offset (bone * 64), then for each other bone
+                    // its offset and its weight in 1/65536 (the first bone takes the rest).
+                    converted.deformed = 1;
+                    for (const std::uint32_t vertex : vertexOrder)
+                    {
+                        const auto &influences = renderSurface->vertexWeights[vertex];
+                        ++converted.vertBlendCounts[influences.size() - 1];
+                        converted.vertsBlend.push_back(static_cast<std::uint16_t>(influences.front().first * 64));
+                        long total = 0;
+                        for (std::size_t other = 1; other < influences.size(); ++other)
+                        {
+                            const auto weight = std::clamp(std::lround(influences[other].second * 65536.0f), 0l, 65535l - total);
+                            total += weight;
+                            converted.vertsBlend.push_back(static_cast<std::uint16_t>(influences[other].first * 64));
+                            converted.vertsBlend.push_back(static_cast<std::uint16_t>(weight));
+                        }
+                        for (const auto &influence : influences)
+                        {
+                            const auto bit = static_cast<std::int32_t>(0x80000000u >> (influence.first % 32));
+                            converted.partBits[influence.first / 32] |= bit;
+                            xse.modelSurfPartBits[influence.first / 32] |= bit;
+                        }
+                    }
+                }
                 // One rigid run per bone: the matrix offset is bone * 64.
                 for (std::size_t vertexStart = 0, triangleStart = 0;
-                     vertexStart < vertexOrder.size();)
+                     !deformed && vertexStart < vertexOrder.size();)
                 {
                     const std::uint8_t bone = boneOf(vertexOrder[vertexStart]);
                     std::size_t vertexEnd = vertexStart;
@@ -7926,6 +7982,8 @@ struct NativeFx
     std::set<std::string> sounds;
     // Replay materials of the common zones (flares), named without converting.
     std::set<std::string> stockMaterials;
+    // Replay models of the common zones (debris), named without converting.
+    std::set<std::string> stockModels;
     bool lights{};
 };
 
@@ -8015,6 +8073,8 @@ std::vector<NativeFx> ReadNativeFx(const std::filesystem::path &root)
                                             assetType = ASSET_TYPE_MATERIAL, fx.stockMaterials.insert(name);
                                         else if (type == "xmodel")
                                             assetType = ASSET_TYPE_XMODEL, fx.models.insert(name);
+                                        else if (type == "stockxmodel")
+                                            assetType = ASSET_TYPE_XMODEL, fx.stockModels.insert(name);
                                         else if (type == "vfx")
                                             assetType = ASSET_TYPE_VFX, fx.effects.insert(name);
                                         else if (type == "lightdef")
@@ -10419,6 +10479,8 @@ PreparedMap PrepareFastfile(const ImportOptions &options)
                     result.vfxReferences.emplace(ASSET_TYPE_PHYSICSFXPIPELINE, pipeline);
                 for (const auto &material : fx.stockMaterials)
                     result.vfxReferences.emplace(ASSET_TYPE_MATERIAL, material);
+                for (const auto &model : fx.stockModels)
+                    result.vfxReferences.emplace(ASSET_TYPE_XMODEL, model);
                 for (const auto &shape : fx.shapes)
                 {
                     if (shapeAliases.contains(shape))

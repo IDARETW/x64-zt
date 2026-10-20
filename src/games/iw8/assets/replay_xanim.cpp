@@ -54,6 +54,63 @@ template <class T> void Write(ZoneWriter &writer, const std::vector<T> &data, co
     writer.align(alignment);
     writer.write(data.data(), data.size() * sizeof(T));
 }
+
+std::array<float, 3> Vector(const nlohmann::json &source, const char *field)
+{
+    const auto &value = source.at(field);
+    if (value.size() != 3)
+        throw std::runtime_error(std::string("IW3 XAnim delta vector has the wrong size: ") + field);
+    return {value[0].get<float>(), value[1].get<float>(), value[2].get<float>()};
+}
+
+DeltaQuat LoadQuat(const nlohmann::json &source, const size_t components, const uint16_t numframes)
+{
+    DeltaQuat quat;
+    quat.size = source.at("size").get<uint16_t>();
+    if (!quat.size)
+    {
+        quat.frame0 = Array<int16_t>(source, "frame0");
+        if (quat.frame0.size() != components)
+            throw std::runtime_error("IW3 XAnim delta rotation key has the wrong size");
+        return quat;
+    }
+    quat.indices = Array<uint16_t>(source, "indices");
+    quat.frames = Array<int16_t>(source, "frames");
+    if (quat.indices.size() != quat.size + 1u || quat.frames.size() != (quat.size + 1u) * components ||
+        (numframes < 256 && std::any_of(quat.indices.begin(), quat.indices.end(), [](uint16_t i) { return i > 255; })))
+        throw std::runtime_error("inconsistent IW3 XAnim delta rotation");
+    return quat;
+}
+
+// The key frames of a delta track: bytes below 256 frames, else shorts (XAnimDynamicIndices).
+void WriteIndices(ZoneWriter &out, const std::vector<uint16_t> &indices, const uint16_t numframes)
+{
+    if (numframes < 256)
+    {
+        std::vector<uint8_t> bytes(indices.begin(), indices.end());
+        Write(out, bytes, 0);
+    }
+    else
+        Write(out, indices, 1);
+}
+
+// Load_XAnimDeltaPartQuat2 / Quat: an 8-byte head (size), then frame0 or the
+// frames pointer, the indices and the frames.
+void WriteQuat(ZoneWriter &out, const DeltaQuat &quat, const size_t components, const uint16_t numframes)
+{
+    out.align(7);
+    std::array<uint8_t, 8> head{};
+    Store(head.data(), 0, quat.size);
+    out.write(head.data(), head.size());
+    if (!quat.size)
+    {
+        out.write(quat.frame0.data(), components * sizeof(int16_t));
+        return;
+    }
+    out.writeT<uint64_t>(PTR_FOLLOWS);
+    WriteIndices(out, quat.indices, numframes);
+    Write(out, quat.frames, 1);
+}
 } // namespace
 
 Anim LoadIw3(const std::filesystem::path &path)
@@ -64,16 +121,37 @@ Anim LoadIw3(const std::filesystem::path &path)
     const auto source = nlohmann::json::parse(input);
     if (source.value("schema", 0) != 1)
         throw std::runtime_error("unsupported IW3 XAnim dump schema: " + path.string());
-    if (!source.at("delta_part").is_null())
-    {
-        const auto &delta = source.at("delta_part");
-        if (delta.contains("trans") || delta.contains("quat"))
-            throw std::runtime_error("IW3 XAnim root-motion (delta) parts are not converted yet: " +
-                                     source.at("name").get<std::string>());
-    }
     Anim anim;
     anim.name = source.at("name");
     anim.numframes = source.at("numframes");
+    if (const auto &delta = source.at("delta_part"); !delta.is_null())
+    {
+        if (const auto trans = delta.find("trans"); trans != delta.end())
+        {
+            DeltaTrans track;
+            track.size = trans->at("size").get<uint16_t>();
+            track.small = trans->at("small").get<bool>();
+            if (!track.size)
+                track.frame0 = Vector(*trans, "frame0");
+            else
+            {
+                track.mins = Vector(*trans, "mins");
+                track.extent = Vector(*trans, "extent");
+                track.indices = Array<uint16_t>(*trans, "indices");
+                track.frames = Array<uint16_t>(*trans, "frames");
+                if (track.indices.size() != track.size + 1u || track.frames.size() != (track.size + 1u) * 3 ||
+                    (track.small && std::any_of(track.frames.begin(), track.frames.end(), [](uint16_t v) { return v > 255; })) ||
+                    (anim.numframes < 256 &&
+                     std::any_of(track.indices.begin(), track.indices.end(), [](uint16_t i) { return i > 255; })))
+                    throw std::runtime_error("inconsistent IW3 XAnim delta translation: " + anim.name);
+            }
+            anim.deltaTrans = std::move(track);
+        }
+        if (const auto quat = delta.find("quat"); quat != delta.end())
+            anim.deltaQuat2 = LoadQuat(*quat, 2, anim.numframes);
+        if (const auto quat = delta.find("quat4"); quat != delta.end())
+            anim.deltaQuat = LoadQuat(*quat, 4, anim.numframes);
+    }
     anim.framerate = source.at("framerate");
     anim.frequency = source.at("frequency");
     anim.loop = source.at("loop");
@@ -158,9 +236,39 @@ void Register(ZoneWriter &writer, const Anim &anim)
                 out.writeT<float>(time);
             }
         }
+        // Load_XAnimDeltaPart: trans, quat2, quat, each followed by its data.
         out.align(7);
-        const std::array<uint8_t, 24> delta{}; // trans, quat2, quat: none
-        out.write(delta.data(), delta.size());
+        out.writeT<uint64_t>(anim.deltaTrans ? PTR_FOLLOWS : PTR_NULL);
+        out.writeT<uint64_t>(anim.deltaQuat2 ? PTR_FOLLOWS : PTR_NULL);
+        out.writeT<uint64_t>(anim.deltaQuat ? PTR_FOLLOWS : PTR_NULL);
+        if (const auto &trans = anim.deltaTrans)
+        {
+            out.align(7);
+            std::array<uint8_t, 8> head{};
+            Store(head.data(), 0, trans->size);
+            head[2] = trans->small ? 1 : 0;
+            out.write(head.data(), head.size());
+            if (!trans->size)
+                out.write(trans->frame0.data(), sizeof(trans->frame0));
+            else
+            {
+                out.write(trans->mins.data(), sizeof(trans->mins));
+                out.write(trans->extent.data(), sizeof(trans->extent));
+                out.writeT<uint64_t>(PTR_FOLLOWS);
+                WriteIndices(out, trans->indices, anim.numframes);
+                if (trans->small)
+                {
+                    std::vector<uint8_t> bytes(trans->frames.begin(), trans->frames.end());
+                    Write(out, bytes, 0);
+                }
+                else
+                    Write(out, trans->frames, 1);
+            }
+        }
+        if (anim.deltaQuat2)
+            WriteQuat(out, *anim.deltaQuat2, 2, anim.numframes);
+        if (anim.deltaQuat)
+            WriteQuat(out, *anim.deltaQuat, 4, anim.numframes);
         Write(out, anim.dataByte, 0);
         Write(out, anim.dataShort, 1);
         Write(out, anim.dataInt, 3);

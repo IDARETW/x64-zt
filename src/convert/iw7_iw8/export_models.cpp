@@ -338,13 +338,63 @@ namespace zonetool::convert::iw7_iw8
 		}
 
 		// An IW7 XAnimParts as the pipeline's IW3 XAnim dump: IW7 keeps IW3's streams (part types boneCount[10], key
-		// counts, frame indices and keys), which Replay decodes as IW3 does. Root motion (delta parts) does not convert.
+		// counts, frame indices and keys), which Replay decodes as IW3 does; so is its root motion (the delta part: "trans",
+		// "quat" of 2 components as IW3 names it, "quat4" of 4).
 		bool write_xanim(const iw7::XAnimParts& anim, const std::filesystem::path& path)
 		{
-			if (anim.deltaPart && (anim.deltaPart->trans || anim.deltaPart->quat2 || anim.deltaPart->quat))
+			const auto indices = [&](const iw7::XAnimDynamicIndices& data, const std::size_t count)
 			{
-				ZONETOOL_WARNING("iw7: animation \"%s\" moves its root (a delta part), which does not convert", anim.name);
-				return false;
+				return anim.numframes < 256 ? values(data._1, count) : values(data._2, count);
+			};
+
+			const auto quat = [&]<std::size_t N>(const auto& track, const short (*frames)[N], const short* frame0)
+			{
+				json result = {{"size", track.size}};
+				if (!track.size)
+				{
+					result["frame0"] = values(frame0, N);
+					return result;
+				}
+
+				const std::size_t count = track.size + 1u;
+				result["indices"] = indices(track.u.frames.indices, count);
+				result["frames"] = values(&frames[0][0], count * N);
+				return result;
+			};
+
+			json delta = nullptr;
+			if (const auto* part = anim.deltaPart)
+			{
+				delta = json::object();
+				if (const auto* trans = part->trans)
+				{
+					json track = {{"size", trans->size}, {"small", trans->smallTrans != 0}};
+					if (!trans->size)
+					{
+						track["frame0"] = values(trans->u.frame0, 3);
+					}
+					else
+					{
+						const std::size_t count = trans->size + 1u;
+						const auto& frames = trans->u.frames;
+						track["mins"] = values(frames.mins, 3);
+						track["extent"] = values(frames.size, 3);
+						track["indices"] = indices(frames.indices, count);
+						track["frames"] = trans->smallTrans ? values(&frames.frames._1[0][0], count * 3) : values(&frames.frames._2[0][0], count * 3);
+					}
+
+					delta["trans"] = std::move(track);
+				}
+
+				if (const auto* track = part->quat2)
+				{
+					delta["quat"] = quat.operator()<2>(*track, track->u.frames.frames, track->u.frame0);
+				}
+
+				if (const auto* track = part->quat)
+				{
+					delta["quat4"] = quat.operator()<4>(*track, track->u.frames.frames, track->u.frame0);
+				}
 			}
 
 			auto names = json::array();
@@ -388,20 +438,21 @@ namespace zonetool::convert::iw7_iw8
 				{"random_data_short", values(anim.randomDataShort, anim.randomDataShortCount)},
 				{"random_data_int", values(anim.randomDataInt, anim.randomDataIntCount)},
 				{"indices", anim.numframes < 256 ? values(anim.indices._1, anim.indexCount) : values(anim.indices._2, anim.indexCount)},
-				{"delta_part", nullptr},
+				{"delta_part", std::move(delta)},
 			});
 			return true;
 		}
 
 		// The skeleton of a model as the OpenAssetTools XMODEL_EXPORT (version 6) of each LOD that the pipeline reads for entity
 		// models: the bones at their bind pose (DObjAnimMat base poses, model space), and each vertex on the bone of its rigid
-		// vertex list, with the triangles of every surface in the order of export_model. Models with blended vertices do not
-		// convert.
+		// vertex list, with the triangles of every surface in the order of export_model. Blended vertices take the bones
+		// they blend (IW7 blend data: per vertex its first bone, then a bone and a weight / 65536 for each other bone, then
+		// a 0; the vertices grouped by their number of bones).
 		bool write_skeleton(const source_map& source, const std::string& name, const iw7::XModel& model, const std::filesystem::path& root)
 		{
 			const auto fail = [&](const char* reason)
 			{
-				ZONETOOL_WARNING("iw7: the skeleton of model \"%s\" does not export (%s); it does not animate", name.data(), reason);
+				ZONETOOL_WARNING("iw7: the skeleton of model \"%s\" does not export (%s); it keeps one bone", name.data(), reason);
 				return false;
 			};
 
@@ -460,7 +511,8 @@ namespace zonetool::convert::iw7_iw8
 				for (std::size_t s = 0; s < info.numsurfs; s++)
 				{
 					std::vector<std::pair<std::uint16_t, std::uint16_t>> lists;
-					auto blended = false;
+					std::array<std::uint16_t, 8> blend_counts{};
+					std::span<const std::uint16_t> blend_data;
 					if (resident)
 					{
 						const auto& surface = surfaces->surfs[s];
@@ -469,22 +521,28 @@ namespace zonetool::convert::iw7_iw8
 							lists.emplace_back(surface.rigidVertLists[l].boneOffsetIndex, surface.rigidVertLists[l].vertCount);
 						}
 
-						blended = std::ranges::any_of(surface.blendVertCounts, [](const auto count) { return count != 0; });
+						std::ranges::copy(surface.blendVertCounts, blend_counts.begin());
+						if (surface.blendVerts)
+						{
+							blend_data = std::span(surface.blendVerts, surface.blendVertSize / 2);
+						}
 					}
 					else
 					{
 						lists = (*streamed)[s].rigid_lists;
-						blended = (*streamed)[s].blended;
+						blend_counts = (*streamed)[s].blend_counts;
+						blend_data = (*streamed)[s].blend_data;
 					}
 
-					if (blended || lists.empty())
+					const auto blended = std::ranges::any_of(blend_counts, [](const auto count) { return count != 0; });
+					if (blended == !lists.empty())
 					{
-						return fail("blended vertices, or no rigid vertex lists");
+						return fail(blended ? "rigid and blended vertices in one surface" : "no rigid vertex lists");
 					}
 
-					// The bone of each vertex: the rigid lists cover the vertices in order. IW7 gives each list its bone index
-					// (IW3 its offset in 64-byte bone matrices).
-					std::vector<unsigned> vertex_bones;
+					// The bones of each vertex. The rigid lists cover the vertices in order; IW7 gives each list its bone index (IW3 its
+					// offset in 64-byte bone matrices).
+					std::vector<std::vector<std::pair<unsigned, float>>> vertex_bones;
 					auto divisor = 1u;
 					for (const auto& [bone, count] : lists)
 					{
@@ -498,7 +556,35 @@ namespace zonetool::convert::iw7_iw8
 							return fail("bone of a rigid list");
 						}
 
-						vertex_bones.insert(vertex_bones.end(), count, bone / divisor);
+						vertex_bones.insert(vertex_bones.end(), count, {{bone / divisor, 1.0f}});
+					}
+
+					std::size_t at{};
+					for (auto bones_of = 1u; bones_of <= blend_counts.size(); bones_of++)
+					{
+						for (auto v = 0u; v < blend_counts[bones_of - 1]; v++)
+						{
+							if (at + 2 * bones_of > blend_data.size())
+							{
+								return fail("blend data");
+							}
+
+							auto& influences = vertex_bones.emplace_back();
+							influences.emplace_back(blend_data[at], 1.0f);
+							for (auto b = 1u; b < bones_of; b++)
+							{
+								const auto weight = blend_data[at + 2 * b] / 65536.0f;
+								influences.emplace_back(blend_data[at + 2 * b - 1], weight);
+								influences.front().second -= weight;
+							}
+
+							influences.front().second = std::max(influences.front().second, 0.0f);
+							at += 2 * bones_of;
+							if (std::ranges::any_of(influences, [&](const auto& influence) { return influence.first >= model.numBones; }))
+							{
+								return fail("bone of a blended vertex");
+							}
+						}
 					}
 
 					const auto add = [&](const auto& source_vertices, const auto& source_faces)
@@ -512,8 +598,12 @@ namespace zonetool::convert::iw7_iw8
 						for (std::size_t v = 0; v < source_vertices.size(); v++)
 						{
 							const auto& xyz = source_vertices[v].xyz;
-							vertices += std::format("VERT {}\nOFFSET {:.6f}, {:.6f}, {:.6f}\nBONES 1\nBONE {} 1.000000\n", vertex_count++,
-								xyz[0], xyz[1], xyz[2], vertex_bones[v]);
+							vertices += std::format("VERT {}\nOFFSET {:.6f}, {:.6f}, {:.6f}\nBONES {}\n", vertex_count++, xyz[0], xyz[1], xyz[2],
+								vertex_bones[v].size());
+							for (const auto& [bone, weight] : vertex_bones[v])
+							{
+								vertices += std::format("BONE {} {:.6f}\n", bone, weight);
+							}
 						}
 
 						for (const auto& face : source_faces)
@@ -878,5 +968,24 @@ namespace zonetool::convert::iw7_iw8
 		ZONETOOL_INFO("iw7: %zu kinds of scriptables animate (%zu models move, %zu skeletons, %zu animations, %zu effects on their tags)",
 			output.scriptable_animations.size(), output.moving_models.size(), skeletons.size(), output.xanims.size(),
 			output.scriptable_tag_effects.size());
+	}
+
+	// The skeletons of the other exported models with bones: entity models keep their tags (effects on tags, destructible
+	// parts, gettagorigin) as IW7 has them.
+	void export_skeletons(const source_map& source, extraction& output)
+	{
+		std::size_t written{};
+		for (const auto& [name, model] : output.models)
+		{
+			if (!model || model->numBones < 2 || !output.exported_models.contains(name) ||
+				std::filesystem::exists(output.root / "skeleton" / "xmodel" / (name + ".json")))
+			{
+				continue;
+			}
+
+			written += write_skeleton(source, name, *model, output.root / "skeleton");
+		}
+
+		ZONETOOL_INFO("iw7: wrote the skeletons of %zu more models with bones", written);
 	}
 }
