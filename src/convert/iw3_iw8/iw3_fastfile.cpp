@@ -8404,6 +8404,7 @@ iw8::impact::EffectOverrides ReadImpactOverrides(
 
 PreparedMap::PreparedMap(PreparedMap &&other) noexcept
     : root(std::move(other.root))
+    , ladderRungDistance(other.ladderRungDistance)
     , collision(std::move(other.collision))
     , footsteps(std::move(other.footsteps))
     , scratch(std::move(other.scratch))
@@ -8444,6 +8445,7 @@ PreparedMap &PreparedMap::operator=(PreparedMap &&other) noexcept
             std::filesystem::remove_all(scratch, error);
         }
         root = std::move(other.root);
+        ladderRungDistance = other.ladderRungDistance;
         collision = std::move(other.collision);
         footsteps = std::move(other.footsteps);
         scratch = std::move(other.scratch);
