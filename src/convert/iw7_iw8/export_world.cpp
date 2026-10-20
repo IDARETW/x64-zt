@@ -495,6 +495,101 @@ namespace zonetool::convert::iw7_iw8
 			bytes.insert(bytes.end(), data, data + sizeof(T));
 		}
 
+		float half_to_float(const std::uint16_t half)
+		{
+			const std::uint32_t sign = (half & 0x8000u) << 16;
+			const std::uint32_t exponent = (half >> 10) & 0x1Fu;
+			const std::uint32_t mantissa = half & 0x3FFu;
+			if (exponent == 0)
+			{
+				const auto value = std::ldexp(static_cast<float>(mantissa), -24);
+				return sign ? -value : value;
+			}
+
+			const std::uint32_t bits = exponent == 31 ? sign | 0x7F800000u | (mantissa << 13) : sign | ((exponent + 112) << 23) | (mantissa << 13);
+			float value{};
+			std::memcpy(&value, &bits, sizeof(value));
+			return value;
+		}
+
+		// IW7's GPU light grid, which Replay keeps in the same form (GfxGpuLightGrid): L2 SH probes (32 halves each: the 9
+		// coefficients of red, green and blue, then a sky weight) at their positions, in a tetrahedral mesh (neighbour i
+		// lies across the face opposite vertex i; the probe indices keep flags in their top bits). Frontier: 71737
+		// probes, 426507 tetrahedra in one zone. It holds the light that the lightmaps bake and the light grid of IW7
+		// does not apply again at run time (bounce and sky; the primary lights light models at run time, as in Replay).
+		// The extraction keeps it for the pipeline's native light grid (extracted/<bsp>.gpulightgrid.bin): "IW7GLG01",
+		// the probe, tetrahedron counts, then the positions (3 floats), the SH (27 floats, in the pipeline's light-grid
+		// units and basis), the tetrahedra and their neighbours (4 uints each).
+		//
+		// Units: IW7's SH taken from above equals its lightmaps (Frontier: the median over the grid points over floors is
+		// 1.08 times), and the pipeline's light grid holds half the lightmap level, so the SH is halved. Basis: stock
+		// Replay probes and IW7's keep the L1 terms negated against the pipeline's (their sky-lit probes point down in
+		// the pipeline's basis: mp_hideout mean z -0.74, IW7 Frontier -0.63), which PackProbe negates when it packs.
+		void export_gpu_light_grid(const source_map& source, extraction& output)
+		{
+			const auto& data = source.world()->lightGrid.probeData;
+			if (!data.probes || !data.probePositions || !data.tetrahedrons || !data.tetrahedronNeighbors || !data.probeCount ||
+				!data.tetrahedronCount)
+			{
+				ZONETOOL_WARNING("iw7: the world has no GPU light grid; models take the light grid of the floors");
+				return;
+			}
+
+			std::vector<std::uint8_t> bytes;
+			const auto put = [&](const auto value)
+			{
+				const auto* raw = reinterpret_cast<const std::uint8_t*>(&value);
+				bytes.insert(bytes.end(), raw, raw + sizeof(value));
+			};
+
+			bytes.insert(bytes.end(), {'I', 'W', '7', 'G', 'L', 'G', '0', '1'});
+			put(data.probeCount);
+			put(data.tetrahedronCount);
+			for (auto p = 0u; p < data.probeCount; p++)
+			{
+				for (const auto component : data.probePositions[p].origin)
+				{
+					put(component);
+				}
+			}
+
+			for (auto p = 0u; p < data.probeCount; p++)
+			{
+				for (auto coefficient = 0; coefficient < 27; coefficient++)
+				{
+					const auto order = coefficient % 9;
+					auto value = half_to_float(data.probes[p].coeffs[coefficient]);
+					value = std::isfinite(value) ? value * 0.5f : 0.0f;
+					put(order >= 1 && order <= 3 ? -value : value);
+				}
+			}
+
+			for (auto t = 0u; t < data.tetrahedronCount; t++)
+			{
+				for (const auto index : data.tetrahedrons[t].indexFlags)
+				{
+					if ((index & 0x0FFFFFFFu) >= data.probeCount)
+					{
+						ZONETOOL_WARNING("iw7: the GPU light grid names a probe it does not have; models take the light grid of the floors");
+						return;
+					}
+
+					put(index & 0x0FFFFFFFu);
+				}
+			}
+
+			for (auto t = 0u; t < data.tetrahedronCount; t++)
+			{
+				for (const auto neighbor : data.tetrahedronNeighbors[t].neighbors)
+				{
+					put(neighbor < data.tetrahedronCount ? neighbor : UINT32_MAX);
+				}
+			}
+
+			write_bytes(output.extracted / (bsp_name(source) + ".gpulightgrid.bin"), bytes);
+			ZONETOOL_INFO("iw7: GPU light grid of %u probes and %u tetrahedra", data.probeCount, data.tetrahedronCount);
+		}
+
 		// Writes an IW3 light grid in the layout of the IW3 extraction: rows of columns, each row a run of points from
 		// its lowest floor to over its highest one. A point takes the light of the floor under it in all 56
 		// directions; the sun lights the points over floors that see it. IW7 keeps its light grid in a compressed
@@ -750,6 +845,7 @@ namespace zonetool::convert::iw7_iw8
 		auto probes = export_reflection_probes(source, output);
 		const floor_light floors(source, world, lightmaps);
 		export_light_grid(source, floors, output);
+		export_gpu_light_grid(source, output);
 
 		// The index of each surface among the surfaces with an area.
 		auto surfaces = json::array();

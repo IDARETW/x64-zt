@@ -414,6 +414,11 @@ std::array<std::uint8_t, 32> PackProbe(const Probe &probe, const std::uint8_t tr
                              (std::uint32_t(blue >> 5) << 22);
     std::array<std::uint8_t, 32> packed{};
     std::memcpy(packed.data(), &dc, sizeof(dc));
+    // Replay keeps the L1 terms negated against EvaluateShBasis: the probes of
+    // stock maps that see the sky point down in this basis (mp_hideout's bright
+    // directional probes: mean z -0.74 under a sun 45 degrees up), as IW7's GPU
+    // light grid does; packed as they are, converted maps lit models from the
+    // side away from their light.
     for (unsigned channel = 0; channel < 3; ++channel)
     {
         const float dcValue = probe[channel][0];
@@ -423,8 +428,9 @@ std::array<std::uint8_t, 32> PackProbe(const Probe &probe, const std::uint8_t tr
             if (dcValue > 0.0f)
             {
                 const float range = coefficient < 4 ? SqrtThree : SqrtFive;
-                normalized = std::clamp(probe[channel][coefficient] / (dcValue * range),
-                                        -1.0f, 1.0f);
+                const float value = coefficient < 4 ? -probe[channel][coefficient]
+                                                    : probe[channel][coefficient];
+                normalized = std::clamp(value / (dcValue * range), -1.0f, 1.0f);
             }
             packed[4 + channel * 8 + coefficient - 1] =
                 static_cast<std::uint8_t>(normalized * 127.0f + 127.5f);
@@ -918,15 +924,262 @@ std::vector<std::uint8_t> BuildPayload(std::vector<Cell> cells,
              1u << rootShift);
     return output;
 }
+// A light grid that the extraction keeps as SH probes in a tetrahedral mesh
+// (IW7's GPU light grid, written by the IW7 export as <bsp>.gpulightgrid.bin:
+// "IW7GLG01", probe and tetrahedron counts, positions, 27 SH floats per probe
+// in this file's basis and light-grid units, tetrahedra, neighbours). Replay's
+// native grid takes the probes and tetrahedra as they are; each voxel starts
+// its walk at the tetrahedron that holds its centre, found by walking the mesh
+// from the last voxel's (UINT32_MAX outside the mesh: the fallback probe).
+std::vector<std::uint8_t> BuildMeshPayload(const std::vector<std::uint8_t> &source,
+                                           const float lightUnitScale)
+{
+    const std::span<const std::uint8_t> data(source);
+    if (source.size() < 16 || std::memcmp(source.data(), "IW7GLG01", 8))
+        throw std::runtime_error("unknown extracted light-grid mesh");
+    const auto probeCount = Read<std::uint32_t>(data, 8);
+    const auto tetrahedronCount = Read<std::uint32_t>(data, 12);
+    if (!probeCount || probeCount > 2'000'000 || !tetrahedronCount || tetrahedronCount > 8'000'000 ||
+        source.size() != 16ull + probeCount * (12ull + 108ull) + tetrahedronCount * 32ull)
+        throw std::runtime_error("inconsistent extracted light-grid mesh");
+
+    std::vector<std::array<double, 3>> positions(probeCount);
+    std::vector<Probe> probes(probeCount);
+    std::vector<std::array<std::uint32_t, 4>> tetrahedra(tetrahedronCount);
+    std::vector<std::array<std::uint32_t, 4>> neighbors(tetrahedronCount);
+    std::size_t offset = 16;
+    std::array<float, 3> low{FLT_MAX, FLT_MAX, FLT_MAX};
+    std::array<float, 3> high{-FLT_MAX, -FLT_MAX, -FLT_MAX};
+    for (auto &position : positions)
+        for (unsigned axis = 0; axis < 3; ++axis, offset += 4)
+        {
+            const auto value = Read<float>(data, offset);
+            if (!std::isfinite(value) || std::abs(value) > 100000.0f)
+                throw std::runtime_error("invalid extracted light-grid probe position");
+            position[axis] = value;
+            low[axis] = std::min(low[axis], value);
+            high[axis] = std::max(high[axis], value);
+        }
+    for (auto &probe : probes)
+        for (unsigned channel = 0; channel < 3; ++channel)
+            for (unsigned coefficient = 0; coefficient < 9; ++coefficient, offset += 4)
+                probe[channel][coefficient] = Read<float>(data, offset) * lightUnitScale;
+    for (auto &tetrahedron : tetrahedra)
+        for (auto &index : tetrahedron)
+        {
+            index = Read<std::uint32_t>(data, offset);
+            offset += 4;
+            if (index >= probeCount)
+                throw std::runtime_error("extracted light-grid tetrahedron names a missing probe");
+        }
+    for (auto &tetrahedron : neighbors)
+        for (auto &neighbor : tetrahedron)
+        {
+            neighbor = Read<std::uint32_t>(data, offset);
+            offset += 4;
+            if (neighbor != UINT32_MAX && neighbor >= tetrahedronCount)
+                throw std::runtime_error("extracted light-grid tetrahedron names a missing neighbour");
+        }
+
+    // The voxels: the smallest power of two that keeps Replay's limits, as BuildPayload.
+    const auto alignDown = [](const double value, const std::int32_t alignment) {
+        return static_cast<std::int32_t>(std::floor(value / alignment)) * alignment;
+    };
+    std::array<std::int32_t, 3> gridLow{};
+    std::array<std::int32_t, 3> gridHigh{};
+    std::array<std::uint32_t, 3> dimensions{};
+    std::uint64_t voxelCount = 0;
+    std::uint64_t rootCount = 0;
+    unsigned rootShift = 5;
+    for (; rootShift <= 20; ++rootShift)
+    {
+        const std::int32_t voxelSize = 1 << rootShift;
+        voxelCount = 1;
+        for (unsigned axis = 0; axis < 3; ++axis)
+        {
+            gridLow[axis] = alignDown(low[axis], voxelSize);
+            gridHigh[axis] = alignDown(high[axis], voxelSize) + voxelSize;
+            dimensions[axis] = static_cast<std::uint32_t>((gridHigh[axis] - gridLow[axis]) / voxelSize);
+            voxelCount *= dimensions[axis];
+        }
+        rootCount = std::uint64_t(dimensions[0]) * dimensions[1];
+        if (rootCount <= 1'000'000 && voxelCount <= 8'000'000)
+            break;
+    }
+    if (rootShift > 20)
+        throw std::runtime_error("extracted light grid exceeds Replay voxel-tree limits");
+
+    const auto barycentric = [&](const std::uint32_t tetrahedron, const std::array<double, 3> &point,
+                                 std::array<double, 4> &weights) {
+        const auto &corner = positions[tetrahedra[tetrahedron][0]];
+        std::array<std::array<double, 3>, 3> m{};
+        std::array<double, 3> r{};
+        for (unsigned axis = 0; axis < 3; ++axis)
+        {
+            for (unsigned vertex = 0; vertex < 3; ++vertex)
+                m[axis][vertex] = positions[tetrahedra[tetrahedron][vertex + 1]][axis] - corner[axis];
+            r[axis] = point[axis] - corner[axis];
+        }
+        const auto determinant = [](const std::array<std::array<double, 3>, 3> &a) {
+            return a[0][0] * (a[1][1] * a[2][2] - a[1][2] * a[2][1]) -
+                   a[0][1] * (a[1][0] * a[2][2] - a[1][2] * a[2][0]) +
+                   a[0][2] * (a[1][0] * a[2][1] - a[1][1] * a[2][0]);
+        };
+        const double det = determinant(m);
+        if (std::abs(det) < 1e-9)
+            return false;
+        double sum = 0.0;
+        for (unsigned column = 0; column < 3; ++column)
+        {
+            auto n = m;
+            for (unsigned axis = 0; axis < 3; ++axis)
+                n[axis][column] = r[axis];
+            weights[column + 1] = determinant(n) / det;
+            sum += weights[column + 1];
+        }
+        weights[0] = 1.0 - sum;
+        return true;
+    };
+    std::uint32_t hint = 0;
+    const auto locate = [&](const std::array<double, 3> &point) -> std::uint32_t {
+        auto tetrahedron = hint;
+        for (unsigned step = 0; step < 16384; ++step)
+        {
+            std::array<double, 4> weights{};
+            if (!barycentric(tetrahedron, point, weights))
+                return UINT32_MAX;
+            const auto lowest = static_cast<unsigned>(std::ranges::min_element(weights) - weights.begin());
+            if (weights[lowest] >= -1e-6)
+                return hint = tetrahedron;
+            const auto next = neighbors[tetrahedron][lowest];
+            if (next == UINT32_MAX)
+                return UINT32_MAX;
+            tetrahedron = next;
+        }
+        return UINT32_MAX;
+    };
+
+    const std::int32_t voxelSize = 1 << rootShift;
+    std::vector<std::uint32_t> voxels(static_cast<std::size_t>(voxelCount), UINT32_MAX);
+    std::size_t assigned = 0;
+    for (std::uint32_t y = 0; y < dimensions[1]; ++y)
+        for (std::uint32_t x = 0; x < dimensions[0]; ++x)
+            for (std::uint32_t z = 0; z < dimensions[2]; ++z)
+            {
+                const std::array<double, 3> centre{gridLow[0] + (x + 0.5) * voxelSize,
+                                                   gridLow[1] + (y + 0.5) * voxelSize,
+                                                   gridLow[2] + (z + 0.5) * voxelSize};
+                auto &voxel = voxels[(std::size_t(y) * dimensions[0] + x) * dimensions[2] + z];
+                voxel = locate(centre);
+                assigned += voxel != UINT32_MAX;
+            }
+    if (!assigned)
+        throw std::runtime_error("extracted light grid holds no voxel centre");
+
+    std::array<float, 32> fallback{};
+    for (unsigned channel = 0; channel < 3; ++channel)
+        for (unsigned coefficient = 0; coefficient < 9; ++coefficient)
+        {
+            std::vector<float> values;
+            values.reserve(probes.size());
+            for (const auto &probe : probes)
+                values.push_back(probe[channel][coefficient]);
+            fallback[channel * 9 + coefficient] = Median(std::move(values));
+        }
+    fallback[27] = 1.0f;
+    fallback[28] = 1.0f;
+
+    std::vector<std::uint8_t> output;
+    output.reserve(264ull + probeCount * 44ull + tetrahedronCount * 32ull + rootCount * 12ull + voxelCount * 4ull);
+    AppendBytes(output, Magic.data(), Magic.size());
+    Append(output, probeCount);
+    Append(output, tetrahedronCount);
+    Append(output, static_cast<std::uint32_t>(rootCount));
+    Append(output, static_cast<std::uint32_t>(voxelCount));
+    constexpr float diagonal = 0.5773502691896258f;
+    constexpr std::array<std::array<float, 3>, 7> axes{{
+        {1, 0, 0}, {0, 1, 0}, {0, 0, 1}, {diagonal, diagonal, diagonal},
+        {diagonal, -diagonal, diagonal}, {-diagonal, diagonal, diagonal},
+        {-diagonal, -diagonal, diagonal}}};
+    for (const auto &axis : axes)
+    {
+        float minimum = 0.0f;
+        float maximum = 0.0f;
+        for (unsigned component = 0; component < 3; ++component)
+        {
+            minimum += axis[component] * (axis[component] >= 0 ? low[component] : high[component]);
+            maximum += axis[component] * (axis[component] >= 0 ? high[component] : low[component]);
+        }
+        Append(output, axis[0]);
+        Append(output, axis[1]);
+        Append(output, minimum);
+        Append(output, maximum);
+    }
+    for (const float value : fallback)
+        Append(output, FloatToHalf(value));
+    for (const auto dimension : dimensions)
+        Append(output, static_cast<std::int32_t>(dimension));
+    for (const std::int32_t value : {0, static_cast<std::int32_t>(rootShift),
+                                     std::max(0, static_cast<std::int32_t>(rootShift) - 2),
+                                     std::max(0, static_cast<std::int32_t>(rootShift) - 4), 0})
+        Append(output, value);
+    for (const auto value : gridLow)
+        Append(output, static_cast<float>(value));
+    Append(output, 0.0f);
+    for (const auto value : gridHigh)
+        Append(output, static_cast<float>(value));
+    Append(output, 0.0f);
+    for (const auto &probe : probes)
+    {
+        // DC must not be negative for PackProbe; IW7's interpolation weights keep it so.
+        Probe clamped = probe;
+        for (auto &channel : clamped)
+            channel[0] = std::max(channel[0], 0.0f);
+        const auto packed = PackProbe(clamped, 0);
+        AppendBytes(output, packed.data(), packed.size());
+    }
+    for (const auto &position : positions)
+        for (const auto value : position)
+            Append(output, static_cast<float>(value));
+    for (const auto &tetrahedron : tetrahedra)
+        AppendBytes(output, tetrahedron.data(), sizeof(tetrahedron));
+    for (const auto &neighbor : neighbors)
+        AppendBytes(output, neighbor.data(), sizeof(neighbor));
+    for (std::uint32_t y = 0; y < dimensions[1]; ++y)
+        for (std::uint32_t x = 0; x < dimensions[0]; ++x)
+        {
+            Append(output, 0x80000000u | ((y * dimensions[0] + x) * dimensions[2]));
+            Append(output, 0u);
+            Append(output, dimensions[2] - 1);
+        }
+    AppendBytes(output, voxels.data(), voxels.size() * sizeof(voxels.front()));
+    if (output.size() > 512ull * 1024 * 1024)
+        throw std::runtime_error("native Replay light-grid exceeds the supported size");
+    zt::info("iw3: native light grid from the extraction's %u probes and %u tetrahedra (%ux%ux%u "
+             "%u-unit voxels, %zu with a start)",
+             probeCount, tetrahedronCount, dimensions[0], dimensions[1], dimensions[2], 1u << rootShift,
+             assigned);
+    return output;
+}
 } // namespace
 
 bool PrepareNativeLightGrid(const std::filesystem::path &sourceRoot,
                             const std::string &sourceAsset,
                             const std::filesystem::path &output, const float lightUnitScale)
 {
+    std::error_code error;
+    // An extraction that keeps its own probe mesh (IW7) gives the native grid as it is.
+    const auto meshPath = sourceRoot / "maps" / "mp" / (sourceAsset + ".gpulightgrid.bin");
+    if (std::filesystem::is_regular_file(meshPath, error))
+    {
+        std::ifstream input(meshPath, std::ios::binary);
+        const std::vector<std::uint8_t> mesh{std::istreambuf_iterator<char>(input), {}};
+        if (!zt::write_file(output.string(), BuildMeshPayload(mesh, lightUnitScale)))
+            throw std::runtime_error("cannot write temporary native Replay light grid");
+        return true;
+    }
     const auto metadataPath =
         sourceRoot / "maps" / "mp" / (sourceAsset + ".lightgrid.json");
-    std::error_code error;
     if (!std::filesystem::is_regular_file(metadataPath, error))
     {
         zt::warn("iw3: source map has no exported light grid");
