@@ -1684,7 +1684,7 @@ Mesh Load(const std::string &path)
         if (sunShadowMask & ~0x3Eu)
             throw std::runtime_error("Surface sun-shadow mask exceeds Replay flags");
         put(sf, 32, uint8_t(castsSunShadow | sunShadowMask |
-                            (sky ? 0 : umbraOccluder)));
+                            (sky || !s.value("umbraOccluder", true) ? 0 : umbraOccluder)));
         auto *bounds = m.bounds.data() + 56 * i;
         // Culling bounds. Translucent surfaces write no depth, so the GPU
         // occlusion pass tests them against the wall they sit on: IW3 signs and

@@ -5270,6 +5270,10 @@ Json BuildRender(const Json &world, const VisibilityGroups &visibility,
                                               {"sunShadowMask", material.castsShadow ? sunShadowMask : 0u},
                                               {"reflectionProbe", surface.reflectionProbe},
                                               {"materialParameters", material.environment}});
+                // Shipped translucent world surfaces are not Umbra occluders (mp_hideout's glass: flags 7, its
+                // opaque surfaces 0x47). Extractions that draw blended surfaces translucent opt in.
+                if (material.kind != SurfaceKind::opaque && world.value("translucent_glass", false))
+                    output["surfaces"].back()["umbraOccluder"] = false;
                 target = &output["surfaces"].back();
                 targetVertices = targetIndices = 0;
                 activeKey = key.str();
