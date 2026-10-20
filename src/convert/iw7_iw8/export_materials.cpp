@@ -483,7 +483,7 @@ namespace zonetool::convert::iw7_iw8
 		}
 
 		// The state of a pass: the depth pass writes no colour; the colour pass blends as the material draws.
-		json state_json(const std::string& cull, const bool color, const surface_kind kind)
+		json state_json(const std::string& cull, const bool color, const surface_kind kind, const bool decal_offset = false)
 		{
 			const auto blended = color && kind != surface_kind::opaque && kind != surface_kind::alpha_test;
 			const auto [source, destination] = !blended ? std::pair{"one", "zero"}
@@ -502,7 +502,7 @@ namespace zonetool::convert::iw7_iw8
 				{"depthWrite", !blended},
 				{"dstBlendAlpha", blended ? destination : "zero"},
 				{"dstBlendRgb", destination},
-				{"polygonOffset", "offset0"},
+				{"polygonOffset", decal_offset && color ? "offset1" : "offset0"},
 				{"polymodeLine", false},
 				{"srcBlendAlpha", blended ? source : "one"},
 				{"srcBlendRgb", source},
@@ -638,6 +638,12 @@ namespace zonetool::convert::iw7_iw8
 			}
 
 			const auto shadow = !kind.unlit && kind.solid();
+			// IW7's decal camera region (2: decal sheets, stripes, signs, scrapes) draws its surfaces over the coplanar
+			// surface beneath with a depth bias; the pipeline's rank nudge alone left the wayfinding signs half hidden
+			// in the wall (owner test of 58aac89). Its lit pass takes IW3's decal polygon offset, which the pipeline draws
+			// biased; an opaque surface of the region keeps none (IW3 maps: Discovery's buried sign).
+			const auto decal_offset = !layer && material && material->cameraRegion == 2 && kind.kind != surface_kind::opaque &&
+				!kind.unlit;
 			return
 			{
 				{"$schema", "http://openassettools.dev/schema/material.v1.json"},
@@ -649,7 +655,7 @@ namespace zonetool::convert::iw7_iw8
 				{"gameFlags", shadow ? json::array({"CASTS_SHADOW"}) : json::array()},
 				// A layer sorts as the first decals, which the pipeline draws with a depth bias over their surface.
 				{"sortKey", layer ? 9u : material ? iw3_sort(*material, kind) : 4u},
-				{"stateBits", json::array({state_json(cull, false, kind.kind), state_json(cull, true, kind.kind)})},
+				{"stateBits", json::array({state_json(cull, false, kind.kind), state_json(cull, true, kind.kind, decal_offset)})},
 				{"stateBitsEntry", std::move(entries)},
 				{"stateFlags", 0},
 				{"surfaceTypeBits", 0},
@@ -809,7 +815,9 @@ namespace zonetool::convert::iw7_iw8
 			return result;
 		}
 
-		result.unlit = has("unlit");
+		// "effectunlit": IW7's unlit effect shading of models (the ops table's planets, mo_effectunlit_falloff_add_...): as
+		// lit additive surfaces they added only the dim room light, so the planets did not show (owner test of 58aac89).
+		result.unlit = has("unlit") || has("effectunlit");
 		// "psfalloff": the falloff of the pixel shader (the ops table's hologram planes).
 		result.falloff = has("falloff") || has("psfalloff");
 		for (const auto token : tokens)
@@ -1090,6 +1098,35 @@ namespace zonetool::convert::iw7_iw8
 		std::array<std::size_t, 7> kinds{};
 		for (const auto& [name, material] : output.materials)
 		{
+			// IW7's tool materials (technique *_tools_*: nodraw, caulk_shadow) draw nothing: the fire alarm speakers'
+			// nodraw surface drew IW7's yellow "nodraw" texture (owner test of 58aac89). They take the pipeline's
+			// shadowcaster technique, which it never draws; shadow tools (caulk_shadow, not "nocast") still cast.
+			if (const auto tools = material && material->techniqueSet ? asset_name(material->techniqueSet->name) : std::string_view{};
+				tools.find("_tools_") != std::string_view::npos || tools.ends_with("_tools"))
+			{
+				const auto casts = name.find("shadow") != std::string::npos && tools.find("nocast") == std::string_view::npos;
+				auto state = state_json("none", false, surface_kind::opaque);
+				write_json(output.extracted / "materials" / (name + ".json"),
+				{
+					{"$schema", "http://openassettools.dev/schema/material.v1.json"},
+					{"_game", "iw3"},
+					{"_type", "material"},
+					{"_version", 1},
+					{"cameraRegion", "lit"},
+					{"constants", json::array()},
+					{"gameFlags", casts ? json::array({"CASTS_SHADOW"}) : json::array()},
+					{"sortKey", 4},
+					{"stateBits", json::array({std::move(state)})},
+					{"stateBitsEntry", json::array()},
+					{"stateFlags", 0},
+					{"surfaceTypeBits", 0},
+					{"techniqueSet", "shadowcaster"},
+					{"textureAtlas", {{"columns", 1}, {"rows", 1}}},
+					{"textures", json::array({texture_json("colorMap", "$white")})},
+				});
+				continue;
+			}
+
 			std::array<std::optional<std::string>, image_role_count> images;
 			for (std::size_t role = 0; role < image_role_count; role++)
 			{
