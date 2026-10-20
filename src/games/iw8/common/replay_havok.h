@@ -139,4 +139,8 @@ XModelDetailCollision BakeXModelDetailCollision(std::string name, const PhysicsM
 void UseDetailCollision(bool enabled);
 bool UsesDetailCollision();
 
+// The Havok data of a PhysicsFXShape (the debris of physics-light particles): the convex hull of the points (Havok units)
+// at the 17 scales of the Replay tools, as a self-describing tagfile. Native Havok only (UseNativeHavok).
+std::vector<std::uint8_t> BuildFxShape(const std::vector<std::array<float, 3>> &points);
+
 } // namespace iw8::havok

@@ -541,6 +541,32 @@ struct ParticleModuleInitLightOmni
     uint8_t disableDynamicShadows;
     uint8_t scriptScale;
 };
+// game-test PDB layout (sizeof 96).
+struct ParticleModuleInitLightSpot
+{
+    ParticleModuleBase base;
+    ParticleLinkedAssetListDef linkedAssets;
+    float fovOuter;
+    float fovInner;
+    float bulbRadius;
+    float bulbLength;
+    float distanceFalloff;
+    float fovCollimation;
+    float brightness;
+    float intensityUV;
+    float intensityIR;
+    float intensityHeat;
+    float shadowSoftness;
+    float shadowBias;
+    float shadowArea;
+    float shadowNearPlane;
+    float toneMappingScaleFactor;
+    uint8_t disableVolumetric;
+    uint8_t disableShadowMap;
+    uint8_t disableDynamicShadows;
+    uint8_t scriptScale;
+    uint8_t pad[8];
+};
 struct ParticleModuleInitDecal
 {
     ParticleModuleBase base;
@@ -709,6 +735,10 @@ static_assert(sizeof(ParticleModuleInitLightOmni) == 0x50);
 static_assert(offsetof(ParticleModuleInitLightOmni, linkedAssets) == 0x08);
 static_assert(offsetof(ParticleModuleInitLightOmni, fovOuter) == 0x18);
 static_assert(offsetof(ParticleModuleInitLightOmni, toneMappingScaleFactor) == 0x48);
+static_assert(sizeof(ParticleModuleInitLightSpot) == 0x60);
+static_assert(offsetof(ParticleModuleInitLightSpot, fovCollimation) == 0x2C);
+static_assert(offsetof(ParticleModuleInitLightSpot, shadowNearPlane) == 0x4C);
+static_assert(offsetof(ParticleModuleInitLightSpot, disableVolumetric) == 0x54);
 static_assert(sizeof(ParticleModuleInitDecal) == 0x40);
 static_assert(offsetof(ParticleModuleInitDecal, linkedAssets) == 0x10);
 static_assert(sizeof(ParticleModuleInitRunner) == 0x70);

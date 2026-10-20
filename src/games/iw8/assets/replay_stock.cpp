@@ -1396,6 +1396,20 @@ Copier::Copier(const Options &options) : impl_(std::make_unique<Impl>())
 
 Copier::~Copier() = default;
 
+void RegisterNameReference(ZoneWriter &writer, const IW8_XAssetType type, const std::string &name)
+{
+    RegisterReference(writer, type, name);
+}
+
+void RegisterPhysicsShape(ZoneWriter &writer, const std::string &name, std::vector<uint8_t> havokData)
+{
+    Shape shape;
+    shape.name = name;
+    Store(shape.native.data(), 0x08, static_cast<uint64_t>(havokData.size()));
+    shape.havok = std::move(havokData);
+    RegisterShape(writer, shape);
+}
+
 void Copier::RegisterSurfaceEffects(ZoneWriter &main, ZoneWriter &techsets) const
 {
     const auto &impl = *impl_;

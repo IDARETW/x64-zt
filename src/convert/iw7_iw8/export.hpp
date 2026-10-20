@@ -31,6 +31,8 @@ namespace zonetool::convert::iw7_iw8
 		std::set<std::string> glass_materials;
 		// The materials of effects, which convert as the pipeline's effect materials.
 		std::set<std::string> effect_materials;
+		// The world materials of particle decals, which convert as the pipeline's decal materials (Replay decal volumes).
+		std::set<std::string> decal_materials;
 		// The layers of layered IW7 materials (techsets "..._b1..._b2..."), which convert as materials of their own: by
 		// name in the extraction, the layer (1 to 3) of the material that `materials` holds.
 		std::map<std::string, int> material_layers;

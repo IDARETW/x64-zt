@@ -1093,6 +1093,51 @@ namespace zonetool::convert::iw7_iw8
 				images[role] = written != role_files.end() ? std::optional(*written) : builtins[name][role];
 			}
 
+			if (output.decal_materials.contains(name))
+			{
+				// A particle decal: the pipeline's decal material (a Replay decal volume) of its colour, normal and specular
+				// maps; the colour's alpha is the decal's opacity.
+				const auto& color = images[static_cast<std::size_t>(image_role::color)];
+				if (!color)
+				{
+					ZONETOOL_WARNING("iw7: decal material \"%s\" has no colour map", name.data());
+					continue;
+				}
+
+				auto textures = json::array({texture_json("colorMap", *color)});
+				if (const auto& normal = images[static_cast<std::size_t>(image_role::normal)]; normal && normal->front() != '$')
+				{
+					textures.push_back(texture_json("normalMap", *normal));
+				}
+
+				if (const auto& specular = images[static_cast<std::size_t>(image_role::specular)]; specular && specular->front() != '$')
+				{
+					textures.push_back(texture_json("specularMap", *specular));
+				}
+
+				const auto tint = material ? material_constant(material, "colorTint").value_or(std::array{1.0f, 1.0f, 1.0f, 1.0f})
+					: std::array{1.0f, 1.0f, 1.0f, 1.0f};
+				write_json(output.extracted / "materials" / (name + ".json"),
+				{
+					{"$schema", "http://openassettools.dev/schema/material.v1.json"},
+					{"_game", "iw3"},
+					{"_type", "material"},
+					{"_version", 1},
+					{"cameraRegion", "decal"},
+					{"constants", json::array({{{"name", "colorTint"}, {"literal", tint}}})},
+					{"gameFlags", json::array()},
+					{"sortKey", material ? std::min(material->info.sortKey + 2u, 63u) : 9u},
+					{"stateBits", json::array()},
+					{"stateBitsEntry", json::array()},
+					{"stateFlags", 52},
+					{"surfaceTypeBits", 0},
+					{"techniqueSet", "wc_l_sm_b0c0n0s0"},
+					{"textureAtlas", {{"columns", 1}, {"rows", 1}}},
+					{"textures", std::move(textures)},
+				});
+				continue;
+			}
+
 			if (output.effect_materials.contains(name))
 			{
 				const auto& color = images[static_cast<std::size_t>(image_role::color)];

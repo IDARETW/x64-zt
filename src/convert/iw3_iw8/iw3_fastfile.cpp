@@ -7906,6 +7906,14 @@ struct NativeFx
     std::set<std::string> materials;
     std::set<std::string> models;
     std::set<std::string> effects;
+    // Debris of physics-light modules: Replay's pipelines (common zones) and
+    // the extraction's shapes (physicsfxshape/<name>.json).
+    std::set<std::string> pipelines;
+    std::set<std::string> shapes;
+    // Sound aliases of sound modules (inline strings), which the map bank takes.
+    std::set<std::string> sounds;
+    // Replay materials of the common zones (flares), named without converting.
+    std::set<std::string> stockMaterials;
     bool lights{};
 };
 
@@ -7991,16 +7999,29 @@ std::vector<NativeFx> ReadNativeFx(const std::filesystem::path &root)
                                         IW8_XAssetType assetType{};
                                         if (type == "material")
                                             assetType = ASSET_TYPE_MATERIAL, fx.materials.insert(name);
+                                        else if (type == "stockmaterial")
+                                            assetType = ASSET_TYPE_MATERIAL, fx.stockMaterials.insert(name);
                                         else if (type == "xmodel")
                                             assetType = ASSET_TYPE_XMODEL, fx.models.insert(name);
                                         else if (type == "vfx")
                                             assetType = ASSET_TYPE_VFX, fx.effects.insert(name);
                                         else if (type == "lightdef")
                                             assetType = ASSET_TYPE_LIGHTDEF, fx.lights = true;
+                                        else if (type == "physicsfxpipeline")
+                                            assetType = ASSET_TYPE_PHYSICSFXPIPELINE, fx.pipelines.insert(name);
+                                        else if (type == "physicsfxshape")
+                                            assetType = ASSET_TYPE_PHYSICSFXSHAPE, fx.shapes.insert(name);
                                         else
                                             throw std::runtime_error("native effect links an asset of an unknown type: " + type);
                                         entry.assets.push_back({offset, {assetType, name}});
                                     }
+                                    if (const auto strings = entryNode.find("strings"); strings != entryNode.end())
+                                        for (const auto &text : *strings)
+                                        {
+                                            const auto value = text.at(1).get<std::string>();
+                                            entry.strings.push_back({text.at(0).get<std::size_t>(), value});
+                                            fx.sounds.insert(value);
+                                        }
                                     child.entries.push_back(std::move(entry));
                                 }
                             module.importedChildren.push_back(std::move(child));
@@ -8017,12 +8038,39 @@ std::vector<NativeFx> ReadNativeFx(const std::filesystem::path &root)
     return result;
 }
 
+// The points of the debris shapes of the extraction (Havok units), by name.
+std::map<std::string, std::vector<std::array<float, 3>>> ReadNativeFxShapes(const std::filesystem::path &root)
+{
+    std::map<std::string, std::vector<std::array<float, 3>>> result;
+    std::error_code error;
+    if (!std::filesystem::is_directory(root / "physicsfxshape", error))
+        return result;
+    for (const auto &file : std::filesystem::directory_iterator(root / "physicsfxshape"))
+    {
+        if (!file.is_regular_file() || file.path().extension() != ".json")
+            continue;
+        const Json source = ReadJson(file.path());
+        auto &points = result[source.at("name").get<std::string>()];
+        for (const auto &point : source.at("points"))
+            points.push_back({point.at(0).get<float>(), point.at(1).get<float>(), point.at(2).get<float>()});
+    }
+    return result;
+}
+
+// Replay's InitSound module type and the state flag of the states that play sounds.
+constexpr std::uint16_t kInitSoundModule = 22;
+constexpr std::uint64_t kStatePlaySounds = 1ull << 27;
+
+// Replay's particle shape (common_mp), for a debris shape that does not build.
+constexpr char kDefaultFxShape[] = "vfx_physfxpip_particle_default";
+
 // The converted names of the assets that a native effect links (effects by their
 // aliases, materials by the converted effect materials, the light definition of the
 // map's FX lights) and the particle material data of its material modules, as
 // converted IW3 effects have them.
 iw8::vfx::Effect ResolveNativeFx(const NativeFx &fx, const PreparedMap &map,
-                                 const std::unordered_map<std::string, std::string> &effectAliases)
+                                 const std::unordered_map<std::string, std::string> &effectAliases,
+                                 const std::unordered_map<std::string, std::string> &shapeAliases)
 {
     auto effect = fx.effect;
     effect.name = effectAliases.at(fx.effect.name);
@@ -8036,6 +8084,8 @@ iw8::vfx::Effect ResolveNativeFx(const NativeFx &fx, const PreparedMap &map,
                         for (auto &entry : child.entries)
                             for (auto &[offset, asset] : entry.assets)
                             {
+                                if (asset.first == ASSET_TYPE_MATERIAL && fx.stockMaterials.contains(asset.second))
+                                    continue;
                                 if (asset.first == ASSET_TYPE_MATERIAL)
                                 {
                                     if (!materialData)
@@ -8048,6 +8098,8 @@ iw8::vfx::Effect ResolveNativeFx(const NativeFx &fx, const PreparedMap &map,
                                     asset.second = effectAliases.at(asset.second);
                                 else if (asset.first == ASSET_TYPE_LIGHTDEF)
                                     asset.second = map.vfxLightDef;
+                                else if (asset.first == ASSET_TYPE_PHYSICSFXSHAPE)
+                                    asset.second = shapeAliases.at(asset.second);
                             }
                     if (module.native.moduleType ==
                             static_cast<std::uint16_t>(iw8_focus::ParticleModuleType::initMaterial) &&
@@ -8363,6 +8415,8 @@ PreparedMap::PreparedMap(PreparedMap &&other) noexcept
     , fxParticleMaterialData(std::move(other.fxParticleMaterialData))
     , vfxEffects(std::move(other.vfxEffects))
     , vfxLightDef(std::move(other.vfxLightDef))
+    , vfxShapes(std::move(other.vfxShapes))
+    , vfxReferences(std::move(other.vfxReferences))
     , smallGlassEffect(std::move(other.smallGlassEffect))
     , impactOverrides(std::move(other.impactOverrides))
     , staticModels(std::move(other.staticModels))
@@ -8401,6 +8455,8 @@ PreparedMap &PreparedMap::operator=(PreparedMap &&other) noexcept
         fxParticleMaterialData = std::move(other.fxParticleMaterialData);
         vfxEffects = std::move(other.vfxEffects);
         vfxLightDef = std::move(other.vfxLightDef);
+        vfxShapes = std::move(other.vfxShapes);
+        vfxReferences = std::move(other.vfxReferences);
         smallGlassEffect = std::move(other.smallGlassEffect);
         impactOverrides = std::move(other.impactOverrides);
         staticModels = std::move(other.staticModels);
@@ -10326,6 +10382,52 @@ PreparedMap PrepareFastfile(const ImportOptions &options)
     zt::info("iw3: converted %zu of %zu map-reachable source FX graph(s) to native Replay VFX",
              result.vfxEffects.size(), result.fxEffects.size());
     {
+        // Debris shapes: the extraction's points as Replay Havok shapes (a shape
+        // that does not build takes Replay's particle shape), and the pipelines
+        // of Replay's common zones.
+        std::unordered_map<std::string, std::string> shapeAliases;
+        {
+            const auto shapePoints = ReadNativeFxShapes(exportRoot);
+            for (const auto &fx : nativeFx)
+            {
+                for (const auto &pipeline : fx.pipelines)
+                    result.vfxReferences.emplace(ASSET_TYPE_PHYSICSFXPIPELINE, pipeline);
+                for (const auto &material : fx.stockMaterials)
+                    result.vfxReferences.emplace(ASSET_TYPE_MATERIAL, material);
+                for (const auto &shape : fx.shapes)
+                {
+                    if (shapeAliases.contains(shape))
+                        continue;
+                    if (shape == kDefaultFxShape)
+                    {
+                        shapeAliases.emplace(shape, shape);
+                        result.vfxReferences.emplace(ASSET_TYPE_PHYSICSFXSHAPE, shape);
+                        continue;
+                    }
+                    try
+                    {
+                        const auto points = shapePoints.find(shape);
+                        if (points == shapePoints.end())
+                            throw std::runtime_error("the extraction has no points for it");
+                        auto havokData = iw8::havok::BuildFxShape(points->second);
+                        const auto alias = "mw120r/" + options.map + "/" + shape;
+                        result.vfxShapes.push_back({alias, std::move(havokData)});
+                        shapeAliases.emplace(shape, alias);
+                    }
+                    catch (const std::exception &error)
+                    {
+                        zt::warn("iw3: debris shape %s takes Replay's %s: %s", shape.c_str(), kDefaultFxShape,
+                                 error.what());
+                        shapeAliases.emplace(shape, kDefaultFxShape);
+                        result.vfxReferences.emplace(ASSET_TYPE_PHYSICSFXSHAPE, kDefaultFxShape);
+                    }
+                }
+            }
+            if (!shapeAliases.empty())
+                zt::info("iw3: built %zu debris shape(s) of native effects as Replay Havok shapes "
+                         "(%zu common-zone reference(s))",
+                         result.vfxShapes.size(), result.vfxReferences.size());
+        }
         // An effect that does not resolve leaves the map with the effects that start
         // it; scripts then load it as an absent effect.
         std::set<std::string> registered;
@@ -10347,7 +10449,7 @@ PreparedMap PrepareFastfile(const ImportOptions &options)
             {
                 if (!children)
                     throw std::runtime_error("an effect that it starts does not convert");
-                result.vfxEffects.push_back(ResolveNativeFx(fx, result, effectAliases));
+                result.vfxEffects.push_back(ResolveNativeFx(fx, result, effectAliases, shapeAliases));
                 return true;
             }
             catch (const std::exception &error)
@@ -10392,6 +10494,8 @@ PreparedMap PrepareFastfile(const ImportOptions &options)
         for (const auto *entry : UsedGlobalFx(entities))
             if (entry->sound)
                 requestedSounds.insert(entry->sound);
+        for (const auto &fx : nativeFx)
+            requestedSounds.insert(fx.sounds.begin(), fx.sounds.end());
         // --style iw8 plays stock aliases for these roles: skip their IW3 audio.
         if (options.style == MapStyle::iw8)
             for (const auto &sound : kIw8StyleSounds)
@@ -10408,6 +10512,45 @@ PreparedMap PrepareFastfile(const ImportOptions &options)
             soundAliases = std::move(sounds->aliases);
             result.soundBank = std::move(sounds->bank);
         }
+        // Sound modules of native effects keep the aliases that the map bank holds; a state whose
+        // sound modules lose all of theirs no longer plays sounds.
+        std::size_t droppedSounds = 0;
+        for (auto &effect : result.vfxEffects)
+            for (auto &emitter : effect.emitters)
+                for (auto &state : emitter.states)
+                {
+                    bool removed = false;
+                    bool kept = false;
+                    for (auto &group : state.groups)
+                        std::erase_if(group, [&](iw8::vfx::Module &module) {
+                            if (!module.imported || module.native.moduleType != kInitSoundModule)
+                                return false;
+                            std::size_t left = 0;
+                            for (auto &child : module.importedChildren)
+                            {
+                                const auto before = child.entries.size();
+                                std::erase_if(child.entries, [&](const iw8::vfx::Module::LinkedEntry &entry) {
+                                    return std::ranges::any_of(entry.strings, [&](const auto &text) {
+                                        return !soundAliases.contains(text.second);
+                                    });
+                                });
+                                droppedSounds += before - child.entries.size();
+                                const auto count = static_cast<std::int32_t>(child.entries.size());
+                                std::memcpy(reinterpret_cast<std::uint8_t *>(&module.native) + child.offset + 8, &count,
+                                            sizeof(count));
+                                left += child.entries.size();
+                            }
+                            std::erase_if(module.importedChildren, [](const auto &child) {
+                                return !child.curve && child.entries.empty();
+                            });
+                            (left ? kept : removed) = true;
+                            return left == 0;
+                        });
+                    if (removed && !kept)
+                        state.native.flags &= ~kStatePlaySounds;
+                }
+        if (droppedSounds)
+            zt::warn("iw3: native effects leave out %zu sound(s) that the map bank does not hold", droppedSounds);
         for (const auto &[alias, looping] : soundAliases)
             ledger::Use("sound", alias);
         if (options.style == MapStyle::iw8)
