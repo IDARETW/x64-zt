@@ -1374,17 +1374,32 @@ std::vector<std::array<std::uint8_t, 256>> SampleStaticModelLighting(
             texels[texel * 4 + 3] = static_cast<std::uint8_t>(color >> 24);
         }
     };
+    // A model with its own colours takes them in the texels of their directions.
+    const auto ownColors = [](std::array<std::uint8_t, 256> &texels, const StaticModelLightingInput &input) {
+        for (unsigned texel = 0; texel < 64; ++texel)
+        {
+            const unsigned color = kModelLightingTexelColors[texel];
+            for (unsigned channel = 0; channel < 3; ++channel)
+                texels[texel * 4 + channel] = (*input.colors)[color * 3 + channel];
+            texels[texel * 4 + 3] = static_cast<std::uint8_t>(input.groundLighting >> 24);
+        }
+    };
     // Without a light grid, the models with ground lighting keep it and the others take the flat ambient.
     const auto withoutGrid = [&] {
         if (std::ranges::none_of(inputs, [](const StaticModelLightingInput &input) {
-                return input.groundLit && input.groundLighting;
+                return (input.groundLit && input.groundLighting) || input.colors;
             }))
             return volumes;
         volumes.resize(inputs.size());
         for (std::size_t index = 0; index < inputs.size(); ++index)
-            groundLighting(volumes[index], inputs[index].groundLit && inputs[index].groundLighting
-                                               ? inputs[index].groundLighting
-                                               : 0xFF282828u);
+        {
+            if (inputs[index].colors)
+                ownColors(volumes[index], inputs[index]);
+            else
+                groundLighting(volumes[index], inputs[index].groundLit && inputs[index].groundLighting
+                                                   ? inputs[index].groundLighting
+                                                   : 0xFF282828u);
+        }
         return volumes;
     };
     const auto metadataPath = sourceRoot / "maps" / "mp" / (sourceAsset + ".lightgrid.json");
@@ -1426,11 +1441,17 @@ std::vector<std::array<std::uint8_t, 256>> SampleStaticModelLighting(
     };
 
     volumes.resize(inputs.size());
-    std::size_t ground = 0, extrapolated = 0, traced = 0, suppressed = 0;
+    std::size_t ground = 0, extrapolated = 0, traced = 0, suppressed = 0, own = 0;
     for (std::size_t index = 0; index < inputs.size(); ++index)
     {
         const StaticModelLightingInput &input = inputs[index];
         auto &texels = volumes[index];
+        if (input.colors)
+        {
+            ownColors(texels, input);
+            ++own;
+            continue;
+        }
         if (input.groundLit && input.groundLighting)
         {
             groundLighting(texels, input.groundLighting);
@@ -1640,9 +1661,9 @@ std::vector<std::array<std::uint8_t, 256>> SampleStaticModelLighting(
             texels[texel * 4 + 3] = alpha;
         }
     }
-    zt::info("iw3: lit %zu static model(s) as IW3 does (%zu ground-lit, %zu extrapolated; %zu grid "
-             "corner trace(s), %zu suppressed)",
-             inputs.size(), ground, extrapolated, traced, suppressed);
+    zt::info("iw3: lit %zu static model(s) as IW3 does (%zu with their own colours, %zu ground-lit, %zu "
+             "extrapolated; %zu grid corner trace(s), %zu suppressed)",
+             inputs.size(), own, ground, extrapolated, traced, suppressed);
     return volumes;
 }
 

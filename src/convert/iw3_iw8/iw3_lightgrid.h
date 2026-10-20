@@ -41,6 +41,11 @@ struct StaticModelLightingInput
     std::uint8_t primaryLight{};   // GfxStaticModelDrawInst::primaryLightIndex
     bool groundLit{};
     std::uint32_t groundLighting{}; // GfxColor packed
+    // The model's own 56 light-grid colours (B, G, R each, in the order of a
+    // light-grid palette entry), from an extraction that lights each model
+    // itself (IW7: its GPU light grid at the model); the sun weight stays
+    // groundLighting's alpha.
+    std::optional<std::array<std::uint8_t, 168>> colors;
 };
 struct LightGridPrimaryLight
 {

@@ -212,6 +212,226 @@ namespace zonetool::convert::iw7_iw8
 			return result;
 		}
 
+		float half_to_float(const std::uint16_t half)
+		{
+			const std::uint32_t sign = (half & 0x8000u) << 16;
+			const std::uint32_t exponent = (half >> 10) & 0x1Fu;
+			const std::uint32_t mantissa = half & 0x3FFu;
+			std::uint32_t bits{};
+			if (exponent == 0)
+			{
+				float value = std::ldexp(static_cast<float>(mantissa), -24);
+				return sign ? -value : value;
+			}
+
+			bits = exponent == 31 ? sign | 0x7F800000u | (mantissa << 13) : sign | ((exponent + 112) << 23) | (mantissa << 13);
+			float value{};
+			std::memcpy(&value, &bits, sizeof(value));
+			return value;
+		}
+
+		// The real SH basis of the pipeline's light grid (iw3_lightgrid.cpp EvaluateShBasis).
+		std::array<float, 9> sh_basis(const std::array<float, 3>& d)
+		{
+			const auto [x, y, z] = d;
+			return {0.2820947918f, -0.4886025119f * y, 0.4886025119f * z, -0.4886025119f * x, 1.0925484306f * x * y,
+				-1.0925484306f * y * z, 0.3153915653f * (3.0f * z * z - 1.0f), -1.0925484306f * x * z, 0.5462742153f * (x * x - y * y)};
+		}
+
+		// The 56 directions of an IW3 light grid colour, in its order (iw3_lightgrid.cpp LightGridProjection): the shell
+		// of a 4x4x4 cube, turned so that a diagonal points up.
+		const std::array<std::array<float, 3>, 56>& grid_directions()
+		{
+			static const auto directions = []
+			{
+				constexpr std::array<std::array<float, 3>, 3> rotation{{
+					{0.47140452f, 0.0f, 0.33333334f}, {-0.23570226f, 0.40824828f, 0.33333334f}, {-0.23570226f, -0.40824828f, 0.33333334f}}};
+				std::array<std::array<float, 3>, 56> result{};
+				std::size_t index{};
+				for (auto z = 0; z < 4; z++)
+				{
+					for (auto y = 0; y < 4; y++)
+					{
+						for (auto x = 0; x < 4; x++)
+						{
+							if (x > 0 && x < 3 && y > 0 && y < 3 && z > 0 && z < 3)
+							{
+								continue;
+							}
+
+							const std::array<float, 3> delta{x * (2.0f / 3.0f) - 1.0f, y * (2.0f / 3.0f) - 1.0f, z * (2.0f / 3.0f) - 1.0f};
+							std::array<float, 3> direction{};
+							for (auto c = 0; c < 3; c++)
+							{
+								for (auto a = 0; a < 3; a++)
+								{
+									direction[c] += delta[a] * rotation[c][a];
+								}
+							}
+
+							const auto length = std::sqrt(direction[0] * direction[0] + direction[1] * direction[1] + direction[2] * direction[2]);
+							for (auto& component : direction)
+							{
+								component /= length;
+							}
+
+							result[index++] = direction;
+						}
+					}
+				}
+
+				return result;
+			}();
+			return directions;
+		}
+
+		// IW7's GPU light grid: L2 SH probes (32 halves each: the 9 coefficients of red, green and blue, then a sky weight)
+		// at their positions, in a tetrahedral mesh (neighbour i lies across the face opposite vertex i; the indices keep
+		// flags in their top bits). Frontier: 71737 probes, 426507 tetrahedra. IW7 keeps the L1 terms negated against the
+		// pipeline's basis: with them as stored, the probes that see the sky point away from the sun (mean cosine -0.82 on
+		// Frontier, +0.82 negated).
+		class iw7_light_grid
+		{
+		public:
+			explicit iw7_light_grid(const iw7::GfxLightGridProbeData& data)
+			{
+				if (!data.probes || !data.probePositions || !data.tetrahedrons || !data.tetrahedronNeighbors || !data.probeCount ||
+					!data.tetrahedronCount)
+				{
+					return;
+				}
+
+				this->positions_.resize(data.probeCount);
+				this->sh_.resize(data.probeCount);
+				for (auto p = 0u; p < data.probeCount; p++)
+				{
+					for (auto c = 0; c < 3; c++)
+					{
+						this->positions_[p][c] = data.probePositions[p].origin[c];
+					}
+
+					for (auto channel = 0; channel < 3; channel++)
+					{
+						for (auto k = 0; k < 9; k++)
+						{
+							const auto value = half_to_float(data.probes[p].coeffs[channel * 9 + k]);
+							this->sh_[p][channel * 9 + k] = std::isfinite(value) ? (k >= 1 && k <= 3 ? -value : value) : 0.0f;
+						}
+					}
+				}
+
+				this->tetrahedra_.resize(data.tetrahedronCount);
+				this->neighbors_.resize(data.tetrahedronCount);
+				for (auto t = 0u; t < data.tetrahedronCount; t++)
+				{
+					for (auto v = 0; v < 4; v++)
+					{
+						this->tetrahedra_[t][v] = data.tetrahedrons[t].indexFlags[v] & 0x0FFFFFFFu;
+						this->neighbors_[t][v] = data.tetrahedronNeighbors[t].neighbors[v];
+						if (this->tetrahedra_[t][v] >= data.probeCount)
+						{
+							this->positions_.clear();
+							return;
+						}
+					}
+				}
+			}
+
+			bool empty() const
+			{
+				return this->positions_.empty();
+			}
+
+			// The SH at a point: the probes of the tetrahedron that holds it, by their barycentric weights, found by walking
+			// the mesh from the last tetrahedron (the grid visits its points in order).
+			std::optional<std::array<float, 27>> sample(const std::array<double, 3>& point)
+			{
+				auto tetrahedron = this->hint_;
+				for (auto step = 0; step < 8192; step++)
+				{
+					const auto weights = this->barycentric(tetrahedron, point);
+					if (!weights)
+					{
+						return std::nullopt;
+					}
+
+					const auto lowest = static_cast<std::size_t>(std::ranges::min_element(*weights) - weights->begin());
+					if ((*weights)[lowest] >= -1e-6)
+					{
+						this->hint_ = tetrahedron;
+						std::array<float, 27> result{};
+						for (auto v = 0; v < 4; v++)
+						{
+							const auto& sh = this->sh_[this->tetrahedra_[tetrahedron][v]];
+							for (auto k = 0; k < 27; k++)
+							{
+								result[k] += static_cast<float>((*weights)[v]) * sh[k];
+							}
+						}
+
+						return result;
+					}
+
+					const auto next = this->neighbors_[tetrahedron][lowest];
+					if (next >= this->tetrahedra_.size())
+					{
+						return std::nullopt;
+					}
+
+					tetrahedron = next;
+				}
+
+				return std::nullopt;
+			}
+
+		private:
+			std::optional<std::array<double, 4>> barycentric(const std::size_t tetrahedron, const std::array<double, 3>& point) const
+			{
+				const auto& indices = this->tetrahedra_[tetrahedron];
+				const auto& a = this->positions_[indices[0]];
+				std::array<std::array<double, 3>, 3> m{};
+				std::array<double, 3> r{};
+				for (auto c = 0; c < 3; c++)
+				{
+					for (auto v = 0; v < 3; v++)
+					{
+						m[c][v] = this->positions_[indices[v + 1]][c] - a[c];
+					}
+
+					r[c] = point[c] - a[c];
+				}
+
+				const auto det = m[0][0] * (m[1][1] * m[2][2] - m[1][2] * m[2][1]) - m[0][1] * (m[1][0] * m[2][2] - m[1][2] * m[2][0]) +
+					m[0][2] * (m[1][0] * m[2][1] - m[1][1] * m[2][0]);
+				if (std::abs(det) < 1e-9)
+				{
+					return std::nullopt;
+				}
+
+				// Cramer's rule for m * l = r.
+				const auto solve = [&](const int column)
+				{
+					auto n = m;
+					for (auto c = 0; c < 3; c++)
+					{
+						n[c][column] = r[c];
+					}
+
+					return (n[0][0] * (n[1][1] * n[2][2] - n[1][2] * n[2][1]) - n[0][1] * (n[1][0] * n[2][2] - n[1][2] * n[2][0]) +
+						n[0][2] * (n[1][0] * n[2][1] - n[1][1] * n[2][0])) / det;
+				};
+
+				const auto l1 = solve(0), l2 = solve(1), l3 = solve(2);
+				return std::array<double, 4>{1.0 - l1 - l2 - l3, l1, l2, l3};
+			}
+
+			std::vector<std::array<double, 3>> positions_;
+			std::vector<std::array<float, 27>> sh_;
+			std::vector<std::array<std::uint32_t, 4>> tetrahedra_;
+			std::vector<std::array<std::uint32_t, 4>> neighbors_;
+			std::size_t hint_{};
+		};
+
 		// The light of the floor under a static model (IW3's ground lighting): the lightmap of the highest lightmapped
 		// world surface under the centre of its bounds. IW7 lights its models from its light grid, which does not
 		// convert yet.
@@ -434,8 +654,46 @@ namespace zonetool::convert::iw7_iw8
 			}
 		};
 
+		// A static model's own light-grid colours: IW7's light grid at the centre of its bounds in the 56 directions of an
+		// IW3 light-grid colour, at half the lightmap level through the lightmaps' knee (IW3's light-grid units; IW7's SH
+		// taken from above matches its lightmaps). IW7 lit its static models by their own vertex lighting or lightmaps,
+		// which hold the direct light of the static lights as well; Replay's lights add that at run time.
+		std::optional<std::string> model_lighting_colors(iw7_light_grid& grid, const float* point)
+		{
+			if (grid.empty())
+			{
+				return std::nullopt;
+			}
+
+			const auto sh = grid.sample({point[0], point[1], point[2]});
+			if (!sh)
+			{
+				return std::nullopt;
+			}
+
+			std::string text;
+			const auto& directions = grid_directions();
+			for (const auto& direction : directions)
+			{
+				const auto basis = sh_basis(direction);
+				for (const auto channel : {2, 1, 0})
+				{
+					auto value = 0.0f;
+					for (auto k = 0; k < 9; k++)
+					{
+						value += (*sh)[channel * 9 + k] * basis[k];
+					}
+
+					const auto level = std::clamp(0.5f * light_level(std::max(value, 0.0f)), 0.0f, 1.0f);
+					text += std::format("{:02x}", static_cast<unsigned>(std::lround(level * 255.0f)));
+				}
+			}
+
+			return text;
+		}
+
 		json export_static_model(const source_map& source, const iw7::GfxWorld& world, const unsigned int index,
-			const reflection_probes& probes, const floor_light& floors, extraction& output)
+			const reflection_probes& probes, const floor_light& floors, iw7_light_grid& grid, extraction& output)
 		{
 			const auto& instance = world.dpvs.smodelDrawInsts[index];
 			const auto ground = floors.ground_lighting(world.dpvs.smodelInsts[index].bounds.midPoint);
@@ -448,7 +706,7 @@ namespace zonetool::convert::iw7_iw8
 			}
 
 			const auto bounds = bounds_json(world.dpvs.smodelInsts[index].bounds);
-			return
+			json result =
 			{
 				{"model", model_name},
 				{"origin", vector_json(instance.placement.origin, 3)},
@@ -463,6 +721,13 @@ namespace zonetool::convert::iw7_iw8
 				{"primary_light", 0},
 				{"reflection_probe", probes.find(instance.placement.origin)},
 			};
+
+			if (const auto colors = model_lighting_colors(grid, world.dpvs.smodelInsts[index].bounds.midPoint))
+			{
+				result["lighting_colors"] = *colors;
+			}
+
+			return result;
 		}
 	}
 
@@ -493,23 +758,6 @@ namespace zonetool::convert::iw7_iw8
 		{
 			const auto* data = reinterpret_cast<const std::uint8_t*>(&value);
 			bytes.insert(bytes.end(), data, data + sizeof(T));
-		}
-
-		float half_to_float(const std::uint16_t half)
-		{
-			const std::uint32_t sign = (half & 0x8000u) << 16;
-			const std::uint32_t exponent = (half >> 10) & 0x1Fu;
-			const std::uint32_t mantissa = half & 0x3FFu;
-			if (exponent == 0)
-			{
-				const auto value = std::ldexp(static_cast<float>(mantissa), -24);
-				return sign ? -value : value;
-			}
-
-			const std::uint32_t bits = exponent == 31 ? sign | 0x7F800000u | (mantissa << 13) : sign | ((exponent + 112) << 23) | (mantissa << 13);
-			float value{};
-			std::memcpy(&value, &bits, sizeof(value));
-			return value;
 		}
 
 		// IW7's GPU light grid, which Replay keeps in the same form (GfxGpuLightGrid): L2 SH probes (32 halves each: the 9
@@ -867,9 +1115,12 @@ namespace zonetool::convert::iw7_iw8
 		auto models = json::array();
 		auto model_indices = json::array();
 		std::size_t ground_lit{};
+		std::size_t grid_lit{};
+		iw7_light_grid grid(world.lightGrid.probeData);
 		for (auto i = 0u; i < dpvs.smodelCount; i++)
 		{
-			auto model = export_static_model(source, world, i, probes, floors, output);
+			auto model = export_static_model(source, world, i, probes, floors, grid, output);
+			grid_lit += model.contains("lighting_colors");
 			if (output.exported_models.contains(model.at("model").get<std::string>()))
 			{
 				ground_lit += model.at("model_flags").get<int>() != 0;
@@ -1016,5 +1267,6 @@ namespace zonetool::convert::iw7_iw8
 		write_json(output.extracted / (bsp_name(source) + ".replay-world.json"), value);
 		ZONETOOL_INFO("iw7: exported %zu of %u world surfaces and %zu of %u static models (%zu lit by the floor under them)",
 			surface_indices.size(), world.surfaceCount, model_indices.size(), dpvs.smodelCount, ground_lit);
+		ZONETOOL_INFO("iw7: %zu of %u static models take IW7's light grid at their centre", grid_lit, dpvs.smodelCount);
 	}
 }
