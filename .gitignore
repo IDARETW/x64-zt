@@ -4,6 +4,9 @@ build/
 
 generate_custom.bat
 
+AGENTS.md
+CLAUDE.md
+
 docs/
 re_reference/
 dump/
