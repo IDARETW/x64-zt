@@ -468,8 +468,39 @@ namespace zonetool::convert::iw7_iw8
 				}
 			}
 
-			// IW3 brush models collide through their brushes alone.
-			model_triangles += shape.triangles.size();
+			// IW3 brush models collide through their brushes alone: each triangle of the model's mesh becomes a brush, the
+			// triangle and a copy of it a unit behind its front.
+			for (const auto& triangle : shape.triangles)
+			{
+				const auto* tag = tag_of(*ents_shapes, triangle.tag);
+				const auto& [a, b, c] = triangle.corners;
+				const std::array<float, 3> u{b[0] - a[0], b[1] - a[1], b[2] - a[2]};
+				const std::array<float, 3> v{c[0] - a[0], c[1] - a[1], c[2] - a[2]};
+				std::array<float, 3> normal{u[1] * v[2] - u[2] * v[1], u[2] * v[0] - u[0] * v[2], u[0] * v[1] - u[1] * v[0]};
+				const auto length = std::sqrt(normal[0] * normal[0] + normal[1] * normal[1] + normal[2] * normal[2]);
+				if (!tag || !(length > 1e-6f))
+				{
+					model_triangles++;
+					continue;
+				}
+
+				havok_convex prism{{}, triangle.tag};
+				for (const auto& corner : triangle.corners)
+				{
+					prism.points.push_back(corner);
+					prism.points.push_back({corner[0] - normal[0] / length, corner[1] - normal[1] / length, corner[2] - normal[2] / length});
+				}
+
+				if (const auto brush = writer.add_brush(prism, *tag))
+				{
+					leaf.push_back(*brush);
+				}
+				else
+				{
+					model_triangles++;
+				}
+			}
+
 			solid_models += !leaf.empty();
 			submodels.push_back(submodel_json(bounds, leaf.empty() ? 0 : writer.add_leaf(std::move(leaf))));
 		}

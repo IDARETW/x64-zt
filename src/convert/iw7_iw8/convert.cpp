@@ -73,6 +73,7 @@ namespace zonetool::convert::iw7_iw8
 		export_effects(source, output, conversion);
 		export_sounds(source, output);
 		export_models(source, output);
+		export_skeletons(source, output);
 		remove_missing_entity_models(source, output);
 		export_world(source, output);
 		export_collision(source, output);
@@ -84,7 +85,7 @@ namespace zonetool::convert::iw7_iw8
 		std::ofstream(output.extracted / "zone_source" / (source.name() + ".zone"), std::ios::binary | std::ios::trunc)
 			<< "// " << source.name() << " (IW7)\n";
 
-		// The skeletons of the animated scriptables' models (export_animations) are the whole skeleton export.
+		// The skeletons of the models with bones (export_animations, export_skeletons) are the whole skeleton export.
 		write_marker(output.root / "skeleton" / "complete");
 		write_marker(output.root / "complete");
 		ZONETOOL_INFO("iw7: extraction written to %s", output.root.string().data());

@@ -86,11 +86,18 @@ namespace zonetool::convert::iw7_iw8
 
 	// IW7 exposes the interiors that its lightmaps light far more than its sunlit exteriors (Frontier: a median
 	// interior irradiance of 0.34 against a sun of 9.5). The sun converts at the brightness of an IW3 sun, and the
-	// lightmaps and probes keep their units, which put lit interiors where IW3 lightmaps put them; a soft knee above
-	// 0.5 keeps the light of lamps from clipping.
+	// lightmaps and probes keep their units, which put lit interiors where IW3 lightmaps put them. In the 8-bit IW3
+	// colours (probes, light-grid colours) a soft knee above 0.5 keeps the light of lamps from clipping; the lightmap
+	// layers keep the whole range (lightmap_level).
 	float light_level(const float value)
 	{
 		return value <= 0.5f ? value : 0.5f + 0.5f * (1.0f - std::exp((0.5f - value) * 2.0f));
+	}
+
+	float lightmap_level(const float value)
+	{
+		const auto clamped = std::clamp(std::isfinite(value) ? value : 0.0f, 0.0f, lightmap_maximum);
+		return std::log2(1.0f + lightmap_log_scale * clamped) / std::log2(1.0f + lightmap_log_scale * lightmap_maximum);
 	}
 
 	// An IW7 lightmap keeps IW3's two layers as high dynamic range colours (its secondary image holds layer A over
@@ -162,9 +169,9 @@ namespace zonetool::convert::iw7_iw8
 				{
 					const auto* color = layers.data() + (layer * count + t) * 4;
 					auto* target = two_layers.data() + (layer * count + t) * 4;
-					target[0] = encode_unit(light_level(color[2]));
-					target[1] = encode_unit(light_level(color[1]));
-					target[2] = encode_unit(light_level(color[0]));
+					target[0] = encode_unit(lightmap_level(color[2]));
+					target[1] = encode_unit(lightmap_level(color[1]));
+					target[2] = encode_unit(lightmap_level(color[0]));
 					target[3] = slopes[layer];
 				}
 			}

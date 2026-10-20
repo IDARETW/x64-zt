@@ -132,6 +132,32 @@ namespace zonetool::convert::iw7_iw8
 		// Replay's particle shape (common_mp), which the importer names without building it.
 		constexpr char default_fx_shape[] = "vfx_physfxpip_particle_default";
 
+		// The debris models of Replay's common_mp (ACTS xmodel dump, 2026-10-20), which effects can name without the model.
+		constexpr std::array<std::string_view, 38> replay_debris_models{
+			"vfx_debris_bone_shards_s1_f1", "vfx_debris_bone_shards_s1_f2", "vfx_debris_bone_shards_s1_f3", "vfx_debris_bone_shards_s1_f4",
+			"vfx_debris_bone_shards_s1_f5", "vfx_debris_bone_shards_s1_f6", "vfx_debris_flesh_chunk_a_01", "vfx_debris_flesh_chunk_a_02",
+			"vfx_debris_flesh_chunk_a_03", "vfx_debris_flesh_chunk_a_04", "vfx_debris_flesh_chunk_a_05", "vfx_debris_flesh_chunk_a_06",
+			"vfx_debris_flesh_chunk_a_07", "vfx_debris_flesh_chunk_a_08", "vfx_debris_glass_shard_1_g1", "vfx_debris_glass_shard_1_g2",
+			"vfx_debris_glass_shard_1_g3", "vfx_debris_glass_shard_1_g4", "vfx_debris_glass_shard_2_g1", "vfx_debris_glass_shard_2_g2",
+			"vfx_debris_glass_shard_2_g3", "vfx_debris_glass_shard_2_g4", "vfx_debris_glass_shard_a_01", "vfx_debris_glass_shard_a_02",
+			"vfx_debris_glass_shard_a_03", "vfx_debris_glass_shard_a_04", "vfx_debris_glass_shard_a_05", "vfx_debris_glass_shard_a_06",
+			"vfx_debris_glass_shard_a_07", "vfx_debris_glass_shard_a_08", "vfx_debris_glass_shard_b_01", "vfx_debris_glass_shard_b_03",
+			"vfx_debris_glass_shard_b_05", "vfx_debris_glass_shard_b_07", "vfx_debris_glass_shard_c_03", "vfx_debris_glass_shard_c_05",
+			"vfx_debris_glass_shard_c_07", "vfx_debris_glass_shard_c_08"};
+
+		// Replay's debris model of a name: the same name, else one of its family (the name without its last number).
+		std::optional<std::string_view> replay_debris_model(const std::string_view name)
+		{
+			if (const auto found = std::ranges::find(replay_debris_models, name); found != replay_debris_models.end())
+			{
+				return *found;
+			}
+
+			const auto family = name.substr(0, name.find_last_not_of("0123456789") + 1);
+			const auto found = std::ranges::find_if(replay_debris_models, [&](const auto model) { return model.starts_with(family); });
+			return found != replay_debris_models.end() ? std::optional(*found) : std::nullopt;
+		}
+
 		// The Replay pipeline of an IW7 debris pipeline (both in Replay's common zones): sparks bounce as Replay's sparks, the
 		// rest (plastic, wood, glass, concrete, cards) as its debris.
 		std::string replay_pipeline(const std::string_view name)
@@ -591,6 +617,15 @@ namespace zonetool::convert::iw7_iw8
 				case iw7::PARTICLE_MODULE_INIT_ATTRIBUTES:
 					copy(sizeof(iw7::ParticleModuleInitAttributes));
 					return result;
+				case iw7::PARTICLE_MODULE_INIT_BEAM:
+				{
+					// Replay's layout is IW7's (game-test PDB); stock beams (common_mp vfx_blue_laser_bright) keep no
+					// linked assets and take their material from the state's material module.
+					copy(sizeof(iw7::ParticleModuleInitBeam));
+					std::memset(result.data() + offsetof(iw7::ParticleModuleInitBeam, m_linkedAssetList), 0,
+						sizeof(iw7::ParticleLinkedAssetListDef));
+					return result;
+				}
 				case iw7::PARTICLE_MODULE_INIT_CAMERA_OFFSET:
 				case iw7::PARTICLE_MODULE_INIT_PLAYER_FACING:
 				case iw7::PARTICLE_MODULE_INIT_MIRROR_TEXTURE:
@@ -790,7 +825,7 @@ namespace zonetool::convert::iw7_iw8
 
 					if (entries.empty())
 					{
-						this->drop("material module without materials");
+						this->drop(list.numAssets ? "material module whose materials the zones do not hold" : "material module that IW7 leaves empty");
 						return std::nullopt;
 					}
 
@@ -811,6 +846,10 @@ namespace zonetool::convert::iw7_iw8
 						{
 							entries.push_back(linked_asset("xmodel", this->output_.add_model(this->source_, const_cast<iw7::XModel*>(model))));
 						}
+						else if (const auto stock = model && model->name ? replay_debris_model(asset_name(model->name)) : std::nullopt)
+						{
+							entries.push_back(linked_asset("stockxmodel", *stock));
+						}
 						else if (model && model->name)
 						{
 							ZONETOOL_INFO("iw7: effect \"%s\" names model \"%s\", whose surfaces are in no loaded zone or stream file%s",
@@ -821,7 +860,7 @@ namespace zonetool::convert::iw7_iw8
 
 					if (entries.empty())
 					{
-						this->drop("model module without models");
+						this->drop(list.numAssets ? "model module without models" : "model module that IW7 leaves empty");
 						return std::nullopt;
 					}
 
@@ -844,7 +883,7 @@ namespace zonetool::convert::iw7_iw8
 					auto entries = this->child_effects(data.initRunner.m_linkedAssetList, 0);
 					if (entries.empty())
 					{
-						this->drop("runner without child effects");
+						this->drop(data.initRunner.m_linkedAssetList.numAssets ? "runner without child effects" : "runner that IW7 leaves empty");
 						return std::nullopt;
 					}
 
@@ -1070,7 +1109,7 @@ namespace zonetool::convert::iw7_iw8
 
 					if (entries.empty())
 					{
-						this->drop("debris module without shapes");
+						this->drop("debris module that IW7 leaves empty");
 						return std::nullopt;
 					}
 
@@ -1693,6 +1732,29 @@ iw7_delaythread_proc( delay, function, a, b, c, d )
 iw7_unsupported( a, b, c, d, e, f )
 {
 }
+
+iw7_istrue( value )
+{
+	return isdefined( value ) && value;
+}
+
+iw7_string_starts_with( text, start )
+{
+	if ( text.size < start.size )
+		return false;
+	return getsubstr( text, 0, start.size ) == start;
+}
+
+iw7_array_add( values, value )
+{
+	values[ values.size ] = value;
+	return values;
+}
+
+iw7_play_loop_sound_on_entity( alias )
+{
+	self playloopsound( alias );
+}
 )gsc";
 
 		// IW7's setscriptablepartstate on the converted scriptables (script models): the animation of the state, from the
@@ -1737,10 +1799,72 @@ iw7_state( mode, animation, to, time )
 		// of other IW7 scripts drop out in the pipeline. The converted models have one bone (tag_origin), which the
 		// effects on their tags take; animations and cinematics do not convert, and scriptable states set the states of
 		// the animated scriptables (iw7_setscriptablepartstate). Adds the effects that it loads.
-		std::string translate_map_script(const std::string& map, const std::string& text, std::set<std::string>& effects,
-			const std::function<bool(const std::string&)>& add_model)
+		std::string translate_map_script(const std::string& map, const std::string& text, const std::map<std::string, std::string>& scripts,
+			std::set<std::string>& effects, const std::function<bool(const std::string&)>& add_model)
 		{
-			const auto functions = script_functions(text);
+			// The shared IW7 scripts that convert with the map script (their functions join it): the animation suite, which
+			// rotates and moves the map's animObj entities. gsc-tool names a script whose name it does not know by its id, so
+			// the script is the one that defines the functions that the map script calls.
+			auto own = text;
+			std::vector<script_function> shared;
+			for (const std::string_view path : {R"(scripts\mp\animation_suite)"})
+			{
+				const auto prefix = std::string(path) + "::";
+				std::set<std::string> called;
+				for (auto at = own.find(prefix); at != std::string::npos; at = own.find(prefix, at + 1))
+				{
+					const auto start = at + prefix.size();
+					const auto end = own.find_first_not_of("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_", start);
+					called.insert(own.substr(start, end - start));
+				}
+
+				if (called.empty())
+				{
+					continue;
+				}
+
+				const std::string* found{};
+				for (const auto& [name, source] : scripts)
+				{
+					const auto defined = script_functions(source);
+					if (std::ranges::all_of(called, [&](const auto& function)
+					{
+						return std::ranges::any_of(defined, [&](const auto& definition) { return definition.name == function; });
+					}))
+					{
+						found = &source;
+						break;
+					}
+				}
+
+				if (!found)
+				{
+					ZONETOOL_WARNING("iw7: the map script runs %s, whose script is not in the loaded zones", std::string(path).data());
+					continue;
+				}
+
+				for (auto at = own.find(prefix); at != std::string::npos; at = own.find(prefix, at))
+				{
+					own.erase(at, prefix.size());
+				}
+
+				const auto defined = script_functions(*found);
+				shared.insert(shared.end(), defined.begin(), defined.end());
+				ZONETOOL_INFO("iw7: the map script runs %s, which converts with it (%zu functions)", std::string(path).data(), defined.size());
+			}
+
+			auto functions = script_functions(own);
+			for (auto& function : shared)
+			{
+				if (std::ranges::any_of(functions, [&](const auto& definition) { return definition.name == function.name; }))
+				{
+					ZONETOOL_WARNING("iw7: the shared function %s has the name of a map script function; the map script's stays",
+						function.name.data());
+					continue;
+				}
+
+				functions.push_back(std::move(function));
+			}
 			std::map<std::string, const script_function*> by_name;
 			for (const auto& function : functions)
 			{
@@ -1797,6 +1921,7 @@ iw7_state( mode, animation, to, time )
 					{"scripts\\engine\\utility::getstructarray(", "common_scripts\\utility::getstructarray("},
 					{"scripts\\engine\\utility::waitframe(", "waitframe("},
 					{"scripts\\engine\\utility::array_thread(", "common_scripts\\utility::array_thread("},
+					{"scripts\\mp\\utility::istrue(", "iw7_istrue("},
 				})
 				{
 					for (auto at = body.find(from); at != std::string::npos; at = body.find(from, at + to.size()))
@@ -1808,7 +1933,7 @@ iw7_state( mode, animation, to, time )
 				// The utilities that the script's own IW3 versions replace (map_script_helpers).
 				for (const auto name : {"getstruct", "waittill_either", "waittill_any_return", "waittill_any", "cointoss",
 					"random", "array_remove", "spawn_tag_origin", "flag_init", "flag_set", "flag_clear", "flag_wait", "flag",
-					"delaythread"})
+					"delaythread", "string_starts_with", "array_add", "play_loop_sound_on_entity"})
 				{
 					const auto from = std::format("scripts\\engine\\utility::{}(", name);
 					const auto to = std::format("iw7_{}(", name);
@@ -2031,7 +2156,7 @@ iw7_state( mode, animation, to, time )
 			}
 
 			std::set<std::string> loaded;
-			map_script = translate_map_script(source.name(), found->second, loaded, [&](const std::string& name)
+			map_script = translate_map_script(source.name(), found->second, scripts, loaded, [&](const std::string& name)
 			{
 				const auto model = static_cast<const iw7::XModel*>(source.find(iw7::ASSET_TYPE_XMODEL, name));
 				if (model)
@@ -2043,6 +2168,29 @@ iw7_state( mode, animation, to, time )
 			});
 			ZONETOOL_INFO("iw7: translated the map script (%zu bytes) with %zu effects of its own", map_script.size(), loaded.size());
 			placed.insert(loaded.begin(), loaded.end());
+
+			// The animation suite plays the effect that each animObj entity names by its script_noteworthy (vfx_...).
+			if (map_script.find("setupvfxobjs(") != std::string::npos)
+			{
+				std::ifstream file(output.extracted / (bsp_name(source) + ".ents"), std::ios::binary);
+				const std::string entities((std::istreambuf_iterator<char>(file)), std::istreambuf_iterator<char>());
+				static const std::regex block(R"re(\{([^{}]*)\})re");
+				static const std::regex noteworthy(R"re("script_noteworthy" "(vfx_\w+)")re");
+				for (auto it = std::sregex_iterator(entities.begin(), entities.end(), block); it != std::sregex_iterator(); ++it)
+				{
+					const auto body = (*it)[1].str();
+					std::smatch match;
+					if (body.find("\"targetname\" \"animObj\"") == std::string::npos || !std::regex_search(body, match, noteworthy))
+					{
+						continue;
+					}
+
+					if (const auto effect = effects.find(match[1].str()); effect != effects.end())
+					{
+						placed.insert(effect->second);
+					}
+				}
+			}
 		}
 
 		// The map script that the generated parts join: IW7 maps run their effects and createfx scripts first.

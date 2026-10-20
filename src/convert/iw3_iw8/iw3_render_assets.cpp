@@ -4780,6 +4780,19 @@ RenderPlan PrepareRenderAssets(const std::filesystem::path &exportRoot, const Js
                           ")\n#define MAP_LIGHTMAP_SIZE float2(" +
                           std::to_string(lightmapPrimary.width) + ", " +
                           std::to_string(lightmapPrimary.height) + ")\n";
+        // Extractions that keep a lightmap's high range store its layers as log2(1 + scale * value) / log2(1 + scale
+        // * maximum) (IW7).
+        if (const auto encoding = world.find("lightmap_encoding"); encoding != world.end())
+        {
+            const float scale = encoding->at("log_scale").get<float>();
+            const float maximum = encoding->at("maximum").get<float>();
+            if (!(scale > 0.0f) || !(maximum > 0.0f))
+                throw std::runtime_error("invalid lightmap encoding");
+            char define[128];
+            std::snprintf(define, sizeof(define), "#define MAP_LIGHTMAP_LOG float2(%.9g, %.9g)\n", scale,
+                          std::log2(1.0f + scale * maximum));
+            lightmapDefines += define;
+        }
         zt::info("iw3: lightmap layers %ux%u at (%u, %u) as uncompressed textures",
                  lightmapPrimary.width, lightmapPrimary.height, lightmapLeft, lightmapTop);
     }

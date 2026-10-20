@@ -1277,6 +1277,7 @@ namespace zonetool::convert::iw7_iw8
 			{"dpvs", {{"planes", json::array()}, {"nodes", json::array({1})},
 				{"cells", json::array({std::move(cell)})}}},
 			{"lightmaps", std::move(lightmaps.entries)},
+			{"lightmap_encoding", {{"log_scale", lightmap_log_scale}, {"maximum", lightmap_maximum}}},
 			{"light_regions", json::array()},
 			{"reflection_probes", std::move(probes.entries)},
 		};
