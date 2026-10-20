@@ -235,11 +235,24 @@ namespace zonetool::iw8::havok
 		builder.set(object, "type", std::uint8_t{1});
 		builder.set(object, "dispatchType", options.dispatch_type);
 		builder.set(object, "userData", options.user_data);
-		builder.set(object, "maxAllowedPenetration", to_half16(static_cast<float>(0.33 * inner_radius(shape))));
+		builder.set(object, "maxAllowedPenetration", options.max_allowed_penetration.value_or(to_half16(static_cast<float>(0.33 * inner_radius(shape)))));
+		if (std::bit_cast<std::uint32_t>(options.convex_radius) != 0)
+		{
+			builder.set(object, "convexRadius", options.convex_radius);
+		}
+
+		// Havok reads the vertices in groups of four: the last vertex repeats, with its index, to fill the last group (every
+		// convex shape of the stock zones has a multiple of four vertices), and so does its vertex edge.
+		const auto padded = (shape.vertices.size() + 3) & ~std::size_t{3};
+		if (shape.vertices.empty() || padded > 256)
+		{
+			throw std::runtime_error("a convex polytope has more than 256 vertices");
+		}
 
 		std::vector<std::uint8_t> vertices;
-		for (std::uint32_t i = 0; i < shape.vertices.size(); i++)
+		for (std::uint32_t slot = 0; slot < padded; slot++)
 		{
+			const auto i = std::min(slot, static_cast<std::uint32_t>(shape.vertices.size() - 1));
 			for (const auto value : shape.vertices[i])
 			{
 				put(vertices, value);
@@ -301,8 +314,10 @@ namespace zonetool::iw8::havok
 			return out;
 		};
 
+		auto vertex_edges = connectivity.vertex_edges;
+		vertex_edges.resize(padded, vertex_edges.back());
 		const auto face_count = static_cast<std::uint32_t>(shape.faces.size());
-		builder.point(object, "vertices", builder.array("hkVector4f", static_cast<std::uint32_t>(shape.vertices.size()), vertices));
+		builder.point(object, "vertices", builder.array("hkVector4f", static_cast<std::uint32_t>(padded), vertices));
 		builder.point(object, "planes", builder.array("hkVector4", face_count, planes));
 		builder.point(object, "faces", builder.array("hknpConvexPolytopeShape::Face", face_count, faces));
 		builder.point(object, "indices", builder.array("hkUint8", static_cast<std::uint32_t>(indices.size()), indices));
@@ -310,7 +325,7 @@ namespace zonetool::iw8::havok
 		const auto links = builder.object("hknpConvexPolytopeShape::Connectivity");
 		builder.point(object, "connectivity", links);
 		builder.point(links, "vertexEdges", builder.array("hknpConvexPolytopeShape::Connectivity::Edge",
-			static_cast<std::uint32_t>(connectivity.vertex_edges.size()), edges(connectivity.vertex_edges)));
+			static_cast<std::uint32_t>(vertex_edges.size()), edges(vertex_edges)));
 		builder.point(links, "faceLinks", builder.array("hknpConvexPolytopeShape::Connectivity::Edge",
 			static_cast<std::uint32_t>(connectivity.face_links.size()), edges(connectivity.face_links)));
 		return object;
@@ -335,8 +350,16 @@ namespace zonetool::iw8::havok
 		const auto& faces = target_of(file, shape, offset_of("faces"));
 		const auto& indices = target_of(file, shape, offset_of("indices"));
 
+		// Trailing copies of the last vertex with its index fill the last group of four.
+		auto used = vertices.count;
+		while (used > 1 && std::equal(vertices.data.begin() + (used - 1) * 16, vertices.data.begin() + used * 16,
+			vertices.data.begin() + (used - 2) * 16))
+		{
+			used--;
+		}
+
 		polytope result;
-		for (std::uint32_t i = 0; i < vertices.count; i++)
+		for (std::uint32_t i = 0; i < used; i++)
 		{
 			result.vertices.push_back({get<float>(vertices.data, i * 16), get<float>(vertices.data, i * 16 + 4), get<float>(vertices.data, i * 16 + 8)});
 		}
@@ -1019,5 +1042,125 @@ namespace zonetool::iw8::havok
 		}
 
 		return copy;
+	}
+
+	std::vector<fx_shape_level> fx_shape_levels(const std::span<const vector3> points)
+	{
+		const auto hull = convex_hull(points, 0.0f);
+		std::vector<float> scales{1.0f};
+		for (auto [scale, k] = std::pair{1.0f, 0}; k < 8; k++)
+		{
+			scales.push_back(scale /= 1.33f);
+		}
+
+		for (auto [scale, k] = std::pair{1.0f, 0}; k < 8; k++)
+		{
+			scales.push_back(scale *= 1.33f);
+		}
+
+		std::vector<fx_shape_level> levels;
+		for (const auto scale : scales)
+		{
+			fx_shape_level level;
+			level.scale = scale;
+			level.shape = hull;
+			for (auto& v : level.shape.vertices)
+			{
+				for (auto& value : v)
+				{
+					value *= scale;
+				}
+			}
+
+			for (auto& plane : level.shape.planes)
+			{
+				plane[3] *= scale;
+			}
+
+			// Density 1000: the mass is the volume in thousands.
+			level.mass = convex_mass_properties(level.shape, 0.0f);
+			level.mass = convex_mass_properties(level.shape, level.mass.volume * 1000.0f);
+			levels.push_back(std::move(level));
+		}
+
+		return levels;
+	}
+
+	std::uint32_t add_fx_shape(object_builder& builder, const std::span<const fx_shape_level> levels, const convex_options& options)
+	{
+		const auto& types = builder.types();
+		const auto count = static_cast<std::uint32_t>(levels.size());
+		const auto tuple = builder.object("hkTuple<hkArray<T*<hknpConvexShape>, hkContainerHeapAllocator>, hkArray<float, hkContainerHeapAllocator>, void, void, void, void, void, void>");
+		const auto list = builder.array("T*<hknpConvexShape>", count, std::vector<std::uint8_t>(std::size_t{8} * count));
+		std::vector<std::uint8_t> scales;
+		for (const auto& level : levels)
+		{
+			put(scales, level.scale);
+		}
+
+		builder.point(tuple, "0", list);
+		builder.point(tuple, "1", builder.array("float", count, scales));
+		const auto pointer_type = *types.find("T*<hknpConvexShape>");
+		std::vector<std::uint32_t> shapes;
+		for (std::uint32_t index = 0; index < count; index++)
+		{
+			auto level_options = options;
+			level_options.max_allowed_penetration = levels[index].max_allowed_penetration;
+			shapes.push_back(add_convex_polytope_shape(builder, levels[index].shape, level_options));
+			builder.pointer(list, index * 8, pointer_type, shapes.back());
+		}
+
+		for (std::uint32_t index = 0; index < count; index++)
+		{
+			add_mass_properties(builder, shapes[index], levels[index].mass);
+		}
+
+		return tuple;
+	}
+
+	tagfile breadth_first(tagfile file)
+	{
+		std::vector<std::uint32_t> order{0, 1};
+		std::vector<std::uint32_t> number(file.items.size(), 0);
+		if (file.items.size() > 1)
+		{
+			number[1] = 1;
+		}
+
+		for (std::size_t next = 1; next < order.size(); next++)
+		{
+			auto pointers = file.items[order[next]].pointers;
+			std::ranges::sort(pointers, {}, &pointer_field::offset);
+			for (const auto& pointer : pointers)
+			{
+				if (pointer.target && !number[pointer.target])
+				{
+					number[pointer.target] = static_cast<std::uint32_t>(order.size());
+					order.push_back(pointer.target);
+				}
+			}
+		}
+
+		for (std::uint32_t index = 1; index < file.items.size(); index++)
+		{
+			if (!number[index])
+			{
+				number[index] = static_cast<std::uint32_t>(order.size());
+				order.push_back(index);
+			}
+		}
+
+		std::vector<item> items(file.items.size());
+		for (std::uint32_t index = 0; index < order.size(); index++)
+		{
+			items[index] = std::move(file.items[order[index]]);
+			for (auto& pointer : items[index].pointers)
+			{
+				pointer.target = number[pointer.target];
+			}
+		}
+
+		file.items = std::move(items);
+		return file;
 	}
 }
