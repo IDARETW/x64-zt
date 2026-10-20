@@ -992,6 +992,9 @@ std::vector<Image> LoadImage(const std::filesystem::path &root,
             if (std::filesystem::is_regular_file(candidate, error))
                 return DecodeIwi(candidate);
     }
+    // The engine's grey image, when no source ships one (IW7 materials name it).
+    if (name == "$gray")
+        return {SolidImage({128, 128, 128, 255})};
     // Composite images the IW3 converter generates (`~<name>~<hash>`) change
     // hash on every recompile; a map IWD packed from another compile carries
     // the same image under a different hash.
