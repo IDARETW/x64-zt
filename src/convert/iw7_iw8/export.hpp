@@ -64,6 +64,24 @@ namespace zonetool::convert::iw7_iw8
 		};
 		std::map<std::string, scriptable_destructible> scriptable_destructibles;
 
+		// The placed scriptables whose first state plays an animation (the ops table's solar system, the floor panels'
+		// closed pose): their instances are script models of a targetname that the map script animates. The animations
+		// export as IW3 XAnim dumps (extracted/xanim/<name>.iw3.json), the models with their skeletons (skeleton/).
+		std::map<std::string, std::string> scriptable_animations;
+		std::map<std::string, std::string> scriptable_animation_models;
+		std::map<std::string, const iw7::XAnimParts*> xanims;
+		std::map<std::string, const iw7::XModel*> animated_models;
+		// The effects that animated scriptables play on tags of their model, which follow the animation (at the bind pose
+		// of the tag when the animation does not export).
+		struct tag_effect
+		{
+			std::string targetname;
+			std::string effect;
+			std::string tag;
+			scriptable_effect placement;
+		};
+		std::vector<tag_effect> scriptable_tag_effects;
+
 		// Adds the material or model of a header and returns its name in the extraction.
 		std::string add_material(const source_map& source, iw7::Material* header);
 		// Adds a layer (1 to 3) of a layered material as a material of its own.
@@ -235,6 +253,10 @@ namespace zonetool::convert::iw7_iw8
 	void export_collision(const source_map& source, extraction& output);
 	void export_materials(const source_map& source, extraction& output);
 	void export_models(const source_map& source, extraction& output);
+	// Writes the animations of the animated scriptables (IW3 XAnim dumps, extracted/xanim/<name>.iw3.json) and the
+	// skeletons of their models (skeleton/: an XMODEL_EXPORT of each LOD), which the pipeline reads for entity models.
+	// A scriptable whose model or animation does not convert keeps its bind pose and its tag effects their bind pose.
+	void export_animations(const source_map& source, extraction& output);
 	// Removes the model of each entity whose model did not export (it is in a zone that the map does not load).
 	void remove_missing_entity_models(const source_map& source, const extraction& output);
 	// Writes a neutral cube map for the reflection probe of the world and returns its image name.

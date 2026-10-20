@@ -334,9 +334,38 @@ namespace zonetool::convert::iw7_iw8
 			return result;
 		}
 
+		// The animation that the first state of a part of a scriptable plays from the start (Frontier: the ops table's solar
+		// system idle, 1799 frames on 35 bones; the floor panels' one-frame closed pose, whose raise is a scripted state).
+		const iw7::XAnimParts* first_animation(const source_map& source, const iw7::ScriptableDef& def)
+		{
+			for (auto p = 0u; def.parts && p < def.numParts; p++)
+			{
+				const auto& part = def.parts[p];
+				if (!part.states || !part.numStates)
+				{
+					continue;
+				}
+
+				const auto& state = part.states[0];
+				for (auto e = 0u; state.base.events && e < state.base.numEvents; e++)
+				{
+					const auto& event = state.base.events[e];
+					if (event.type == iw7::Scriptable_EventType_Animation && event.data.animation.animation)
+					{
+						if (const auto anim = source.resolve(iw7::ASSET_TYPE_XANIMPARTS, event.data.animation.animation); anim && anim->name)
+						{
+							return anim;
+						}
+					}
+				}
+			}
+
+			return nullptr;
+		}
+
 		// The effects that the first state of each part of a scriptable plays, on the tags of the instance's model.
 		void add_scriptable_effects(const source_map& source, const iw7::ScriptableDef& def, const iw7::XModel* model,
-			const iw7::ScriptableInstanceContext& context, extraction& output)
+			const iw7::ScriptableInstanceContext& context, extraction& output, const std::string& animated)
 		{
 			for (auto p = 0u; def.parts && p < def.numParts; p++)
 			{
@@ -385,7 +414,14 @@ namespace zonetool::convert::iw7_iw8
 							continue;
 						}
 
+						// On an animated model the effect plays on its tag, which the animation moves (the ops table's planets).
 						placement->effect = effect;
+						if (!animated.empty() && !tag.empty() && tag != "tag_origin")
+						{
+							output.scriptable_tag_effects.push_back({animated, effect, tag, *placement});
+							continue;
+						}
+
 						output.scriptable_effects.push_back(std::move(*placement));
 					}
 				}
@@ -600,7 +636,8 @@ namespace zonetool::convert::iw7_iw8
 		// IW7's scriptables (screens, displays, lamps and props with states): an IW3 script model of each instance's
 		// model at its initial placement (the first model of its definition when the instance names none), and the
 		// effects of the first state of each of its parts on their tags. The kinds that break (destructible_of) take a
-		// targetname that the map script breaks them by. Their other states, animations and other events do not convert.
+		// targetname that the map script breaks them by; those whose first state plays an animation, one that the map script
+		// animates them by. Their other states and events do not convert.
 		const auto& scriptables = map_ents->scriptableMapEnts;
 		std::size_t placed{};
 		std::size_t destructibles{};
@@ -629,9 +666,14 @@ namespace zonetool::convert::iw7_iw8
 			entities += std::format("\"model\" \"{}\"\n", name);
 			entities += std::format("\"origin\" \"{}\"\n", vector_text(context.initialOrigin));
 			entities += std::format("\"angles\" \"{}\"\n", vector_text(context.initialAngles));
+			// An animated scriptable (a model of several bones) plays its first state's animation by the map script.
+			const auto* animation = def && model && model->numBones > 1 && model->boneNames && model->baseMat ?
+				first_animation(source, *def) : nullptr;
+			std::string animated;
 			if (const auto targetname = script_string(scriptables.instances[i].targetname); !targetname.empty())
 			{
 				entities += std::format("\"targetname\" \"{}\"\n", targetname);
+				animated = animation ? targetname : std::string{};
 			}
 			else if (const auto destructible = def ? destructible_of(source, *def, output) : std::nullopt)
 			{
@@ -639,13 +681,32 @@ namespace zonetool::convert::iw7_iw8
 				output.scriptable_destructibles.try_emplace(destructible->targetname, *destructible);
 				destructibles++;
 			}
+			else if (animation)
+			{
+				std::string kind(def_name);
+				std::ranges::transform(kind, kind.begin(), [](const unsigned char c)
+				{
+					return std::isalnum(c) ? static_cast<char>(std::tolower(c)) : '_';
+				});
+				animated = "iw7_animated_" + kind;
+				entities += std::format("\"targetname\" \"{}\"\n", animated);
+			}
+
+			if (!animated.empty())
+			{
+				const std::string anim(asset_name(animation->name));
+				output.scriptable_animations.try_emplace(animated, anim);
+				output.xanims.try_emplace(anim, animation);
+				output.animated_models.try_emplace(file_name(name), model);
+				output.scriptable_animation_models.try_emplace(animated, file_name(name));
+			}
 
 			entities += "}\n";
 			output.models.try_emplace(file_name(name), model);
 			placed++;
 			if (def)
 			{
-				add_scriptable_effects(source, *def, model, context, output);
+				add_scriptable_effects(source, *def, model, context, output, animated);
 			}
 		}
 
@@ -654,6 +715,8 @@ namespace zonetool::convert::iw7_iw8
 			output.scriptable_effects.size());
 		ZONETOOL_INFO("iw7: %zu of them break (%zu kinds: a health state, then the broken model, its effects and sound)", destructibles,
 			output.scriptable_destructibles.size());
+		ZONETOOL_INFO("iw7: %zu kinds of them animate (%zu animations, %zu effects on their tags)", output.scriptable_animations.size(),
+			output.xanims.size(), output.scriptable_tag_effects.size());
 
 		// IW7's breakable glass: an IW3 glass entity for each pane.
 		const auto panes = glass_panes(source);

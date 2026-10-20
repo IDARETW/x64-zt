@@ -9468,6 +9468,10 @@ PreparedMap PrepareFastfile(const ImportOptions &options)
             std::set<std::string> needed;
             for (const auto &[type, anim] : destroyAnims)
                 needed.insert(anim);
+            // The animations that an extraction's map script plays (IW7's animated scriptables),
+            // which the extraction holds.
+            for (const auto &anim : world.value("xanims", Json::array()))
+                needed.insert(anim.get<std::string>());
             const auto dumped = [&](const std::string &anim) {
                 std::error_code missing;
                 return std::filesystem::is_regular_file(

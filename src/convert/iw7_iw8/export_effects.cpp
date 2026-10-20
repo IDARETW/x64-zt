@@ -1962,6 +1962,68 @@ iw7_unsupported( a, b, c, d, e, f )
 			placed.insert(loaded.begin(), loaded.end());
 		}
 
+		// The map script that the generated parts join: IW7 maps run their effects and createfx scripts first.
+		const auto start_thread = [&](const std::string& call)
+		{
+			if (map_script.empty())
+			{
+				map_script = std::format("// The map script (IW7 maps run their effects and createfx scripts first).\nmain()\n{{\n"
+					"\tmaps\\mp\\{0}_fx::main();\n\tmaps\\createfx\\{0}_fx::main();\n\tmaps\\mp\\_load::main();\n}}\n", source.name());
+			}
+
+			const std::string load = "maps\\mp\\_load::main();";
+			if (const auto at = map_script.find(load); at != std::string::npos)
+			{
+				map_script.insert(at + load.size(), "\n    thread " + call + "();");
+			}
+		};
+
+		// The animated scriptables (export_animations): the map script plays each one's animation and the effects on the tags
+		// of its model, which follow the animation.
+		if (!output.scriptable_animations.empty())
+		{
+			std::string calls;
+			for (const auto& [targetname, anim] : output.scriptable_animations)
+			{
+				calls += std::format("\tiw7_animate( \"{}\", \"{}\" );\n", targetname, anim);
+			}
+
+			for (const auto& effect : output.scriptable_tag_effects)
+			{
+				effects.try_emplace(effect.effect, effect.effect);
+				placed.insert(effect.effect);
+				calls += std::format("\tiw7_tag_effect( \"{}\", \"{}\", \"{}\" );\n", effect.targetname, effect.effect, effect.tag);
+			}
+
+			start_thread("iw7_animations");
+			map_script += "\n// The scriptables that animate: IW7 plays the animation of their first state from the start.\n"
+				"iw7_animations()\n{\n" + calls + "}\n" + std::string(R"gsc(
+iw7_animate( name, anim )
+{
+    pieces = getentarray( name, "targetname" );
+    foreach ( piece in pieces )
+        piece scriptmodelplayanim( anim );
+}
+
+iw7_tag_effect( name, effect, tag )
+{
+    pieces = getentarray( name, "targetname" );
+    foreach ( piece in pieces )
+        piece thread iw7_tag_effect_play( effect, tag );
+}
+
+iw7_tag_effect_play( effect, tag )
+{
+    self endon( "death" );
+    wait 0.05;
+    if ( isdefined( level._effect[effect] ) )
+        playfxontag( level._effect[effect], self, tag );
+}
+)gsc");
+			ZONETOOL_INFO("iw7: the map script animates %zu kinds of scriptables with %zu effects on their tags",
+				output.scriptable_animations.size(), output.scriptable_tag_effects.size());
+		}
+
 		// The scriptables that break (export_entities): the map script breaks each when it took its health in damage. Their
 		// effects load by their own names.
 		if (!output.scriptable_destructibles.empty())
@@ -1979,18 +2041,7 @@ iw7_unsupported( a, b, c, d, e, f )
 					kind.effects.empty() ? std::string{} : kind.effects.front(), kind.sound, kind.health);
 			}
 
-			if (map_script.empty())
-			{
-				map_script = std::format("// The map script (IW7 maps run their effects and createfx scripts first).\nmain()\n{{\n"
-					"\tmaps\\mp\\{0}_fx::main();\n\tmaps\\createfx\\{0}_fx::main();\n\tmaps\\mp\\_load::main();\n}}\n", source.name());
-			}
-
-			const std::string load = "maps\\mp\\_load::main();";
-			if (const auto at = map_script.find(load); at != std::string::npos)
-			{
-				map_script.insert(at + load.size(), "\n    thread iw7_destructibles();");
-			}
-
+			start_thread("iw7_destructibles");
 			map_script += "\n// The scriptables that break: IW7 swaps their model, plays an effect and a sound when their health runs out.\n"
 				"iw7_destructibles()\n{\n" + calls + "}\n" + std::string(R"gsc(
 iw7_destructible( name, model, effect, sound, health )
