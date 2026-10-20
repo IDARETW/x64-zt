@@ -528,9 +528,20 @@ class Translator
         for (std::size_t i = 0; i < body.size();)
         {
             const Token &token = body[i];
-            // IW3 team/faction setup belongs to the Replay gametype.
+            // IW3 team/faction setup belongs to the Replay gametype, except the attacking and defending
+            // teams, which Replay's game logic takes from the level script (it prints "No attackers or
+            // defenders team defined in level .gsc." and defaults to allies/axis without them).
+            const auto sides = [&] {
+                const auto isString = [&](const std::size_t at, std::initializer_list<std::string_view> values) {
+                    return at < body.size() && body[at].kind == Kind::String &&
+                           std::ranges::find(values, Lower(body[at].text)) != values.end();
+                };
+                return i + 6 < body.size() && isString(i + 2, {"\"attackers\"", "\"defenders\""}) &&
+                       body[i + 3].text == "]" && body[i + 4].text == "=" &&
+                       isString(i + 5, {"\"allies\"", "\"axis\""}) && body[i + 6].text == ";";
+            };
             if (token.kind == Kind::Ident && Lower(token.text) == "game" && i + 1 < body.size() &&
-                body[i + 1].text == "[" && statementStart())
+                body[i + 1].text == "[" && statementStart() && !sides())
             {
                 while (i < body.size() && !(body[i].kind == Kind::Punct && body[i].text == ";"))
                     ++i;
