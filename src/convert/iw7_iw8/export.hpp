@@ -33,6 +33,11 @@ namespace zonetool::convert::iw7_iw8
 		std::set<std::string> effect_materials;
 		// The world materials of particle decals, which convert as the pipeline's decal materials (Replay decal volumes).
 		std::set<std::string> decal_materials;
+		// IW7's light-grid intensity tweak, which the map script sets (r_lightGridEnableTweaks, r_lightGridIntensity: 1.33 on
+		// Frontier and Breakneck) and Replay lacks: the converted light grid holds it.
+		float light_grid_intensity = 1.0f;
+		// The map script turns IW7's volumetric lighting off (r_volumetrics 0: Frontier): its lights convert without volumetrics.
+		bool volumetrics = true;
 		// The layers of layered IW7 materials (techsets "..._b1..._b2..."), which convert as materials of their own: by
 		// name in the extraction, the layer (1 to 3) of the material that `materials` holds.
 		std::map<std::string, int> material_layers;
