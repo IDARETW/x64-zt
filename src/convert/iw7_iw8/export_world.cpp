@@ -682,6 +682,137 @@ namespace zonetool::convert::iw7_iw8
 			return text;
 		}
 
+		// A static model's own light-grid colours from IW7's vertex lighting (STATIC_MODEL_FLAG_VERTEXLIT_LIGHTING), with
+		// the mean sun visibility of its vertices. IW7's vertex-lit pixel shader lights a vertex by ambient + highlight *
+		// saturate(dot(N, D)): the colours of GfxStaticModelVertexLighting, with D in the vertex's tangent frame (x and y
+		// in the w of the ambient and the highlight, z = sqrt(1 - x^2 - y^2); binormal cross(N, T), negated with the
+		// tangent's sign bits); visibility[0] is the sun's. Each of the 56 directions takes the mean over the vertices of
+		// the first LOD, at the level of model_lighting_colors.
+		std::optional<std::pair<std::string, std::uint8_t>> vertex_lighting_colors(const source_map& source,
+			const iw7::GfxStaticModelDrawInst& instance)
+		{
+			const auto& info = instance.vertexLightingInfo;
+			const auto* model = (instance.flags & iw7::STATIC_MODEL_FLAG_VERTEXLIT_LIGHTING) && info.lightingValues && info.numLightingValues
+				? source.resolve(iw7::ASSET_TYPE_XMODEL, instance.model) : nullptr;
+			if (!model || !model->numLods)
+			{
+				return std::nullopt;
+			}
+
+			const auto unit = [](const iw7::PackedUnitVec& vector)
+			{
+				std::array<float, 3> result{};
+				for (auto i = 0; i < 3; i++)
+				{
+					result[i] = static_cast<float>((vector.packed >> (10 * i)) & 0x3FF) / 1023.0f * 2.0f - 1.0f;
+				}
+
+				return result;
+			};
+
+			// The tangent frames (normal, tangent, binormal) of the first LOD's vertices, in the order of its surfaces.
+			std::vector<std::array<std::array<float, 3>, 3>> frames;
+			const auto add = [&](const auto& vertices)
+			{
+				for (const auto& vertex : vertices)
+				{
+					const auto n = unit(vertex.normal);
+					const auto t = unit(vertex.tangent);
+					const auto sign = (vertex.tangent.packed >> 30) ? -1.0f : 1.0f;
+					frames.push_back({n, t, std::array<float, 3>{(n[1] * t[2] - n[2] * t[1]) * sign, (n[2] * t[0] - n[0] * t[2]) * sign,
+						(n[0] * t[1] - n[1] * t[0]) * sign}});
+				}
+			};
+
+			// The values cover the vertices of every LOD in turn (Frontier: 352 values for 350 vertices, a little padding); the
+			// first LOD's lead.
+			std::size_t first_lod{};
+			for (auto l = 0; l < model->numLods && l < 6; l++)
+			{
+				const auto& lod = model->lodInfo[l];
+				const auto surfaces = source.resolve(iw7::ASSET_TYPE_XMODEL_SURFS, lod.modelSurfs);
+				const auto streamed = lod.modelSurfs ? source.streamed_surfaces(asset_name(lod.modelSurfs->name)) : nullptr;
+				for (std::size_t s = 0; s < lod.numsurfs; s++)
+				{
+					if (surfaces && surfaces->surfs && s < surfaces->numsurfs)
+					{
+						const auto& surface = surfaces->surfs[s];
+						if ((surface.flags & 8) != 0)
+						{
+							add(std::span(surface.verts0.packedMotionVerts0, surface.vertCount));
+						}
+						else
+						{
+							add(std::span(surface.verts0.packedVerts0, surface.vertCount));
+						}
+					}
+					else if (streamed && s < streamed->size())
+					{
+						const auto& stream = (*streamed)[s];
+						stream.motion ? add(stream.motion_vertices) : add(stream.vertices);
+					}
+				}
+
+				first_lod = first_lod ? first_lod : frames.size();
+			}
+
+			if (frames.size() > info.numLightingValues || info.numLightingValues - frames.size() >= 64 || !first_lod)
+			{
+				ZONETOOL_WARNING("iw7: the vertex lighting of a placement of \"%s\" has %u values for %zu vertices; it takes the light grid",
+					model->name, info.numLightingValues, frames.size());
+				return std::nullopt;
+			}
+
+			const auto& axis = instance.placement.axis;
+			const auto& directions = grid_directions();
+			std::vector<std::array<double, 3>> sums(directions.size());
+			double visibility{};
+			frames.resize(first_lod);
+			for (std::size_t v = 0; v < frames.size(); v++)
+			{
+				const auto& lighting = info.lightingValues[v];
+				const auto& [n, t, b] = frames[v];
+				const auto x = half_to_float(lighting.ambientColorFloat16[3]);
+				const auto y = half_to_float(lighting.highlightColorFloat16[3]);
+				const auto z = std::sqrt(std::max(0.0f, 1.0f - x * x - y * y));
+				std::array<float, 3> local{x * t[0] + z * n[0] + y * b[0], x * t[1] + z * n[1] + y * b[1], x * t[2] + z * n[2] + y * b[2]};
+				std::array<float, 3> along{};
+				for (auto c = 0; c < 3; c++)
+				{
+					along[c] = local[0] * axis[0][c] + local[1] * axis[1][c] + local[2] * axis[2][c];
+				}
+
+				const auto length = std::sqrt(along[0] * along[0] + along[1] * along[1] + along[2] * along[2]);
+				for (std::size_t d = 0; d < directions.size(); d++)
+				{
+					const auto& direction = directions[d];
+					const auto facing = length > 0.0f ? std::max(0.0f, (direction[0] * along[0] + direction[1] * along[1] +
+						direction[2] * along[2]) / length) : 0.0f;
+					for (auto c = 0; c < 3; c++)
+					{
+						const auto ambient = half_to_float(lighting.ambientColorFloat16[c]);
+						const auto highlight = half_to_float(lighting.highlightColorFloat16[c]);
+						sums[d][c] += (std::isfinite(ambient) ? ambient : 0.0f) + (std::isfinite(highlight) ? highlight : 0.0f) * facing;
+					}
+				}
+
+				visibility += lighting.visibility[0];
+			}
+
+			std::string text;
+			for (const auto& sum : sums)
+			{
+				for (auto c = 0; c < 3; c++)
+				{
+					const auto value = static_cast<float>(sum[c] / static_cast<double>(frames.size()));
+					const auto level = std::clamp(0.5f * light_level(std::max(value, 0.0f)), 0.0f, 1.0f);
+					text += std::format("{:02x}", static_cast<unsigned>(std::lround(level * 255.0f)));
+				}
+			}
+
+			return std::pair(std::move(text), static_cast<std::uint8_t>(std::lround(visibility / static_cast<double>(frames.size()))));
+		}
+
 		json export_static_model(const source_map& source, const iw7::GfxWorld& world, const unsigned int index,
 			const reflection_probes& probes, const floor_light& floors, iw7_light_grid& grid, extraction& output)
 		{
@@ -712,7 +843,13 @@ namespace zonetool::convert::iw7_iw8
 				{"reflection_probe", probes.find(instance.placement.origin)},
 			};
 
-			if (const auto colors = model_lighting_colors(grid, world.dpvs.smodelInsts[index].bounds.midPoint))
+			if (const auto vertex = vertex_lighting_colors(source, instance))
+			{
+				// The sun weight of the colours is the alpha of the ground lighting (a D3DCOLOR).
+				result["lighting_colors"] = vertex->first;
+				result["ground_lighting"] = (ground.value_or(0) & 0x00FFFFFFu) | static_cast<std::uint32_t>(vertex->second) << 24;
+			}
+			else if (const auto colors = model_lighting_colors(grid, world.dpvs.smodelInsts[index].bounds.midPoint))
 			{
 				result["lighting_colors"] = *colors;
 			}

@@ -39,7 +39,7 @@ namespace zonetool::convert::iw7_iw8
 			return;
 		}
 
-		const source_map source(zone_path);
+		source_map source(zone_path);
 		{
 			const auto& world = *source.world();
 			// The surfaces share the vertices of the transient zones.
@@ -72,6 +72,15 @@ namespace zonetool::convert::iw7_iw8
 		export_animations(source, output);
 		export_effects(source, output, conversion);
 		export_sounds(source, output);
+		// A model that the loaded zones lack may have a zone of its own.
+		for (auto& [name, model] : output.models)
+		{
+			if (!model && source.load_model_zone(name))
+			{
+				model = static_cast<const iw7::XModel*>(source.find(iw7::ASSET_TYPE_XMODEL, name));
+			}
+		}
+
 		export_models(source, output);
 		export_skeletons(source, output);
 		remove_missing_entity_models(source, output);
