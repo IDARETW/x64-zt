@@ -5161,6 +5161,29 @@ Json BuildRender(const Json &world, const VisibilityGroups &visibility,
             if (found->second.kind != SurfaceKind::skipped)
                 ordered.push_back(&surface);
         }
+        // Extractions that opt in ("spatial_surfaces") merge only surfaces of one 512-unit cell, up to 4096 triangles:
+        // merged by material alone, IW7 Frontier drew 388 world surfaces of up to 42793 triangles and 34000 units, which
+        // GPU culling and the shadow maps of local lights took whole (stock mp_hideout: 3301, 28 triangles and 207
+        // units at the median).
+        const bool spatial = world.value("spatial_surfaces", false);
+        std::map<const Surface *, std::array<int, 3>> cells;
+        if (spatial)
+            for (const Surface *surface : ordered)
+            {
+                Vec3 low{INFINITY, INFINITY, INFINITY}, high{-INFINITY, -INFINITY, -INFINITY};
+                for (const Vertex &vertex : surface->vertices)
+                    for (std::size_t axis = 0; axis < 3; ++axis)
+                    {
+                        low[axis] = std::min(low[axis], vertex.position[axis]);
+                        high[axis] = std::max(high[axis], vertex.position[axis]);
+                    }
+                std::array<int, 3> cell{};
+                for (std::size_t axis = 0; axis < 3; ++axis)
+                    cell[axis] = surface->vertices.empty()
+                                     ? 0
+                                     : static_cast<int>(std::floor((low[axis] + high[axis]) * 0.5f / 512.0f));
+                cells.emplace(surface, cell);
+            }
         std::stable_sort(ordered.begin(), ordered.end(), [&](const Surface *a, const Surface *b) {
             const auto &ma = plan.materials.at(a->material);
             const auto &mb = plan.materials.at(b->material);
@@ -5181,6 +5204,8 @@ Json BuildRender(const Json &world, const VisibilityGroups &visibility,
                 return a->visibilityGroup < b->visibilityGroup;
             if (a->reflectionProbe != b->reflectionProbe)
                 return a->reflectionProbe < b->reflectionProbe;
+            if (spatial && cells.at(a) != cells.at(b))
+                return cells.at(a) < cells.at(b);
             return a->material < b->material;
         });
 
@@ -5257,9 +5282,15 @@ Json BuildRender(const Json &world, const VisibilityGroups &visibility,
             // Several IW3 materials share one Replay fallback material. Keep
             // their caster eligibility separate when merging fixed and entity brushes.
             key << ':' << material.castsShadow;
+            if (spatial)
+            {
+                const auto &cell = cells.at(source);
+                key << ':' << cell[0] << ',' << cell[1] << ',' << cell[2];
+            }
             if (!target || activeKey != key.str() ||
                 targetVertices + emittedVertices > 60000 ||
-                targetIndices + surface.indices.size() > 65535u * 3u)
+                targetIndices + surface.indices.size() > 65535u * 3u ||
+                (spatial && targetIndices && targetIndices + surface.indices.size() > 4096u * 3u))
             {
                 output["surfaces"].push_back({{"vertices", Json::array()},
                                               {"indices", Json::array()},

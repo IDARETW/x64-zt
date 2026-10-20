@@ -125,6 +125,10 @@ Without a command, `zonetool.exe` opens an interactive console.
 - The extraction's world JSON sets `translucent_glass`: the pipeline then draws blended BSP surfaces in the
   translucent camera region (3, 26), after the sky. In the opaque region the sky covered Frontier's roof glass.
   IW3 conversions do not set it.
+- IW7 extractions set `spatial_surfaces`: world surfaces merge only within 512-unit cells and up to 4096 triangles.
+  Merged by material alone, Frontier drew 388 surfaces of up to 42793 triangles and 34000 units, which GPU culling and
+  the shadow maps of local lights took whole (stock mp_hideout: 3301 surfaces, 28 triangles and 207 units at the median;
+  Frontier now 2748, 20 triangles at the median).
 - Each Replay particle element draws from its module: beam, decal, flare, geo trail, omni light, model and runner states
   read it at their particles' update (`sub_141BA52C0` dispatches by element; every stock state has its module). An emitter
   with a state whose module did not convert is left out: Breakneck's `vfx_rivet_spotlight_orange` kept its spot element
