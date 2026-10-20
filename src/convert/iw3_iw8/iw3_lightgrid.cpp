@@ -1127,15 +1127,31 @@ std::vector<std::uint8_t> BuildMeshPayload(const std::vector<std::uint8_t> &sour
     for (const auto value : gridHigh)
         Append(output, static_cast<float>(value));
     Append(output, 0.0f);
+    std::size_t scaledProbes = 0;
     for (const auto &probe : probes)
     {
         // DC must not be negative for PackProbe; IW7's interpolation weights keep it so.
         Probe clamped = probe;
         for (auto &channel : clamped)
             channel[0] = std::max(channel[0], 0.0f);
+        // Probes keep half floats: a day map's light units take IW7's brightest probes past their range (Scorch: raw
+        // 7171 x 23.9). Such a probe scales as a whole into it, keeping its colour and direction.
+        float peak = 0.0f;
+        for (const auto &channel : clamped)
+            for (const float value : channel)
+                peak = std::max(peak, std::isfinite(value) ? std::abs(value) : 0.0f);
+        if (peak > 60000.0f)
+        {
+            for (auto &channel : clamped)
+                for (float &value : channel)
+                    value *= 60000.0f / peak;
+            ++scaledProbes;
+        }
         const auto packed = PackProbe(clamped, 0);
         AppendBytes(output, packed.data(), packed.size());
     }
+    if (scaledProbes)
+        zt::warn("iw3: %zu light-grid probe(s) exceed the half-float range; scaled into it", scaledProbes);
     for (const auto &position : positions)
         for (const auto value : position)
             Append(output, static_cast<float>(value));

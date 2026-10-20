@@ -320,6 +320,72 @@ namespace zonetool::convert::iw7_iw8
 			ZONETOOL_INFO("iw7: exported %zu collision triangles from the world surfaces", writer.triangles.size());
 		}
 
+		// IW7's unbreakable glass (Frontier's patterned roof, glass_clear_unbreakable_*) has no bullet collision of its own:
+		// only the player clips over it, so bullets passed through it (owner test of 58aac89). Its render triangles become
+		// collision that stops shots and nothing else (clipshot and missileclip, as IW7's other shot clips), of Replay's
+		// glass_solid surface (39: bulletproof, glass impacts).
+		void add_unbreakable_glass_collision(const source_map& source, collision_writer& writer)
+		{
+			constexpr std::uint32_t contents_shot_clip = 0x2080;
+			constexpr std::uint32_t surface_glass_solid = 39;
+			const auto& world = *source.world();
+			const auto world_surfaces = world.modelCount ? world.models[0].surfaceCount : world.surfaceCount;
+			std::size_t added{};
+			for (auto i = 0u; i < world_surfaces && i < world.surfaceCount; i++)
+			{
+				const auto& surface = world.dpvs.surfaces[i];
+				const auto* material = source.resolve(iw7::ASSET_TYPE_MATERIAL, surface.material);
+				const std::string_view name = material ? asset_name(material->name) : std::string_view{};
+				if (name.find("glass") == std::string_view::npos || name.find("unbreakable") == std::string_view::npos ||
+					surface.transientZone >= world.draw.transientZoneCount)
+				{
+					continue;
+				}
+
+				const auto zone = source.resolve(iw7::ASSET_TYPE_GFXWORLD_TRANSIENT_ZONE, world.draw.transientZones[surface.transientZone]);
+				if (!zone || !zone->vd.vertices)
+				{
+					continue;
+				}
+
+				const auto& tris = surface.tris;
+				for (auto t = 0u; t < tris.triCount; t++)
+				{
+					const auto* index = world.draw.indices + tris.baseIndex + t * 3;
+					std::array<std::size_t, 3> corners{};
+					auto valid = true;
+					for (auto c = 0; c < 3; c++)
+					{
+						const auto v = tris.firstVertex + index[c];
+						if (v >= zone->vertexCount)
+						{
+							valid = false;
+							break;
+						}
+
+						const auto& xyz = zone->vd.vertices[v].xyz;
+						corners[c] = writer.vertex({xyz[0], xyz[1], xyz[2]});
+					}
+
+					if (!valid)
+					{
+						continue;
+					}
+
+					// Render triangles wind as the extraction's IW3 triangles (the pipeline reverses them).
+					writer.triangles.push_back(json::array({corners[0], corners[1], corners[2]}));
+					writer.contents.push_back(contents_shot_clip);
+					writer.surfaces.push_back(json::array({surface_glass_solid, 0}));
+					added++;
+				}
+			}
+
+			if (added)
+			{
+				ZONETOOL_INFO("iw7: added %zu shot-clip triangles of unbreakable glass", added);
+			}
+		}
+
 		std::optional<havok_shapes> read_shapes(const char* data, const unsigned int size, const char* owner)
 		{
 			if (!data || !size)
@@ -432,6 +498,7 @@ namespace zonetool::convert::iw7_iw8
 
 			ZONETOOL_INFO("iw7: exported the Havok collision of the world: %zu brushes and %zu triangles (%zu pieces of a form that "
 				"does not convert)", world_brushes, writer.triangles.size(), world_shapes->unknown);
+			add_unbreakable_glass_collision(source, writer);
 		}
 		else
 		{

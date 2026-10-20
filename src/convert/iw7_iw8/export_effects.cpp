@@ -808,7 +808,17 @@ namespace zonetool::convert::iw7_iw8
 					for (auto a = 0; a < list.numAssets; a++)
 					{
 						const auto* material = list.assetList[a].material;
-						if (material && flare)
+						// A flare whose own image cannot be read (Frontier's fixture glares: their glow images are stubs
+						// of paks the zone folder lacks) keeps its IW7 material, which the material export turns into
+						// one that adds nothing, as for such sprites: a stock flare in its place drew white glows at the
+						// fixtures that the occlusion test switched on and off with the view (owner test of 58aac89).
+						const auto readable = [&]
+						{
+							const auto* color = color_image(this->source_, material);
+							return color && color->name && (color->name[0] == '$' ||
+								load_image_faces(*color, DXGI_FORMAT_R8G8B8A8_UNORM, 64).size() == 1);
+						};
+						if (material && flare && readable())
 						{
 							// Replay draws flares through flare materials (MTL_TYPE_EFFECT_FLARE: screen-space flare
 							// vertices); IW7's lens-flare materials converted as effect sprites drew those vertices as
