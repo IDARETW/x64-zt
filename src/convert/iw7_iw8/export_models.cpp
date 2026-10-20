@@ -93,12 +93,44 @@ namespace zonetool::convert::iw7_iw8
 			};
 		}
 
+		// The largest scale that the world places a model at (1 for a model that it does not place).
+		float largest_placement_scale(const source_map& source, const std::string& name)
+		{
+			static std::unordered_map<const source_map*, std::unordered_map<std::string, float>> cache;
+			auto& scales = cache[&source];
+			if (scales.empty())
+			{
+				scales.emplace("", 1.0f);
+				if (const auto* world = source.world())
+				{
+					for (auto i = 0u; i < world->dpvs.smodelCount; i++)
+					{
+						const auto& instance = world->dpvs.smodelDrawInsts[i];
+						if (!instance.model)
+						{
+							continue;
+						}
+
+						auto& scale = scales[file_name(asset_name(iw7::get_asset_name(iw7::ASSET_TYPE_XMODEL, instance.model)))];
+						scale = std::max(scale, instance.placement.scale);
+					}
+				}
+			}
+
+			const auto found = scales.find(name);
+			return found != scales.end() ? std::max(found->second, 1.0f) : 1.0f;
+		}
+
 		bool export_model(const source_map& source, const std::string& name, const iw7::XModel* model, extraction& output)
 		{
 			if (!model || !model->numLods)
 			{
 				return false;
 			}
+
+			// A model that the world places beyond the range of model bounds spans the map: the sky draws it (Breakneck's
+			// black hole, 4932 units placed at scale 60, cut through the level with its default-white disc).
+			const auto placement_scale = largest_placement_scale(source, name);
 
 			auto table_lods = json::array();
 			auto geometry_lods = json::array();
@@ -139,10 +171,10 @@ namespace zonetool::convert::iw7_iw8
 							: export_surface(std::span(surface.vertices), std::span(surface.faces), material_name));
 					}
 
-					if (largest > largest_model_coordinate)
+					if (largest * placement_scale > largest_model_coordinate)
 					{
-						ZONETOOL_WARNING("iw7: model \"%s\" reaches %.0f units, beyond the range of Replay model bounds: the sky draws it",
-							name.data(), largest);
+						ZONETOOL_WARNING("iw7: model \"%s\" reaches %.0f units (placed at scale %g), beyond the range of Replay model "
+							"bounds: the sky draws it", name.data(), largest * placement_scale, placement_scale);
 						output.distant_models.insert(name);
 						return false;
 					}

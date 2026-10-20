@@ -415,7 +415,9 @@ namespace zonetool::convert::iw7_iw8
 			return name;
 		}
 
-		ZONETOOL_WARNING("iw7: the world has no sky cube map that converts; the pipeline draws a dark sky");
+		ZONETOOL_WARNING("iw7: the world has no sky cube map that converts; the pipeline draws a dark sky%s",
+			output.distant_models.empty() ? "" : std::format(" without the {} models that the sky would draw",
+				output.distant_models.size()).data());
 		return {};
 	}
 }
