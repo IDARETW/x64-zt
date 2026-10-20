@@ -5,6 +5,18 @@ namespace zonetool::convert::iw7_iw8
 {
 	namespace
 	{
+		// Names each form of Havok data that does not convert, once.
+		void report_unknown(const std::string& form)
+		{
+			static std::mutex mutex;
+			static std::set<std::string> reported;
+			const std::lock_guard lock(mutex);
+			if (reported.insert(form).second)
+			{
+				ZONETOOL_INFO("iw7: Havok data of a form that does not convert: %s", form.data());
+			}
+		}
+
 		using vec3 = std::array<float, 3>;
 
 		// The game units of a Havok unit.
@@ -342,6 +354,7 @@ namespace zonetool::convert::iw7_iw8
 						const auto header = table_entry(indices[0]);
 						if ((header & 0xFF) != 2)
 						{
+							report_unknown(std::format("compressed mesh primitive of type {}", header & 0xFF));
 							shapes.unknown++;
 							continue;
 						}
@@ -395,6 +408,7 @@ namespace zonetool::convert::iw7_iw8
 				const auto child_class = file.class_of(*child);
 				if (child_class != "hknpConvexPolytopeShape" && child_class != "hknpConvexShape")
 				{
+					report_unknown(std::format("compound child {}", child_class));
 					shapes.unknown++;
 					continue;
 				}
@@ -490,6 +504,7 @@ namespace zonetool::convert::iw7_iw8
 			}
 			else
 			{
+				report_unknown(std::string(shape_class));
 				result.unknown++;
 			}
 		}

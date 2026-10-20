@@ -210,7 +210,45 @@ bool isReplayEntity(const std::string &classname)
         "trigger_use",
         "trigger_use_touch",
     }};
-    return std::find(classes.begin(), classes.end(), classname) != classes.end();
+    // The other classes of shipped Replay maps (mp_shipment's spawn list and
+    // entity string, 2026-10-20): the spawns of its other modes (Hardpoint,
+    // Demolition, Cyber Attack, Arena, Gunfight-style secondary sets), the
+    // helicopter path structs, and its battle-chatter location triggers
+    // (trigger_multiple_bcs_<location>).
+    static constexpr std::array<const char *, 29> shipped{{
+        "mp_arena_spawn_allies_start",
+        "mp_arena_spawn_axis_start",
+        "mp_ctf_spawn_secondary",
+        "mp_cyber_spawn_allies",
+        "mp_cyber_spawn_axis",
+        "mp_dd_spawn_attacker",
+        "mp_dd_spawn_attacker_a",
+        "mp_dd_spawn_attacker_b",
+        "mp_dd_spawn_attacker_start",
+        "mp_dd_spawn_defender",
+        "mp_dd_spawn_defender_a",
+        "mp_dd_spawn_defender_b",
+        "mp_dd_spawn_defender_start",
+        "mp_dm_spawn_secondary",
+        "mp_dm_spawn_start",
+        "mp_dom_spawn_secondary",
+        "mp_koth_spawn",
+        "mp_koth_spawn_allies_start",
+        "mp_koth_spawn_axis_start",
+        "mp_koth_spawn_secondary",
+        "mp_rugby_spawn_allies",
+        "mp_rugby_spawn_allies_secondary",
+        "mp_rugby_spawn_allies_start",
+        "mp_rugby_spawn_axis",
+        "mp_rugby_spawn_axis_secondary",
+        "mp_rugby_spawn_axis_start",
+        "mp_tdm_spawn_secondary",
+        "script_struct_heli",
+        "triggermodeldummydefault",
+    }};
+    return std::find(classes.begin(), classes.end(), classname) != classes.end() ||
+           std::find(shipped.begin(), shipped.end(), classname) != shipped.end() ||
+           classname.starts_with("trigger_multiple_bcs_");
 }
 
 bool isModeSpecificSpawn(const std::string &classname)

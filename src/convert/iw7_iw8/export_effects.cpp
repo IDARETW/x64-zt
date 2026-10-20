@@ -1802,12 +1802,13 @@ iw7_state( mode, animation, to, time )
 		std::string translate_map_script(const std::string& map, const std::string& text, const std::map<std::string, std::string>& scripts,
 			std::set<std::string>& effects, const std::function<bool(const std::string&)>& add_model)
 		{
-			// The shared IW7 scripts that convert with the map script (their functions join it): the animation suite, which
-			// rotates and moves the map's animObj entities. gsc-tool names a script whose name it does not know by its id, so
-			// the script is the one that defines the functions that the map script calls.
+			// The shared IW7 scripts that convert with the map script (their functions join it; only those that the map
+			// script reaches are written): the animation suite, which rotates and moves the map's animObj entities, and the
+			// MP utilities (Frontier's zero-g ragdolls, physics_setgravityragdollscalar). gsc-tool names a script whose name
+			// it does not know by its id, so the script is the one that defines the functions that the map script calls.
 			auto own = text;
 			std::vector<script_function> shared;
-			for (const std::string_view path : {R"(scripts\mp\animation_suite)"})
+			for (const std::string_view path : {R"(scripts\mp\animation_suite)", R"(scripts\mp\utility)"})
 			{
 				const auto prefix = std::string(path) + "::";
 				std::set<std::string> called;
