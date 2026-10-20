@@ -71,6 +71,14 @@ namespace zonetool::convert::iw7_iw8
 		export_entities(source, output);
 		export_animations(source, output);
 		export_effects(source, output, conversion);
+		// The sound globals (SndGlobals "singleton": the falloff, filter and reverb send curves that aliases name) are in
+		// code_post_gfx, which the game loads before every map; as a common zone it only fills in what the others lack.
+		source.load("patch_code_post_gfx");
+		if (!source.load("code_post_gfx"))
+		{
+			ZONETOOL_WARNING("iw7: zone \"code_post_gfx\" was not found; sound aliases keep the default curves");
+		}
+
 		export_sounds(source, output);
 		// A model that the loaded zones lack may have a zone of its own.
 		for (auto& [name, model] : output.models)

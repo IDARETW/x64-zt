@@ -375,13 +375,224 @@ namespace zonetool::convert::iw7_iw8
 		};
 	}
 
-	void export_sounds(const source_map& source, extraction& output)
+	namespace
 	{
-		if (output.sound_names.empty())
+		// The Replay entity channel for an IW7 channel index (games/iw7/assets/sound_globals.hpp ENTCHANNELS): the
+		// same name, or the nearest Replay channel for the IW7-only ones.
+		std::string replay_channel(const int index)
 		{
-			return;
+			if (index < 0 || static_cast<std::size_t>(index) >= std::size(iw7::ENTCHANNELS))
+			{
+				return "scn_fx_unres_3d";
+			}
+
+			static const std::unordered_map<std::string, std::string> nearest =
+			{
+				{"reload_plr_akimbo_res_2d", "reload_plr_res2_2d"},
+				{"reload_plr_akimbo_unres_2d", "reload_plr_unres_2d"},
+				{"spear_refl_close_unres_3d_lim", "spear_refl_front_unres_3d_lim"},
+				{"spear_refl_unres_3d_lim", "spear_refl_dist_unres_3d_lim"},
+				{"ability_plr_unres_2d", "plr_use_misc_unres_2d"},
+				{"ability_npc_unres_3d", "equip_use_unres_3d"},
+				{"explo_1_3d", "explo_main_3d"},
+				{"explo_2_3d", "explo_close_3d"},
+				{"explo_3_3d", "explo_body_3d"},
+				{"explo_4_3d", "explo_body2_3d"},
+				{"explo_5_3d", "explo_debris_3d"},
+				{"explo_dist_1_3d", "explo_far_3d"},
+				{"explo_dist_2_3d", "explo_dist_3d"},
+				{"foley_c12_step_3d", "foley_npc_step_3d"},
+				{"foley_c12_lfe_3d", "vehicle_lfe_3d"},
+				{"beamimpact_unres_3d_lim", "bulletimpact_unres_3d_lim"},
+				{"foley_npc_zmb_step_3d_lim", "foley_npc_step_unres_3d"},
+				{"vehicle_weap_close_3d_lim", "veh_weap_npc_main_3d"},
+			};
+			const auto& name = iw7::ENTCHANNELS[index];
+			const auto found = nearest.find(name);
+			return found != nearest.end() ? found->second : name;
 		}
 
+		// IW7 volmods all exist in Replay under the same names.
+		std::string replay_volmod(const int index)
+		{
+			return index >= 0 && static_cast<std::size_t>(index) < std::size(iw7::VOLMODS) ? iw7::VOLMODS[index] : "default";
+		}
+
+		json string_or_null(const char* text)
+		{
+			return text && *text ? json(text) : json();
+		}
+
+		// sound/soundtable.json for the importer (iw3_sound.cpp ReadSoundTable): the bank's SoundTable (zones, reverbs,
+		// filters, mixes, occlusion, ambience) and send effects (the reverbs' room types) under the Replay field names. IW7's
+		// ZoneDef has no exterior flag; it follows the zone's weapon reflection preset ("exterior..." presets, as the
+		// Frontier zones use them; inferred). IW7's unknown 56-byte table (SoundTable +200) has no Replay counterpart.
+		// Returns the aliases that the table plays.
+		std::set<std::string> export_sound_table(const source_map& source, const iw7::SndBank& bank, extraction& output)
+		{
+			const auto& table = bank.soundTable;
+			json out = {{"map", source.name()}};
+			auto& send = out["send_effects"] = json::array();
+			for (auto i = 0u; i < bank.sendEffectCount; i++)
+			{
+				const auto& e = bank.sendEffects[i];
+				send.push_back({{"name", std::string(e.name, strnlen(e.name, sizeof(e.name)))}, {"id", e.id}, {"smoothing", e.smoothing},
+					{"earlyTime", e.earlyTime}, {"lateTime", e.lateTime}, {"earlyGain", e.earlyGain}, {"lateGain", e.lateGain},
+					{"lateGainProx", e.lateGainProx}, {"returnGain", e.returnGain}, {"earlyLpf", e.earlyLpf}, {"lateLpf", e.lateLpf},
+					{"inputLpf", e.inputLpf}, {"dampLpf", e.dampLpf}, {"wallReflect", e.wallReflect}, {"dryGain", e.dryGain},
+					{"earlySize", e.earlySize}, {"lateSize", e.lateSize}, {"diffusion", e.diffusion}, {"rearLevel", e.rearLevel}});
+			}
+
+			const auto adsr_zones = [](const iw7::AdsrZoneEntry* entries, const unsigned count)
+			{
+				auto items = json::array();
+				for (auto i = 0u; i < count; i++)
+				{
+					items.push_back({{"name", string_or_null(entries[i].name)}, {"id", entries[i].id},
+						{"weaponName", string_or_null(entries[i].weaponName)}, {"adsrIdx", entries[i].adsrIdx}, {"weaponIdx", entries[i].weaponIdx}});
+				}
+
+				return items;
+			};
+
+			auto& adsr = out["adsr"] = json::array();
+			for (auto i = 0u; i < table.adsrCount; i++)
+			{
+				const auto& a = table.adsrSettings[i];
+				adsr.push_back({{"name", string_or_null(a.name)}, {"id", a.id}, {"attackLength", a.attackLength},
+					{"attackCurve", static_cast<int>(a.attackCurve)}, {"decayLength", a.decayLength}, {"decayCurve", static_cast<int>(a.decayCurve)},
+					{"releaseLength", a.releaseLength}, {"releaseCurve", static_cast<int>(a.releaseCurve)}, {"sustainLevel", a.sustainLevel},
+					{"sustainLength", a.sustainLength}});
+			}
+
+			auto& defs = out["ambient_defs"] = json::array();
+			for (auto i = 0u; i < table.ambientDefCount; i++)
+			{
+				const auto& d = table.ambientDefs[i];
+				defs.push_back({{"name", string_or_null(d.name)}, {"id", d.id}, {"ambientEventIndex", d.ambientEventIndex},
+					{"numEvents", d.numEvents}, {"timeMin", d.timeMin}, {"timeMax", d.timeMax}});
+			}
+
+			auto& events = out["ambient_events"] = json::array();
+			for (auto i = 0u; i < table.ambientEventCount; i++)
+			{
+				const auto& e = table.ambientEvents[i];
+				events.push_back({{"id", e.id}, {"ambientElementIndex", e.ambientElementIndex}, {"weight", e.weight}});
+			}
+
+			std::set<std::string> aliases;
+			auto& elements = out["ambient_elements"] = json::array();
+			for (auto i = 0u; i < table.ambientElementsCount; i++)
+			{
+				const auto& e = table.ambientElements[i];
+				elements.push_back({{"id", e.id}, {"aliasName", string_or_null(e.aliasName)}, {"rangeMin", e.rangeMin},
+					{"rangeMax", e.rangeMax}, {"coneMin", e.coneMin}, {"coneMax", e.coneMax}});
+				if (e.aliasName && *e.aliasName)
+				{
+					aliases.insert(std::string(asset_name(e.aliasName)));
+				}
+			}
+
+			auto& filters = out["filters"] = json::array();
+			for (auto i = 0u; i < table.filterCount; i++)
+			{
+				const auto& f = table.filters[i];
+				filters.push_back({{"id", f.id}, {"entChannel", replay_channel(f.entChannelIdx)}, {"band", f.band},
+					{"type", static_cast<int>(f.type)}, {"freq", f.freq}, {"gain", f.gain}, {"q", f.q}});
+			}
+
+			auto& mixes = out["mixes"] = json::array();
+			for (auto i = 0u; i < table.mixCount; i++)
+			{
+				const auto& m = table.mixes[i];
+				mixes.push_back({{"id", m.id}, {"volMod", replay_volmod(m.volModIndex)}, {"volume", m.volume}, {"fade", m.fade}});
+			}
+
+			out["npc_adsr_zones"] = adsr_zones(table.npcADSRZones, table.npcADSRZoneCount);
+			out["player_adsr_zones"] = adsr_zones(table.playerADSRZones, table.playerADSRZoneCount);
+
+			auto& occlusion = out["occlusion_filters"] = json::array();
+			for (auto i = 0u; i < table.occlusionFilterCount; i++)
+			{
+				const auto& o = table.occlusionFilters[i];
+				occlusion.push_back({{"id", o.id}, {"entChannel", replay_channel(o.entChannelIdx)}, {"cutoffLevel1", o.cutoffLevel1},
+					{"cutoffLevel2", o.cutoffLevel2}, {"cutoffLevel3", o.cutoffLevel3}, {"cutoffLevel4", o.cutoffLevel4},
+					{"attnLevel1", o.attnLevel1}, {"attnLevel2", o.attnLevel2}, {"attnLevel3", o.attnLevel3}, {"attnLevel4", o.attnLevel4}});
+			}
+
+			auto& reverbs = out["reverbs"] = json::array();
+			for (auto i = 0u; i < table.reverbCount; i++)
+			{
+				const auto& r = table.reverbs[i];
+				reverbs.push_back({{"id", r.id}, {"roomTypeId", r.roomTypeId},
+					{"roomType", std::string(r.roomType, strnlen(r.roomType, sizeof(r.roomType)))}, {"dryLevel", r.dryLevel},
+					{"wetLevel", r.wetLevel}, {"fadeTime", r.fadeTime}});
+			}
+
+			auto& timescales = out["timescales"] = json::array();
+			for (auto i = 0u; i < table.timeScaleSettingCount; i++)
+			{
+				const auto& t = table.timeScaleSettings[i];
+				timescales.push_back({{"id", t.id}, {"presetName", t.presetName}, {"entChannel", replay_channel(t.entChannelIdx)}, {"scale", t.scale}});
+			}
+
+			auto& zones = out["zones"] = json::array();
+			for (auto i = 0u; i < table.zoneCount; i++)
+			{
+				const auto& z = table.zones[i];
+				const auto reflection = std::string(z.weapReflName ? z.weapReflName : "");
+				zones.push_back({{"id", z.id}, {"stateId", z.stateId}, {"reverbIndex", z.reverbIndex},
+					{"startOcclusionIndex", z.startOcclusionIndex}, {"numOcclusion", z.numOcclusion}, {"startFilterIndex", z.startFilterIndex},
+					{"numFilter", z.numFilter}, {"startMixIndex", z.startMixIndex}, {"numMix", z.numMix},
+					{"ambientStream", string_or_null(z.ambientStream)}, {"startAdsrZoneIndex", z.startAdsrZoneIndex},
+					{"numAdsrZone", z.numAdsrZone}, {"startNPCAdsrZoneIndex", z.startNPCAdsrZoneIndex}, {"numNPCAdsrZone", z.numNPCAdsrZone},
+					{"ambientDefIndex", z.ambientDefIndex}, {"startFullOccIndex", z.startFullOccIndex}, {"numDisableFullOcc", z.numDisableFullOcc},
+					{"startPlayerBreathStateIndex", z.startPlayerBreathStateIndex}, {"numPlayerBreathStates", z.numPlayerBreathStates},
+					{"weapReflId", z.weapReflId}, {"exterior", reflection.starts_with("exterior")},
+					{"zoneName", string_or_null(z.zoneName)}, {"stateName", string_or_null(z.stateName)},
+					{"ambientName", string_or_null(z.ambientName)}, {"mixName", string_or_null(z.mixName)},
+					{"reverbName", string_or_null(z.reverbName)}, {"filterName", string_or_null(z.filterName)},
+					{"occlusionName", string_or_null(z.occlusionName)}, {"plrAdsrName", string_or_null(z.plrAdsrName)},
+					{"npcAdsrName", string_or_null(z.npcAdsrName)}, {"weapReflName", string_or_null(z.weapReflName)},
+					{"fullOccName", string_or_null(z.fullOccName)}, {"playerBreathStateName", string_or_null(z.playerBreathStateName)},
+					{"contextType1", z.contextType1}, {"contextValue1", z.contextValue1}, {"contextType2", z.contextType2},
+					{"contextValue2", z.contextValue2}, {"contextType3", z.contextType3}, {"contextValue3", z.contextValue3},
+					{"contextType4", z.contextType4}, {"contextValue4", z.contextValue4}});
+				if (z.ambientStream && *z.ambientStream)
+				{
+					aliases.insert(std::string(asset_name(z.ambientStream)));
+				}
+			}
+
+			auto& full = out["full_occlusions"] = json::array();
+			for (auto i = 0u; i < table.fullOcclusionDefCount; i++)
+			{
+				const auto& f = table.fullOcclusionDefs[i];
+				full.push_back({{"id", f.id}, {"presetName", f.presetName}, {"entChannel", replay_channel(f.entChannelIdx)}});
+			}
+
+			auto& breath = out["breath_states"] = json::array();
+			for (auto i = 0u; i < table.plrBreathStateDefCount; i++)
+			{
+				const auto& b = table.plrBreathStateDefs[i];
+				breath.push_back({{"stateType", b.stateType}, {"inhaleAlias", string_or_null(b.inhaleAlias)},
+					{"exhaleAlias", string_or_null(b.exhaleAlias)}, {"minBreaths", b.minBreaths}});
+			}
+
+			if (table.unkCount)
+			{
+				ZONETOOL_INFO("iw7: sound table drops %u entries of its unknown table (no Replay counterpart)", table.unkCount);
+			}
+
+			write_json(output.extracted / "sound" / "soundtable.json", out);
+			ZONETOOL_INFO("iw7: exported sound table: %u zones, %u reverbs, %u filters, %u mixes, %u occlusion filters, %u send effects",
+				table.zoneCount, table.reverbCount, table.filterCount, table.mixCount, table.occlusionFilterCount, bank.sendEffectCount);
+			return aliases;
+		}
+	}
+
+	void export_sounds(const source_map& source, extraction& output)
+	{
 		const auto bank = static_cast<const iw7::SndBank*>(source.find(iw7::ASSET_TYPE_SOUND_BANK, source.name() + ".all"));
 		if (!bank || !bank->alias)
 		{
@@ -389,21 +600,168 @@ namespace zonetool::convert::iw7_iw8
 			return;
 		}
 
-		const asset_bank loaded(std::string(bank->zone ? bank->zone : source.name().data()) + ".sabl");
-		if (!loaded.size())
+		// The table's aliases (zone ambience beds, ambient elements) export with the aliases that the scripts name.
+		for (const auto& name : export_sound_table(source, *bank, output))
 		{
-			ZONETOOL_WARNING("iw7: the zone folder has no %s.sabl; the map has no sounds", bank->zone ? bank->zone : source.name().data());
+			output.sound_names.insert(name);
+		}
+
+		if (output.sound_names.empty())
+		{
 			return;
 		}
 
-		std::unordered_map<std::string, const iw7::SndAliasList*> lists;
-		for (auto i = 0u; i < bank->aliasCount; i++)
+		// Loaded sounds sit in <zone>.sabl, streamed ones (ambience beds) in <zone>.sabs, for each bank's zone.
+		std::map<std::string, std::pair<asset_bank, asset_bank>> sound_files;
+		const auto files_of = [&](const iw7::SndBank& owner) -> const std::pair<asset_bank, asset_bank>&
 		{
-			if (bank->alias[i].aliasName)
+			const std::string zone = owner.zone ? owner.zone : source.name();
+			auto found = sound_files.find(zone);
+			if (found == sound_files.end())
 			{
-				lists.emplace(asset_name(bank->alias[i].aliasName), &bank->alias[i]);
+				found = sound_files.try_emplace(zone, asset_bank(zone + ".sabl"), asset_bank(zone + ".sabs")).first;
+				if (!found->second.first.size() && !found->second.second.size())
+				{
+					ZONETOOL_WARNING("iw7: the zone folder has no %s.sabl or %s.sabs; the aliases of %s have no sounds", zone.data(),
+						zone.data(), owner.name ? owner.name : "?");
+				}
+			}
+
+			return found->second;
+		};
+
+		// The aliases of the map bank, then of the other loaded banks (the common zones' banks hold the aliases that common
+		// effects play: Frontier's emt_sparks_runner, emt_steam_hiss_long_dist).
+		std::unordered_map<std::string, std::pair<const iw7::SndAliasList*, const iw7::SndBank*>> lists;
+		const auto add_lists = [&](const iw7::SndBank& owner)
+		{
+			for (auto i = 0u; owner.alias && i < owner.aliasCount; i++)
+			{
+				if (owner.alias[i].aliasName)
+				{
+					lists.try_emplace(std::string(asset_name(owner.alias[i].aliasName)), &owner.alias[i], &owner);
+				}
+			}
+		};
+
+		add_lists(*bank);
+		for (const auto& [bank_name, asset] : source.assets(iw7::ASSET_TYPE_SOUND_BANK))
+		{
+			if (asset != bank)
+			{
+				add_lists(*static_cast<const iw7::SndBank*>(asset));
 			}
 		}
+
+		// The curves that the aliases name (SndGlobals "singleton" of code_post_gfx; games/iw7/assets/sound_globals.hpp
+		// lists their names in the same order).
+		const auto globals = static_cast<const iw7::SndGlobals*>(source.find(iw7::ASSET_TYPE_SOUND_GLOBALS, "singleton"));
+		struct curve_kind
+		{
+			const char* key;
+			const iw7::SndCurve* curves;
+			unsigned count;
+			const std::string* names;
+			std::size_t name_count;
+		};
+		const std::array<curve_kind, 4> curve_kinds{{
+			{"volume_falloff", globals ? globals->vfCurves : nullptr, globals ? globals->vfCurveCount : 0, iw7::vf_curves_s, std::size(iw7::vf_curves_s)},
+			{"lpf", globals ? globals->lpfCurves : nullptr, globals ? globals->lpfCurveCount : 0, iw7::lpf_curves_s, std::size(iw7::lpf_curves_s)},
+			{"hpf", globals ? globals->hpfCurves : nullptr, globals ? globals->hpfCurveCount : 0, iw7::hpf_curves_s, std::size(iw7::hpf_curves_s)},
+			{"reverb_send", globals ? globals->rvbCurves : nullptr, globals ? globals->rvbCurveCount : 0, iw7::rvb_curves_s, std::size(iw7::rvb_curves_s)},
+		}};
+		std::array<std::map<std::string, json>, 4> used_curves;
+		const auto curve_name = [&](const std::size_t kind, const unsigned index) -> std::string
+		{
+			const auto& k = curve_kinds[kind];
+			if (k.curves && index < k.count)
+			{
+				const auto& curve = k.curves[index];
+				const auto name = std::string(curve.name, strnlen(curve.name, sizeof(curve.name)));
+				if (name != "default" && !used_curves[kind].contains(name))
+				{
+					auto points = json::array();
+					for (auto p = 0; p < curve.numPoints && p < 16; p++)
+					{
+						points.push_back({curve.points[p][0], curve.points[p][1]});
+					}
+
+					used_curves[kind][name] = std::move(points);
+				}
+
+				return name;
+			}
+
+			return index < k.name_count ? k.names[index] : "default";
+		};
+
+		// The speaker maps, occlusion shapes and doppler presets that the aliases name (same globals), by name.
+		std::map<std::string, json> speaker_maps, occlusion_shapes, doppler_presets;
+		const auto floats = [](const float* values, const std::size_t count)
+		{
+			return json(std::vector<float>(values, values + count));
+		};
+		const auto preset_name = [&](const char* text, const std::size_t size)
+		{
+			return std::string(text, strnlen(text, size));
+		};
+		const auto speaker_map = [&](const unsigned index) -> std::string
+		{
+			if (!globals || index >= globals->speakerMapCount)
+			{
+				return index < std::size(iw7::speaker_maps_s) ? iw7::speaker_maps_s[index] : "default";
+			}
+
+			const auto& map = globals->speakerMaps[index];
+			const auto map_name = preset_name(map.name, sizeof(map.name));
+			if (map_name != "default")
+			{
+				speaker_maps.try_emplace(map_name, json{{"monoToStereo", floats(map.monoToStereo, 2)},
+					{"stereoToStereo", floats(map.stereoToStereo, 4)}, {"monoTo51", floats(map.monoTo51, 6)},
+					{"stereoTo51", floats(map.stereoTo51, 12)}, {"monoTo71", floats(map.monoTo71, 8)},
+					{"stereoTo71", floats(map.stereoTo71, 16)}});
+			}
+
+			return map_name;
+		};
+		const auto occlusion_shape = [&](const unsigned index) -> std::string
+		{
+			if (!globals || index >= globals->occlusionShapeCount)
+			{
+				return index < std::size(iw7::occlusion_shapes_s) ? iw7::occlusion_shapes_s[index] : "default";
+			}
+
+			const auto& shape = globals->occlusionShapes[index];
+			const auto shape_name = preset_name(shape.name, sizeof(shape.name));
+			if (shape_name != "default")
+			{
+				occlusion_shapes.try_emplace(shape_name, json{{"innerAngleVolume", shape.innerAngleVolume},
+					{"outerAngleVolume", shape.outerAngleVolume}, {"occludedVolume", shape.occludedVolume},
+					{"innerAngleLPF", shape.innerAngleLPF}, {"outerAngleLPF", shape.outerAngleLPF}, {"occludedLPF", shape.occludedLPF}});
+			}
+
+			return shape_name;
+		};
+		const auto doppler_preset = [&](const unsigned index) -> std::string
+		{
+			if (!globals || index >= globals->dopplerPresetCount)
+			{
+				return index < std::size(iw7::doppler_presets_s) ? iw7::doppler_presets_s[index] : "default";
+			}
+
+			const auto& preset = globals->dopplerPresets[index];
+			const auto doppler_name = preset_name(preset.name, sizeof(preset.name));
+			if (doppler_name != "default")
+			{
+				doppler_presets.try_emplace(doppler_name, json{{"speedOfSound", preset.speedOfSound},
+					{"playerVelocityScale", preset.playerVelocityScale}, {"minPitch", preset.minPitch}, {"maxPitch", preset.maxPitch},
+					{"smoothing", preset.smoothing}});
+			}
+
+			return doppler_name;
+		};
+
+		std::set<std::uint32_t> used_ducks;
 
 		// The aliases that the scripts name, with their secondary aliases.
 		std::vector<std::string> pending(output.sound_names.begin(), output.sound_names.end());
@@ -422,10 +780,12 @@ namespace zonetool::convert::iw7_iw8
 			}
 
 			auto variations = json::array();
-			for (auto v = 0; v < found->second->count; v++)
+			const auto& [loaded, streamed] = files_of(*found->second.second);
+			for (auto v = 0; v < found->second.first->count; v++)
 			{
-				const auto& alias = found->second->head[v];
-				const auto entry = loaded.find(alias.assetId);
+				const auto& alias = found->second.first->head[v];
+				const auto* source_bank = loaded.find(alias.assetId) ? &loaded : &streamed;
+				const auto entry = source_bank->find(alias.assetId);
 				if (!entry || entry->channelCount < 1 || entry->channelCount > 2)
 				{
 					continue;
@@ -434,7 +794,7 @@ namespace zonetool::convert::iw7_iw8
 				const auto file = std::format("iw7/{:08x}.wav", alias.assetId);
 				if (written.insert(alias.assetId).second)
 				{
-					const auto bytes = loaded.read(*entry);
+					const auto bytes = source_bank->read(*entry);
 					try
 					{
 						if (!bytes)
@@ -476,6 +836,36 @@ namespace zonetool::convert::iw7_iw8
 					pending.push_back(secondary);
 				}
 
+				// IW7's own mix fields: the importer (iw3_sound.cpp) takes them over the IW3 role templates. Channels and
+				// volmods by Replay name; curves by IW7 name (sound/curves.json holds their points).
+				variation["iw7"] =
+				{
+					{"volmod", replay_volmod(alias.volModIndex)},
+					{"channel", replay_channel(static_cast<int>(alias.flags.channel))},
+					{"looping", static_cast<unsigned>(alias.flags.looping)},
+					{"full_dry_level", alias.flags.reverb != 0},
+					{"shape", static_cast<unsigned>(alias.flags.shape)},
+					{"precached", alias.flags.precached != 0},
+					{"donut_fade_end", alias.donutFadeEnd},
+					{"velocity_min", alias.velocityMin},
+					{"curves", {{"volume_falloff", curve_name(0, alias.volumeFalloffCurveIndex)}, {"lpf", curve_name(1, alias.lpfCurveIndex)},
+						{"hpf", curve_name(2, alias.hpfCurveIndex)}, {"reverb_send", curve_name(3, alias.reverbSendCurveIndex)}}},
+					{"reverb_multiplier", alias.reverbMultiplier},
+					{"far_reverb_multiplier", alias.farReverbMultiplier},
+					{"smart_pan", {alias.smartPanDistance2d, alias.smartPanDistance3d, alias.smartPanAttenuation2d}},
+					{"stereo_spread", {alias.stereoSpreadMinDist, alias.stereoSpreadMaxDist, alias.stereoSpreadMidPoint,
+						std::clamp(alias.stereoSpreadMaxAngle, 0, 255)}},
+					{"master", {alias.masterPriority, alias.masterPercentage, alias.slavePercentage}},
+					{"context", {alias.contextType, alias.contextValue}},
+					{"speaker_map", speaker_map(alias.speakerMapIndex)},
+					{"occlusion_shape", occlusion_shape(alias.occlusionShapeIndex)},
+					{"doppler_preset", doppler_preset(alias.dopplerPresetIndex)},
+					{"duck", alias.duck},
+				};
+				if (alias.duck)
+				{
+					used_ducks.insert(alias.duck);
+				}
 				variations.push_back(std::move(variation));
 			}
 
@@ -488,7 +878,65 @@ namespace zonetool::convert::iw7_iw8
 			aliases++;
 		}
 
-		ZONETOOL_INFO("iw7: exported %zu of %zu sound aliases that the scripts name, with %zu sounds of %s", aliases,
-			output.sound_names.size(), samples, bank->name ? bank->name : "?");
+		json curves = json::object();
+		std::size_t curve_count{};
+		for (auto kind = 0u; kind < curve_kinds.size(); kind++)
+		{
+			auto& items = curves[curve_kinds[kind].key] = json::object();
+			for (auto& [curve, points] : used_curves[kind])
+			{
+				items[curve] = std::move(points);
+				curve_count++;
+			}
+		}
+
+		// IW7's occlusion shapes keep a float at +68 that Replay's lack (Replay adds yaw/pitch offsets): it does not convert.
+		curves["speaker_maps"] = json(speaker_maps);
+		curves["occlusion_shapes"] = json(occlusion_shapes);
+		curves["doppler_presets"] = json(doppler_presets);
+		write_json(output.extracted / "sound" / "curves.json", curves);
+
+		// sound/ducks.json: the ducks that the exported aliases start (SndDuck: fades, the attenuation and low-pass of each
+		// volmod while it holds; the 128-entry arrays are indexed by volmod, here by Replay volmod name).
+		auto ducks = json::array();
+		for (auto d = 0u; bank->ducks && d < bank->duckCount; d++)
+		{
+			const auto& duck = bank->ducks[d];
+			if (!used_ducks.contains(duck.id))
+			{
+				continue;
+			}
+
+			const auto by_volmod = [&](const float* values)
+			{
+				json result = json::object();
+				for (auto v = 0u; values && v < std::size(iw7::VOLMODS); v++)
+				{
+					result[iw7::VOLMODS[v]] = values[v];
+				}
+
+				return result;
+			};
+			ducks.push_back({{"name", std::string(duck.name, strnlen(duck.name, sizeof(duck.name)))}, {"id", duck.id},
+				{"fadeIn", duck.fadeIn}, {"fadeOut", duck.fadeOut}, {"startDelay", duck.startDelay}, {"minDistance", duck.minDistance},
+				{"distance", duck.distance}, {"length", duck.length}, {"fadeInCurve", duck.fadeInCurve}, {"fadeOutCurve", duck.fadeOutCurve},
+				{"updateWhilePaused", duck.updateWhilePaused}, {"trackAmplitude", duck.trackAmplitude},
+				{"disableInSplitscreen", duck.disableInSplitscreen}, {"aliasAttenuation", duck.aliasAttenuation}, {"aliasLpf", duck.aliasLpf},
+				{"duckAlias", duck.duckAlias}, {"attenuation", by_volmod(duck.attenuation)}, {"lpf", by_volmod(duck.lpf)}});
+		}
+
+		const auto duck_count = ducks.size();
+		write_json(output.extracted / "sound" / "ducks.json", std::move(ducks));
+		if (duck_count < used_ducks.size())
+		{
+			ZONETOOL_WARNING("iw7: %zu ducks that aliases start are not in the bank", used_ducks.size() - duck_count);
+		}
+		if (!globals)
+		{
+			ZONETOOL_WARNING("iw7: no sound globals (code_post_gfx); the aliases' curves export by name only and keep the default");
+		}
+
+		ZONETOOL_INFO("iw7: exported %zu of %zu sound aliases that the scripts name, with %zu sounds and %zu curves of %s", aliases,
+			output.sound_names.size(), samples, curve_count, bank->name ? bank->name : "?");
 	}
 }

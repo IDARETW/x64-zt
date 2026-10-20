@@ -120,6 +120,9 @@ namespace zonetool::convert::iw7_iw8
 			return {};
 		}
 
+		// The images that streamed from a pak file that the game folder lacks, by pak (the owner's install misses some).
+		std::map<std::string, std::set<std::string>> missing_paks;
+
 		// The resident pixels of an image, or the largest stream that the atlas can use.
 		std::optional<image_pixels> read_pixels(const iw7::GfxImage& image, const std::size_t limit)
 		{
@@ -156,12 +159,13 @@ namespace zonetool::convert::iw7_iw8
 					const std::lock_guard lock(read_mutex);
 					if (!game_files::get().read(pak, file.offset, compressed.size(), compressed.data()))
 					{
-						static std::set<std::string> missing;
-						if (missing.insert(pak).second)
+						auto& images = missing_paks[pak];
+						if (images.empty())
 						{
 							ZONETOOL_WARNING("iw7: streamed images need %s", pak.data());
 						}
 
+						images.insert(image.name ? image.name : "?");
 						continue;
 					}
 				}
@@ -1189,10 +1193,49 @@ namespace zonetool::convert::iw7_iw8
 				light_unit_scale(source)));
 		}
 
+		// The HUD minimap. IW7 keeps it as a 2D material of the map, compass_map_<map> or a game mode's variant of it
+		// (Frontier: compass_map_mp_frontier_tdmd); the importer (iw3_fastfile.cpp CopyCompass) takes
+		// images/compass_map_<map>.dds as the converted map's compass, with its alpha (the transparent outside).
+		{
+			const auto compass_name = "compass_map_" + source.name();
+			const iw7::Material* compass{};
+			for (const auto& [material_name, asset] : source.assets(iw7::ASSET_TYPE_MATERIAL))
+			{
+				if (material_name == compass_name)
+				{
+					compass = static_cast<const iw7::Material*>(asset);
+					break;
+				}
+
+				if (!compass && material_name.starts_with(compass_name + "_"))
+				{
+					compass = static_cast<const iw7::Material*>(asset);
+				}
+			}
+
+			const auto* image = compass && compass->textureCount && compass->textureTable
+				? source.resolve(iw7::ASSET_TYPE_IMAGE, compass->textureTable[0].image) : nullptr;
+			image_file entry{image, image_role::color};
+			if (!image)
+			{
+				ZONETOOL_WARNING("iw7: the map has no minimap material (%s); the HUD compass keeps the default", compass_name.data());
+			}
+			else if (write_image(entry, folder / (compass_name + ".dds")))
+			{
+				ZONETOOL_INFO("iw7: exported the minimap %s (%ux%u)", image->name, image->width, image->height);
+			}
+		}
+
 		const auto written = std::ranges::count_if(files, [](const auto& entry)
 		{
 			return entry.second.written.value_or(false);
 		});
+
+		for (const auto& [pak, images] : missing_paks)
+		{
+			ZONETOOL_WARNING("iw7: %zu images stream from %s, which the game folder lacks (first: %s)", images.size(), pak.data(),
+				images.begin()->data());
+		}
 
 		ZONETOOL_INFO("iw7: exported %zu materials (%zu not in the loaded zones) with %zu of their %zu images",
 			output.materials.size(), missing, static_cast<std::size_t>(written), files.size());

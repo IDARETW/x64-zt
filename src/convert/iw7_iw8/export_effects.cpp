@@ -334,13 +334,18 @@ namespace zonetool::convert::iw7_iw8
 			{
 				if (!this->bank_aliases_)
 				{
+					// The aliases of every loaded bank: export_sounds takes them from the map bank, then from the common zones'
+					// banks (with each bank's own sound files).
 					this->bank_aliases_.emplace();
-					const auto* bank = static_cast<const iw7::SndBank*>(this->source_.find(iw7::ASSET_TYPE_SOUND_BANK, this->source_.name() + ".all"));
-					for (auto i = 0u; bank && bank->alias && i < bank->aliasCount; i++)
+					for (const auto& [bank_name, asset] : this->source_.assets(iw7::ASSET_TYPE_SOUND_BANK))
 					{
-						if (bank->alias[i].aliasName)
+						const auto* bank = static_cast<const iw7::SndBank*>(asset);
+						for (auto i = 0u; bank && bank->alias && i < bank->aliasCount; i++)
 						{
-							this->bank_aliases_->emplace(asset_name(bank->alias[i].aliasName));
+							if (bank->alias[i].aliasName)
+							{
+								this->bank_aliases_->emplace(asset_name(bank->alias[i].aliasName));
+							}
 						}
 					}
 				}
@@ -1023,7 +1028,7 @@ namespace zonetool::convert::iw7_iw8
 				case iw7::PARTICLE_MODULE_INIT_SOUND:
 				{
 					// Replay's layout is IW7's, each entry an alias name at +0 (stock entries: the string only). The aliases of
-					// the map's own sound bank convert with its sounds (export_sounds); the importer leaves out any that do not.
+					// the loaded sound banks convert with their sounds (export_sounds); the importer leaves out any that do not.
 					copy(sizeof(iw7::ParticleModuleInitSound));
 					auto entries = json::array();
 					const auto& list = data.initSound.m_linkedAssetList;
@@ -1033,7 +1038,7 @@ namespace zonetool::convert::iw7_iw8
 						const auto name = sound ? std::string(asset_name(sound)) : std::string();
 						if (name.empty() || !this->bank_aliases().contains(name))
 						{
-							this->drop("sound of another sound bank");
+							this->drop("sound of no loaded sound bank");
 							continue;
 						}
 

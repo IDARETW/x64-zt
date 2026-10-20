@@ -6,6 +6,7 @@
 
 #include <iw8/common/fs_util.h>
 #include <iw8/common/log.h>
+#include <iw8/dump/xsurface_convert.h>
 #include <BC.h>
 
 #include <Windows.h>
@@ -715,6 +716,79 @@ Cubemap DecodeDdsCubemap(const std::filesystem::path &path)
         Read<std::uint32_t>(data, 92), Read<std::uint32_t>(data, 96),
         Read<std::uint32_t>(data, 100), Read<std::uint32_t>(data, 104)};
     const std::uint32_t caps2 = Read<std::uint32_t>(data, 112);
+    // Half-float captures (D3DFMT_A16B16G16R16F, IW7 extractions) are linear colour
+    // of a high range: they keep their colour (IW3's desaturation below answers
+    // IW3's clipped captures), scaled as the IW3 probes are, from the average of the
+    // colours through the 8-bit knee (light_level) the extraction used before, at
+    // most to the 99.9th percentile of the luminance.
+    if (fourCC == 113)
+    {
+        if (!width || width != height || width > 4096 || mipCount > 13 || (caps2 & 0xFE00u) != 0xFE00u)
+            throw std::runtime_error("unsupported reflection-probe DDS " + path.string());
+        const auto knee = [](const float value) {
+            return value <= 0.5f ? value : 0.5f + 0.5f * (1.0f - std::exp((0.5f - value) * 2.0f));
+        };
+        std::array<std::vector<std::vector<float>>, 6> levels;
+        std::size_t offset = 128;
+        for (unsigned face = 0; face < 6; ++face)
+            for (unsigned level = 0, size = width; level < mipCount; ++level, size = std::max(1u, size / 2))
+            {
+                const std::size_t bytesOfLevel = std::size_t(size) * size * 8;
+                if (offset > bytes.size() || bytesOfLevel > bytes.size() - offset)
+                    throw std::runtime_error("truncated reflection-probe DDS " + path.string());
+                auto &values = levels[face].emplace_back(std::size_t(size) * size * 3);
+                for (std::size_t texel = 0; texel < std::size_t(size) * size; ++texel)
+                    for (unsigned channel = 0; channel < 3; ++channel)
+                    {
+                        const float value =
+                            xsurf_conv::halfToFloat(Read<std::uint16_t>(data, offset + texel * 8 + channel * 2));
+                        values[texel * 3 + channel] = std::isfinite(value) ? std::max(value, 0.0f) : 0.0f;
+                    }
+                offset += bytesOfLevel;
+            }
+        if (offset != bytes.size())
+            throw std::runtime_error("reflection-probe DDS contains trailing data " + path.string());
+        double kneeSum = 0, linearSum = 0;
+        std::vector<float> luminances;
+        for (const auto &face : levels)
+            for (std::size_t texel = 0; texel < face.front().size() / 3; ++texel)
+            {
+                const float *rgb = face.front().data() + texel * 3;
+                const float luminance = 0.2126f * rgb[0] + 0.7152f * rgb[1] + 0.0722f * rgb[2];
+                kneeSum += 0.2126f * knee(rgb[0]) + 0.7152f * knee(rgb[1]) + 0.0722f * knee(rgb[2]);
+                linearSum += luminance;
+                luminances.push_back(luminance);
+            }
+        float scale = 1;
+        if (!luminances.empty() && linearSum > 0)
+        {
+            const auto top = luminances.begin() + static_cast<std::ptrdiff_t>((luminances.size() - 1) * 999 / 1000);
+            std::nth_element(luminances.begin(), top, luminances.end());
+            scale = static_cast<float>(kneeSum / linearSum);
+            if (*top > 0)
+                scale = std::min(scale, 1.0f / *top);
+        }
+        Cubemap result{width, height, mipCount, std::vector<std::vector<Image>>(6), {}};
+        result.absoluteScale = 1.0f / scale;
+        for (unsigned face = 0; face < 6; ++face)
+            for (unsigned level = 0, size = width; level < mipCount; ++level, size = std::max(1u, size / 2))
+            {
+                Image image{size, size, std::vector<std::uint8_t>(std::size_t(size) * size * 4, 255)};
+                const auto &values = levels[face][level];
+                for (std::size_t texel = 0; texel < std::size_t(size) * size; ++texel)
+                    for (unsigned channel = 0; channel < 3; ++channel)
+                        image.rgba[texel * 4 + channel] = SrgbByte(std::min(values[texel * 3 + channel] * scale, 1.0f));
+                result.faces[face].push_back(std::move(image));
+            }
+        for (unsigned level = 0; level < mipCount; ++level)
+            for (unsigned face = 0; face < 6; ++face)
+            {
+                result.residentPixels.insert(result.residentPixels.end(), result.faces[face][level].rgba.begin(),
+                                             result.faces[face][level].rgba.end());
+                result.residentPixels.resize((result.residentPixels.size() + 15) & ~std::size_t{15});
+            }
+        return result;
+    }
     if (!width || width != height || width > 4096 || mipCount > 13 ||
         (caps2 & 0xFE00u) != 0xFE00u ||
         (fourCC && fourCC != 0x31545844u && fourCC != 0x33545844u && fourCC != 0x35545844u))

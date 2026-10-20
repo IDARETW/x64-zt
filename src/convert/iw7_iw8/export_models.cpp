@@ -208,6 +208,8 @@ namespace zonetool::convert::iw7_iw8
 			{
 				{"schema", 1},
 				{"name", name},
+				// The importer warns about a missing skeleton export only for models with bones to keep.
+				{"bone_count", model->numBones},
 				{"lods", std::move(geometry_lods)},
 			});
 
