@@ -6,12 +6,14 @@ Standalone fastfile unlinker and linker for next-generation Call of Duty titles.
 
 | Game | Title | Notes |
 |---|---|---|
+| **IW3** | Call of Duty 4: Modern Warfare | Conversion source only. Zones are read through OpenAssetTools' Unlinker (`--unlinker`) |
 | **IW6** | Ghosts | |
 | **S1** | Advanced Warfare | |
 | **H1** | Modern Warfare Remastered | |
 | **H2** | Modern Warfare 2 Campaign Remastered | Battle.net CASC |
 | **S2** | WWII | Signed zones. The key comes from `s2_zone_key.der` or the game executable |
 | **IW7** | Infinite Warfare | |
+| **IW8** | Modern Warfare (2019), Replay 1.20 build | `game_dx12_ship_replay.exe` zones. The asset readers and writers are generated from the game's own `Load_*` routines (`tools/iw8_format.json`) |
 
 T7 was in v1 (`main`). It is not ported to v2 yet.
 
@@ -19,14 +21,16 @@ T7 was in v1 (`main`). It is not ported to v2 yet.
 
 Rows are the source game. Columns are the target game.
 
-| From ↓ / To → | IW6 | S1 | H1 | H2 | S2 | IW7 |
-|---|:-:|:-:|:-:|:-:|:-:|:-:|
-| **IW6** | ✅ | ❌ | ✅ | ❌ | ❌ | ❌ |
-| **S1**  | ❌ | ✅ | ✅ | ✅ | ⚠️ | ❌ |
-| **H1**  | ❌ | ❌ | ✅ | ✅ | ⚠️ | ⚠️ |
-| **H2**  | ❌ | ❌ | ✅ | ✅ | ❌ | ❌ |
-| **S2**  | ❌ | ❌ | ⚠️ | ❌ | ✅ | ❌ |
-| **IW7** | ❌ | ❌ | ⚠️ | ❌ | ❌ | ✅ |
+| From ↓ / To → | IW6 | S1 | H1 | H2 | S2 | IW7 | IW8 |
+|---|:-:|:-:|:-:|:-:|:-:|:-:|:-:|
+| **IW3** | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ✅ |
+| **IW6** | ✅ | ❌ | ✅ | ❌ | ❌ | ❌ | ❌ |
+| **S1**  | ❌ | ✅ | ✅ | ✅ | ⚠️ | ❌ | ❌ |
+| **H1**  | ❌ | ❌ | ✅ | ✅ | ⚠️ | ⚠️ | ❌ |
+| **H2**  | ❌ | ❌ | ✅ | ✅ | ❌ | ❌ | ❌ |
+| **S2**  | ❌ | ❌ | ⚠️ | ❌ | ✅ | ❌ | ❌ |
+| **IW7** | ❌ | ❌ | ⚠️ | ❌ | ❌ | ✅ | ⚠️ |
+| **IW8** | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ✅ |
 
 ✅ supported &nbsp; ⚠️ partial or experimental &nbsp; ❌ not supported
 
@@ -35,6 +39,8 @@ Rows are the source game. Columns are the target game.
 - **H1 → S1** has been purposely left out for now
 - **IW7 → H1** converts images, materials and models only
 - **H1 → S2** and **S1 → S2** are experiments done for map assets (world, collision, map ents), models, materials and images. effects, sounds, animations, scriptables and weapons are not converted yet
+- **IW3 → IW8** converts whole multiplayer maps into Replay 1.20 zones: the world with its lightmaps, light grid, probes, sky, fog and sun shadows, collision (Havok data built natively), static and entity models, materials and images, local lights, effects, sounds, breakable glass, bot navigation, the minimap and the map scripts (translated to IW8 GSC)
+- **IW7 → IW8** converts multiplayer maps the same way: IW7's world, collision, models, materials, lightmaps, probes, sky, lights, glass, effects (module by module), map sounds, map scripts and scriptables (breaking props, animated props) become an extraction that the IW3 → IW8 pipeline builds. Tested on Frontier and Breakneck, still in progress
 
 <details>
 <summary>v1 legend (<code>main</code>), for comparison</summary>
@@ -57,6 +63,14 @@ zonetool.exe -game h1 dumpzone mp_shipment
 ```
 
 Run `zonetool.exe` without a command to open the interactive console.
+
+Converting a map to Replay 1.20 (IW3 or IW7 source, see `AGENTS.md` for every option):
+
+```bash
+zonetool.exe -game iw7 -path "C:/IW7" dumpzone mp_frontier --target iw8 --map mp_iw7_frontier --replay "E:/IW8/game_dx12_ship_replay.exe" --gsc_tool gsc-tool.exe --acts acts.exe
+```
+
+The zones go to `output/<map>/`. IW3 maps also need `--unlinker <OpenAssetTools Unlinker.exe>`. `--acts` validates the built zones with Atian tools, and `--metadata <json>` gives the map its id, title and description in the map list.
 
 | Command | Result |
 |---|---|
@@ -98,7 +112,7 @@ generate.bat --games=h1,iw7
 | `--no-convert` | Skips the converter projects |
 | `--copy-to=<folder>` | Copies `zonetool.exe` to this folder after each build |
 
-The converters for games only builds only when its source and target games are selected.
+The converters for games only builds only when its source and target games are selected. IW7 → IW8 also needs IW3 (it builds through the IW3 → IW8 pipeline): `--games=iw3,iw7,iw8`.
 
 ## Guides
 
