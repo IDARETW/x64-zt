@@ -266,33 +266,6 @@ int InstanceReflectionProbe(uint instance) {
 }
 #endif
 
-#ifdef MAP_LIGHT_VOLUME
-// Entities (DObjs): the IW3 light grid as a world-space L1 SH volume, packed as
-// an atlas of Z-slice tiles (three coefficient groups x slices, one-texel
-// borders); see iw3_lightgrid.h LightGridVolume for the layout.
-Texture2D<float4> lightVolume : register(t6);
-float4 LightVolumeTile(float tile, float2 cell) {
-    float2 origin = float2(fmod(tile, MAP_LIGHT_VOLUME_TILES) * (MAP_LIGHT_VOLUME_DIMS.x + 2),
-                           floor(tile / MAP_LIGHT_VOLUME_TILES) * (MAP_LIGHT_VOLUME_DIMS.y + 2));
-    return lightVolume.SampleLevel(colorSampler, (origin + 1.5 + cell) / MAP_LIGHT_VOLUME_SIZE, 0);
-}
-float3 LightVolumeAmbient(float3 world, float3 n) {
-    float3 c = clamp((world - MAP_LIGHT_VOLUME_ORIGIN) / MAP_LIGHT_VOLUME_CELL, 0,
-                     MAP_LIGHT_VOLUME_DIMS - 1);
-    float z0 = floor(c.z), z1 = min(z0 + 1, MAP_LIGHT_VOLUME_DIMS.z - 1), fz = c.z - z0;
-    float4 g[3];
-    [unroll] for (int group = 0; group < 3; ++group)
-        g[group] = lerp(LightVolumeTile(group * MAP_LIGHT_VOLUME_DIMS.z + z0, c.xy),
-                        LightVolumeTile(group * MAP_LIGHT_VOLUME_DIMS.z + z1, c.xy), fz);
-    float3 l0 = g[0].rgb * 8;
-    float3 l1x = (float3(g[0].a, g[1].b, g[2].g) - .5) * 8; // basis -0.488603 y
-    float3 l1y = (float3(g[1].r, g[1].a, g[2].b) - .5) * 8; // basis 0.488603 z
-    float3 l1z = (float3(g[1].g, g[2].r, g[2].a) - .5) * 8; // basis -0.488603 x
-    return max(0, l0 * 0.282095 + l1x * (-0.488603 * n.y) + l1y * (0.488603 * n.z) +
-                      l1z * (-0.488603 * n.x));
-}
-#endif
-
 #ifdef MAP_ENTITY_GRID
 // Entities (DObjs) lit as IW3's R_GetLightingAtPoint + lit model shaders do:
 // trilinear corner weights of the IW3 light grid at the lighting origin
@@ -345,6 +318,26 @@ float3 EntityPresetAmbient(uint volume, float3 n) {
     float3 x01 = lerp(v[4], v[5], f.x), x11 = lerp(v[6], v[7], f.x);
     return lerp(lerp(x00, x10, f.y), lerp(x01, x11, f.y), f.z) * 2;
 }
+#ifdef MAP_ENTITY_GRID_SH
+// Extractions with their own light grid (IW7): each entry is a record of 14
+// texels holding the 27 SH coefficients (red, green, blue; EvaluateShBasis) as
+// halves; record 0 is the fallback. The corners' SH blend as IW3 blends its
+// colours, and the entity takes the light along its normal at the level of the
+// static models' colours (iw7 model_lighting_colors: 0.5 * light_level through
+// the lightmaps' knee, ambient = 2 * colour).
+void EntityGridAddSh(uint record, float w, inout float sh[27]) {
+    uint base = MAP_ENTITY_GRID_PALETTE + record * 14;
+    [unroll] for (uint t = 0; t < 14; ++t) {
+        uint4 b = (uint4)round(EntityGridTexel(base + t) * 255);
+        sh[t * 2] += w * f16tof32(b.r | (b.g << 8));
+        if (t * 2 + 1 < 27)
+            sh[t * 2 + 1] += w * f16tof32(b.b | (b.a << 8));
+    }
+}
+float EntityLightLevel(float v) {
+    return v <= .5 ? v : .5 + .5 * (1 - exp((.5 - v) * 2));
+}
+#endif
 float3 EntityGridAmbient(float3 root, float3 n) {
     int preset = EntityPreset(root);
     if (preset >= 0)
@@ -355,6 +348,40 @@ float3 EntityGridAmbient(float3 root, float3 n) {
     float3 g = (world + 131072) / float3(32, 32, 64);
     int3 base = (int3)floor(g);
     float3 f = g - base;
+#ifdef MAP_ENTITY_GRID_SH
+    float sh[27];
+    [unroll] for (uint k = 0; k < 27; ++k)
+        sh[k] = 0;
+    float shTotal = 0;
+    [loop] for (uint shCorner = 0; shCorner < 8; ++shCorner) {
+        int3 p = base + int3(shCorner & 1, (shCorner >> 1) & 1, (shCorner >> 2) & 1) - MAP_ENTITY_GRID_MIN;
+        float w = ((shCorner & 1) ? f.x : 1 - f.x) * ((shCorner & 2) ? f.y : 1 - f.y) *
+                  ((shCorner & 4) ? f.z : 1 - f.z);
+        if (w < .001 || any(p < 0) || any(p >= MAP_ENTITY_GRID_DIMS))
+            continue;
+        uint4 t = (uint4)round(EntityGridTexel(
+            (uint)p.x + (uint)MAP_ENTITY_GRID_DIMS.x * ((uint)p.y + (uint)MAP_ENTITY_GRID_DIMS.y * (uint)p.z)) * 255);
+        uint record = t.r | (t.g << 8) | (t.b << 16);
+        if (record == 0)
+            continue;
+        EntityGridAddSh(record, w, sh);
+        shTotal += w;
+    }
+    if (shTotal <= 0) {
+        EntityGridAddSh(0, 1, sh);
+        shTotal = 1;
+    }
+    float3 d = normalize(n);
+    float basis[9] = {0.2820947918, -0.4886025119 * d.y, 0.4886025119 * d.z, -0.4886025119 * d.x,
+                      1.0925484306 * d.x * d.y, -1.0925484306 * d.y * d.z, 0.3153915653 * (3 * d.z * d.z - 1),
+                      -1.0925484306 * d.x * d.z, 0.5462742153 * (d.x * d.x - d.y * d.y)};
+    float3 light = 0;
+    [unroll] for (uint coefficient = 0; coefficient < 9; ++coefficient)
+        light += float3(sh[coefficient], sh[9 + coefficient], sh[18 + coefficient]) * basis[coefficient];
+    light /= shTotal;
+    return 2 * saturate(.5 * float3(EntityLightLevel(max(light.r, 0)), EntityLightLevel(max(light.g, 0)),
+                                    EntityLightLevel(max(light.b, 0))));
+#else
     uint colors[8];
     float weights[8];
     float total = 0;
@@ -396,6 +423,7 @@ float3 EntityGridAmbient(float3 root, float3 n) {
         result += tw * blended;
     }
     return result / total * 2;
+#endif
 }
 #endif
 
@@ -1094,13 +1122,6 @@ float4 main(Input input) : SV_TARGET0 {
             visibility = min(visibility, InstanceSunVisibility(input.instance));
 #endif
     }
-#endif
-#ifdef MAP_LIGHT_VOLUME
-    // Entities: the light grid at this point (camera position cb2[4], as the
-    // stock lit shaders read it).
-    if (input.instance == 0xffffffff)
-        indirect = LightVolumeAmbient(input.relativePosition + replayView[4].xyz, shadingNormal) *
-                   MAP_INDIRECT_GAIN;
 #endif
 #ifdef MAP_ENTITY_GRID
     if (input.instance == 0xffffffff)

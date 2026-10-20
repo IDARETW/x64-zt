@@ -41,7 +41,7 @@ struct StaticModelLightingInput
     std::uint8_t primaryLight{};   // GfxStaticModelDrawInst::primaryLightIndex
     bool groundLit{};
     std::uint32_t groundLighting{}; // GfxColor packed
-    // The model's own 56 light-grid colours (B, G, R each, in the order of a
+    // The model's own 56 light-grid colours (R, G, B each, in the order of a
     // light-grid palette entry), from an extraction that lights each model
     // itself (IW7: its GPU light grid at the model); the sun weight stays
     // groundLighting's alpha.
@@ -68,6 +68,11 @@ std::vector<std::array<std::uint8_t, 256>> SampleStaticModelLighting(
 // texel `paletteStart` the palette's 56 colours per entry (RGB). The entity
 // pixel shader blends the 8 corners at the model's lighting origin and samples
 // the 4x4x4 model-lighting volume by normal, as the lit model shaders do.
+// With `sh` (extractions that keep their own light grid at each entry, IW7's
+// <grid>.sh.bin) an entry texel holds R + 256 G + 65536 B = record, 0 = no
+// entry, and from paletteStart each record is 14 texels of 28 halves (the 27
+// SH coefficients of red, green and blue in EvaluateShBasis, then a pad);
+// record 0 is the fallback (the mean of the entries), record n + 1 entry n.
 struct EntityLightGrid
 {
     std::array<int, 3> minimum{}; // grid coordinates (32, 32, 64 units from -131072)
@@ -75,30 +80,10 @@ struct EntityLightGrid
     unsigned width{};
     unsigned height{};
     unsigned paletteStart{};
-    std::size_t paletteColors{}; // 56 texels each from paletteStart
+    std::size_t paletteColors{}; // 56 texels each from paletteStart (records with sh)
+    bool sh{};
     std::vector<std::uint8_t> pixels;
 };
 std::optional<EntityLightGrid> BuildEntityLightGrid(const std::filesystem::path &sourceRoot,
-                                                    const std::string &sourceAsset);
-
-// The IW3 light grid as a world-space L1 SH volume for moving or scripted
-// models (IW3 lit those from the grid at their lighting origin). Cells hold
-// the grid's SH (L0 + L1, IW3 light-grid units), empty cells are filled from
-// their neighbours. Packed as a 2D RGBA8 atlas: three coefficient groups x Z
-// slices, each an (x + 2) x (y + 2) tile with a one-texel border, tilesPerRow
-// tiles per row. Group 0 = (L0 r,g,b, L1x r), 1 = (L1y r, L1z r, L1x g, L1y g),
-// 2 = (L1z g, L1x b, L1y b, L1z b); L0 / 8 and L1 / 8 + 0.5. The basis is
-// EvaluateShBasis: L1x = -0.488603 y, L1y = 0.488603 z, L1z = -0.488603 x.
-struct LightGridVolume
-{
-    std::array<float, 3> origin{}; // world position of cell (0,0,0)
-    std::array<float, 3> cell{};   // cell size
-    std::array<unsigned, 3> dims{};
-    unsigned tilesPerRow{};
-    unsigned width{};
-    unsigned height{};
-    std::vector<std::uint8_t> pixels;
-};
-std::optional<LightGridVolume> BuildLightGridVolume(const std::filesystem::path &sourceRoot,
                                                     const std::string &sourceAsset);
 }
