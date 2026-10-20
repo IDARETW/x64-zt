@@ -9951,6 +9951,10 @@ PreparedMap PrepareFastfile(const ImportOptions &options)
                 preset.boxMid = preset.root;
             presets.push_back(preset);
         }
+        // A grid of the extraction's own light (IW7's SH at each entry) lights every entity at run time; the
+        // presets reproduce IW3's traced lookups of its colour grid.
+        if (grid->sh)
+            presets.clear();
         if (presets.size() > 512)
             presets.resize(512);
         std::vector<StaticModelLightingInput> presetInputs(presets.size());
@@ -10080,7 +10084,8 @@ PreparedMap PrepareFastfile(const ImportOptions &options)
                      "light-region tests)",
                      nearLocalLight);
         const auto presetVolumes =
-            SampleStaticModelLighting(exportRoot, sourceAsset, presetInputs, gridLights, sightBlocked);
+            presets.empty() ? std::vector<std::array<std::uint8_t, 256>>{}
+                            : SampleStaticModelLighting(exportRoot, sourceAsset, presetInputs, gridLights, sightBlocked);
         unsigned presetStart = 0, presetCount = 0;
         const std::size_t presetFirst = (std::size_t(grid->paletteStart) + grid->paletteColors * 56 + 3) / 4 * 4;
         if (!presetVolumes.empty() &&
@@ -10113,6 +10118,7 @@ PreparedMap PrepareFastfile(const ImportOptions &options)
             throw std::runtime_error("cannot write the entity light grid");
         char defines[512];
         std::snprintf(defines, sizeof(defines),
+                      "%s"
                       "#define MAP_ENTITY_GRID 1\n"
                       "#define MAP_ENTITY_GRID_MIN int3(%d, %d, %d)\n"
                       "#define MAP_ENTITY_GRID_DIMS int3(%u, %u, %u)\n"
@@ -10120,9 +10126,9 @@ PreparedMap PrepareFastfile(const ImportOptions &options)
                       "#define MAP_ENTITY_GRID_PALETTE %u\n"
                       "#define MAP_ENTITY_PRESET_START %uu\n"
                       "#define MAP_ENTITY_PRESET_COUNT %uu\n",
-                      grid->minimum[0], grid->minimum[1], grid->minimum[2], grid->dims[0],
-                      grid->dims[1], grid->dims[2], grid->width, grid->paletteStart, presetStart,
-                      presetCount);
+                      grid->sh ? "#define MAP_ENTITY_GRID_SH 1\n" : "", grid->minimum[0], grid->minimum[1],
+                      grid->minimum[2], grid->dims[0], grid->dims[1], grid->dims[2], grid->width,
+                      grid->paletteStart, presetStart, presetCount);
         entityLightVolume->defines = defines;
     }
     RenderPlan renderPlan =

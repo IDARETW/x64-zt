@@ -239,13 +239,11 @@ namespace zonetool::convert::iw7_iw8
 		}
 
 		// The 56 directions of an IW3 light grid colour, in its order (iw3_lightgrid.cpp LightGridProjection): the shell
-		// of a 4x4x4 cube, turned so that a diagonal points up.
+		// texels of a 4x4x4 cube, which IW3's model shaders index with the world normal.
 		const std::array<std::array<float, 3>, 56>& grid_directions()
 		{
 			static const auto directions = []
 			{
-				constexpr std::array<std::array<float, 3>, 3> rotation{{
-					{0.47140452f, 0.0f, 0.33333334f}, {-0.23570226f, 0.40824828f, 0.33333334f}, {-0.23570226f, -0.40824828f, 0.33333334f}}};
 				std::array<std::array<float, 3>, 56> result{};
 				std::size_t index{};
 				for (auto z = 0; z < 4; z++)
@@ -259,16 +257,7 @@ namespace zonetool::convert::iw7_iw8
 								continue;
 							}
 
-							const std::array<float, 3> delta{x * (2.0f / 3.0f) - 1.0f, y * (2.0f / 3.0f) - 1.0f, z * (2.0f / 3.0f) - 1.0f};
-							std::array<float, 3> direction{};
-							for (auto c = 0; c < 3; c++)
-							{
-								for (auto a = 0; a < 3; a++)
-								{
-									direction[c] += delta[a] * rotation[c][a];
-								}
-							}
-
+							std::array<float, 3> direction{x * (2.0f / 3.0f) - 1.0f, y * (2.0f / 3.0f) - 1.0f, z * (2.0f / 3.0f) - 1.0f};
 							const auto length = std::sqrt(direction[0] * direction[0] + direction[1] * direction[1] + direction[2] * direction[2]);
 							for (auto& component : direction)
 							{
@@ -554,8 +543,8 @@ namespace zonetool::convert::iw7_iw8
 				return result;
 			}
 
-			// The packed colour of the floor (red, green, blue and sun visibility bytes, as IW3 packs ground
-			// lighting).
+			// The packed colour of the floor as IW3 packs ground lighting: a D3DCOLOR (blue, green, red and sun
+			// visibility bytes; R_SetModelGroundLighting copies them into an A8R8G8B8 texel).
 			std::optional<std::uint32_t> ground_lighting(const float* point) const
 			{
 				const auto hits = this->floors(point[0], point[1]);
@@ -569,7 +558,7 @@ namespace zonetool::convert::iw7_iw8
 					return {};
 				}
 
-				return floor->color[0] | floor->color[1] << 8 | floor->color[2] << 16 | static_cast<std::uint32_t>(floor->visibility) << 24;
+				return floor->color[2] | floor->color[1] << 8 | floor->color[0] << 16 | static_cast<std::uint32_t>(floor->visibility) << 24;
 			}
 
 			// The area of the floors: the lowest and highest x and y.
@@ -676,7 +665,7 @@ namespace zonetool::convert::iw7_iw8
 			for (const auto& direction : directions)
 			{
 				const auto basis = sh_basis(direction);
-				for (const auto channel : {2, 1, 0})
+				for (auto channel = 0; channel < 3; channel++)
 				{
 					auto value = 0.0f;
 					for (auto k = 0; k < 9; k++)
@@ -840,9 +829,10 @@ namespace zonetool::convert::iw7_iw8
 
 		// Writes an IW3 light grid in the layout of the IW3 extraction: rows of columns, each row a run of points from
 		// its lowest floor to over its highest one. A point takes the light of the floor under it in all 56
-		// directions; the sun lights the points over floors that see it. IW7 keeps its light grid in a compressed
-		// tree, which does not convert yet.
-		void export_light_grid(const source_map& source, const floor_light& floors, extraction& output)
+		// directions; the sun lights the points over floors that see it. Beside it, each point keeps IW7's light grid
+		// there (<grid>.sh.bin: 27 floats per entry in the pipeline's basis, NaN outside IW7's mesh), which the
+		// entities' lighting takes in place of the floor colours.
+		void export_light_grid(const source_map& source, const floor_light& floors, iw7_light_grid& grid, extraction& output)
 		{
 			// The grid covers the play space: the spawn points with a margin. The world reaches far beyond it (set
 			// dressing in the distance), which would take more points than Replay's light grid holds.
@@ -898,10 +888,11 @@ namespace zonetool::convert::iw7_iw8
 				palette_indices.emplace(key, created);
 				for (auto sample = 0; sample < 56; sample++)
 				{
-					// Blue, green and red bytes, as the model lighting texels take them.
-					palette.push_back(key[2]);
-					palette.push_back(key[1]);
+					// Red, green and blue bytes, as IW3's GfxLightGridColors (R_SetLightGridColors swaps them into its
+					// A8R8G8B8 texels).
 					palette.push_back(key[0]);
+					palette.push_back(key[1]);
+					palette.push_back(key[2]);
 				}
 
 				return created;
@@ -910,6 +901,8 @@ namespace zonetool::convert::iw7_iw8
 			std::vector<std::uint8_t> row_starts;
 			std::vector<std::uint8_t> row_data;
 			std::vector<std::uint8_t> entries;
+			std::vector<float> sh;
+			std::size_t sampled{};
 			auto min_z = INT64_MAX;
 			auto max_z = INT64_MIN;
 			std::size_t entry_count{};
@@ -963,6 +956,7 @@ namespace zonetool::convert::iw7_iw8
 					std::uint8_t run{};
 					for (; it != last_used && !it->empty() == filled && run < 255; ++it, ++run)
 					{
+						const auto x = static_cast<double>((first_column + (it - columns.begin())) * grid_spacing_xy - grid_base);
 						for (auto z = bottom; filled && z <= top; z++)
 						{
 							const auto point = static_cast<float>(z * grid_spacing_z - grid_base);
@@ -972,6 +966,13 @@ namespace zonetool::convert::iw7_iw8
 							entries.push_back(static_cast<std::uint8_t>(hit.visibility > 127 ? sun_light : 0));
 							entries.push_back(0);
 							entry_count++;
+
+							const auto probe = grid.empty() ? std::nullopt : grid.sample({x, static_cast<double>(y), static_cast<double>(point)});
+							sampled += probe.has_value();
+							for (auto k = 0; k < 27; k++)
+							{
+								sh.push_back(probe ? (*probe)[k] : std::numeric_limits<float>::quiet_NaN());
+							}
 						}
 					}
 
@@ -997,7 +998,7 @@ namespace zonetool::convert::iw7_iw8
 			write_bytes(output.extracted / (stem + ".raw.bin"), row_data);
 			write_bytes(output.extracted / (stem + ".entries.bin"), entries);
 			write_bytes(output.extracted / (stem + ".colors.bin"), palette);
-			write_json(output.extracted / (stem + ".json"),
+			json metadata =
 			{
 				{"schema", 1},
 				{"name", bsp_name(source)},
@@ -1014,9 +1015,18 @@ namespace zonetool::convert::iw7_iw8
 				{"row_data", {{"bytes", row_data.size()}, {"file", stem + ".raw.bin"}}},
 				{"entries", {{"bytes", entries.size()}, {"file", stem + ".entries.bin"}}},
 				{"colors", {{"bytes", palette.size()}, {"file", stem + ".colors.bin"}}},
-			});
+			};
 
-			ZONETOOL_INFO("iw7: light grid of %zu points with %zu colours", entry_count, palette_indices.size());
+			if (sampled)
+			{
+				std::vector<std::uint8_t> bytes(sh.size() * sizeof(float));
+				std::memcpy(bytes.data(), sh.data(), bytes.size());
+				write_bytes(output.extracted / (stem + ".sh.bin"), bytes);
+				metadata["sh"] = {{"bytes", bytes.size()}, {"file", stem + ".sh.bin"}};
+			}
+
+			write_json(output.extracted / (stem + ".json"), metadata);
+			ZONETOOL_INFO("iw7: light grid of %zu points with %zu colours, %zu with IW7's light grid", entry_count, palette_indices.size(), sampled);
 		}
 	}
 
@@ -1092,7 +1102,8 @@ namespace zonetool::convert::iw7_iw8
 		auto lightmaps = export_lightmaps(source, output);
 		auto probes = export_reflection_probes(source, output);
 		const floor_light floors(source, world, lightmaps);
-		export_light_grid(source, floors, output);
+		iw7_light_grid grid(world.lightGrid.probeData);
+		export_light_grid(source, floors, grid, output);
 		export_gpu_light_grid(source, output);
 
 		// The index of each surface among the surfaces with an area.
@@ -1116,7 +1127,6 @@ namespace zonetool::convert::iw7_iw8
 		auto model_indices = json::array();
 		std::size_t ground_lit{};
 		std::size_t grid_lit{};
-		iw7_light_grid grid(world.lightGrid.probeData);
 		for (auto i = 0u; i < dpvs.smodelCount; i++)
 		{
 			auto model = export_static_model(source, world, i, probes, floors, grid, output);

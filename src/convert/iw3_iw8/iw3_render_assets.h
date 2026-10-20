@@ -106,9 +106,9 @@ struct NativeLightmapPlan
     std::array<std::string, 3> files;
 };
 
-// World-space IW3 light-grid volume for entity (DObj) materials: an RGBA8 atlas
-// (iw3_lightgrid.h LightGridVolume) bound as the fourth texture, and the pixel
-// shader defines that locate it (MAP_LIGHT_VOLUME_*).
+// The light grid of entity (DObj) materials: an RGBA8 image (iw3_lightgrid.h
+// EntityLightGrid) bound as the fourth texture, and the pixel shader defines
+// that locate it (MAP_ENTITY_GRID_*).
 struct EntityLightVolume
 {
     std::string image;

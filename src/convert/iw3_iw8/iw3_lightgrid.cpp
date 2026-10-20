@@ -272,13 +272,16 @@ std::array<float, 9> EvaluateShBasis(const std::array<float, 3> &direction)
             0.5462742153f * (x * x - y * y)};
 }
 
+// IW3 light-grid colour s is the light along the direction of shell texel s of
+// the 4x4x4 model-lighting volume itself: the lit model shaders index the volume
+// with the world normal (ps_lp_sun_t0c0n0: uvw = N * lightingLookupScale /
+// max|N| + base). IW3's s_lightGridRotAxis only maps the legacy 8-corner colours
+// into them (R_ModernizeLegacyLightGridColors). Nuketown's colours fit an L1
+// that points up (mean direction 0.02, 0.06, 0.94); through the rotation it
+// pointed along the cube diagonal (0.56, 0.58, 0.49).
 const std::array<std::array<double, 56>, 9> &LightGridProjection()
 {
     static const auto projection = [] {
-        constexpr std::array<std::array<float, 3>, 3> rotation{{
-            {0.47140452f, 0.0f, 0.33333334f},
-            {-0.23570226f, 0.40824828f, 0.33333334f},
-            {-0.23570226f, -0.40824828f, 0.33333334f}}};
         std::array<std::array<double, 9>, 56> samples{};
         std::size_t sampleIndex = 0;
         for (int z = 0; z < 4; ++z)
@@ -293,12 +296,7 @@ const std::array<std::array<double, 56>, 9> &LightGridProjection()
                         x * (2.0f / 3.0f) - 1.0f,
                         y * (2.0f / 3.0f) - 1.0f,
                         z * (2.0f / 3.0f) - 1.0f};
-                    std::array<float, 3> direction{};
-                    for (unsigned component = 0; component < 3; ++component)
-                    {
-                        for (unsigned axis = 0; axis < 3; ++axis)
-                            direction[component] += delta[axis] * rotation[component][axis];
-                    }
+                    std::array<float, 3> direction = delta;
                     const float length = std::sqrt(direction[0] * direction[0] +
                                                    direction[1] * direction[1] +
                                                    direction[2] * direction[2]);
@@ -1693,6 +1691,74 @@ std::optional<EntityLightGrid> BuildEntityLightGrid(const std::filesystem::path 
     const std::size_t entryTexels = std::size_t(grid.dims[0]) * grid.dims[1] * grid.dims[2];
     grid.width = 4096;
     grid.paletteStart = static_cast<unsigned>((entryTexels + grid.width - 1) / grid.width * grid.width);
+    const auto pointOf = [&](const Cell &cell) {
+        const std::array<int, 3> point{(cell.position[0] + 131072) / 32 - grid.minimum[0],
+                                       (cell.position[1] + 131072) / 32 - grid.minimum[1],
+                                       (cell.position[2] + 131072) / 64 - grid.minimum[2]};
+        if (point[0] < 0 || point[1] < 0 || point[2] < 0 || point[0] >= int(grid.dims[0]) ||
+            point[1] >= int(grid.dims[1]) || point[2] >= int(grid.dims[2]))
+            throw std::runtime_error("IW3 light-grid entry is outside its bounds");
+        return (std::size_t(point[2]) * grid.dims[1] + point[1]) * grid.dims[0] + point[0];
+    };
+
+    // The extraction's own light grid at each entry: records of its SH.
+    if (metadata.contains("sh"))
+    {
+        constexpr unsigned recordTexels = 14;
+        const std::size_t total = grid.paletteStart + (cells.size() + 1) * recordTexels;
+        if ((total + grid.width - 1) / grid.width <= 4096 && cells.size() * 27 * sizeof(float) <= 64ull * 1024 * 1024)
+        {
+            const auto bytes = ReadArray(sourceRoot, metadata, "sh", cells.size() * 27 * sizeof(float));
+            std::vector<float> sh(cells.size() * 27);
+            std::memcpy(sh.data(), bytes.data(), bytes.size());
+            grid.sh = true;
+            grid.paletteColors = cells.size() + 1;
+            grid.height = static_cast<unsigned>((total + grid.width - 1) / grid.width);
+            grid.pixels.assign(std::size_t(grid.width) * grid.height * 4, 0);
+            const auto writeRecord = [&](const std::size_t record, const float *values) {
+                std::array<std::uint16_t, recordTexels * 2> halves{};
+                for (unsigned k = 0; k < 27; ++k)
+                    halves[k] = FloatToHalf(values[k]);
+                std::memcpy(grid.pixels.data() + (grid.paletteStart + record * recordTexels) * 4, halves.data(),
+                            sizeof(halves));
+            };
+            std::array<double, 27> sum{};
+            std::size_t valid = 0;
+            for (std::size_t entry = 0; entry < cells.size(); ++entry)
+            {
+                const float *values = sh.data() + entry * 27;
+                if (!std::all_of(values, values + 27, [](const float value) { return std::isfinite(value); }))
+                    continue;
+                for (unsigned k = 0; k < 27; ++k)
+                    sum[k] += values[k];
+                ++valid;
+                const std::size_t texel = pointOf(cells[entry]);
+                const auto record = static_cast<std::uint32_t>(entry + 1);
+                grid.pixels[texel * 4 + 0] = static_cast<std::uint8_t>(record);
+                grid.pixels[texel * 4 + 1] = static_cast<std::uint8_t>(record >> 8);
+                grid.pixels[texel * 4 + 2] = static_cast<std::uint8_t>(record >> 16);
+                grid.pixels[texel * 4 + 3] = 255;
+                writeRecord(record, values);
+            }
+            if (valid)
+            {
+                std::array<float, 27> mean{};
+                for (unsigned k = 0; k < 27; ++k)
+                    mean[k] = static_cast<float>(sum[k] / static_cast<double>(valid));
+                writeRecord(0, mean.data());
+                zt::info("iw3: entity light grid %ux%ux%u points from the extraction's own light grid (%zu of %zu "
+                         "entries, %ux%u image)",
+                         grid.dims[0], grid.dims[1], grid.dims[2], valid, cells.size(), grid.width, grid.height);
+                return grid;
+            }
+            grid.sh = false;
+            zt::warn("iw3: the extraction's light grid holds no entry; entities take the light-grid colours");
+        }
+        else
+            zt::warn("iw3: the extraction's light grid at %zu entries needs %zu image rows (Replay allows 4096); "
+                     "entities take the light-grid colours",
+                     cells.size(), (total + grid.width - 1) / grid.width);
+    }
     grid.paletteColors = colorCount;
     const std::size_t total = grid.paletteStart + colorCount * 56;
     // One texel per point of the grid's box: a resident RGBA8 image holds at
@@ -1710,14 +1776,7 @@ std::optional<EntityLightGrid> BuildEntityLightGrid(const std::filesystem::path 
     grid.pixels.assign(std::size_t(grid.width) * grid.height * 4, 0);
     for (const Cell &cell : cells)
     {
-        const std::array<int, 3> point{(cell.position[0] + 131072) / 32 - grid.minimum[0],
-                                       (cell.position[1] + 131072) / 32 - grid.minimum[1],
-                                       (cell.position[2] + 131072) / 64 - grid.minimum[2]};
-        if (point[0] < 0 || point[1] < 0 || point[2] < 0 || point[0] >= int(grid.dims[0]) ||
-            point[1] >= int(grid.dims[1]) || point[2] >= int(grid.dims[2]))
-            throw std::runtime_error("IW3 light-grid entry is outside its bounds");
-        const std::size_t texel =
-            (std::size_t(point[2]) * grid.dims[1] + point[1]) * grid.dims[0] + point[0];
+        const std::size_t texel = pointOf(cell);
         const unsigned color = cell.entry.color + 1u;
         grid.pixels[texel * 4 + 0] = static_cast<std::uint8_t>(color);
         grid.pixels[texel * 4 + 1] = static_cast<std::uint8_t>(color >> 8);
@@ -1735,195 +1794,5 @@ std::optional<EntityLightGrid> BuildEntityLightGrid(const std::filesystem::path 
     zt::info("iw3: entity light grid %ux%ux%u points, %zu palette colours (%ux%u image)", grid.dims[0],
              grid.dims[1], grid.dims[2], colorCount, grid.width, grid.height);
     return grid;
-}
-
-std::optional<LightGridVolume> BuildLightGridVolume(const std::filesystem::path &sourceRoot,
-                                                    const std::string &sourceAsset)
-{
-    const auto metadataPath = sourceRoot / "maps" / "mp" / (sourceAsset + ".lightgrid.json");
-    std::error_code error;
-    if (!std::filesystem::is_regular_file(metadataPath, error))
-        return std::nullopt;
-    const Json metadata = ReadJson(metadataPath);
-    if (metadata.value("available", true) == false)
-        return std::nullopt;
-    std::vector<std::uint8_t> palette;
-    const auto cells = ReadCells(sourceRoot, metadata, palette);
-    const auto probes = BuildProbes(palette);
-    if (cells.empty() || probes.empty())
-        return std::nullopt;
-
-    std::array<std::int64_t, 3> low{INT64_MAX, INT64_MAX, INT64_MAX}, high{INT64_MIN, INT64_MIN, INT64_MIN};
-    const auto coordinate = [](const Cell &cell) {
-        return std::array<std::int64_t, 3>{(cell.position[0] + 131072) / 32,
-                                           (cell.position[1] + 131072) / 32,
-                                           (cell.position[2] + 131072) / 64};
-    };
-    for (const Cell &cell : cells)
-    {
-        const auto c = coordinate(cell);
-        for (unsigned axis = 0; axis < 3; ++axis)
-        {
-            low[axis] = std::min(low[axis], c[axis]);
-            high[axis] = std::max(high[axis], c[axis]);
-        }
-    }
-    // Coarsen until the three coefficient groups of every Z slice fit a
-    // 4096 x 4096 atlas.
-    std::array<std::int64_t, 3> step{1, 1, 1};
-    LightGridVolume volume;
-    for (;;)
-    {
-        for (unsigned axis = 0; axis < 3; ++axis)
-            volume.dims[axis] = static_cast<unsigned>((high[axis] - low[axis]) / step[axis] + 1);
-        const unsigned tileWidth = volume.dims[0] + 2, tileHeight = volume.dims[1] + 2;
-        volume.tilesPerRow = tileWidth <= 4096 ? 4096 / tileWidth : 0;
-        if (volume.tilesPerRow)
-        {
-            const unsigned tiles = 3 * volume.dims[2];
-            const unsigned rows = (tiles + volume.tilesPerRow - 1) / volume.tilesPerRow;
-            // Replay's resident image loader pads each mip to 16 bytes; keep rows 16-byte
-            // multiples so the RGBA8 file length is exactly width * height * 4.
-            volume.width = (std::min(tiles, volume.tilesPerRow) * tileWidth + 3) & ~3u;
-            volume.height = rows * tileHeight;
-            if (volume.height <= 4096)
-                break;
-        }
-        if (step[0] <= step[2] * 2)
-        {
-            step[0] *= 2;
-            step[1] *= 2;
-        }
-        else
-            step[2] *= 2;
-        if (step[0] > 64)
-            return std::nullopt;
-    }
-    volume.cell = {32.0f * step[0], 32.0f * step[1], 64.0f * step[2]};
-    for (unsigned axis = 0; axis < 3; ++axis)
-        volume.origin[axis] = static_cast<float>(low[axis] * (axis == 2 ? 64 : 32) - 131072) +
-                              0.5f * (volume.cell[axis] - (axis == 2 ? 64.0f : 32.0f));
-
-    // L0 + L1 per channel (12 values) per volume cell, averaged over the IW3
-    // cells it covers.
-    const std::size_t count = std::size_t(volume.dims[0]) * volume.dims[1] * volume.dims[2];
-    std::vector<std::array<float, 12>> sh(count);
-    std::vector<float> weight(count, 0.0f);
-    const auto index = [&](const std::array<std::int64_t, 3> &c) {
-        return (std::size_t(c[2]) * volume.dims[1] + std::size_t(c[1])) * volume.dims[0] + std::size_t(c[0]);
-    };
-    for (const Cell &cell : cells)
-    {
-        auto c = coordinate(cell);
-        for (unsigned axis = 0; axis < 3; ++axis)
-            c[axis] = (c[axis] - low[axis]) / step[axis];
-        const std::size_t at = index(c);
-        const Probe &probe = probes.at(cell.entry.color);
-        for (unsigned channel = 0; channel < 3; ++channel)
-            for (unsigned coefficient = 0; coefficient < 4; ++coefficient)
-                sh[at][channel * 4 + coefficient] += probe[channel][coefficient];
-        weight[at] += 1.0f;
-    }
-    std::array<double, 12> total{};
-    double totalWeight = 0.0;
-    for (std::size_t at = 0; at < count; ++at)
-        if (weight[at] > 0.0f)
-        {
-            for (unsigned value = 0; value < 12; ++value)
-            {
-                sh[at][value] /= weight[at];
-                total[value] += sh[at][value];
-            }
-            totalWeight += 1.0;
-            weight[at] = 1.0f;
-        }
-    // Empty cells (solid, outside the playable grid) take their filled
-    // neighbours' average, so trilinear filtering never blends in black.
-    std::size_t filled = 0;
-    for (unsigned pass = 0; pass < 8; ++pass)
-    {
-        std::vector<std::size_t> updates;
-        std::vector<std::array<float, 12>> values;
-        for (unsigned z = 0; z < volume.dims[2]; ++z)
-            for (unsigned y = 0; y < volume.dims[1]; ++y)
-                for (unsigned x = 0; x < volume.dims[0]; ++x)
-                {
-                    const std::size_t at = index({x, y, z});
-                    if (weight[at] > 0.0f)
-                        continue;
-                    std::array<float, 12> sum{};
-                    unsigned neighbours = 0;
-                    const std::array<std::array<int, 3>, 6> offsets{
-                        {{1, 0, 0}, {-1, 0, 0}, {0, 1, 0}, {0, -1, 0}, {0, 0, 1}, {0, 0, -1}}};
-                    for (const auto &offset : offsets)
-                    {
-                        const std::int64_t nx = std::int64_t(x) + offset[0], ny = std::int64_t(y) + offset[1],
-                                           nz = std::int64_t(z) + offset[2];
-                        if (nx < 0 || ny < 0 || nz < 0 || nx >= volume.dims[0] || ny >= volume.dims[1] ||
-                            nz >= volume.dims[2])
-                            continue;
-                        const std::size_t other = index({nx, ny, nz});
-                        if (weight[other] <= 0.0f)
-                            continue;
-                        for (unsigned value = 0; value < 12; ++value)
-                            sum[value] += sh[other][value];
-                        ++neighbours;
-                    }
-                    if (!neighbours)
-                        continue;
-                    for (auto &value : sum)
-                        value /= static_cast<float>(neighbours);
-                    updates.push_back(at);
-                    values.push_back(sum);
-                }
-        for (std::size_t update = 0; update < updates.size(); ++update)
-        {
-            sh[updates[update]] = values[update];
-            weight[updates[update]] = 1.0f;
-        }
-        filled += updates.size();
-        if (updates.empty())
-            break;
-    }
-    for (std::size_t at = 0; at < count; ++at)
-        if (weight[at] <= 0.0f)
-            for (unsigned value = 0; value < 12; ++value)
-                sh[at][value] = totalWeight > 0.0 ? static_cast<float>(total[value] / totalWeight) : 0.0f;
-
-    // Group layout (see the header): channel*4 + coefficient indexes sh.
-    constexpr std::array<std::array<unsigned, 4>, 3> groups{{{0, 4, 8, 1}, {2, 3, 5, 6}, {7, 9, 10, 11}}};
-    const auto encode = [](const float value, const bool l0) {
-        const float unit = l0 ? value / 8.0f : value / 8.0f + 0.5f;
-        return static_cast<std::uint8_t>(std::lround(std::clamp(unit, 0.0f, 1.0f) * 255.0f));
-    };
-    const unsigned tileWidth = volume.dims[0] + 2, tileHeight = volume.dims[1] + 2;
-    volume.pixels.assign(std::size_t(volume.width) * volume.height * 4, 0);
-    for (unsigned group = 0; group < 3; ++group)
-        for (unsigned z = 0; z < volume.dims[2]; ++z)
-        {
-            const unsigned tile = group * volume.dims[2] + z;
-            const unsigned originX = (tile % volume.tilesPerRow) * tileWidth;
-            const unsigned originY = (tile / volume.tilesPerRow) * tileHeight;
-            for (unsigned ty = 0; ty < tileHeight; ++ty)
-                for (unsigned tx = 0; tx < tileWidth; ++tx)
-                {
-                    // The border replicates the edge cells.
-                    const unsigned x = std::min(std::max(tx, 1u) - 1, volume.dims[0] - 1);
-                    const unsigned y = std::min(std::max(ty, 1u) - 1, volume.dims[1] - 1);
-                    const auto &cell = sh[index({x, y, z})];
-                    auto *out = volume.pixels.data() +
-                                (std::size_t(originY + ty) * volume.width + originX + tx) * 4;
-                    for (unsigned channel = 0; channel < 4; ++channel)
-                    {
-                        const unsigned value = groups[group][channel];
-                        out[channel] = encode(cell[value], value % 4 == 0);
-                    }
-                }
-        }
-    zt::info("iw3: light-grid volume %ux%ux%u cells of %gx%gx%g units (%zu filled from neighbours), "
-             "%ux%u atlas",
-             volume.dims[0], volume.dims[1], volume.dims[2], volume.cell[0], volume.cell[1],
-             volume.cell[2], filled, volume.width, volume.height);
-    return volume;
 }
 } // namespace iw3
