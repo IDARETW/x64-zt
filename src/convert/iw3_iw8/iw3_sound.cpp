@@ -667,6 +667,27 @@ struct Iw3Alias
     unsigned channel{1}; // IW3 entity channel (flags bits 8-13, soundaliases/channels.def order)
     std::string secondary;
     std::string curve; // IW3 volume falloff curve (soundaliases/<curve>.vfcurve)
+    // IW7 aliases (export_sounds.cpp "iw7"): their own mix fields, which replace the
+    // role template's.
+    struct Native
+    {
+        std::string volmod, channel; // Replay names
+        unsigned shape{};
+        std::optional<unsigned> looping; // 0 nonlooping, 1 looping, 3 rlooping (stock loop template: 3)
+        bool fullDryLevel{}, precached{};
+        float donutFadeEnd{-1}, velocityMin{};
+        std::array<std::string, 4> curves; // volume falloff, lpf, hpf, reverb send (IW7 names)
+        float reverb{1}, farReverb{1};
+        std::array<float, 3> smartPan{0, 0, 1};
+        std::array<float, 3> spread{};
+        uint8_t spreadAngle{};
+        uint8_t masterPriority{};
+        float masterPercentage{}, masterSlavePercentage{1};
+        uint32_t contextType{}, contextValue{};
+        std::string speakerMap, occlusionShape, dopplerPreset; // IW7 names
+        uint32_t duck{};                                         // SndDuck id
+    };
+    std::optional<Native> native;
 };
 
 std::map<std::string, std::vector<Iw3Alias>> ReadZoneAliases(const std::filesystem::path &exportRoot)
@@ -721,6 +742,61 @@ std::map<std::string, std::vector<Iw3Alias>> ReadZoneAliases(const std::filesyst
                 alias.curve = Lower(source.at("volume_falloff_curve").get<std::string>());
                 while (!alias.curve.empty() && alias.curve.front() == ',')
                     alias.curve.erase(alias.curve.begin());
+            }
+            if (source.contains("iw7") && source.at("iw7").is_object())
+            {
+                const Json &fields = source.at("iw7");
+                Iw3Alias::Native native;
+                native.volmod = fields.value("volmod", std::string{});
+                native.channel = fields.value("channel", std::string{});
+                native.shape = fields.value("shape", 0u) & 7u;
+                if (fields.contains("looping") && fields.at("looping").is_number_unsigned())
+                    native.looping = fields.at("looping").get<unsigned>() & 7u;
+                native.fullDryLevel = fields.value("full_dry_level", false);
+                native.precached = fields.value("precached", false);
+                native.donutFadeEnd = fields.value("donut_fade_end", -1.0f);
+                native.velocityMin = fields.value("velocity_min", 0.0f);
+                if (fields.contains("curves") && fields.at("curves").is_object())
+                {
+                    const Json &curves = fields.at("curves");
+                    static constexpr std::array<const char *, 4> kKeys{"volume_falloff", "lpf", "hpf", "reverb_send"};
+                    for (size_t i = 0; i < kKeys.size(); ++i)
+                        native.curves[i] = Lower(curves.value(kKeys[i], std::string{}));
+                }
+                native.reverb = fields.value("reverb_multiplier", 1.0f);
+                native.farReverb = fields.value("far_reverb_multiplier", 1.0f);
+                const auto floats = [&](const char *key, auto &out) {
+                    if (fields.contains(key) && fields.at(key).is_array())
+                        for (size_t i = 0; i < out.size() && i < fields.at(key).size(); ++i)
+                            if (fields.at(key)[i].is_number())
+                                out[i] = fields.at(key)[i].get<float>();
+                };
+                floats("smart_pan", native.smartPan);
+                if (fields.contains("stereo_spread") && fields.at("stereo_spread").is_array() &&
+                    fields.at("stereo_spread").size() == 4)
+                {
+                    const Json &spread = fields.at("stereo_spread");
+                    for (size_t i = 0; i < 3; ++i)
+                        native.spread[i] = spread[i].get<float>();
+                    native.spreadAngle = static_cast<uint8_t>(std::clamp(spread[3].get<int>(), 0, 255));
+                }
+                if (fields.contains("master") && fields.at("master").is_array() && fields.at("master").size() == 3)
+                {
+                    const Json &master = fields.at("master");
+                    native.masterPriority = static_cast<uint8_t>(std::clamp(master[0].get<int>(), 0, 255));
+                    native.masterPercentage = master[1].get<float>();
+                    native.masterSlavePercentage = master[2].get<float>();
+                }
+                if (fields.contains("context") && fields.at("context").is_array() && fields.at("context").size() == 2)
+                {
+                    native.contextType = fields.at("context")[0].get<uint32_t>();
+                    native.contextValue = fields.at("context")[1].get<uint32_t>();
+                }
+                native.speakerMap = Lower(fields.value("speaker_map", std::string{}));
+                native.occlusionShape = Lower(fields.value("occlusion_shape", std::string{}));
+                native.dopplerPreset = Lower(fields.value("doppler_preset", std::string{}));
+                native.duck = fields.value("duck", 0u);
+                alias.native = std::move(native);
             }
             if (!alias.file.empty())
                 result[name].push_back(std::move(alias));
@@ -1009,12 +1085,627 @@ std::set<std::string> ReadScriptStringLiterals(const std::filesystem::path &scri
     return names;
 }
 
+namespace
+{
+// ------------------------------------------------------------ sound table
+// sound/soundtable.json (IW7 exporter, export_sounds.cpp): the source bank's
+// SoundTable and send effects with the Replay field names of
+// games/iw8/structs.hpp; channels and volmods by name.
+enum class TableField
+{
+    u8,
+    u16,
+    i16,
+    u32,
+    i32,
+    f32,
+    str,
+    char64,
+    channel8,
+    channel16,
+    channel32,
+    volmod16,
+};
+
+struct TableFieldSpec
+{
+    const char *key;
+    uint32_t offset;
+    TableField kind;
+};
+
+struct TableSpec
+{
+    const char *key; // JSON array
+    uint32_t stride; // Replay record size
+    std::vector<TableFieldSpec> fields;
+};
+
+const TableSpec &SendEffectSpec()
+{
+    static const TableSpec spec = [] {
+        TableSpec result{"send_effects", 236, {{"name", 0, TableField::char64}, {"id", 64, TableField::u32}}};
+        static constexpr std::array<const char *, 17> kFloats{
+            "smoothing", "earlyTime", "lateTime", "earlyGain", "lateGain", "lateGainProx", "returnGain", "earlyLpf",
+            "lateLpf", "inputLpf", "dampLpf", "wallReflect", "dryGain", "earlySize", "lateSize", "diffusion",
+            "rearLevel"};
+        for (size_t i = 0; i < kFloats.size(); ++i)
+            result.fields.push_back({kFloats[i], static_cast<uint32_t>(68 + i * 4), TableField::f32});
+        // Replay's five delay taps (+136, 20 B each: bool enabled, then four floats;
+        // IW7 has none, so they stay disabled).
+        static constexpr std::array<std::array<const char *, 5>, 5> kDelays{{
+            {"delay1enabled", "delay1delayTimeMS", "delay1Level", "delay1LpfCutoff", "delay1HpfCutoff"},
+            {"delay2enabled", "delay2delayTimeMS", "delay2Level", "delay2LpfCutoff", "delay2HpfCutoff"},
+            {"delay3enabled", "delay3delayTimeMS", "delay3Level", "delay3LpfCutoff", "delay3HpfCutoff"},
+            {"delay4enabled", "delay4delayTimeMS", "delay4Level", "delay4LpfCutoff", "delay4HpfCutoff"},
+            {"delay5enabled", "delay5delayTimeMS", "delay5Level", "delay5LpfCutoff", "delay5HpfCutoff"},
+        }};
+        for (size_t i = 0; i < kDelays.size(); ++i)
+            for (size_t f = 0; f < 5; ++f)
+                result.fields.push_back({kDelays[i][f], static_cast<uint32_t>(136 + i * 20 + f * 4),
+                                         f ? TableField::f32 : TableField::u8});
+        return result;
+    }();
+    return spec;
+}
+
+// In iw8::sound::TableKind order.
+const std::array<TableSpec, iw8::sound::TABLE_COUNT> &TableSpecs()
+{
+    using F = TableField;
+    static const std::array<TableSpec, iw8::sound::TABLE_COUNT> specs{{
+        {"adsr",
+         48,
+         {{"name", 0, F::str},
+          {"id", 8, F::u32},
+          {"attackLength", 12, F::f32},
+          {"attackCurve", 16, F::u32},
+          {"decayLength", 20, F::f32},
+          {"decayCurve", 24, F::u32},
+          {"releaseLength", 28, F::f32},
+          {"releaseCurve", 32, F::u32},
+          {"sustainLevel", 36, F::f32},
+          {"sustainLength", 40, F::f32}}},
+        {"ambient_defs",
+         24,
+         {{"name", 0, F::str},
+          {"id", 8, F::u32},
+          {"ambientEventIndex", 12, F::u16},
+          {"numEvents", 14, F::u16},
+          {"timeMin", 16, F::f32},
+          {"timeMax", 20, F::f32}}},
+        {"ambient_events", 12, {{"id", 0, F::u32}, {"ambientElementIndex", 4, F::u16}, {"weight", 8, F::f32}}},
+        // unusedNameField (+8) is not streamed: it stays null.
+        {"ambient_elements",
+         40,
+         {{"id", 0, F::u32},
+          {"aliasName", 16, F::str},
+          {"rangeMin", 24, F::f32},
+          {"rangeMax", 28, F::f32},
+          {"coneMin", 32, F::f32},
+          {"coneMax", 36, F::f32}}},
+        {"filters",
+         24,
+         {{"id", 0, F::u32},
+          {"entChannel", 4, F::channel8},
+          {"band", 5, F::u8},
+          {"type", 8, F::u32},
+          {"freq", 12, F::f32},
+          {"gain", 16, F::f32},
+          {"q", 20, F::f32}}},
+        {"mixes", 16, {{"id", 0, F::u32}, {"volMod", 4, F::volmod16}, {"volume", 8, F::f32}, {"fade", 12, F::f32}}},
+        {"npc_adsr_zones",
+         32,
+         {{"name", 0, F::str},
+          {"id", 8, F::u32},
+          {"weaponName", 16, F::str},
+          {"adsrIdx", 24, F::i32},
+          {"weaponIdx", 28, F::u32}}},
+        {"occlusion_filters",
+         40,
+         {{"id", 0, F::u32},
+          {"entChannel", 4, F::channel16},
+          {"cutoffLevel1", 8, F::f32},
+          {"cutoffLevel2", 12, F::f32},
+          {"cutoffLevel3", 16, F::f32},
+          {"cutoffLevel4", 20, F::f32},
+          {"attnLevel1", 24, F::f32},
+          {"attnLevel2", 28, F::f32},
+          {"attnLevel3", 32, F::f32},
+          {"attnLevel4", 36, F::f32}}},
+        {"player_adsr_zones",
+         32,
+         {{"name", 0, F::str},
+          {"id", 8, F::u32},
+          {"weaponName", 16, F::str},
+          {"adsrIdx", 24, F::i32},
+          {"weaponIdx", 28, F::u32}}},
+        {"reverbs",
+         84,
+         {{"id", 0, F::u32},
+          {"roomTypeId", 4, F::u32},
+          {"roomType", 8, F::char64},
+          {"dryLevel", 72, F::f32},
+          {"wetLevel", 76, F::f32},
+          {"fadeTime", 80, F::f32}}},
+        {"timescales",
+         16,
+         {{"id", 0, F::u32}, {"presetName", 4, F::u32}, {"entChannel", 8, F::channel32}, {"scale", 12, F::f32}}},
+        {"zones",
+         200,
+         {{"id", 0, F::u32},
+          {"stateId", 4, F::u32},
+          {"reverbIndex", 8, F::i16},
+          {"startOcclusionIndex", 10, F::i16},
+          {"numOcclusion", 12, F::i16},
+          {"startFilterIndex", 14, F::i16},
+          {"numFilter", 16, F::i16},
+          {"startMixIndex", 18, F::i16},
+          {"numMix", 20, F::i16},
+          {"ambientStream", 24, F::str},
+          {"startAdsrZoneIndex", 32, F::i16},
+          {"numAdsrZone", 34, F::i16},
+          {"startNPCAdsrZoneIndex", 36, F::i16},
+          {"numNPCAdsrZone", 38, F::i16},
+          {"ambientDefIndex", 40, F::i16},
+          {"startFullOccIndex", 42, F::i16},
+          {"numDisableFullOcc", 44, F::i16},
+          {"startPlayerBreathStateIndex", 46, F::i16},
+          {"numPlayerBreathStates", 48, F::i16},
+          {"weapReflId", 52, F::u32},
+          {"exterior", 56, F::u8},
+          {"zoneName", 64, F::str},
+          {"stateName", 72, F::str},
+          {"ambientName", 80, F::str},
+          {"mixName", 88, F::str},
+          {"reverbName", 96, F::str},
+          {"filterName", 104, F::str},
+          {"occlusionName", 112, F::str},
+          {"plrAdsrName", 120, F::str},
+          {"npcAdsrName", 128, F::str},
+          {"weapReflName", 136, F::str},
+          {"fullOccName", 144, F::str},
+          {"playerBreathStateName", 152, F::str},
+          {"contextType1", 160, F::u32},
+          {"contextValue1", 164, F::u32},
+          {"contextType2", 168, F::u32},
+          {"contextValue2", 172, F::u32},
+          {"contextType3", 176, F::u32},
+          {"contextValue3", 180, F::u32},
+          {"contextType4", 184, F::u32},
+          {"contextValue4", 188, F::u32},
+          {"duck", 192, F::u32}}},
+        {"full_occlusions", 12, {{"id", 0, F::u32}, {"presetName", 4, F::u32}, {"entChannel", 8, F::channel32}}},
+        {"breath_states",
+         32,
+         {{"stateType", 0, F::u32},
+          {"inhaleAlias", 8, F::str},
+          {"exhaleAlias", 16, F::str},
+          {"minBreaths", 24, F::i32}}},
+    }};
+    return specs;
+}
+
+template <class T> void StoreField(std::vector<uint8_t> &bytes, const size_t offset, const T value)
+{
+    std::memcpy(bytes.data() + offset, &value, sizeof(value));
+}
+
+// Packs one JSON array into Replay records. Unknown channel / volmod names fall
+// back to index 0 with a warning (the exporter maps IW7 names first).
+iw8::sound::TableArray PackTable(const Json &json, const TableSpec &spec, std::set<std::string> &badNames)
+{
+    iw8::sound::TableArray array;
+    array.stride = spec.stride;
+    for (const auto &field : spec.fields)
+        if (field.kind == TableField::str)
+            array.stringOffsets.push_back(field.offset);
+    if (!json.contains(spec.key) || !json.at(spec.key).is_array())
+        return array;
+    for (const Json &item : json.at(spec.key))
+    {
+        const size_t base = array.records.size();
+        array.records.resize(base + spec.stride, 0);
+        for (const auto &field : spec.fields)
+        {
+            const size_t at = base + field.offset;
+            const bool has = item.contains(field.key) && !item.at(field.key).is_null();
+            const Json &value = has ? item.at(field.key) : Json();
+            const auto number = [&]() -> double { return has && value.is_number() ? value.get<double>() : 0.0; };
+            const auto name = [&]() { return has && value.is_string() ? value.get<std::string>() : std::string{}; };
+            const auto index = [&](const bool channel) -> int {
+                const std::string text = name();
+                const int found = channel ? iw8::sound::EntChannelIndex(text) : iw8::sound::VolModIndex(text);
+                if (found < 0 && !text.empty())
+                    badNames.insert(std::string(channel ? "channel " : "volmod ") + text);
+                return std::max(found, 0);
+            };
+            switch (field.kind)
+            {
+            case TableField::u8:
+                array.records[at] = static_cast<uint8_t>(has && value.is_boolean() ? value.get<bool>() : number());
+                break;
+            case TableField::u16:
+                StoreField(array.records, at, static_cast<uint16_t>(number()));
+                break;
+            case TableField::i16:
+                StoreField(array.records, at, static_cast<int16_t>(number()));
+                break;
+            case TableField::u32:
+                StoreField(array.records, at, static_cast<uint32_t>(has && value.is_number_unsigned()
+                                                                        ? value.get<uint64_t>()
+                                                                        : static_cast<int64_t>(number())));
+                break;
+            case TableField::i32:
+                StoreField(array.records, at, static_cast<int32_t>(number()));
+                break;
+            case TableField::f32:
+                StoreField(array.records, at, static_cast<float>(number()));
+                break;
+            case TableField::str:
+                array.strings.push_back(name());
+                break;
+            case TableField::char64: {
+                const std::string text = name().substr(0, 63);
+                std::memcpy(array.records.data() + at, text.data(), text.size());
+                break;
+            }
+            case TableField::channel8:
+                array.records[at] = static_cast<uint8_t>(index(true));
+                break;
+            case TableField::channel16:
+                StoreField(array.records, at, static_cast<uint16_t>(index(true)));
+                break;
+            case TableField::channel32:
+                StoreField(array.records, at, static_cast<int32_t>(index(true)));
+                break;
+            case TableField::volmod16:
+                StoreField(array.records, at, static_cast<uint16_t>(index(false)));
+                break;
+            }
+        }
+    }
+    return array;
+}
+
+struct LoadedTable
+{
+    iw8::sound::SoundTable table;
+    iw8::sound::TableArray sendEffects;
+    std::set<std::string> aliases; // zone ambient streams and ambient elements
+};
+
+std::optional<LoadedTable> ReadSoundTable(const std::filesystem::path &exportRoot, const std::string &map)
+{
+    std::string text;
+    const auto path = exportRoot / "sound" / "soundtable.json";
+    if (!std::filesystem::exists(path) || !zt::read_file_str(path.string(), text))
+        return std::nullopt;
+    Json json = Json::parse(text, nullptr, false);
+    if (json.is_discarded() || !json.is_object())
+    {
+        zt::warn("iw3 sound: %s is not valid JSON; the map has no sound zones", path.string().c_str());
+        return std::nullopt;
+    }
+    // The source map's own zone is the map's default zone (stock mp_shipment.all
+    // holds zone "mp_shipment", id = the table id): it takes the converted name.
+    const std::string source = Lower(json.value("map", std::string{}));
+    const std::string target = Lower(map);
+    if (json.contains("zones") && json.at("zones").is_array())
+        for (Json &zone : json.at("zones"))
+            if (!source.empty() && Lower(zone.value("zoneName", std::string{})) == source)
+            {
+                zone["zoneName"] = target;
+                zone["id"] = iw8::sound::HashName(target);
+            }
+
+    // Breath states are Replay's player breathing (state types shared with IW7, whose
+    // aliases name IW7 weapon sounds): every bank carries stock mp_shipment.all's 23
+    // states with the plr_breath_* aliases of the common banks, and each zone that
+    // uses breath states takes all of them, as every stock zone does.
+    if (json.contains("breath_states") && json.at("breath_states").is_array() &&
+        !json.at("breath_states").empty())
+    {
+        static constexpr struct
+        {
+            uint32_t stateType;
+            const char *inhale, *exhale;
+            int minBreaths;
+        } kStockBreathStates[] = {
+            {0xfda9899f, "plr_breath_null", "plr_breath_null", 1},
+            {0x9fdde97c, "plr_breath_sniper_gasp", "plr_breath_null", 1},
+            {0xd5429184, "plr_breath_sniper_exh", "plr_breath_sniper_inh", 1},
+            {0xfe5eb7b9, "plr_breath_nose_inh", "plr_breath_nose_exh", 2},
+            {0x35459053, "plr_breath_jump", "plr_breath_null", 1},
+            {0x58194f32, "plr_breath_land_hi", "plr_breath_null", 1},
+            {0xf5b29e44, "plr_breath_land_lo", "plr_breath_null", 1},
+            {0x19557838, "plr_breath_climb", "plr_breath_null", 1},
+            {0x35d1876d, "plr_breath_sprint_rec_exh", "plr_breath_null", 1},
+            {0xb23dfa3c, "plr_breath_melee", "plr_breath_null", 1},
+            {0xa4312752, "plr_breath_offhand_throw", "plr_breath_null", 1},
+            {0xc442f7a9, "plr_breath_pain_init", "plr_breath_null", 1},
+            {0x58d6c020, "plr_breath_pain_ong_inh", "plr_breath_pain_ong_exh", 1},
+            {0xfe6f86f0, "plr_breath_pain_rec_inh", "plr_breath_pain_rec_exh", 1},
+            {0x3059c366, "plr_breath_run_inh", "plr_breath_run_exh", 2},
+            {0xbe1ff69b, "plr_breath_run_rec_inh", "plr_breath_run_rec_exh", 2},
+            {0x02e09fc3, "plr_breath_sniper_gasp", "plr_breath_null", 1},
+            {0x4debe9bf, "plr_breath_sprint_inh", "plr_breath_sprint_exh", 2},
+            {0x6dd92af4, "plr_breath_sprint_rec_inh", "plr_breath_sniper_gasp", 2},
+            {0x51bfc2f0, "plr_breath_supersprint_inh", "plr_breath_supersprint_exh", 2},
+            {0x8843f3ae, "plr_breath_idle_walk_inh", "plr_breath_idle_walk_exh", 2},
+            {0x385edb59, "plr_breath_null", "plr_breath_null", 2},
+            {0xc244174e, "plr_breath_null", "plr_breath_null", 2},
+        };
+        Json states = Json::array();
+        for (const auto &state : kStockBreathStates)
+            states.push_back({{"stateType", state.stateType},
+                              {"inhaleAlias", state.inhale},
+                              {"exhaleAlias", state.exhale},
+                              {"minBreaths", state.minBreaths}});
+        json["breath_states"] = std::move(states);
+        if (json.contains("zones") && json.at("zones").is_array())
+            for (Json &zone : json.at("zones"))
+                if (zone.value("numPlayerBreathStates", 0) > 0)
+                {
+                    zone["startPlayerBreathStateIndex"] = 0;
+                    zone["numPlayerBreathStates"] = static_cast<int>(std::size(kStockBreathStates));
+                }
+    }
+
+    // ADSR settings and their zone entries name source-game weapons; stock Replay map
+    // banks hold none (mp_shipment.all: 0 / 0 / 0) and no zone references them.
+    for (const char *key : {"adsr", "npc_adsr_zones", "player_adsr_zones"})
+        json.erase(key);
+    if (json.contains("zones") && json.at("zones").is_array())
+        for (Json &zone : json.at("zones"))
+        {
+            zone["startAdsrZoneIndex"] = -1;
+            zone["numAdsrZone"] = 0;
+            zone["startNPCAdsrZoneIndex"] = -1;
+            zone["numNPCAdsrZone"] = 0;
+            zone.erase("plrAdsrName");
+            zone.erase("npcAdsrName");
+            // weapReflId selects one of the bank's weapon reflections; converted
+            // banks carry none.
+            zone["weapReflId"] = 0;
+        }
+
+    LoadedTable result;
+    std::set<std::string> badNames;
+    result.table.id = iw8::sound::HashName(target);
+    for (size_t kind = 0; kind < iw8::sound::TABLE_COUNT; ++kind)
+        result.table.arrays[kind] = PackTable(json, TableSpecs()[kind], badNames);
+    result.sendEffects = PackTable(json, SendEffectSpec(), badNames);
+    for (const auto &name : badNames)
+        zt::warn("iw3 sound: sound table names unknown Replay %s; it uses index 0", name.c_str());
+
+    // Every zone index must address its array (Replay does not check them).
+    const auto count = [&](const iw8::sound::TableKind kind) {
+        return static_cast<int>(result.table.arrays[kind].count());
+    };
+    const auto &zones = result.table.arrays[iw8::sound::TABLE_ZONE];
+    const auto i16 = [&](const size_t zone, const uint32_t offset) {
+        int16_t value;
+        std::memcpy(&value, zones.records.data() + zone * zones.stride + offset, sizeof(value));
+        return static_cast<int>(value);
+    };
+    const struct
+    {
+        uint32_t start, num;
+        iw8::sound::TableKind kind;
+    } ranges[] = {{10, 12, iw8::sound::TABLE_OCCLUSION},       {14, 16, iw8::sound::TABLE_FILTER},
+                  {18, 20, iw8::sound::TABLE_MIX},             {32, 34, iw8::sound::TABLE_PLAYER_ADSR_ZONE},
+                  {36, 38, iw8::sound::TABLE_NPC_ADSR_ZONE},   {42, 44, iw8::sound::TABLE_FULL_OCCLUSION},
+                  {46, 48, iw8::sound::TABLE_BREATH_STATE}};
+    for (size_t z = 0; z < zones.count(); ++z)
+    {
+        const std::string &name = zones.strings[z * zones.stringOffsets.size() + 1];
+        const int reverb = i16(z, 8);
+        bool bad = reverb >= count(iw8::sound::TABLE_REVERB) || reverb < -1;
+        for (const auto &range : ranges)
+        {
+            const int start = i16(z, range.start), num = i16(z, range.num);
+            bad = bad || (num > 0 && (start < 0 || start + num > count(range.kind)));
+        }
+        const int ambient = i16(z, 40);
+        bad = bad || ambient >= count(iw8::sound::TABLE_AMBIENT_DEF) || ambient < -1;
+        if (bad)
+            throw std::runtime_error("sound table zone " + name + " indexes past its arrays");
+    }
+
+    // The map aliases the table plays (the stock breath aliases live in the common
+    // banks: stock map banks hold none).
+    const auto collect = [&](const iw8::sound::TableKind kind, const uint32_t offset) {
+        const auto &array = result.table.arrays[kind];
+        const auto field = std::ranges::find(array.stringOffsets, offset) - array.stringOffsets.begin();
+        for (size_t i = 0; i < array.count(); ++i)
+            if (const auto &alias = array.strings[i * array.stringOffsets.size() + field]; !alias.empty())
+                result.aliases.insert(Lower(alias));
+    };
+    collect(iw8::sound::TABLE_ZONE, 24);
+    collect(iw8::sound::TABLE_AMBIENT_ELEMENT, 16);
+    zt::info("iw3 sound: sound table %08x: %zu zone(s), %zu reverb(s), %zu filter(s), %zu mix(es), %zu "
+             "occlusion filter(s), %zu send effect(s)",
+             result.table.id, zones.count(), result.table.arrays[iw8::sound::TABLE_REVERB].count(),
+             result.table.arrays[iw8::sound::TABLE_FILTER].count(),
+             result.table.arrays[iw8::sound::TABLE_MIX].count(),
+             result.table.arrays[iw8::sound::TABLE_OCCLUSION].count(), result.sendEffects.count());
+    return result;
+}
+// sound/curves.json (IW7 exporter): the IW7 curves the aliases name, by kind
+// (volume falloff, lpf, hpf, reverb send) and name, as (x, y) points.
+std::array<std::map<std::string, iw8::sound::Curve>, 4> ReadIw7Curves(const std::filesystem::path &exportRoot)
+{
+    std::array<std::map<std::string, iw8::sound::Curve>, 4> result;
+    std::string text;
+    if (!zt::read_file_str((exportRoot / "sound" / "curves.json").string(), text))
+        return result;
+    const Json json = Json::parse(text, nullptr, false);
+    if (json.is_discarded() || !json.is_object())
+        return result;
+    static constexpr std::array<const char *, 4> kKeys{"volume_falloff", "lpf", "hpf", "reverb_send"};
+    for (size_t kind = 0; kind < kKeys.size(); ++kind)
+    {
+        if (!json.contains(kKeys[kind]) || !json.at(kKeys[kind]).is_object())
+            continue;
+        for (const auto &entry : json.at(kKeys[kind]).items())
+        {
+            const std::string curveName = entry.key();
+            const Json &points = entry.value();
+            // Bank curves take a prefix: Replay's common banks hold curves of the same names.
+            iw8::sound::Curve curve{"mw120r_iw7_" + Lower(curveName), {}};
+            for (const Json &point : points)
+                if (point.is_array() && point.size() == 2)
+                    curve.points.push_back({point[0].get<float>(), point[1].get<float>()});
+            if (!curve.points.empty() && curve.points.size() <= 16 && curve.name.size() < 64)
+                result[kind].emplace(Lower(curveName), std::move(curve));
+            else
+                zt::warn("iw3 sound: IW7 curve %s has %zu points; its aliases use the default", curveName.c_str(),
+                         curve.points.size());
+        }
+    }
+    return result;
+}
+// The presets in sound/curves.json as Replay records by kind (0 doppler 88 B,
+// 1 occlusion shape 100 B, 2 speaker map 452 B) and IW7 name; each record names
+// itself mw120r_iw7_<name>.
+std::array<std::map<std::string, std::vector<uint8_t>>, 3> ReadIw7Presets(const std::filesystem::path &exportRoot)
+{
+    std::array<std::map<std::string, std::vector<uint8_t>>, 3> result;
+    std::string text;
+    if (!zt::read_file_str((exportRoot / "sound" / "curves.json").string(), text))
+        return result;
+    const Json json = Json::parse(text, nullptr, false);
+    if (json.is_discarded() || !json.is_object())
+        return result;
+    static constexpr std::array<const char *, 3> kKeys{"doppler_presets", "occlusion_shapes", "speaker_maps"};
+    static constexpr std::array<size_t, 3> kSizes{88, 100, 452};
+    const auto put = [](std::vector<uint8_t> &record, const size_t offset, const Json &value, const size_t count) {
+        for (size_t i = 0; i < count; ++i)
+        {
+            const float number = value.is_array() && i < value.size() && value[i].is_number() ? value[i].get<float>()
+                                 : !value.is_array() && value.is_number()                    ? value.get<float>()
+                                                                                             : 0.0f;
+            std::memcpy(record.data() + offset + i * 4, &number, 4);
+        }
+    };
+    for (size_t kind = 0; kind < kKeys.size(); ++kind)
+    {
+        if (!json.contains(kKeys[kind]) || !json.at(kKeys[kind]).is_object())
+            continue;
+        for (const auto &entry : json.at(kKeys[kind]).items())
+        {
+            const std::string presetName = "mw120r_iw7_" + Lower(entry.key());
+            if (presetName.size() >= 64)
+                continue;
+            const Json &fields = entry.value();
+            std::vector<uint8_t> record(kSizes[kind], 0);
+            std::memcpy(record.data(), presetName.data(), presetName.size());
+            const uint32_t id = iw8::sound::HashName(presetName);
+            std::memcpy(record.data() + 64, &id, 4);
+            const auto field = [&](const char *key) { return fields.contains(key) ? fields.at(key) : Json(); };
+            if (kind == 0)
+            {
+                put(record, 68, field("speedOfSound"), 1);
+                put(record, 72, field("playerVelocityScale"), 1);
+                put(record, 76, field("minPitch"), 1);
+                put(record, 80, field("maxPitch"), 1);
+                put(record, 84, field("smoothing"), 1);
+            }
+            else if (kind == 1)
+            {
+                // yaw/pitch offsets (+92/+96, Replay only) stay 0.
+                put(record, 68, field("innerAngleVolume"), 1);
+                put(record, 72, field("outerAngleVolume"), 1);
+                put(record, 76, field("occludedVolume"), 1);
+                put(record, 80, field("innerAngleLPF"), 1);
+                put(record, 84, field("outerAngleLPF"), 1);
+                put(record, 88, field("occludedLPF"), 1);
+            }
+            else
+            {
+                put(record, 68, field("monoToStereo"), 2);
+                put(record, 76, field("stereoToStereo"), 4);
+                put(record, 92, field("monoTo51"), 6);
+                put(record, 116, field("stereoTo51"), 12);
+                put(record, 164, field("monoTo71"), 8);
+                put(record, 196, field("stereoTo71"), 16);
+                // 7.1.4 ([input][16 outputs]): the 7.1 outputs, no height channels, as
+                // every stock speaker map (mp_shipment.all) holds them.
+                const Json mono = field("monoTo71"), stereo = field("stereoTo71");
+                put(record, 260, mono, 8);
+                for (size_t input = 0; input < 2; ++input)
+                {
+                    Json row = Json::array();
+                    for (size_t output = 0; output < 8; ++output)
+                        row.push_back(stereo.is_array() && input * 8 + output < stereo.size() ? stereo[input * 8 + output]
+                                                                                             : Json(0.0f));
+                    put(record, 324 + input * 64, row, 8);
+                }
+            }
+            result[kind].emplace(Lower(entry.key()), std::move(record));
+        }
+    }
+    return result;
+}
+// sound/ducks.json (IW7 exporter): the ducks the aliases start, their per-volmod
+// arrays by Replay volmod name (Replay volmods without an IW7 counterpart keep the
+// stock defaults: no attenuation, no filter).
+std::map<uint32_t, iw8::sound::Duck> ReadIw7Ducks(const std::filesystem::path &exportRoot)
+{
+    std::map<uint32_t, iw8::sound::Duck> result;
+    std::string text;
+    if (!zt::read_file_str((exportRoot / "sound" / "ducks.json").string(), text))
+        return result;
+    const Json json = Json::parse(text, nullptr, false);
+    if (json.is_discarded() || !json.is_array())
+        return result;
+    for (const Json &item : json)
+    {
+        iw8::sound::Duck duck;
+        duck.name = Lower(item.value("name", std::string{}));
+        duck.id = item.value("id", 0u);
+        if (duck.name.empty() || duck.name.size() >= 64 || !duck.id)
+            continue;
+        duck.fadeIn = item.value("fadeIn", 0.0f);
+        duck.fadeOut = item.value("fadeOut", 0.0f);
+        duck.startDelay = item.value("startDelay", 0.0f);
+        duck.minDistance = item.value("minDistance", 0.0f);
+        duck.distance = item.value("distance", 0.0f);
+        duck.length = item.value("length", 0.0f);
+        duck.fadeInCurve = item.value("fadeInCurve", 0u);
+        duck.fadeOutCurve = item.value("fadeOutCurve", 0u);
+        duck.updateWhilePaused = item.value("updateWhilePaused", false);
+        duck.trackAmplitude = item.value("trackAmplitude", false);
+        duck.disableInSplitscreen = item.value("disableInSplitscreen", false);
+        duck.aliasAttenuation = item.value("aliasAttenuation", 1.0f);
+        duck.aliasLpf = item.value("aliasLpf", 1.0f);
+        duck.duckAlias = item.value("duckAlias", 0u);
+        for (const auto &[key, values] : {std::pair{"attenuation", &duck.attenuation}, std::pair{"lpf", &duck.lpf}})
+        {
+            if (!item.contains(key) || !item.at(key).is_object())
+                continue;
+            for (const auto &entry : item.at(key).items())
+                if (const int index = iw8::sound::VolModIndex(entry.key());
+                    index >= 0 && index < 128 && entry.value().is_number())
+                    (*values)[static_cast<size_t>(index)] = entry.value().get<float>();
+        }
+        const uint32_t id = duck.id;
+        result.emplace(id, std::move(duck));
+    }
+    return result;
+}
+} // namespace
+
 std::optional<ConvertedSounds> Convert(const std::filesystem::path &exportRoot,
                                        const std::vector<std::filesystem::path> &searchPaths,
                                        const std::string &map, const std::set<std::string> &requested,
                                        const std::set<std::string> &candidates)
 {
-    if (requested.empty() && candidates.empty())
+    // A source sound table (IW7) ships even when no map alias converts: its reverb,
+    // filter and mix zones shape every sound of the map (weapons and footsteps too).
+    auto table = ReadSoundTable(exportRoot, map);
+    if (requested.empty() && candidates.empty() && !table)
         return std::nullopt;
     const auto zoneAliases = ReadZoneAliases(exportRoot);
     const auto csvAliases = ReadCsvAliases(searchPaths, Lower(map));
@@ -1031,6 +1722,8 @@ std::optional<ConvertedSounds> Convert(const std::filesystem::path &exportRoot,
     std::vector<std::string> order;
     std::set<std::string> visited;
     std::vector<std::string> pending(requested.begin(), requested.end());
+    if (table)
+        pending.insert(pending.end(), table->aliases.begin(), table->aliases.end());
     std::size_t literalAliases = 0;
     for (const auto &name : candidates)
         if (!requested.contains(name) && definition(Lower(name)))
@@ -1117,7 +1810,7 @@ std::optional<ConvertedSounds> Convert(const std::filesystem::path &exportRoot,
         else
             zt::warn("iw3 sound: alias %s has no usable audio; left silent", name.c_str());
     }
-    if (converted.empty())
+    if (converted.empty() && !table)
         return std::nullopt;
 
     ConvertedSounds result;
@@ -1128,8 +1821,55 @@ std::optional<ConvertedSounds> Convert(const std::filesystem::path &exportRoot,
     // bank loads in every Replay install without shipping another file.
     result.bank.zone = "vehicle_engine_type4_npc";
     result.bank.streamKey = Lower(map) + "_all_loaded";
+    if (table)
+    {
+        // A zone bed without audio is cleared (stock zones without a bed hold a null
+        // ambientStream) so no zone asks for a missing alias.
+        auto &zones = table->table.arrays[iw8::sound::TABLE_ZONE];
+        for (size_t i = 0; i < zones.count(); ++i)
+            if (auto &alias = zones.strings[i * zones.stringOffsets.size()];
+                !alias.empty() && !converted.contains(Lower(alias)))
+            {
+                zt::warn("iw3 sound: zone %s ambient stream %s has no audio; the zone plays no bed",
+                         zones.strings[i * zones.stringOffsets.size() + 1].c_str(), alias.c_str());
+                alias.clear();
+            }
+        result.bank.table = std::move(table->table);
+        result.bank.sendEffects = std::move(table->sendEffects);
+    }
     std::set<std::string> curves{"default"};
     std::map<std::string, std::optional<iw8::sound::Curve>> iw3Curves;
+    const auto iw7Curves = ReadIw7Curves(exportRoot);
+    const auto iw7Presets = ReadIw7Presets(exportRoot);
+    const auto iw7Ducks = ReadIw7Ducks(exportRoot);
+    std::set<uint32_t> usedDucks;
+    std::array<std::set<std::string>, 3> usedIw7Presets;
+    // The bank preset of an IW7 preset name, or 0 for Replay's "default".
+    const auto iw7Preset = [&](const size_t kind, const std::string &presetName) -> uint32_t {
+        if (presetName.empty() || presetName == "default")
+            return 0;
+        if (!iw7Presets[kind].contains(presetName))
+        {
+            zt::warn("iw3 sound: IW7 preset %s has no data; its aliases use the default", presetName.c_str());
+            return 0;
+        }
+        usedIw7Presets[kind].insert(presetName);
+        return iw8::sound::HashName("mw120r_iw7_" + presetName);
+    };
+    std::array<std::set<std::string>, 4> usedIw7Curves;
+    // The bank curve of an IW7 curve name, or 0 for Replay's "default".
+    const auto iw7Curve = [&](const size_t kind, const std::string &curveName) -> uint32_t {
+        if (curveName.empty() || curveName == "default")
+            return 0;
+        const auto found = iw7Curves[kind].find(curveName);
+        if (found == iw7Curves[kind].end())
+        {
+            zt::warn("iw3 sound: IW7 curve %s has no points; its aliases use the default", curveName.c_str());
+            return 0;
+        }
+        usedIw7Curves[kind].insert(curveName);
+        return iw8::sound::HashName(found->second.name);
+    };
     for (const auto &name : order)
     {
         if (!converted.contains(name))
@@ -1196,6 +1936,65 @@ std::optional<ConvertedSounds> Convert(const std::filesystem::path &exportRoot,
             alias.stereoSpreadMaxDist = role.spreadMax;
             alias.stereoSpreadMidPoint = role.spreadMid;
             alias.stereoSpreadMaxAngle = role.spreadAngle;
+            if (source.native)
+            {
+                // IW7 aliases keep their own mix: the volume group, channel, curves,
+                // reverb sends and spread they were mixed with (the role gain does not
+                // apply). Flags: IW7's fields in the layout the two games share (bits 0-2
+                // loop type, as the stock loop template's 3 = rlooping; bit 3 full dry
+                // level; bits 4-6 shape; bit 19 precached), the channel at bits 10-17
+                // (IW7: bit 9). Load type 0: the samples are resident.
+                const auto &native = *source.native;
+                if (const int volMod = iw8::sound::VolModIndex(native.volmod); volMod >= 0)
+                    alias.volModIndex = volMod;
+                else
+                    zt::warn("iw3 sound: %s volmod %s is not a Replay volmod; the role template gives it",
+                             name.c_str(), native.volmod.c_str());
+                uint32_t channel = (role.flags >> 10) & 0xFFu;
+                if (const int channelIndex = iw8::sound::EntChannelIndex(native.channel); channelIndex >= 0)
+                    channel = static_cast<uint32_t>(channelIndex);
+                else
+                    zt::warn("iw3 sound: %s channel %s is not a Replay channel; the role template gives it",
+                             name.c_str(), native.channel.c_str());
+                alias.flags = native.looping.value_or(role.flags & 0x7u) | (native.fullDryLevel ? 0x8u : 0u) | (native.shape << 4) |
+                              (channel << 10) | ((native.precached || (role.flags & 0x80000u)) ? 0x80000u : 0u);
+                alias.volMin = std::clamp(source.volMin, 0.0f, 1.0f);
+                alias.volMax = std::clamp(std::max(source.volMax, source.volMin), 0.0f, 1.0f);
+                alias.donutFadeEnd = native.donutFadeEnd;
+                alias.velocityMin = native.velocityMin;
+                alias.volumeFalloffCurve = iw7Curve(0, native.curves[0]);
+                if (!alias.volumeFalloffCurve)
+                    alias.volumeFalloffCurve = iw8::sound::HashName("default");
+                alias.lpfCurve = iw7Curve(1, native.curves[1]);
+                alias.hpfCurve = iw7Curve(2, native.curves[2]);
+                alias.reverbSendCurve = iw7Curve(3, native.curves[3]);
+                alias.reverbMultiplier = native.reverb;
+                alias.farReverbMultiplier = native.farReverb;
+                alias.smartPanDistance2d = native.smartPan[0];
+                alias.smartPanDistance3d = native.smartPan[1];
+                alias.smartPanAttenuation2d = native.smartPan[2];
+                alias.stereoSpreadMinDist = native.spread[0];
+                alias.stereoSpreadMaxDist = native.spread[1];
+                alias.stereoSpreadMidPoint = native.spread[2];
+                alias.stereoSpreadMaxAngle = native.spreadAngle;
+                alias.masterPriority = native.masterPriority;
+                alias.masterPercentage = native.masterPercentage;
+                alias.masterSlavePercentage = native.masterSlavePercentage;
+                alias.dopplerPreset = iw7Preset(0, native.dopplerPreset);
+                alias.occlusionShape = iw7Preset(1, native.occlusionShape);
+                alias.speakerMap = iw7Preset(2, native.speakerMap);
+                if (native.duck && iw7Ducks.contains(native.duck))
+                {
+                    alias.duck = native.duck;
+                    usedDucks.insert(native.duck);
+                }
+                // A context type Replay lacks would never select the variant.
+                if (native.contextType && iw8::sound::IsContextType(native.contextType))
+                {
+                    alias.contextType = native.contextType;
+                    alias.contextValue = native.contextValue;
+                }
+            }
             const double seconds = double(sample->pcm.size() / sample->channels) / sample->rate;
             alias.maxDurationDsec = static_cast<int16_t>(std::clamp(std::ceil(seconds * 10.0), 1.0, 32767.0));
             list.aliases.push_back(std::move(alias));
@@ -1204,6 +2003,26 @@ std::optional<ConvertedSounds> Convert(const std::filesystem::path &exportRoot,
         zt::info("iw3 sound: alias %s -> %zu variant(s)%s", name.c_str(), list.aliases.size(),
                  looping ? " (looping)" : "");
         result.bank.lists.push_back(std::move(list));
+    }
+    if (result.bank.lists.empty())
+    {
+        // A bank holds at least one alias and one sound (RegisterBank): the table
+        // ships with a silent placeholder that nothing plays.
+        iw8::sound::Sample silence;
+        silence.name = prefix + "table_placeholder";
+        silence.rate = 48000;
+        silence.channels = 1;
+        silence.pcm.assign(4800, 0);
+        iw8::sound::AliasList list;
+        list.name = "mw120r_" + Lower(map) + "_table_placeholder";
+        iw8::sound::Alias alias;
+        alias.assetName = silence.name;
+        alias.volumeFalloffCurve = iw8::sound::HashName("default");
+        alias.maxDurationDsec = 1;
+        list.aliases.push_back(std::move(alias));
+        result.bank.lists.push_back(std::move(list));
+        samples.emplace(silence.name, std::move(silence));
+        zt::warn("iw3 sound: no map alias has audio; the bank ships the sound table with a silent placeholder alias");
     }
     for (const auto &name : curves)
         result.bank.volumeCurves.push_back(CurveNamed(name));
@@ -1219,6 +2038,37 @@ std::optional<ConvertedSounds> Convert(const std::filesystem::path &exportRoot,
                      name.c_str());
     if (convertedCurves)
         zt::info("iw3 sound: converted %zu IW3 falloff curve(s)", convertedCurves);
+    const std::array<std::vector<iw8::sound::Curve> *, 4> bankCurves{
+        &result.bank.volumeCurves, &result.bank.lpfCurves, &result.bank.hpfCurves, &result.bank.reverbCurves};
+    std::size_t iw7CurveCount = 0;
+    for (size_t kind = 0; kind < bankCurves.size(); ++kind)
+        for (const auto &curveName : usedIw7Curves[kind])
+        {
+            bankCurves[kind]->push_back(iw7Curves[kind].at(curveName));
+            ++iw7CurveCount;
+        }
+    if (iw7CurveCount)
+        zt::info("iw3 sound: converted %zu IW7 curve(s)", iw7CurveCount);
+    const std::array<std::pair<iw8::sound::TableArray *, uint32_t>, 3> bankPresets{
+        std::pair{&result.bank.dopplerPresets, 88u}, std::pair{&result.bank.occlusionShapes, 100u},
+        std::pair{&result.bank.speakerMaps, 452u}};
+    for (size_t kind = 0; kind < bankPresets.size(); ++kind)
+    {
+        auto &[array, stride] = bankPresets[kind];
+        array->stride = stride;
+        for (const auto &presetName : usedIw7Presets[kind])
+        {
+            const auto &record = iw7Presets[kind].at(presetName);
+            array->records.insert(array->records.end(), record.begin(), record.end());
+        }
+    }
+    for (const uint32_t id : usedDucks)
+        result.bank.ducks.push_back(iw7Ducks.at(id));
+    if (!usedDucks.empty())
+        zt::info("iw3 sound: converted %zu IW7 duck(s)", usedDucks.size());
+    if (std::ranges::any_of(usedIw7Presets, [](const auto &used) { return !used.empty(); }))
+        zt::info("iw3 sound: converted %zu IW7 doppler preset(s), %zu occlusion shape(s), %zu speaker map(s)",
+                 usedIw7Presets[0].size(), usedIw7Presets[1].size(), usedIw7Presets[2].size());
     std::vector<iw8::sound::Sample> ordered;
     for (auto &[path, sample] : samples)
         ordered.push_back(std::move(sample));

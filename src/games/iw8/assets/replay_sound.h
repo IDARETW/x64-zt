@@ -47,6 +47,36 @@ struct Alias
     float stereoSpreadMinDist{}, stereoSpreadMaxDist{}, stereoSpreadMidPoint{};
     uint8_t stereoSpreadMaxAngle{};
     int16_t maxDurationDsec{};
+    // Source-game fields (IW7 aliases); the defaults keep the stock map-bank values.
+    uint32_t lpfCurve{}, hpfCurve{}, reverbSendCurve{}; // 0 = "default"
+    float donutFadeEnd{-1};                             // < 0: distMin (stock)
+    float velocityMin{};
+    float smartPanDistance2d{}, smartPanDistance3d{}, smartPanAttenuation2d{1};
+    uint8_t masterPriority{};
+    float masterPercentage{}, masterSlavePercentage{1};
+    uint32_t contextType{}, contextValue{};
+    uint32_t speakerMap{}, occlusionShape{}, dopplerPreset{}; // 0 = "default"
+    uint32_t duck{}; // +60: SndDuck id the alias starts (0 = none)
+};
+
+// SndDuck (168 B, SndBank +304/+312): while it holds, each volmod (the 128-entry
+// arrays' index; stock defaults 1 / 0 / 1 / 0 / 0) plays attenuated and filtered.
+struct Duck
+{
+    std::string name;
+    uint32_t id{};
+    float fadeIn{}, fadeOut{}, startDelay{}, minDistance{}, distance{}, length{};
+    uint32_t fadeInCurve{}, fadeOutCurve{};
+    bool updateWhilePaused{}, trackAmplitude{}, disableInSplitscreen{};
+    float aliasAttenuation{1}, aliasHpf{}, aliasLpf{1};
+    uint32_t duckAlias{};
+    std::array<float, 128> attenuation{}, hpf{}, lpf{}, focusAmount{};
+    std::array<uint32_t, 128> focusCone{};
+    Duck()
+    {
+        attenuation.fill(1.0f);
+        lpf.fill(1.0f);
+    }
 };
 
 struct AliasList
@@ -66,6 +96,63 @@ struct Curve
 // sample as fixed 1024-sample FLAC frames behind its 18-byte seek table.
 std::vector<uint8_t> BuildSab(const std::vector<Sample> &samples, const std::string &zone);
 
+// Index of a Replay SndGlobals ("singleton", code_post_gfx) volmod / entity channel by
+// name, or -1.
+int VolModIndex(std::string_view name);
+int EntChannelIndex(std::string_view name);
+// Whether a hash names one of Replay's 20 SndGlobals context types.
+bool IsContextType(uint32_t id);
+
+// One SoundTable array (or the bank's send effects): `count` records of the Replay
+// layout. Pointer fields hold zero in `records`; `strings` lists each record's
+// string fields in stream order (stringOffsets), empty for a null pointer.
+struct TableArray
+{
+    uint32_t stride{};
+    std::vector<uint32_t> stringOffsets;
+    std::vector<uint8_t> records;
+    std::vector<std::string> strings; // count * stringOffsets.size()
+    size_t count() const
+    {
+        return stride ? records.size() / stride : 0;
+    }
+};
+
+// SndBank.soundTable (+72, 232 B): fourteen (pointer, count) arrays from +8 in
+// this order. CG_StartClientSideTriggersAudio 0x1416F5E00 selects the table whose
+// id is HashName(map name) (SND_GetSoundTableById 0x141394410).
+enum TableKind
+{
+    TABLE_ADSR,
+    TABLE_AMBIENT_DEF,
+    TABLE_AMBIENT_EVENT,
+    TABLE_AMBIENT_ELEMENT,
+    TABLE_FILTER,
+    TABLE_MIX,
+    TABLE_NPC_ADSR_ZONE,
+    TABLE_OCCLUSION,
+    TABLE_PLAYER_ADSR_ZONE,
+    TABLE_REVERB,
+    TABLE_TIMESCALE,
+    TABLE_ZONE,
+    TABLE_FULL_OCCLUSION,
+    TABLE_BREATH_STATE,
+    TABLE_COUNT
+};
+
+struct SoundTable
+{
+    uint32_t id{};
+    std::array<TableArray, TABLE_COUNT> arrays;
+    bool empty() const
+    {
+        for (const TableArray &array : arrays)
+            if (array.count())
+                return false;
+        return true;
+    }
+};
+
 struct Bank
 {
     std::string name;      // SndBankResident asset name
@@ -73,7 +160,14 @@ struct Bank
     std::string streamKey; // StreamKey asset holding the loaded SAB
     std::vector<AliasList> lists;
     std::vector<Curve> volumeCurves;
+    std::vector<Curve> lpfCurves, hpfCurves, reverbCurves; // SndBank +416/+432/+448
     std::vector<uint8_t> sab;
+    TableArray sendEffects; // SndSendEffectParams (236 B): the reverbs' room types
+    // The aliases' presets (stock map banks hold their own): DopplerPreset 88 B (+352),
+    // OcclusionShape 100 B (+368), SpeakerMap 452 B (+464).
+    TableArray dopplerPresets, occlusionShapes, speakerMaps;
+    std::vector<Duck> ducks;
+    SoundTable table;       // id 0 = none (SND_GetSoundTableById never selects the bank)
 };
 
 // Registers the StreamKey (type 102, resident data) and the always-loaded

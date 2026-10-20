@@ -1919,7 +1919,8 @@ int writeMapPackage(const Args &args, const std::string &map, const std::string 
         iw8::registerMapWorldAssets(
             writer, worldStrings, assetName, mapEntities, bounds, lighting, collision,
             glassInitCount, glassPieceLimit, dynamicCounts,
-            prepared && prepared->vfxLightDef == "light_point_linear", levelStrings);
+            prepared && prepared->vfxLightDef == "light_point_linear", levelStrings,
+            prepared ? prepared->clientTriggers : nullptr);
         timing.lap("asset registration");
         techsets.build();
         writer.build();

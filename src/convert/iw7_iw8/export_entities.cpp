@@ -591,6 +591,178 @@ namespace zonetool::convert::iw7_iw8
 		ZONETOOL_INFO("iw7: removed the model of %zu entities whose model is not in the loaded zones", removed);
 	}
 
+	namespace
+	{
+		std::string trigger_string(const iw7::ClientTriggers& triggers, const int offset)
+		{
+			if (offset < 0 || !triggers.triggerString || static_cast<unsigned>(offset) >= triggers.triggerStringLength)
+			{
+				return {};
+			}
+
+			const auto* text = triggers.triggerString + offset;
+			return std::string(text, strnlen(text, triggers.triggerStringLength - offset));
+		}
+
+		// maps/clienttriggers.json for the importer (iw3_fastfile.cpp ReadClientTriggers): IW7's client triggers (audio zones,
+		// NPC audio zones, blends) in trigger space, as Replay tests them (CG point - origins[i] against triggerSpaceBounds and
+		// the slabs; IW7 keeps world-space hulls). Audio and NPC zone names come out by name. The roles without a Replay
+		// counterpart in converted maps clear: vision sets (1, blend 4: converted maps ship no vision sets) and audio occluders
+		// (0x20); a trigger keeps its index either way. IW7 has no priority; Replay plays the highest-priority audio zone and,
+		// between zones of equal priority, the one whose box lies inside the other's (sub_1416F1B90, verified-static), so
+		// every IW7 zone takes one priority (10) and the nesting picks the inner zone. Stock zones' default ambience is a
+		// map-wide priority-0 trigger of the map's own zone (mp_shipment trigger 1); IW7 plays its map zone outside every
+		// trigger, so a map-wide priority-0 trigger of that zone follows the others.
+		void export_client_triggers(const source_map& source, const iw7::MapEnts& map_ents, extraction& output)
+		{
+			// The PA speakers (the scripts' announcer speakers: origin, group name hash, channel hash) keep IW7's layout in
+			// Replay (AudioPASpeaker, 20 B).
+			auto speakers = json::array();
+			for (auto i = 0u; map_ents.audioPASpeakers && i < map_ents.audioPASpeakerCount; i++)
+			{
+				const auto& speaker = map_ents.audioPASpeakers[i];
+				speakers.push_back({{"origin", {speaker.origin[0], speaker.origin[1], speaker.origin[2]}}, {"nameHash", speaker.nameHash},
+					{"entChannelHash", speaker.entChannelHash}});
+			}
+
+			const auto& triggers = map_ents.clientTrigger;
+			auto count = triggers.trigger.count;
+			if (!triggers.trigger.models || !triggers.triggerType || !triggers.origins)
+			{
+				count = 0;
+			}
+
+
+			const auto& hulls = triggers.trigger.hulls;
+			const auto& slabs = triggers.trigger.slabs;
+			constexpr std::uint16_t audio_roles = 0x2 | 0x8 | 0x10 | 0x40;
+			auto items = json::array();
+			std::size_t audio{};
+			std::size_t cleared{};
+			for (auto i = 0u; i < count; i++)
+			{
+				const auto& model = triggers.trigger.models[i];
+				const auto& origin = triggers.origins[i];
+				const auto type = static_cast<std::uint16_t>(triggers.triggerType[i]);
+				const auto kept = static_cast<std::uint16_t>(type & audio_roles);
+				cleared += kept != type;
+				audio += (kept & 0x2) != 0;
+
+				auto hull_items = json::array();
+				for (auto h = 0u; h < model.hullCount && model.firstHull + h < triggers.trigger.hullCount; h++)
+				{
+					const auto& hull = hulls[model.firstHull + h];
+					auto slab_items = json::array();
+					for (auto s = 0u; s < hull.slabCount && hull.firstSlab + s < triggers.trigger.slabCount; s++)
+					{
+						const auto& slab = slabs[hull.firstSlab + s];
+						const auto along = slab.dir[0] * origin[0] + slab.dir[1] * origin[1] + slab.dir[2] * origin[2];
+						slab_items.push_back({{"dir", {slab.dir[0], slab.dir[1], slab.dir[2]}}, {"midPoint", slab.midPoint - along},
+							{"halfSize", slab.halfSize}});
+					}
+
+					hull_items.push_back({
+						{"midPoint", {hull.bounds.midPoint[0] - origin[0], hull.bounds.midPoint[1] - origin[1], hull.bounds.midPoint[2] - origin[2]}},
+						{"halfSize", {hull.bounds.halfSize[0], hull.bounds.halfSize[1], hull.bounds.halfSize[2]}},
+						{"slabs", std::move(slab_items)}});
+				}
+
+				const auto value16 = [&](const short* values) { return values ? values[i] : static_cast<short>(-1); };
+				json item = {
+					{"type", kept},
+					{"origin", {origin[0], origin[1], origin[2]}},
+					{"scriptDelay", triggers.scriptDelay ? triggers.scriptDelay[i] : 0.0f},
+					{"audio", (kept & 0x2) ? trigger_string(triggers, value16(triggers.audioTriggers)) : std::string{}},
+					{"npc", (kept & 0x10) ? trigger_string(triggers, value16(triggers.npcTriggers)) : std::string{}},
+					{"blend", (kept & 0x8) ? value16(triggers.blendLookup) : -1},
+					{"audioState", value16(triggers.audioStateIds)},
+					{"hulls", std::move(hull_items)},
+				};
+				if (triggers.audioRvbPanInfo)
+				{
+					const auto& pan = triggers.audioRvbPanInfo[i];
+					item["rvbPan"] = {{"hasCustomPosition", pan.hasCustomPosition}, {"position", {pan.position[0], pan.position[1], pan.position[2]}},
+						{"maxWallDistance", pan.maxWallDistance}, {"minReverbVolume", pan.minReverbVolume}};
+				}
+
+				items.push_back(std::move(item));
+			}
+
+			for (auto& item : items)
+			{
+				item["priority"] = (item["type"].get<int>() & 0x2) ? 10.0f : 0.0f;
+			}
+
+			// The blend nodes of the kept blends (audio blends), renumbered in order.
+			auto nodes = json::array();
+			const auto& blend = map_ents.clientTriggerBlend;
+			std::map<int, int> renumbered;
+			for (auto& item : items)
+			{
+				const auto index = item["blend"].get<int>();
+				if (index < 0)
+				{
+					continue;
+				}
+
+				if (!blend.blendNodes || index >= blend.numClientTriggerBlendNodes)
+				{
+					item["blend"] = -1;
+					item["type"] = item["type"].get<int>() & ~0x8;
+					continue;
+				}
+
+				const auto [found, added] = renumbered.try_emplace(index, static_cast<int>(nodes.size()));
+				if (added)
+				{
+					const auto& node = blend.blendNodes[index];
+					nodes.push_back({{"pointA", {node.pointA[0], node.pointA[1], node.pointA[2]}},
+						{"pointB", {node.pointB[0], node.pointB[1], node.pointB[2]}}, {"triggerA", node.triggerA}, {"triggerB", node.triggerB}});
+				}
+
+				item["blend"] = found->second;
+			}
+
+			// The map-wide trigger of the map's own zone, when the sound table has one.
+			const auto bank = static_cast<const iw7::SndBank*>(source.find(iw7::ASSET_TYPE_SOUND_BANK, source.name() + ".all"));
+			const auto world = source.world();
+			bool map_zone{};
+			for (auto z = 0u; bank && z < bank->soundTable.zoneCount; z++)
+			{
+				const auto* name = bank->soundTable.zones[z].zoneName;
+				map_zone = map_zone || (name && source.name() == name);
+			}
+
+			if (map_zone && world)
+			{
+				const auto& bounds = world->bounds;
+				json hull = {{"midPoint", {0.0f, 0.0f, 0.0f}},
+					{"halfSize", {bounds.halfSize[0] + 512.0f, bounds.halfSize[1] + 512.0f, bounds.halfSize[2] + 512.0f}}, {"slabs", json::array()}};
+				items.push_back({{"type", 0x2}, {"origin", {bounds.midPoint[0], bounds.midPoint[1], bounds.midPoint[2]}}, {"scriptDelay", 0.25f},
+					{"audio", source.name()}, {"npc", ""}, {"blend", -1}, {"audioState", -1}, {"priority", 0.0f},
+					{"hulls", json::array({std::move(hull)})}});
+				audio++;
+			}
+
+			const auto node_count = nodes.size();
+			const auto speaker_count = speakers.size();
+			if (items.empty() && !speaker_count)
+			{
+				return;
+			}
+
+			write_json(output.extracted / "maps" / "clienttriggers.json", {{"map", source.name()}, {"triggers", std::move(items)},
+				{"blend_nodes", std::move(nodes)}, {"pa_speakers", std::move(speakers)}});
+			if (speaker_count)
+			{
+				ZONETOOL_INFO("iw7: exported %zu PA speakers", speaker_count);
+			}
+
+			ZONETOOL_INFO("iw7: exported %u client triggers (%zu audio zones%s; %zu lose their vision or occluder roles) and %zu of %u blend nodes",
+				count, audio, map_zone ? ", with the map-wide map zone" : "", cleared, node_count, blend.numClientTriggerBlendNodes);
+		}
+	}
+
 	void export_entities(const source_map& source, extraction& output)
 	{
 		const auto map_ents = source.map_ents();
@@ -598,6 +770,8 @@ namespace zonetool::convert::iw7_iw8
 		{
 			throw std::runtime_error(std::format("zone \"{}\" holds no map entities", source.name()));
 		}
+
+		export_client_triggers(source, *map_ents, output);
 
 		auto entities = with_trigger_models(source,
 			with_key_names(std::string(map_ents->entityString, strnlen(map_ents->entityString, map_ents->numEntityChars))));

@@ -23,8 +23,8 @@ namespace zonetool::convert::iw7_iw8
 			return x * x + y * y + z * z;
 		}
 
-		// Writes the six faces of a probe (linear colours) as an IW3 probe: blue, green, red and alpha bytes of the
-		// sRGB colours, with the mip levels.
+		// Writes the six faces of a probe (linear colours) as a half-float cube map with its mip levels, which the importer
+		// reads as a high-range capture (it keeps the colour, unlike IW3's captures).
 		bool write_probe(const std::span<const DirectX::ScratchImage> faces, const std::filesystem::path& path)
 		{
 			DirectX::ScratchImage cube;
@@ -61,33 +61,12 @@ namespace zonetool::convert::iw7_iw8
 				return false;
 			}
 
+			// The colours stay linear and of their whole range (half floats): the importer scales each probe itself.
 			DirectX::ScratchImage stored;
-			if (FAILED(stored.InitializeCube(DXGI_FORMAT_B8G8R8A8_UNORM, probe_size, probe_size, 1, probe_levels)))
+			if (FAILED(DirectX::Convert(mips.GetImages(), mips.GetImageCount(), mips.GetMetadata(), DXGI_FORMAT_R16G16B16A16_FLOAT,
+				DirectX::TEX_FILTER_FORCE_NON_WIC, DirectX::TEX_THRESHOLD_DEFAULT, stored)))
 			{
 				return false;
-			}
-
-			for (auto face = 0u; face < 6; face++)
-			{
-				for (auto level = 0u; level < probe_levels; level++)
-				{
-					const auto& source = *mips.GetImage(level, face, 0);
-					const auto& target = *stored.GetImage(level, face, 0);
-					for (std::size_t y = 0; y < source.height; y++)
-					{
-						const auto* colors = reinterpret_cast<const float*>(source.pixels + y * source.rowPitch);
-						auto* pixel = target.pixels + y * target.rowPitch;
-						for (std::size_t x = 0; x < source.width; x++, pixel += 4)
-						{
-							for (auto channel = 0; channel < 3; channel++)
-							{
-								pixel[2 - channel] = static_cast<std::uint8_t>(std::lround(linear_to_srgb(light_level(colors[x * 4 + channel])) * 255.0f));
-							}
-
-							pixel[3] = 0xFF;
-						}
-					}
-				}
 			}
 
 			std::filesystem::create_directories(path.parent_path());

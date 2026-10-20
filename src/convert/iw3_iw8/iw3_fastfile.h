@@ -13,10 +13,12 @@
 #include "iw3_vision.h"
 #include <iw8/assets/replay_vfx.h>
 #include <iw8/assets/replay_xanim.h>
+#include <iw8/zone/replay_client_triggers.h>
 
 #include <array>
 #include <cstdint>
 #include <filesystem>
+#include <memory>
 #include <optional>
 #include <set>
 #include <string>
@@ -262,6 +264,9 @@ struct PreparedMap
     std::vector<std::uint8_t> gradingClutPixels;
     // Converted IW3 sound aliases (always-loaded map bank), when any convert.
     std::optional<iw8::sound::Bank> soundBank;
+    // Client-side audio zones of the source map (IW7 maps/clienttriggers.json), when
+    // it has any.
+    std::shared_ptr<const iw8::ClientTriggerSet> clientTriggers;
     // Map-intro chyron (localize mp_chyron/<map>_<team>_<1..4> in eng_<map>):
     // line 2's clock, which the game follows with the running seconds
     // ("Day 1 10:30:"), and each team's unit (allies, axis; stock IW8 names).

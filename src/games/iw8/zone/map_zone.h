@@ -6,6 +6,7 @@
 #include "../common/physics_asset_serialization.h"
 #include "../assets/replay_dynentity.h"
 #include "../common/replay_havok.h"
+#include "replay_client_triggers.h"
 #include "replay_map_layout.h"
 #include "replay_netconst.h"
 #include "replay_spawns.h"
@@ -395,6 +396,227 @@ inline void emitMapTriggers(ZoneBuffer &zb, const havok::BakeResult &collision)
     }
 }
 
+// MapEnts.clientTrigger (+0x68) and clientTriggerBlend (+0x118) header fields.
+inline void stampClientTriggers(uint8_t *me, const ClientTriggerSet &set)
+{
+    if (!set.paSpeakers.empty())
+    {
+        stamp32(me, 0x3C8, static_cast<uint32_t>(set.paSpeakers.size()));
+        stamp64(me, 0x3D0, PTR_FOLLOWS);
+    }
+    constexpr size_t base = 0x68;
+    const auto count = static_cast<uint32_t>(set.triggers.size());
+    if (!count)
+        return;
+    if (count > 0x4000) // CG_StartClientSideTriggers Com_Errors past 0x4000
+        throw std::runtime_error("Replay client trigger count exceeds 0x4000");
+    size_t hulls = 0, slabs = 0, chars = 0;
+    std::vector<std::string> names;
+    for (const auto &trigger : set.triggers)
+    {
+        hulls += trigger.hulls.size();
+        for (const auto &hull : trigger.hulls)
+            slabs += hull.slabs.size();
+        for (const std::string *name : {&trigger.audio, &trigger.npc})
+            if (!name->empty() && std::find(names.begin(), names.end(), *name) == names.end())
+            {
+                names.push_back(*name);
+                chars += name->size() + 1;
+            }
+    }
+    stamp32(me, base + 0x00, count);
+    stamp64(me, base + 0x08, PTR_FOLLOWS);
+    stamp32(me, base + 0x10, static_cast<uint32_t>(hulls));
+    stamp64(me, base + 0x18, hulls ? PTR_FOLLOWS : PTR_NULL);
+    stamp32(me, base + 0x20, static_cast<uint32_t>(slabs));
+    stamp64(me, base + 0x28, slabs ? PTR_FOLLOWS : PTR_NULL);
+    stamp32(me, base + 0x30, static_cast<uint32_t>(chars));
+    stamp64(me, base + 0x38, chars ? PTR_FOLLOWS : PTR_NULL);
+    for (size_t offset = 0x40; offset <= 0xA8; offset += 8)
+        stamp64(me, base + offset, PTR_FOLLOWS);
+    if (!set.blendNodes.empty())
+    {
+        if (set.blendNodes.size() > std::numeric_limits<uint16_t>::max())
+            throw std::runtime_error("Replay client trigger blend node count exceeds 16 bits");
+        stamp16(me, 0x118, static_cast<uint16_t>(set.blendNodes.size()));
+        stamp64(me, 0x120, PTR_FOLLOWS);
+    }
+}
+
+// The client trigger arrays in x64-zt asset_streams.cpp stream_clienttriggers /
+// stream_clienttriggerblend order (VIRTUAL, after the server triggers). Stock
+// mp_shipment: model flags 0, vision -1 for non-vision triggers, null
+// detailSoundBank / linkTo pointers, parent -1. The spatial tree holds no tree,
+// only an always list of every trigger, which the frame test walks like a leaf
+// (the ladders' edge list tree is built the same way).
+inline void emitClientTriggers(ZoneBuffer &zb, const ClientTriggerSet &set)
+{
+    const size_t count = set.triggers.size();
+    if (!count)
+        return;
+    std::string text;
+    const auto offsetOf = [&](const std::string &name) -> int16_t {
+        if (name.empty())
+            return -1;
+        size_t at = 0;
+        while (at < text.size())
+        {
+            const size_t end = text.find('\0', at);
+            if (text.compare(at, end - at, name) == 0)
+                return static_cast<int16_t>(at);
+            at = end + 1;
+        }
+        if (text.size() + name.size() + 1 > static_cast<size_t>(std::numeric_limits<int16_t>::max()))
+            throw std::runtime_error("Replay client trigger string exceeds 16-bit offsets");
+        text += name;
+        text += '\0';
+        return static_cast<int16_t>(at);
+    };
+    std::vector<int16_t> audio, npc;
+    for (const auto &trigger : set.triggers)
+    {
+        audio.push_back(offsetOf(trigger.audio));
+        npc.push_back(offsetOf(trigger.npc));
+    }
+
+    struct Model
+    {
+        uint16_t hullCount;
+        uint32_t firstHull;
+        uint32_t flags;
+    };
+    struct Hull
+    {
+        float midPoint[3], halfSize[3];
+        uint16_t slabCount;
+        uint32_t firstSlab;
+    };
+    struct Slab
+    {
+        float dir[3], midPoint, halfSize;
+    };
+    struct ReverbPan
+    {
+        bool hasCustomPosition;
+        float position[3], maxWallDistance, minReverbVolume;
+    };
+    struct BlendNode
+    {
+        float pointA[3], pointB[3];
+        uint16_t triggerA, triggerB;
+    };
+    static_assert(sizeof(Model) == 12 && sizeof(Hull) == 32 && sizeof(Slab) == 20 && sizeof(ReverbPan) == 24 &&
+                  sizeof(BlendNode) == 28);
+
+    zb.align(3);
+    uint32_t firstHull = 0;
+    for (const auto &trigger : set.triggers)
+    {
+        if (trigger.hulls.empty() || trigger.hulls.size() > std::numeric_limits<uint16_t>::max())
+            throw std::runtime_error("Replay client trigger hull count is invalid");
+        Model model;
+        std::memset(&model, 0, sizeof(model)); // padding included
+        model.hullCount = static_cast<uint16_t>(trigger.hulls.size());
+        model.firstHull = firstHull;
+        zb.writeT(model);
+        firstHull += static_cast<uint32_t>(trigger.hulls.size());
+    }
+    zb.align(3);
+    uint32_t firstSlab = 0;
+    bool anySlab = false;
+    for (const auto &trigger : set.triggers)
+        for (const auto &source : trigger.hulls)
+        {
+            Hull hull;
+            std::memset(&hull, 0, sizeof(hull));
+            for (size_t axis = 0; axis < 3; ++axis)
+            {
+                hull.midPoint[axis] = source.midPoint[axis];
+                hull.halfSize[axis] = source.halfSize[axis];
+            }
+            if (source.slabs.size() > std::numeric_limits<uint16_t>::max())
+                throw std::runtime_error("Replay client trigger slab count exceeds 16 bits");
+            hull.slabCount = static_cast<uint16_t>(source.slabs.size());
+            hull.firstSlab = firstSlab;
+            zb.writeT(hull);
+            firstSlab += hull.slabCount;
+            anySlab = anySlab || hull.slabCount;
+        }
+    if (anySlab)
+    {
+        zb.align(3);
+        for (const auto &trigger : set.triggers)
+            for (const auto &hull : trigger.hulls)
+                for (const auto &source : hull.slabs)
+                    zb.writeT(Slab{{source.dir[0], source.dir[1], source.dir[2]}, source.midPoint, source.halfSize});
+    }
+    if (!text.empty())
+        zb.write(text.data(), text.size());
+    const auto writeShorts = [&](const auto &value) {
+        zb.align(1);
+        for (size_t i = 0; i < count; ++i)
+            zb.writeT<int16_t>(value(i));
+    };
+    const auto writeFloats = [&](const auto &value) {
+        zb.align(3);
+        for (size_t i = 0; i < count; ++i)
+            zb.writeT<float>(value(i));
+    };
+    writeShorts([](size_t) { return int16_t{-1}; }); // visionSetTriggers
+    writeShorts([&](size_t i) { return static_cast<int16_t>(set.triggers[i].type); });
+    zb.align(3);
+    for (const auto &trigger : set.triggers)
+        for (const float value : trigger.origin)
+            zb.writeT(value);
+    writeFloats([&](size_t i) { return set.triggers[i].scriptDelay; });
+    writeFloats([&](size_t i) { return set.triggers[i].priority; });
+    writeShorts([&](size_t i) { return audio[i]; });
+    writeShorts([&](size_t i) { return set.triggers[i].blend; });
+    writeShorts([&](size_t i) { return npc[i]; });
+    writeShorts([&](size_t i) { return set.triggers[i].audioState; });
+    zb.align(7);
+    for (size_t i = 0; i < count; ++i)
+        zb.writeT<uint64_t>(PTR_NULL); // detailSoundBank
+    zb.align(3);
+    for (const auto &trigger : set.triggers)
+    {
+        const auto &source = trigger.reverbPan;
+        ReverbPan pan;
+        std::memset(&pan, 0, sizeof(pan));
+        pan.hasCustomPosition = source.hasCustomPosition;
+        std::copy(source.position.begin(), source.position.end(), pan.position);
+        pan.maxWallDistance = source.maxWallDistance;
+        pan.minReverbVolume = source.minReverbVolume;
+        zb.writeT(pan);
+    }
+    writeShorts([](size_t) { return int16_t{-1}; }); // parent
+    zb.align(7);
+    for (size_t i = 0; i < count; ++i)
+        zb.writeT<uint64_t>(PTR_NULL); // linkTo
+    zb.align(7);
+    uint8_t tree[24]{};
+    stamp64(tree, 8, PTR_FOLLOWS);
+    stamp32(tree, 20, static_cast<uint32_t>(count));
+    zb.write(tree, sizeof(tree));
+    zb.align(3);
+    for (uint32_t i = 0; i < count; ++i)
+        zb.writeT(i);
+
+    if (!set.blendNodes.empty())
+    {
+        zb.align(3);
+        for (const auto &node : set.blendNodes)
+        {
+            if (node.triggerA >= count || node.triggerB >= count)
+                throw std::runtime_error("Replay client trigger blend node names a missing trigger");
+            zb.writeT(BlendNode{{node.pointA[0], node.pointA[1], node.pointA[2]},
+                                {node.pointB[0], node.pointB[1], node.pointB[2]},
+                                node.triggerA,
+                                node.triggerB});
+        }
+    }
+}
+
 inline void emitCmodels(ZoneBuffer &zb, const havok::BakeResult &collision)
 {
     if (collision.models.empty())
@@ -593,7 +815,8 @@ inline void emitMapEntsBody(ZoneBuffer &zb, const char *assetName, const std::st
                             const ReplaySpawns *spawns = nullptr,
                             const havok::BakeResult *collision = nullptr,
                             const uint64_t edgeListAlias = PTR_NULL,
-                            const DynamicEntityCounts &dynamic = {})
+                            const DynamicEntityCounts &dynamic = {},
+                            const ClientTriggerSet *clientTriggers = nullptr)
 {
     const uint32_t dynamicModelCount = dynamic.models;
     const uint32_t dynamicBrushCount = dynamic.brushes;
@@ -648,6 +871,8 @@ inline void emitMapEntsBody(ZoneBuffer &zb, const char *assetName, const std::st
             stamp64(me, kME_edgeListSpatialTree, PTR_FOLLOWS);
         }
     }
+    if (clientTriggers)
+        stampClientTriggers(me, *clientTriggers);
     const uint64_t dynamicCount = static_cast<uint64_t>(dynamicModelCount) + dynamicBrushCount;
     if (dynamicCount > UINT32_MAX)
         throw std::runtime_error("Replay dynamic-entity count exceeds 32 bits");
@@ -689,6 +914,8 @@ inline void emitMapEntsBody(ZoneBuffer &zb, const char *assetName, const std::st
     zb.writeT<uint8_t>(0); // entityString + NUL
     if (collision)
         emitMapTriggers(zb, *collision);
+    if (clientTriggers)
+        emitClientTriggers(zb, *clientTriggers);
     if (spawns)
         spawns->writeRecords(zb);
     if (collision && !collision->entities.empty())
@@ -758,6 +985,19 @@ inline void emitMapEntsBody(ZoneBuffer &zb, const char *assetName, const std::st
         zb.writeT<float>(-100000.f);
     for (unsigned k = 0; k < 3; ++k)
         zb.writeT<float>(100000.f);
+    // MapEnts.audioPASpeakers: after the scriptables (and the empty spawn-group,
+    // effect, mayhem and spawner lists) in stream_mapents order.
+    if (clientTriggers && !clientTriggers->paSpeakers.empty())
+    {
+        zb.align(3);
+        for (const auto &speaker : clientTriggers->paSpeakers)
+        {
+            for (const float value : speaker.origin)
+                zb.writeT(value);
+            zb.writeT(speaker.nameHash);
+            zb.writeT(speaker.entChannelHash);
+        }
+    }
     zb.popStream();
     zb.popStream();
 }
@@ -1098,7 +1338,8 @@ inline void registerMapWorldAssets(ZoneWriter &writer, const MapWorldStrings &st
                                    const havok::BakeResult &collision,
                                    const uint32_t glassInitCount, const uint32_t glassPieceLimit,
                                    const DynamicEntityCounts &dynamic, const bool lightDefInZone,
-                                   const LevelNetConstStrings &levelStrings = {})
+                                   const LevelNetConstStrings &levelStrings = {},
+                                   std::shared_ptr<const ClientTriggerSet> clientTriggers = {})
 {
     const auto spawns = strings.spawns;
     const auto staticCollisionPlan = strings.staticCollisionPlan;
@@ -1110,11 +1351,11 @@ inline void registerMapWorldAssets(ZoneWriter &writer, const MapWorldStrings &st
             emitMapEdgeListBody(output.buffer(), collision.ladders);
         });
     writer.add(ASSET_TYPE_MAP_ENTS, assetName,
-               [assetName, ents, spawns, &collision, hasLadders, dynamic](ZoneWriter &output) {
+               [assetName, ents, spawns, &collision, hasLadders, dynamic, clientTriggers](ZoneWriter &output) {
                    const uint64_t edgeListAlias =
                        hasLadders ? output.assetAlias(ASSET_TYPE_EDGELIST, assetName) : PTR_NULL;
                    emitMapEntsBody(output.buffer(), assetName.c_str(), ents, spawns.get(),
-                                   &collision, edgeListAlias, dynamic);
+                                   &collision, edgeListAlias, dynamic, clientTriggers.get());
                });
 
     // col_map(23): clipMap struct -> TEMP_PRELOAD, variable data -> VIRTUAL.

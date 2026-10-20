@@ -351,10 +351,13 @@ namespace zonetool::convert::iw7_iw8
 
 					if (indices[1] == indices[2] && indices[2] == indices[3])
 					{
+						// Type 2 is a convex piece; 34 (2 with the flag 0x20, one Frontier piece) reads the same way when
+						// its points lie in the section [inferred].
 						const auto header = table_entry(indices[0]);
-						if ((header & 0xFF) != 2)
+						const auto type = header & 0xFF;
+						if (type != 2 && type != 34)
 						{
-							report_unknown(std::format("compressed mesh primitive of type {}", header & 0xFF));
+							report_unknown(std::format("compressed mesh primitive of type {}", type));
 							shapes.unknown++;
 							continue;
 						}
@@ -362,10 +365,19 @@ namespace zonetool::convert::iw7_iw8
 						havok_convex convex;
 						convex.tag = tags[k];
 						const auto first = page | table_entry(indices[0] + 1u);
+						const auto misplaced = shapes.misplaced;
 						for (auto v = 0u; v < header >> 8; v++)
 						{
 							convex.points.push_back(shared_vertex(first + v));
 							check(convex.points.back());
+						}
+
+						if (type == 34 && shapes.misplaced != misplaced)
+						{
+							report_unknown("compressed mesh primitive of type 34 outside its section");
+							shapes.misplaced = misplaced;
+							shapes.unknown++;
+							continue;
 						}
 
 						shape.convexes.push_back(std::move(convex));

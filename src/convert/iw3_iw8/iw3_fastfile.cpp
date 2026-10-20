@@ -123,6 +123,9 @@ struct SourceStaticModelInstance
     std::uint32_t groundLighting{};
     // The model's own light-grid colours (extractions that light each model themselves).
     std::optional<std::array<std::uint8_t, 168>> lightingColors;
+    // A script model placed through the static-model path: the compiler gave it no
+    // lighting inputs, so it lights from the grid at its bounds centre.
+    bool promoted{};
 };
 
 struct SourceStaticModels
@@ -2514,10 +2517,11 @@ SourceSkeletonLod ReadXModelExport(const std::filesystem::path &path)
 }
 
 // Every LOD of `modelName` from the skeleton export, when the model has more
-// than one bone. Without an export the model keeps a single root bone.
+// than one bone. Without an export the model keeps a single root bone; a model
+// the extraction marks single-boned (bone_count 1) needs none.
 std::vector<SourceSkeletonLod> ReadSourceSkeleton(const std::filesystem::path &skeletonRoot,
                                                   const std::string &modelName,
-                                                  const std::size_t lodCount)
+                                                  const std::size_t lodCount, const bool expectBones = true)
 {
     if (skeletonRoot.empty())
         return {};
@@ -2526,8 +2530,9 @@ std::vector<SourceSkeletonLod> ReadSourceSkeleton(const std::filesystem::path &s
         SafeChild(skeletonRoot, std::filesystem::path("xmodel") / (modelName + ".json"));
     if (!std::filesystem::is_regular_file(modelPath, error))
     {
-        zt::warn("iw3: no skeleton export for entity model %s; it keeps one bone",
-                 modelName.c_str());
+        if (expectBones)
+            zt::warn("iw3: no skeleton export for entity model %s; it keeps one bone",
+                     modelName.c_str());
         return {};
     }
     const Json model = ReadJson(modelPath);
@@ -2641,7 +2646,8 @@ SourceStaticModel ReadSourceModel(const std::filesystem::path &root, const std::
     if (geometry.value("schema", 0) != 1 || geometry.at("name") != modelName ||
         !geometry.at("lods").is_array() || geometry.at("lods").size() != model.at("lods").size())
         throw std::runtime_error("IW3 model geometry does not match its LOD table: " + modelName);
-    const auto skeleton = ReadSourceSkeleton(skeletonRoot, modelName, model.at("lods").size());
+    const auto skeleton = ReadSourceSkeleton(skeletonRoot, modelName, model.at("lods").size(),
+                                             geometry.value("bone_count", 0) != 1);
     if (!skeleton.empty())
         converted.bones = skeleton.front().bones;
     float previousDistance = 0.0f;
@@ -3768,6 +3774,7 @@ void AddPromotedStaticModels(const Json &world, const std::filesystem::path &roo
         instance.origin = placement.origin;
         instance.axis = placement.axis;
         instance.scale = placement.scale;
+        instance.promoted = true;
         // The IW3 compiler assigns probes per placement; the nearest compiled
         // static model's probe matches it for 94% of Nuketown's placements.
         float best = std::numeric_limits<float>::infinity();
@@ -8472,6 +8479,115 @@ iw8::impact::EffectOverrides ReadImpactOverrides(
     }
     return overrides;
 }
+
+// maps/clienttriggers.json (IW7 exporter, export_entities.cpp): the source map's
+// client-side audio zones. The zone named after the source map takes the converted
+// map's name, as the sound table's does (sound::ReadSoundTable). Audio zones whose
+// name the map bank's sound table lacks print "Client Trigger Audio script_zone %s
+// not matched" in Replay, and a zone with a state (stateId != 0) Com_Errors
+// (CG_StartClientSideTriggersAudioTrigger 0x1416F6280): both drop their audio role.
+std::shared_ptr<const iw8::ClientTriggerSet> ReadClientTriggers(const std::filesystem::path &exportRoot,
+                                                                const std::string &map,
+                                                                const std::optional<iw8::sound::Bank> &bank)
+{
+    const auto path = exportRoot / "maps" / "clienttriggers.json";
+    std::error_code error;
+    if (!std::filesystem::exists(path, error))
+        return nullptr;
+    std::ifstream input(path);
+    const Json json = Json::parse(input, nullptr, false);
+    if (json.is_discarded() || !json.contains("triggers") || !json.at("triggers").is_array())
+    {
+        zt::warn("iw3: %s is not valid; the map has no client triggers", path.string().c_str());
+        return nullptr;
+    }
+    const std::string source = Lowercase(json.value("map", std::string{}));
+    const std::string target = Lowercase(map);
+
+    std::set<std::string> zones; // stateless zones of the map bank's sound table
+    if (bank)
+    {
+        const auto &array = bank->table.arrays[iw8::sound::TABLE_ZONE];
+        for (size_t i = 0; i < array.count(); ++i)
+        {
+            uint32_t stateId;
+            std::memcpy(&stateId, array.records.data() + i * array.stride + 4, sizeof(stateId));
+            if (!stateId)
+                zones.insert(Lowercase(array.strings[i * array.stringOffsets.size() + 1]));
+        }
+    }
+
+    const auto vec3 = [](const Json &value) {
+        std::array<float, 3> result{};
+        if (value.is_array() && value.size() == 3)
+            for (size_t axis = 0; axis < 3; ++axis)
+                result[axis] = value[axis].get<float>();
+        return result;
+    };
+    auto set = std::make_shared<iw8::ClientTriggerSet>();
+    std::set<std::string> unmatched;
+    std::size_t audio = 0;
+    for (const Json &item : json.at("triggers"))
+    {
+        iw8::ClientTriggerSet::Trigger trigger;
+        // 0x40 (audio propagation) walks MapEnts.audioPropNodes/Edges, which IW7 maps
+        // do not have (stock mp_shipment: 15 nodes, 36 edges): the role clears.
+        trigger.type = static_cast<uint16_t>(item.value("type", 0) & ~0x40);
+        trigger.origin = vec3(item.value("origin", Json()));
+        trigger.scriptDelay = item.value("scriptDelay", 0.0f);
+        trigger.priority = item.value("priority", 0.0f);
+        trigger.audio = Lowercase(item.value("audio", std::string{}));
+        trigger.npc = Lowercase(item.value("npc", std::string{}));
+        if (!source.empty() && trigger.audio == source)
+            trigger.audio = target;
+        trigger.blend = static_cast<int16_t>(item.value("blend", -1));
+        trigger.audioState = static_cast<int16_t>(item.value("audioState", -1));
+        if (item.contains("rvbPan") && item.at("rvbPan").is_object())
+        {
+            const Json &pan = item.at("rvbPan");
+            trigger.reverbPan.hasCustomPosition = pan.value("hasCustomPosition", false);
+            trigger.reverbPan.position = vec3(pan.value("position", Json()));
+            trigger.reverbPan.maxWallDistance = pan.value("maxWallDistance", 0.0f);
+            trigger.reverbPan.minReverbVolume = pan.value("minReverbVolume", 0.0f);
+        }
+        for (const Json &source_hull : item.value("hulls", Json::array()))
+        {
+            iw8::ClientTriggerSet::Hull hull;
+            hull.midPoint = vec3(source_hull.value("midPoint", Json()));
+            hull.halfSize = vec3(source_hull.value("halfSize", Json()));
+            for (const Json &source_slab : source_hull.value("slabs", Json::array()))
+                hull.slabs.push_back({vec3(source_slab.value("dir", Json())), source_slab.value("midPoint", 0.0f),
+                                      source_slab.value("halfSize", 0.0f)});
+            trigger.hulls.push_back(std::move(hull));
+        }
+        if (trigger.hulls.empty())
+            throw std::runtime_error("client trigger without hulls in " + path.string());
+        if ((trigger.type & 0x2) && (trigger.audio.empty() || !zones.contains(trigger.audio)))
+        {
+            unmatched.insert(trigger.audio.empty() ? "(none)" : trigger.audio);
+            trigger.type = static_cast<uint16_t>(trigger.type & ~0x42);
+            trigger.audio.clear();
+        }
+        audio += (trigger.type & 0x2) != 0;
+        set->triggers.push_back(std::move(trigger));
+    }
+    for (const Json &item : json.value("blend_nodes", Json::array()))
+        set->blendNodes.push_back({vec3(item.value("pointA", Json())), vec3(item.value("pointB", Json())),
+                                   static_cast<uint16_t>(item.value("triggerA", 0)),
+                                   static_cast<uint16_t>(item.value("triggerB", 0))});
+    for (const Json &item : json.value("pa_speakers", Json::array()))
+        set->paSpeakers.push_back({vec3(item.value("origin", Json())), item.value("nameHash", 0u),
+                                   item.value("entChannelHash", 0u)});
+    for (const auto &name : unmatched)
+        zt::warn("iw3: client trigger audio zone %s is not a stateless zone of the map bank's sound table; the "
+                 "trigger plays no zone",
+                 name.c_str());
+    zt::info("iw3: %zu client trigger(s), %zu audio zone(s), %zu blend node(s), %zu PA speaker(s)",
+             set->triggers.size(), audio, set->blendNodes.size(), set->paSpeakers.size());
+    if (set->triggers.empty() && set->paSpeakers.empty())
+        return nullptr;
+    return set;
+}
 } // namespace
 
 PreparedMap::PreparedMap(PreparedMap &&other) noexcept
@@ -8501,6 +8617,7 @@ PreparedMap::PreparedMap(PreparedMap &&other) noexcept
     , gradingClutName(std::move(other.gradingClutName))
     , gradingClutPixels(std::move(other.gradingClutPixels))
     , soundBank(std::move(other.soundBank))
+    , clientTriggers(std::move(other.clientTriggers))
     , chyronClock(std::move(other.chyronClock))
     , chyronUnits(std::move(other.chyronUnits))
 {
@@ -8542,6 +8659,7 @@ PreparedMap &PreparedMap::operator=(PreparedMap &&other) noexcept
         gradingClutName = std::move(other.gradingClutName);
         gradingClutPixels = std::move(other.gradingClutPixels);
         soundBank = std::move(other.soundBank);
+        clientTriggers = std::move(other.clientTriggers);
         chyronClock = std::move(other.chyronClock);
         chyronUnits = std::move(other.chyronUnits);
         other.scratch.clear();
@@ -10280,7 +10398,7 @@ PreparedMap PrepareFastfile(const ImportOptions &options)
         {
             const auto &source = sourceStaticModels.instances.at(index);
             lightingInputs[index].origin = source.lightingOrigin.value_or(origins[index]);
-            legacyOrigins += !source.lightingOrigin;
+            legacyOrigins += !source.lightingOrigin && !source.promoted;
             lightingInputs[index].primaryLight = source.primaryLight;
             lightingInputs[index].groundLit = source.groundLit;
             lightingInputs[index].groundLighting = source.groundLighting;
@@ -10599,6 +10717,7 @@ PreparedMap PrepareFastfile(const ImportOptions &options)
             soundAliases = std::move(sounds->aliases);
             result.soundBank = std::move(sounds->bank);
         }
+        result.clientTriggers = ReadClientTriggers(exportRoot, options.map, result.soundBank);
         // Sound modules of native effects keep the aliases that the map bank holds; a state whose
         // sound modules lose all of theirs no longer plays sounds.
         std::size_t droppedSounds = 0;

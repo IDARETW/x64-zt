@@ -559,6 +559,69 @@ std::vector<IndexEntry> MakeAliasIndex(const std::vector<uint32_t> &ids)
 
 // Replay sound.h curve hash of "default" (the fallback every map bank defines).
 constexpr uint32_t kDefaultHash = 4135636924u;
+
+// SndGlobals "singleton" (code_post_gfx) volmodinfo / entchannelInfo names in index
+// order (x64-zt dumpasset soundglobals singleton code_post_gfx).
+constexpr std::array<std::string_view, 86> kVolMods{
+    "hud", "interface", "interface_music", "hitmarker", "music", "music_emitter", "music_emitter_pa", "ambience",
+    "ambience_dist", "element", "emitter", "physics", "nuke_reactive_emitter", "bodyfall", "foley_plr", "foleymp_plr",
+    "foley_npc", "foleymp_npc", "foley_wpn_plr", "foley_wpn_npc", "footstep_plr", "footstep_npc", "footstepmp_plr",
+    "footstepmp_npc", "melee_plr", "melee_npc", "chatteral", "chatterax", "reactional", "reactionax", "voiceover",
+    "voiceover_radio", "voiceover_radio_3d", "voiceover_critical", "voiceover_amb", "voiceover_plr", "destruct",
+    "explosion", "explosion_grenade", "explosion_flashbang", "explosion_rocket", "explosion_car", "rex_emitters",
+    "impact", "impact_plr", "impact_npc", "impact_plr_to_npc", "impactmp", "impactmp_plr", "impactmp_npc",
+    "impactmp_plr_to_npc", "whizby", "whizbymp", "vehicle_plr", "vehicle_npc", "vehicle_wpn_plr", "vehicle_wpn_npc",
+    "vehicle", "grenadebounce", "grenadebouncemp", "shellcasings", "shellcasingsmp", "wpn_plr", "wpn_plr_mech",
+    "wpn_plr_lfe", "wpn_plr_atmo", "wpnmp_plr", "wpn_npc", "wpnmp_npc", "wpn_projectile", "wpnmp_projectile",
+    "wpn_reflections", "wpn_reflections_mid", "wpn_reflections_far", "wpn_reflections_dist", "na", "max", "scripted1",
+    "scripted2", "scripted3", "scripted4", "scripted5", "fullvolume", "perkmp_quiet", "deathsdoor", "default",
+};
+
+constexpr std::array<std::string_view, 177> kEntChannels{
+    "scn_fx_unres_3d", "scn_lfe_unres_3d", "scn_fx_unres_2d", "scn_lfe_unres_2d", "scn_fx_special_unres_3d",
+    "scn_fx_special_unres_2d", "scn_fx_special_unres_prop_3d", "scn_fx_unres_3d_lim", "scn_fx_unres_2d_lim",
+    "scn_fx_res_3d", "scn_fx_res_2d", "melee_plr_2d", "weap_plr_fire_1_2d", "weap_plr_fire_2_2d",
+    "weap_plr_fire_3_2d", "weap_plr_fire_4_2d", "weap_plr_fire_overlap_2d", "weap_plr_fire_lfe_2d",
+    "weap_casing_eject_3d", "weap_plr_fire_alt_1_2d", "weap_plr_fire_alt_2_2d", "weap_plr_fire_alt_3_2d",
+    "weap_plr_fire_alt_4_2d", "weap_plr_fire_alt_overlap_2d", "weap_plr_fire_alt_lfe_2d", "foley_plr_step_2d",
+    "foley_plr_step_unres_2d", "foley_plr_mvmt_unres_2d_lim", "foley_plr_weap_2d_lim", "reload_plr_res_2d",
+    "reload_plr_res2_2d", "reload_plr_unres_2d", "spear_refl_front_unres_3d_lim", "spear_refl_rear_unres_3d_lim",
+    "spear_refl_side_unres_3d_lim", "spear_refl_dist_unres_3d_lim", "spear_refl_npc_unres_3d_lim", "weap_npc_main_3d",
+    "weap_npc_mech_3d", "weap_npc_atmo_3d", "weap_npc_atmo_alt_3d", "weap_npc_lfe_3d", "weap_npc_mid_3d",
+    "weap_npc_mid_atmo_3d", "weap_npc_mid_atmo_alt_3d", "weap_npc_far_3d", "weap_npc_far_atmo_3d",
+    "weap_npc_far_atmo_alt_3d", "weap_npc_dist_3d", "weap_npc_dist_atmo_3d", "weap_npc_dist_atmo_alt_3d",
+    "weap_npc_sniper_mid_3d", "weap_npc_sniper_mid_atmo_3d", "weap_npc_sniper_mid_atmo_alt_3d",
+    "weap_npc_sniper_far_3d", "weap_npc_sniper_far_atmo_3d", "weap_npc_sniper_far_atmo_alt_3d",
+    "weap_npc_sniper_dist_3d", "weap_npc_sniper_dist_atmo_3d", "weap_npc_sniper_dist_atmo_alt_3d", "weap_npc_lo_3d",
+    "melee_npc_3d", "plr_use_misc_unres_2d", "plr_ui_ingame_unres_2d", "plr_use_ps4spkr_res_2d", "equip_use_unres_3d",
+    "equip_ui_ingame_unres_3d", "amb_plunder_loops_unres_3d", "amb_plunder_loops_close_unres_3d",
+    "amb_plunder_loops_mech_3d", "pickup_plunder_unres_1_2d", "explo_main_3d", "explo_close_3d", "explo_body_3d",
+    "explo_body2_3d", "explo_debris_3d", "explo_atmo_3d", "explo_atmo_alt_3d", "explo_lfe_3d", "explo_far_3d",
+    "explo_dist_3d", "projectile_loop_close", "projectile_loop_mid", "projectile_loop_dist",
+    "whizby_crack_unres_3d_lim", "whizby_in_unres_3d_lim", "whizby_out_unres_3d_lim", "bulletimpact_unres_3d_lim",
+    "bulletimpact_lo_unres_3d_lim", "bullet_ricochets_unres_3d_lim", "bullet_rico_reflect_unres_3d_lim",
+    "bullet_plr_1_unres_3d_lim", "bullet_plr_exit_unres_3d_lim", "hit_marker_unres_3d_lim",
+    "hit_marker_final_res_2d_lim", "bulletflesh_1_unres_3d_lim", "bulletflesh_2_unres_3d_lim",
+    "bulletflesh_lfe_unres_2d_lim", "bulletflesh_npc_1_unres_3d_lim", "bulletflesh_npc_2_unres_3d_lim",
+    "bulletflesh_npcnpc1_unres_3d_lim", "bulletflesh_npcnpc2_unres_3d_lim", "melee_impact_3d", "foley_npc_step_3d",
+    "foley_npc_step_unres_3d", "foley_npc_step_ceiling_3d", "foley_npc_parachute_land", "foley_npc_mvmt_unres_3d_lim",
+    "foley_npc_weap_unres_3d_lim", "reload_npc_res_3d", "reload_npc_unres_3d", "voice_air_3d", "voice_no_occ_3d",
+    "voice_radio_3d", "voice_radio_2d", "voice_narration_2d", "voice_special_2d", "voice_walla_1_3d",
+    "voice_bchatter_1_3d", "voice_bchatter_lo_unres_3d_lim", "voice_plr_2d", "voice_plr_efforts_2d",
+    "voice_plr_breath_2d", "voice_plr_breath_2d_alt", "voice_animal_1_3d", "amb_bed_2d", "amb_elm_unres_3d",
+    "amb_elm_int_unres_3d", "amb_elm_ext_unres_3d", "amb_elm_unres_2d_lim", "amb_elm_unres_2d",
+    "amb_elm_int_special_unres_3d", "amb_elm_ext_special_unres_3d", "rex_emitters_unres_3d_lim", "doors_3d",
+    "vehicle_air_flyby_close_3d_lim", "vehicle_air_loops_3d_lim", "vehicle_air_flyby_midfar_3d_lim",
+    "veh_weap_npc_main_3d", "veh_weap_npc_mech_3d", "veh_weap_npc_atmo_3d", "veh_weap_npc_atmo_alt_3d",
+    "veh_weap_npc_lfe_3d", "vehicle_hi_res_3d", "vehicle_hi_unres_3d", "vehicle_lfe_3d", "vehicle_lo_3d_lim",
+    "vehicle_unres_2d", "vehicle_unres_2d_lim", "shock_nofilter_2d", "hurt_nofilter_2d", "shock1_nofilter_3d",
+    "shock2_nofilter_3d", "music_lr", "music_lsrs", "musicnopause_lr", "musicnopause_lsrs", "mus_emitter_3d",
+    "menu_unres_2d", "menu_1_2d_lim", "menu_2_2d_lim", "physics_hi_unres_3d_lim", "physics_lo_unres_3d_lim",
+    "bodyfalls_hi_unres_3d_lim", "bodyfalls_lo_unres_3d_lim", "special_hi_unres_1_3d", "special_hi_unres_1_2d",
+    "special_mid_unres_1_3d", "special_lo_unres_1_3d", "special_lo_unres_1_2d", "pa_speaker", "pa_voice",
+    "z_audio_test_music_unres_2d", "z_audio_test_wpn_unres_2d", "z_audio_test_wpn_lo_unres_2d",
+    "z_audio_test_fx_unres_2d", "z_audio_test_voice_2d",
+};
 } // namespace
 
 uint32_t HashName(const std::string_view name)
@@ -570,6 +633,29 @@ uint32_t HashName(const std::string_view name)
         hash = 65599u * hash + static_cast<uint32_t>(static_cast<int32_t>(static_cast<signed char>(lower)));
     }
     return hash ? hash : 1;
+}
+
+int VolModIndex(const std::string_view name)
+{
+    const auto found = std::ranges::find(kVolMods, name);
+    return found != kVolMods.end() ? static_cast<int>(found - kVolMods.begin()) : -1;
+}
+
+bool IsContextType(const uint32_t id)
+{
+    // SndGlobals "singleton" contexts (code_post_gfx), in index order.
+    static constexpr std::array<std::string_view, 20> kContexts{
+        "ads",     "atmosphere", "rain",    "wind",   "chtype",  "dusty",
+        "storm",   "special_foley", "special_land", "vehicle", "battle", "mature",
+        "plr_fs_mvmt_weap_foley", "npc_fs_mvmt_weap_foley", "gender", "trainby", "climb", "donetsk_amb",
+        "silent_plant", "lobby_fade"};
+    return std::ranges::any_of(kContexts, [&](const std::string_view name) { return HashName(name) == id; });
+}
+
+int EntChannelIndex(const std::string_view name)
+{
+    const auto found = std::ranges::find(kEntChannels, name);
+    return found != kEntChannels.end() ? static_cast<int>(found - kEntChannels.begin()) : -1;
 }
 
 std::vector<uint8_t> BuildSab(const std::vector<Sample> &samples, const std::string &zone)
@@ -725,12 +811,41 @@ void RegisterBank(ZoneWriter &writer, const Bank &source)
         for (size_t offset : {size_t(0), size_t(8), size_t(16), size_t(24), size_t(40), size_t(48)})
             Store(header, offset, PTR_FOLLOWS);
         Store(header, 32, static_cast<uint32_t>(bank.lists.size()));
-        // soundTable.id stays 0: SND_GetSoundTableById never selects this bank.
-        if (!bank.volumeCurves.empty())
+        if (bank.sendEffects.count())
         {
-            Store(header, 400, static_cast<uint32_t>(bank.volumeCurves.size()));
-            Store(header, 408, PTR_FOLLOWS);
+            Store(header, 56, static_cast<uint32_t>(bank.sendEffects.count()));
+            Store(header, 64, PTR_FOLLOWS);
         }
+        for (const auto &[array, offset] : {std::pair{&bank.dopplerPresets, size_t(352)},
+                                            std::pair{&bank.occlusionShapes, size_t(368)},
+                                            std::pair{&bank.speakerMaps, size_t(464)}})
+            if (array->count())
+            {
+                Store(header, offset, static_cast<uint32_t>(array->count()));
+                Store(header, offset + 8, PTR_FOLLOWS);
+            }
+        if (!bank.ducks.empty())
+        {
+            Store(header, 304, static_cast<uint32_t>(bank.ducks.size()));
+            Store(header, 312, PTR_FOLLOWS);
+        }
+        // A table id of 0 keeps SND_GetSoundTableById from selecting this bank.
+        Store(header, 72, bank.table.id);
+        for (size_t kind = 0; kind < TABLE_COUNT; ++kind)
+            if (bank.table.arrays[kind].count())
+            {
+                Store(header, 80 + kind * 16, PTR_FOLLOWS);
+                Store(header, 88 + kind * 16, static_cast<uint32_t>(bank.table.arrays[kind].count()));
+            }
+        // vfCurves +400, lpfCurves +416, hpfCurves +432, rvbCurves +448: (count, pointer).
+        const std::array<const std::vector<Curve> *, 4> curveArrays{&bank.volumeCurves, &bank.lpfCurves,
+                                                                    &bank.hpfCurves, &bank.reverbCurves};
+        for (size_t i = 0; i < curveArrays.size(); ++i)
+            if (!curveArrays[i]->empty())
+            {
+                Store(header, 400 + i * 16, static_cast<uint32_t>(curveArrays[i]->size()));
+                Store(header, 408 + i * 16, PTR_FOLLOWS);
+            }
         Store(header, 496, out.assetAlias(ASSET_TYPE_STREAMKEY, bank.streamKey));
         header[504] = 1; // streamInfo.alwaysLoaded: SNDL_AddBank uses a resident slot
         out.pushStream(XFILE_BLOCK_TEMP_PRELOAD);
@@ -772,7 +887,12 @@ void RegisterBank(ZoneWriter &writer, const Bank &source)
                 Store(head, 84, alias.volModIndex);
                 Store(head, 88, alias.pitchMin);
                 Store(head, 92, alias.pitchMax);
-                Store(head, 96, alias.distMin); // donutFadeEnd: stock equals distMin
+                // donutFadeEnd: stock map banks hold distMin.
+                Store(head, 96, alias.donutFadeEnd < 0 ? alias.distMin : alias.donutFadeEnd);
+                Store(head, 108, alias.velocityMin);
+                Store(head, 44, alias.contextType);
+                Store(head, 48, alias.contextValue);
+                Store(head, 60, alias.duck);
                 Store(head, 100, alias.distMin);
                 Store(head, 104, alias.distMax);
                 Store(head, 112, alias.flags);
@@ -785,20 +905,24 @@ void RegisterBank(ZoneWriter &writer, const Bank &source)
                 Store(head, 128, alias.startDelay);
                 Store(head, 132, alias.startDelayMax);
                 Store(head, 136, alias.volumeFalloffCurve ? alias.volumeFalloffCurve : kDefaultHash);
-                Store(head, 140, kDefaultHash); // lpfCurve
-                Store(head, 144, kDefaultHash); // hpfCurve
-                Store(head, 148, kDefaultHash); // reverbSendCurve
-                Store(head, 164, kDefaultHash); // speakerMap
+                Store(head, 140, alias.lpfCurve ? alias.lpfCurve : kDefaultHash);
+                Store(head, 144, alias.hpfCurve ? alias.hpfCurve : kDefaultHash);
+                Store(head, 148, alias.reverbSendCurve ? alias.reverbSendCurve : kDefaultHash);
+                Store(head, 164, alias.speakerMap ? alias.speakerMap : kDefaultHash);
                 Store(head, 168, alias.reverbMultiplier);
                 Store(head, 172, alias.farReverbMultiplier);
-                Store(head, 176, kDefaultHash); // occlusionShape
-                Store(head, 180, kDefaultHash); // dopplerPreset
-                Store(head, 192, 1.0f);         // smartPanAttenuation2d
+                Store(head, 176, alias.occlusionShape ? alias.occlusionShape : kDefaultHash);
+                Store(head, 180, alias.dopplerPreset ? alias.dopplerPreset : kDefaultHash);
+                Store(head, 184, alias.smartPanDistance2d);
+                Store(head, 188, alias.smartPanDistance3d);
+                Store(head, 192, alias.smartPanAttenuation2d);
                 Store(head, 196, alias.stereoSpreadMinDist);
                 Store(head, 200, alias.stereoSpreadMaxDist);
                 Store(head, 204, alias.stereoSpreadMidPoint);
                 head[208] = alias.stereoSpreadMaxAngle;
-                Store(head, 216, 1.0f);        // masterSlavePercentage
+                head[209] = alias.masterPriority;
+                Store(head, 212, alias.masterPercentage);
+                Store(head, 216, alias.masterSlavePercentage);
                 Store(head, 220, 0.25118864f); // masterThreshold (-12 dB)
                 Store(head, 224, alias.maxDurationDsec);
                 out.write(head.data(), head.size());
@@ -813,10 +937,84 @@ void RegisterBank(ZoneWriter &writer, const Bank &source)
         }
         out.align(1);
         out.write(index.data(), index.size() * sizeof(IndexEntry));
-        if (!bank.volumeCurves.empty())
+        // x64-zt asset_streams.cpp stream_sndbank / stream_soundtable: send effects,
+        // then each table array in field order, each followed by its records'
+        // strings (arrays with pointers align 8, the rest 4).
+        const auto writeArray = [&out](const TableArray &array, const char *label) {
+            const size_t count = array.count();
+            if (!count)
+                return;
+            const size_t fields = array.stringOffsets.size();
+            if (array.records.size() != count * array.stride || array.strings.size() != count * fields)
+                throw std::runtime_error(std::string("sound table array ") + label + " is malformed");
+            std::vector<uint8_t> records = array.records;
+            for (size_t i = 0; i < count; ++i)
+                for (size_t f = 0; f < fields; ++f)
+                    Store(records, i * array.stride + array.stringOffsets[f],
+                          array.strings[i * fields + f].empty() ? uint64_t{0} : PTR_FOLLOWS);
+            out.align(fields ? 7 : 3);
+            out.write(records.data(), records.size());
+            for (const std::string &text : array.strings)
+                if (!text.empty())
+                    out.writeStr(text);
+        };
+        writeArray(bank.sendEffects, "sendEffects");
+        static constexpr std::array<const char *, TABLE_COUNT> kLabels{
+            "adsr", "ambientDefs", "ambientEvents", "ambientElements", "filters", "mixes", "npcADSRZones",
+            "occlusionFilters", "playerADSRZones", "reverbs", "timeScaleSettings", "zones", "fullOcclusionDefs",
+            "plrBreathStateDefs"};
+        for (size_t kind = 0; kind < TABLE_COUNT; ++kind)
+            writeArray(bank.table.arrays[kind], kLabels[kind]);
+        // Ducks (x64-zt stream_sndduck_array: records, then each duck's five
+        // 128-entry arrays at 32-byte alignment); no music sets or weapon reflections.
+        if (!bank.ducks.empty())
         {
+            out.align(7);
+            for (const Duck &duck : bank.ducks)
+            {
+                if (duck.name.empty() || duck.name.size() >= 64)
+                    throw std::runtime_error("invalid sound duck " + duck.name);
+                std::vector<uint8_t> record(168, 0);
+                std::memcpy(record.data(), duck.name.data(), duck.name.size());
+                Store(record, 0x40, duck.id ? duck.id : HashName(duck.name));
+                Store(record, 0x44, duck.fadeIn);
+                Store(record, 0x48, duck.fadeOut);
+                Store(record, 0x4C, duck.startDelay);
+                Store(record, 0x50, duck.minDistance);
+                Store(record, 0x54, duck.distance);
+                Store(record, 0x58, duck.length);
+                Store(record, 0x5C, duck.fadeInCurve);
+                Store(record, 0x60, duck.fadeOutCurve);
+                for (size_t offset = 0x68; offset <= 0x88; offset += 8)
+                    Store(record, offset, PTR_FOLLOWS);
+                record[0x90] = duck.updateWhilePaused;
+                record[0x91] = duck.trackAmplitude;
+                record[0x92] = duck.disableInSplitscreen;
+                Store(record, 0x94, duck.aliasAttenuation);
+                Store(record, 0x98, duck.aliasHpf);
+                Store(record, 0x9C, duck.aliasLpf);
+                Store(record, 0xA0, duck.duckAlias);
+                out.write(record.data(), record.size());
+            }
+            for (const Duck &duck : bank.ducks)
+            {
+                for (const auto *values : {&duck.attenuation, &duck.hpf, &duck.lpf, &duck.focusAmount})
+                {
+                    out.align(31);
+                    out.write(values->data(), values->size() * sizeof(float));
+                }
+                out.align(31);
+                out.write(duck.focusCone.data(), duck.focusCone.size() * sizeof(uint32_t));
+            }
+        }
+        writeArray(bank.dopplerPresets, "dopplerPresets");
+        writeArray(bank.occlusionShapes, "occlusionShapes");
+        for (const auto *curves : curveArrays)
+        {
+            if (curves->empty())
+                continue;
             out.align(3);
-            for (const Curve &curve : bank.volumeCurves)
+            for (const Curve &curve : *curves)
             {
                 if (curve.name.empty() || curve.name.size() >= 64 || curve.points.empty() ||
                     curve.points.size() > 16)
@@ -833,6 +1031,7 @@ void RegisterBank(ZoneWriter &writer, const Bank &source)
                 out.write(record.data(), record.size());
             }
         }
+        writeArray(bank.speakerMaps, "speakerMaps");
         out.popStream();
         out.popStream();
     });
