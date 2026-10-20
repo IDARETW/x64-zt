@@ -896,6 +896,8 @@ namespace zonetool::convert::iw7_iw8
 			{"translucent_glass", true},
 			// IW7 zones are twice the size of IW3 ones: the pipeline block compresses the images that keep their detail.
 			{"bc7_images", true},
+			// Merge world surfaces only within 512-unit cells, so that GPU culling and the light shadow maps can skip them.
+			{"spatial_surfaces", true},
 			{"script_models", script_models},
 			{"surfaces", std::move(surfaces)},
 			{"models", std::move(models)},
