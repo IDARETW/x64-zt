@@ -17,6 +17,9 @@ namespace zonetool::convert::iw7_iw8
 		std::vector<iw7::GfxPackedVertex> vertices;
 		std::vector<iw7::GfxPackedMotionVertex> motion_vertices;
 		std::vector<iw7::Face> faces;
+		// The rigid vertex lists (bone, vertex count; they cover the vertices in order) and whether vertices blend bones.
+		std::vector<std::pair<std::uint16_t, std::uint16_t>> rigid_lists;
+		bool blended{};
 	};
 
 	// The zones of an IW7 map: the map zone, the transient zones of its world and any zone that holds an asset that the

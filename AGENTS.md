@@ -92,8 +92,14 @@ Without a command, `zonetool.exe` opens an interactive console.
   state that swaps the model and plays effects and a sound; Frontier: 172 cups, bottles, screens and clocks of 41
   kinds) take a targetname `iw7_destructible_<kind>`, and the map script (`iw7_destructibles`) breaks each when it has
   taken its health in damage: the broken model (or none), the first effect, the sound. A script model that is all
-  glass keeps its glass in its collision, and a model with no solid collision keeps no physics. Their other states,
-  animations (Frontier's rising floor panels) and events do not convert.
+  glass keeps its glass in its collision, and a model with no solid collision keeps no physics. A kind whose first
+  state plays an animation (Frontier: the ops table's solar system idle, 1799 frames on 35 bones; the floor panels'
+  closed pose) takes a targetname `iw7_animated_<kind>` (or keeps its own), and the map script (`iw7_animations`)
+  plays it (`scriptmodelplayanim`) and its tag effects on the tags (`playfxontag`), which the animation moves. IW7
+  XAnimParts keep Replay's streams (`sub_1414D3460` consumes Frontier's exactly): they export as IW3 XAnim dumps
+  (`extracted/xanim`, listed in the world JSON's `xanims`), their models' skeletons as XMODEL_EXPORTs (`skeleton/`:
+  bones at their base poses, each vertex on its rigid list's bone; models with blended vertices and root-motion
+  anims do not animate). Their other states (the floor panels' scripted raise) and events do not convert.
   The map's own script (`scripts\mp\maps\<map>\<map>`) becomes the IW3 map script: the functions that its main
   reaches, with IW7's utilities replaced by IW3 ones or their IW3 versions, the names that gsc-tool writes as IW7
   token ids (`_id_XXXX`) renamed, and the effects that it plays on the tags of converted models (which have one bone)

@@ -136,6 +136,12 @@ namespace zonetool::convert::iw7_iw8
 					}
 
 					copy.faces.assign(surface.triIndices, surface.triIndices + surface.triCount);
+					for (auto l = 0u; surface.rigidVertLists && l < surface.rigidVertListCount; l++)
+					{
+						copy.rigid_lists.emplace_back(surface.rigidVertLists[l].boneOffsetIndex, surface.rigidVertLists[l].vertCount);
+					}
+
+					copy.blended = std::ranges::any_of(surface.blendVertCounts, [](const auto count) { return count != 0; });
 				}
 			}
 

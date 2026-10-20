@@ -882,6 +882,13 @@ namespace zonetool::convert::iw7_iw8
 			}
 		}
 
+		// The animations of the animated scriptables (export_animations), which the map script plays.
+		auto xanims = json::array();
+		for (const auto& [name, anim] : output.xanims)
+		{
+			xanims.push_back(name);
+		}
+
 		json value =
 		{
 			{"schema", 1},
@@ -899,6 +906,7 @@ namespace zonetool::convert::iw7_iw8
 			// Merge world surfaces only within 512-unit cells, so that GPU culling and the light shadow maps can skip them.
 			{"spatial_surfaces", true},
 			{"script_models", script_models},
+			{"xanims", std::move(xanims)},
 			{"surfaces", std::move(surfaces)},
 			{"models", std::move(models)},
 			{"brush_models", std::move(brush_models)},

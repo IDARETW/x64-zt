@@ -316,4 +316,301 @@ namespace zonetool::convert::iw7_iw8
 
 		ZONETOOL_INFO("iw7: exported %zu of %zu static models", written, output.models.size());
 	}
+
+	namespace
+	{
+		std::string script_name(const iw7::scr_string_t id)
+		{
+			const auto string = SL_ConvertToString(static_cast<std::uint32_t>(id));
+			return string ? string : "";
+		}
+
+		template <typename T>
+		json values(const T* data, const std::size_t count)
+		{
+			auto result = json::array();
+			for (std::size_t i = 0; data && i < count; i++)
+			{
+				result.push_back(data[i]);
+			}
+
+			return result;
+		}
+
+		// An IW7 XAnimParts as the pipeline's IW3 XAnim dump: IW7 keeps IW3's streams (part types boneCount[10], key
+		// counts, frame indices and keys), which Replay decodes as IW3 does. Root motion (delta parts) does not convert.
+		bool write_xanim(const iw7::XAnimParts& anim, const std::filesystem::path& path)
+		{
+			if (anim.deltaPart && (anim.deltaPart->trans || anim.deltaPart->quat2 || anim.deltaPart->quat))
+			{
+				ZONETOOL_WARNING("iw7: animation \"%s\" moves its root (a delta part), which does not convert", anim.name);
+				return false;
+			}
+
+			auto names = json::array();
+			for (auto i = 0u; anim.names && i < anim.boneCount[9]; i++)
+			{
+				names.push_back(script_name(anim.names[i]));
+			}
+
+			auto notify = json::array();
+			for (auto i = 0u; anim.notify && i < anim.notifyCount; i++)
+			{
+				notify.push_back({{"name", script_name(anim.notify[i].name)}, {"time", anim.notify[i].time}});
+			}
+
+			auto counts = json::array();
+			for (const auto count : anim.boneCount)
+			{
+				counts.push_back(count);
+			}
+
+			const auto bytes = [](const char* data, const std::size_t count)
+			{
+				return values(reinterpret_cast<const std::uint8_t*>(data), count);
+			};
+
+			write_json(path,
+			{
+				{"schema", 1},
+				{"name", asset_name(anim.name)},
+				{"numframes", anim.numframes},
+				{"framerate", anim.framerate},
+				{"frequency", anim.frequency},
+				{"loop", (anim.flags & 1) != 0},
+				{"bone_count", std::move(counts)},
+				{"names", std::move(names)},
+				{"notify", std::move(notify)},
+				{"data_byte", bytes(anim.dataByte, anim.dataByteCount)},
+				{"data_short", values(anim.dataShort, anim.dataShortCount)},
+				{"data_int", values(anim.dataInt, anim.dataIntCount)},
+				{"random_data_byte", bytes(anim.randomDataByte, anim.randomDataByteCount)},
+				{"random_data_short", values(anim.randomDataShort, anim.randomDataShortCount)},
+				{"random_data_int", values(anim.randomDataInt, anim.randomDataIntCount)},
+				{"indices", anim.numframes < 256 ? values(anim.indices._1, anim.indexCount) : values(anim.indices._2, anim.indexCount)},
+				{"delta_part", nullptr},
+			});
+			return true;
+		}
+
+		// The skeleton of a model as the OpenAssetTools XMODEL_EXPORT (version 6) of each LOD that the pipeline reads for entity
+		// models: the bones at their bind pose (DObjAnimMat base poses, model space), and each vertex on the bone of its rigid
+		// vertex list, with the triangles of every surface in the order of export_model. Models with blended vertices do not
+		// convert.
+		bool write_skeleton(const source_map& source, const std::string& name, const iw7::XModel& model, const std::filesystem::path& root)
+		{
+			const auto fail = [&](const char* reason)
+			{
+				ZONETOOL_WARNING("iw7: the skeleton of model \"%s\" does not export (%s); it does not animate", name.data(), reason);
+				return false;
+			};
+
+			if (!model.boneNames || !model.baseMat || !model.parentList || model.numBones < 2 || model.numBones > 128)
+			{
+				return fail("bones");
+			}
+
+			std::string bones = std::format("NUMBONES {}\n", model.numBones);
+			for (auto i = 0u; i < model.numBones; i++)
+			{
+				const int parent = i < model.numRootBones ? -1 : static_cast<int>(i) - model.parentList[i - model.numRootBones];
+				if (parent >= static_cast<int>(i))
+				{
+					return fail("parent order");
+				}
+
+				bones += std::format("BONE {} {} \"{}\"\n", i, parent, script_name(model.boneNames[i]));
+			}
+
+			for (auto i = 0u; i < model.numBones; i++)
+			{
+				const auto& pose = model.baseMat[i];
+				const double length = std::sqrt(pose.quat[0] * pose.quat[0] + pose.quat[1] * pose.quat[1] + pose.quat[2] * pose.quat[2] +
+					pose.quat[3] * pose.quat[3]);
+				if (!(length > 0.0))
+				{
+					return fail("bind pose");
+				}
+
+				const auto x = pose.quat[0] / length, y = pose.quat[1] / length, z = pose.quat[2] / length, w = pose.quat[3] / length;
+				bones += std::format("BONE {}\nOFFSET {:.6f}, {:.6f}, {:.6f}\nSCALE 1.000000, 1.000000, 1.000000\n", i, pose.trans[0],
+					pose.trans[1], pose.trans[2]);
+				bones += std::format("X {:.6f}, {:.6f}, {:.6f}\n", 1 - 2 * (y * y + z * z), 2 * (x * y + w * z), 2 * (x * z - w * y));
+				bones += std::format("Y {:.6f}, {:.6f}, {:.6f}\n", 2 * (x * y - w * z), 1 - 2 * (x * x + z * z), 2 * (y * z + w * x));
+				bones += std::format("Z {:.6f}, {:.6f}, {:.6f}\n", 2 * (x * z + w * y), 2 * (y * z - w * x), 1 - 2 * (x * x + y * y));
+			}
+
+			auto lods = json::array();
+			for (auto lod = 0; lod < model.numLods && lod < 6; lod++)
+			{
+				const auto& info = model.lodInfo[lod];
+				// The surfaces of the zones, else those of the stream files, in the order of export_model.
+				const auto surfaces = source.resolve(iw7::ASSET_TYPE_XMODEL_SURFS, info.modelSurfs);
+				const auto streamed = info.modelSurfs ? source.streamed_surfaces(asset_name(info.modelSurfs->name)) : nullptr;
+				const auto resident = surfaces && surfaces->surfs;
+				if (resident ? surfaces->numsurfs < info.numsurfs : !streamed || streamed->size() < info.numsurfs)
+				{
+					return fail("surfaces in no loaded zone or stream file");
+				}
+
+				std::string vertices;
+				std::string faces;
+				std::size_t vertex_count{};
+				std::size_t face_count{};
+				for (std::size_t s = 0; s < info.numsurfs; s++)
+				{
+					std::vector<std::pair<std::uint16_t, std::uint16_t>> lists;
+					auto blended = false;
+					if (resident)
+					{
+						const auto& surface = surfaces->surfs[s];
+						for (auto l = 0u; surface.rigidVertLists && l < surface.rigidVertListCount; l++)
+						{
+							lists.emplace_back(surface.rigidVertLists[l].boneOffsetIndex, surface.rigidVertLists[l].vertCount);
+						}
+
+						blended = std::ranges::any_of(surface.blendVertCounts, [](const auto count) { return count != 0; });
+					}
+					else
+					{
+						lists = (*streamed)[s].rigid_lists;
+						blended = (*streamed)[s].blended;
+					}
+
+					if (blended || lists.empty())
+					{
+						return fail("blended vertices, or no rigid vertex lists");
+					}
+
+					// The bone of each vertex: the rigid lists cover the vertices in order. IW7 gives each list its bone index
+					// (IW3 its offset in 64-byte bone matrices).
+					std::vector<unsigned> vertex_bones;
+					auto divisor = 1u;
+					for (const auto& [bone, count] : lists)
+					{
+						divisor = bone >= model.numBones ? 64u : divisor;
+					}
+
+					for (const auto& [bone, count] : lists)
+					{
+						if (bone % divisor || bone / divisor >= model.numBones)
+						{
+							return fail("bone of a rigid list");
+						}
+
+						vertex_bones.insert(vertex_bones.end(), count, bone / divisor);
+					}
+
+					const auto add = [&](const auto& source_vertices, const auto& source_faces)
+					{
+						if (vertex_bones.size() != source_vertices.size())
+						{
+							return fail("vertex count of the rigid lists");
+						}
+
+						const auto first = vertex_count;
+						for (std::size_t v = 0; v < source_vertices.size(); v++)
+						{
+							const auto& xyz = source_vertices[v].xyz;
+							vertices += std::format("VERT {}\nOFFSET {:.6f}, {:.6f}, {:.6f}\nBONES 1\nBONE {} 1.000000\n", vertex_count++,
+								xyz[0], xyz[1], xyz[2], vertex_bones[v]);
+						}
+
+						for (const auto& face : source_faces)
+						{
+							faces += std::format("TRI {} 0 0 0\n", s);
+							for (const auto corner : {face.v1, face.v2, face.v3})
+							{
+								faces += std::format("VERT {}\nNORMAL 0 0 1\nCOLOR 1 1 1 1\nUV 1 0 0\n", first + corner);
+							}
+
+							face_count++;
+						}
+
+						return true;
+					};
+
+					auto added = false;
+					if (resident)
+					{
+						const auto& surface = surfaces->surfs[s];
+						const std::span faces_span(surface.triIndices, surface.triCount);
+						added = (surface.flags & 8) != 0 ? add(std::span(surface.verts0.packedMotionVerts0, surface.vertCount), faces_span)
+							: add(std::span(surface.verts0.packedVerts0, surface.vertCount), faces_span);
+					}
+					else
+					{
+						const auto& stream = (*streamed)[s];
+						added = stream.motion ? add(stream.motion_vertices, stream.faces) : add(stream.vertices, stream.faces);
+					}
+
+					if (!added)
+					{
+						return fail("surface vertices");
+					}
+				}
+
+				const auto file = std::format("xmodel_export/{}_lod{}.XMODEL_EXPORT", name, lod);
+				std::filesystem::create_directories((root / file).parent_path());
+				std::ofstream(root / file, std::ios::binary | std::ios::trunc) << std::format("// IW7 skeleton of {} (lod {})\nMODEL\nVERSION 6\n\n",
+					name, lod) << bones << std::format("\nNUMVERTS {}\n", vertex_count) << vertices << std::format("\nNUMFACES {}\n", face_count)
+					<< faces;
+				lods.push_back({{"file", file}});
+			}
+
+			write_json(root / "xmodel" / (name + ".json"), {{"lods", std::move(lods)}});
+			return true;
+		}
+	}
+
+	void export_animations(const source_map& source, extraction& output)
+	{
+		std::set<std::string> skeletons;
+		for (const auto& [name, model] : output.animated_models)
+		{
+			if (model && write_skeleton(source, name, *model, output.root / "skeleton"))
+			{
+				skeletons.insert(name);
+			}
+		}
+
+		std::set<std::string> written;
+		for (const auto& [name, anim] : output.xanims)
+		{
+			if (anim && write_xanim(*anim, output.extracted / "xanim" / (name + ".iw3.json")))
+			{
+				written.insert(name);
+			}
+		}
+
+		// The scriptables whose model or animation does not convert keep their bind pose, with their effects at the bind
+		// pose of their tags.
+		std::erase_if(output.scriptable_animations, [&](const auto& entry)
+		{
+			const auto& [targetname, anim] = entry;
+			const auto model = output.scriptable_animation_models.find(targetname);
+			return !written.contains(anim) || model == output.scriptable_animation_models.end() || !skeletons.contains(model->second);
+		});
+
+		std::erase_if(output.scriptable_tag_effects, [&](const auto& effect)
+		{
+			if (output.scriptable_animations.contains(effect.targetname))
+			{
+				return false;
+			}
+
+			output.scriptable_effects.push_back(effect.placement);
+			return true;
+		});
+
+		std::erase_if(output.xanims, [&](const auto& entry)
+		{
+			return !written.contains(entry.first) || std::ranges::none_of(output.scriptable_animations, [&](const auto& animation)
+			{
+				return animation.second == entry.first;
+			});
+		});
+		ZONETOOL_INFO("iw7: %zu kinds of scriptables animate (%zu animations, %zu skeletons, %zu effects on their tags)",
+			output.scriptable_animations.size(), output.xanims.size(), skeletons.size(), output.scriptable_tag_effects.size());
+	}
 }
