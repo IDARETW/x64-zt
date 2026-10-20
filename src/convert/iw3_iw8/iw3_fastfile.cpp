@@ -119,6 +119,8 @@ struct SourceStaticModelInstance
     std::uint8_t primaryLight{};
     bool groundLit{};
     std::uint32_t groundLighting{};
+    // The model's own light-grid colours (extractions that light each model themselves).
+    std::optional<std::array<std::uint8_t, 168>> lightingColors;
 };
 
 struct SourceStaticModels
@@ -3233,6 +3235,16 @@ std::vector<BrushModel> ReadBrushModels(const Json &world, const std::filesystem
             converted.primaryLight = instance.value("primary_light", std::uint8_t{0});
             converted.groundLit = (instance.value("model_flags", 0u) & 1u) != 0;
             converted.groundLighting = instance.value("ground_lighting", 0u);
+            if (const auto colors = instance.find("lighting_colors"); colors != instance.end())
+            {
+                const auto text = colors->get<std::string>();
+                if (text.size() != 336)
+                    throw std::runtime_error("invalid static-model lighting colours");
+                std::array<std::uint8_t, 168> bytes{};
+                for (std::size_t i = 0; i < bytes.size(); ++i)
+                    bytes[i] = static_cast<std::uint8_t>(std::stoul(text.substr(i * 2, 2), nullptr, 16));
+                converted.lightingColors = bytes;
+            }
         }
         converted.scale = instance.at("scale").get<float>();
         if (!std::isfinite(converted.scale) || converted.scale <= 0.0f)
@@ -10206,6 +10218,7 @@ PreparedMap PrepareFastfile(const ImportOptions &options)
             lightingInputs[index].primaryLight = source.primaryLight;
             lightingInputs[index].groundLit = source.groundLit;
             lightingInputs[index].groundLighting = source.groundLighting;
+            lightingInputs[index].colors = source.lightingColors;
         }
         if (legacyOrigins)
             zt::warn("iw3: %zu static model(s) lack IW3 lighting inputs (old extraction); using bounds centres",
