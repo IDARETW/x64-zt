@@ -559,6 +559,347 @@ namespace zonetool::iw8
 			return found != item.pointers.end() ? found->target : 0;
 		}
 
+		// IW8_REWRITE=fxshape builds the Havok data of each PhysicsFXShape of the zone again, as the IW7 converter builds it.
+		// From the stock levels (convex shapes, scales, mass properties) the tagfile must be the stock one; from the vertices of
+		// the first level alone the levels must agree with the stock ones.
+		void verify_fxshape(const std::filesystem::path& zone_folder, const loaded_zone& zone)
+		{
+			const auto& compendium = replay_compendium(zone_folder);
+			const auto tuple_type = *compendium.find("hkTuple<hkArray<T*<hknpConvexShape>, hkContainerHeapAllocator>, hkArray<float, hkContainerHeapAllocator>, void, void, void, void, void, void>");
+			char log[8]{};
+			const auto verbose = GetEnvironmentVariableA("IW8_FXSHAPE_LOG", log, sizeof(log)) != 0;
+			std::size_t shapes{};
+			std::size_t levels_checked{};
+			double worst_vertex{};
+			double worst_volume{};
+			double worst_centre{};
+			double worst_inertia{};
+			const auto convex_type = *compendium.find("hknpConvexPolytopeShape");
+			std::size_t penetration_levels{};
+			std::size_t penetration_same{};
+			std::size_t penetration_close{};
+			int penetration_worst{};
+			std::size_t radii{};
+			std::size_t with_radius{};
+			std::size_t without_indices{};
+			std::size_t angles{};
+			std::size_t angles_same{};
+			std::size_t angles_close{};
+			std::size_t differing{};
+			std::size_t vertex_edges{};
+			std::size_t vertex_edges_same{};
+			std::size_t masses{};
+			std::size_t masses_same{};
+			for (const auto& asset : zone.assets)
+			{
+				if (asset.type != ASSET_TYPE_PHYSICS_FX_SHAPE || asset.referenced)
+				{
+					continue;
+				}
+
+				const auto* shape = static_cast<const PhysicsFXShape*>(asset.header);
+				const std::string name = shape->name ? shape->name : "?";
+				const std::span bytes(reinterpret_cast<const std::uint8_t*>(shape->havokData), shape->havokDataSize);
+				const auto file = havok::read_tagfile(bytes, &compendium);
+				if (file.items.size() < 2 || file.items[1].type != tuple_type)
+				{
+					throw std::runtime_error(std::format("physics shape \"{}\" has a root of another type", name));
+				}
+
+				const auto& tuple = file.items[1];
+				const auto& list = file.items.at(item_target(tuple, 0));
+				const auto& scales = file.items.at(item_target(tuple, 16));
+				std::vector<havok::fx_shape_level> stock;
+				std::vector<std::uint16_t> penetrations;
+				std::vector<float> level_radii;
+				bool indexed_vertices = true;
+				havok::convex_options options;
+				for (std::uint32_t s = 0; s < list.count; s++)
+				{
+					const auto index = item_target(list, s * 8);
+					const auto& convex = file.items.at(index);
+					const auto member = [&](const std::string_view member_name)
+					{
+						return compendium.member(convex.type, member_name).value().first;
+					};
+
+					const havok::convex_options level_options{item_value<std::uint16_t>(convex, member("flags")),
+						item_value<std::uint8_t>(convex, member("dispatchType")), item_value<std::uint64_t>(convex, member("userData")),
+						item_value<float>(convex, member("convexRadius"))};
+					radii += level_options.convex_radius != 0.0f;
+					if (s && (level_options.flags != options.flags || level_options.dispatch_type != options.dispatch_type ||
+						level_options.user_data != options.user_data))
+					{
+						throw std::runtime_error(std::format("physics shape \"{}\" has levels with other headers", name));
+					}
+
+					options = level_options;
+					const auto mass = havok::read_mass_properties(file, compendium, index);
+					if (!mass)
+					{
+						throw std::runtime_error(std::format("physics shape \"{}\" has a level without mass properties", name));
+					}
+
+					stock.push_back({item_value<float>(scales, s * 4), havok::read_convex_polytope_shape(file, compendium, index), *mass});
+					level_radii.push_back(level_options.convex_radius);
+					penetrations.push_back(item_value<std::uint16_t>(convex, member("maxAllowedPenetration")));
+					const auto& vertices = file.items.at(item_target(convex, member("vertices")));
+					for (std::uint32_t v = 0; v < vertices.count; v++)
+					{
+						indexed_vertices &= (item_value<std::uint32_t>(vertices, v * 16 + 12) & 0xFFFFFF00u) == 0x3F000000u;
+					}
+				}
+
+				// The w of each vertex holds its index (0.5 + index) in the shapes of the Replay tools.
+				if (!indexed_vertices)
+				{
+					without_indices++;
+					continue;
+				}
+
+				// maxAllowedPenetration: a third of the inner radius, as the builder gives it; the tagfile compares with the stock values.
+				for (std::size_t level = 0; level < stock.size(); level++)
+				{
+					havok::object_builder probe(compendium);
+					const auto item = havok::add_convex_polytope_shape(probe, stock[level].shape);
+					const auto ours = item_value<std::uint16_t>(probe.finish(file.sdk_version, {}, item).items[1],
+						compendium.member(convex_type, "maxAllowedPenetration").value().first);
+					const auto ulps = std::abs(static_cast<int>(ours) - static_cast<int>(penetrations[level]));
+					penetration_same += ulps == 0;
+					penetration_close += ulps <= 1;
+					penetration_worst = std::max(penetration_worst, ulps);
+					penetration_levels++;
+					stock[level].max_allowed_penetration = penetrations[level];
+				}
+
+				// The stock tools scale the convex radius with the level; the IW7 converter builds shapes without one.
+				if (std::ranges::any_of(level_radii, [](const float r) { return r != 0.0f; }))
+				{
+					with_radius++;
+					continue;
+				}
+
+				havok::object_builder builder(compendium);
+				havok::add_fx_shape(builder, stock, options);
+				// As the writer orders the items.
+				auto built_file = havok::read_tagfile(havok::write_self_describing_tagfile(havok::breadth_first(builder.finish(file.sdk_version, {})),
+					compendium), &compendium);
+
+				// What the builder estimates is counted, then the stock values are taken: minHalfAngle (the last byte of each face),
+				// the face edge that vertexEdges names for each vertex (one of the edges that start at it), and the packed mass
+				// properties (the levels compare with the stock ones below).
+				const auto face_type = *compendium.find("hknpConvexPolytopeShape::Face");
+				const auto links_type = *compendium.find("hknpConvexPolytopeShape::Connectivity");
+				const auto mass_type = *compendium.find("hknpShapeMassProperties");
+				const auto vertex_edges_offset = compendium.member(links_type, "vertexEdges").value().first;
+				std::set<std::uint32_t> vertex_edge_items;
+				for (const auto& entry : built_file.items)
+				{
+					if (entry.type == links_type)
+					{
+						vertex_edge_items.insert(item_target(entry, vertex_edges_offset));
+					}
+				}
+
+				for (std::uint32_t index = 1; index < std::min(built_file.items.size(), file.items.size()); index++)
+				{
+					auto& ours = built_file.items[index];
+					const auto& theirs = file.items[index];
+					if (ours.type != theirs.type || ours.data.size() != theirs.data.size())
+					{
+						continue;
+					}
+
+					if (ours.type == face_type)
+					{
+						for (std::size_t at = 3; at < ours.data.size(); at += 4)
+						{
+							const auto steps = std::abs(static_cast<int>(ours.data[at]) - static_cast<int>(theirs.data[at]));
+							angles_same += steps == 0;
+							angles_close += steps <= 2;
+							angles++;
+							ours.data[at] = theirs.data[at];
+						}
+					}
+					else if (ours.type == mass_type)
+					{
+						masses_same += ours.data == theirs.data;
+						masses++;
+						ours.data = theirs.data;
+					}
+					else if (vertex_edge_items.contains(index))
+					{
+						for (std::size_t at = 0; at + 4 <= ours.data.size(); at += 4)
+						{
+							vertex_edges_same += std::equal(ours.data.begin() + at, ours.data.begin() + at + 4, theirs.data.begin() + at);
+							vertex_edges++;
+						}
+
+						ours.data = theirs.data;
+					}
+				}
+
+				const auto built = havok::write_self_describing_tagfile(built_file, compendium);
+				const auto expected = havok::write_self_describing_tagfile(file, compendium);
+				if (built != expected)
+				{
+					const auto again = havok::read_tagfile(built, &compendium);
+					std::string difference = std::format("{} items, stock {}", again.items.size(), file.items.size());
+					for (std::size_t index = 1; index < std::min(again.items.size(), file.items.size()); index++)
+					{
+						const auto& a = again.items[index];
+						const auto& b = file.items[index];
+						if (a.type != b.type || a.count != b.count || a.data.size() != b.data.size() || a.pointers.size() != b.pointers.size())
+						{
+							difference += std::format("; item {} is {} x{} (stock {} x{})", index, compendium.identity(a.type), a.count,
+								compendium.identity(b.type), b.count);
+							break;
+						}
+
+						if (a.data != b.data)
+						{
+							const auto at = static_cast<std::size_t>(std::ranges::mismatch(a.data, b.data).in1 - a.data.begin());
+							std::string member_name = "?";
+							for (auto type = a.type; type; type = compendium.at(type).parent)
+							{
+								std::uint32_t best{};
+								for (const auto& m : compendium.at(type).members)
+								{
+									if (m.offset <= at && m.offset >= best)
+									{
+										best = m.offset;
+										member_name = compendium.identity(type) + "::" + m.name;
+									}
+								}
+
+								if (member_name != "?")
+								{
+									break;
+								}
+							}
+
+							difference += std::format("; item {} ({}) differs at byte {} (after member {}): {:02X}{:02X} (stock {:02X}{:02X})", index,
+								compendium.identity(a.type), at, member_name, a.data[at + 1 < a.data.size() ? at + 1 : at], a.data[at],
+								b.data[at + 1 < b.data.size() ? at + 1 : at], b.data[at]);
+							break;
+						}
+
+						if (!std::ranges::equal(a.pointers, b.pointers, [](const auto& x, const auto& y) { return x.offset == y.offset &&
+							x.pointer_type == y.pointer_type && x.target == y.target; }))
+						{
+							difference += std::format("; item {} ({}) points elsewhere", index, compendium.identity(a.type));
+							break;
+						}
+					}
+
+					ZONETOOL_INFO("  physics shape \"%s\" builds differently: %s", name.data(), difference.data());
+					if (verbose)
+					{
+						for (std::size_t index = 1; index < std::min(again.items.size(), file.items.size()); index++)
+						{
+							const auto& a = again.items[index];
+							const auto& b = file.items[index];
+							std::string pa, pb;
+							for (const auto& x : a.pointers) pa += std::format(" {}@{}", x.target, x.offset);
+							for (const auto& x : b.pointers) pb += std::format(" {}@{}", x.target, x.offset);
+							ZONETOOL_INFO("    %zu: %s x%u%s %s| stock %s x%u%s", index, compendium.identity(a.type).data(), a.count, pa.data(),
+								a.data == b.data ? "" : "(data) ", compendium.identity(b.type).data(), b.count, pb.data());
+						}
+					}
+					differing++;
+				}
+
+				// The levels from the vertices of the first.
+				const auto ours = havok::fx_shape_levels(stock.front().shape.vertices);
+				if (ours.size() != stock.size())
+				{
+					throw std::runtime_error(std::format("physics shape \"{}\" has {} levels", name, stock.size()));
+				}
+
+				const auto relative = [](const double a, const double b)
+				{
+					return std::abs(a - b) / std::max(std::abs(b), 1e-12);
+				};
+
+				for (std::size_t level = 0; level < stock.size(); level++)
+				{
+					const auto& a = ours[level];
+					const auto& b = stock[level];
+					if (a.scale != b.scale)
+					{
+						throw std::runtime_error(std::format("physics shape \"{}\" level {} has scale {} (stock {})", name, level, a.scale, b.scale));
+					}
+
+					auto extent = 0.0;
+					for (std::size_t axis = 0; axis < 3; axis++)
+					{
+						const auto [low, high] = std::ranges::minmax(b.shape.vertices | std::views::transform([axis](const havok::vector3& v) { return v[axis]; }));
+						extent = std::max(extent, static_cast<double>(high) - low);
+					}
+
+					// Each stock vertex is a vertex of ours.
+					auto vertex = 0.0;
+					for (const auto& v : b.shape.vertices)
+					{
+						auto nearest = std::numeric_limits<double>::max();
+						for (const auto& w : a.shape.vertices)
+						{
+							nearest = std::min(nearest, std::hypot(static_cast<double>(v[0]) - w[0], static_cast<double>(v[1]) - w[1],
+								static_cast<double>(v[2]) - w[2]));
+						}
+
+						vertex = std::max(vertex, nearest / extent);
+					}
+
+					auto centre = 0.0;
+					for (std::size_t axis = 0; axis < 3; axis++)
+					{
+						centre = std::max(centre, std::abs(static_cast<double>(a.mass.centre[axis]) - b.mass.centre[axis]) / extent);
+					}
+
+					auto ours_moments = a.mass.inertia;
+					auto stock_moments = b.mass.inertia;
+					std::ranges::sort(ours_moments);
+					std::ranges::sort(stock_moments);
+					auto inertia = 0.0;
+					for (std::size_t axis = 0; axis < 3; axis++)
+					{
+						inertia = std::max(inertia, relative(ours_moments[axis], stock_moments[axis]));
+					}
+
+					const auto volume = std::max(relative(a.mass.volume, b.mass.volume), relative(a.mass.mass, b.mass.mass));
+					if (verbose)
+					{
+						ZONETOOL_INFO("  %s level %zu scale %g: %zu/%zu vertices, vertex %.2g volume %.2g centre %.2g inertia %.2g (mass %g, stock %g)",
+							name.data(), level, b.scale, a.shape.vertices.size(), b.shape.vertices.size(), vertex, volume, centre, inertia,
+							a.mass.mass, b.mass.mass);
+					}
+
+					// The first level of the stock shapes keeps another centre of mass than its other levels.
+					worst_vertex = std::max(worst_vertex, vertex);
+					worst_volume = std::max(worst_volume, volume);
+					worst_centre = std::max(worst_centre, level ? centre : 0.0);
+					worst_inertia = std::max(worst_inertia, inertia);
+					levels_checked++;
+				}
+
+				shapes++;
+			}
+
+			ZONETOOL_INFO("%s: %zu physics shapes build again (%zu with a convex radius and %zu without vertex indices are left out); %zu levels from the hulls of their "
+				"vertices: vertices within %.2g, mass and volume within %.2g, centre within %.2g of the extent (after the first level), inertia "
+				"within %.2g; maxAllowedPenetration the same for %zu of %zu levels, within one step for %zu, at most %d steps; minHalfAngle "
+				"the same for %zu of %zu faces, within two steps for %zu; vertexEdges the same for %zu of %zu vertices; packed mass "
+				"properties the same for %zu of %zu levels", zone.name.data(), shapes, with_radius, without_indices, levels_checked, worst_vertex,
+				worst_volume, worst_centre, worst_inertia, penetration_same, penetration_levels, penetration_close, penetration_worst,
+				angles_same, angles, angles_close, vertex_edges_same, vertex_edges, masses_same, masses);
+			if (differing)
+			{
+				throw std::runtime_error(std::format("{} physics shapes build differently", differing));
+			}
+		}
+
+
 		// The instances that the leaves of a SIMD tree hold, leaf by leaf from the left. With check_bounds, each inner slot must
 		// hold the bounds of its child node.
 		std::vector<std::uint32_t> tree_instances(const havok::item& nodes, const bool check_bounds)
@@ -2480,6 +2821,10 @@ namespace zonetool::iw8
 			else if (std::string_view(rewrite) == "compound")
 			{
 				verify_compound(zone_folder, *zone);
+			}
+			else if (std::string_view(rewrite) == "fxshape")
+			{
+				verify_fxshape(zone_folder, *zone);
 			}
 			else if (std::string_view(rewrite) == "mesh")
 			{

@@ -50,6 +50,9 @@ namespace zonetool::iw8::havok
 		std::uint16_t flags = 0x943;
 		std::uint8_t dispatch_type = 2;
 		std::uint64_t user_data{};
+		float convex_radius{};
+		// hknpShape::m_maxAllowedPenetration (hkHalf16); otherwise a third of the inner radius.
+		std::optional<std::uint16_t> max_allowed_penetration;
 	};
 
 	// An hknpConvexPolytopeShape of the polytope, with its connectivity. Returns the shape item.
@@ -101,6 +104,26 @@ namespace zonetool::iw8::havok
 
 	// The mass properties that a shape item keeps, as they decode.
 	std::optional<mass_properties> read_mass_properties(const tagfile& file, const type_table& types, std::uint32_t shape);
+
+	// A convex shape of a PhysicsFXShape, at its scale.
+	struct fx_shape_level
+	{
+		float scale{};
+		polytope shape;
+		mass_properties mass;
+		std::optional<std::uint16_t> max_allowed_penetration;
+	};
+
+	// The levels of a PhysicsFXShape as the Replay tools make them: the hull of the points at 1, then divided by 1.33 eight
+	// times, then multiplied by 1.33 eight times, each with the mass properties of density 1000.
+	std::vector<fx_shape_level> fx_shape_levels(std::span<const vector3> points);
+
+	// The Havok data of a PhysicsFXShape: an hkTuple of its convex shapes and their scales. Returns the tuple item.
+	std::uint32_t add_fx_shape(object_builder& builder, std::span<const fx_shape_level> levels, const convex_options& options = {});
+
+	// The items of the tagfile in breadth-first order from the root, each item's targets in the order of their offsets (as
+	// the Replay tools write self-describing tagfiles).
+	tagfile breadth_first(tagfile file);
 
 	// A copy of an item of another tagfile, with the items that it points at.
 	std::uint32_t copy_item(object_builder& builder, const tagfile& file, std::uint32_t item,
