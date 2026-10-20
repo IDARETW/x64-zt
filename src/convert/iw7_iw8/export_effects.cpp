@@ -1695,11 +1695,48 @@ iw7_unsupported( a, b, c, d, e, f )
 }
 )gsc";
 
+		// IW7's setscriptablepartstate on the converted scriptables (script models): the animation of the state, from the
+		// table that iw7_animations fills, as a move of the entity (a model of one moving bone; its collision moves with
+		// it) or an animation of the model.
+		constexpr std::string_view scriptable_state_helpers = R"gsc(
+iw7_setscriptablepartstate( part, state, instant )
+{
+	if ( !isdefined( level.iw7_states ) || !isdefined( self.model ) || !isdefined( level.iw7_states[self.model] ) )
+		return;
+	entry = level.iw7_states[self.model][part + ":" + state];
+	if ( !isdefined( entry ) )
+		return;
+	if ( entry.mode == "move" )
+	{
+		if ( !isdefined( self.iw7_base ) )
+			self.iw7_base = self.origin;
+		goal = self.iw7_base + anglestoforward( self.angles ) * entry.to[0] - anglestoright( self.angles ) * entry.to[1] +
+			anglestoup( self.angles ) * entry.to[2];
+		if ( isdefined( instant ) && instant || entry.time < 0.1 )
+			self.origin = goal;
+		else
+			self moveto( goal, entry.time, entry.time * 0.25, entry.time * 0.25 );
+		return;
+	}
+	self scriptmodelplayanim( entry.animation );
+}
+
+iw7_state( mode, animation, to, time )
+{
+	state = spawnstruct();
+	state.mode = mode;
+	state.animation = animation;
+	state.to = to;
+	state.time = time;
+	return state;
+}
+)gsc";
+
 		// The map's own script (scripts\mp\maps\<map>\<map>) as the IW3 map script that the pipeline translates: the
 		// functions that its main runs, with IW7's utilities replaced by the IW3 ones or their IW3 versions. Calls
 		// of other IW7 scripts drop out in the pipeline. The converted models have one bone (tag_origin), which the
-		// effects on their tags take; animations, cinematics and scriptable states do not convert. Adds the effects
-		// that it loads.
+		// effects on their tags take; animations and cinematics do not convert, and scriptable states set the states of
+		// the animated scriptables (iw7_setscriptablepartstate). Adds the effects that it loads.
 		std::string translate_map_script(const std::string& map, const std::string& text, std::set<std::string>& effects,
 			const std::function<bool(const std::string&)>& add_model)
 		{
@@ -1813,8 +1850,20 @@ iw7_unsupported( a, b, c, d, e, f )
 					return "playsound( " + join(arguments) + " )";
 				});
 
-				for (const auto name : {"playcinematicforalllooping", "scriptmodelplayanim", "precachempanim",
-					"setscriptablepartstate"})
+				// The converted scriptables are script models of their targetname, whose states the table of
+				// iw7_animations converts.
+				body = rewrite_calls(body, "setscriptablepartstate", [](const std::vector<std::string>& arguments)
+				{
+					return arguments.size() >= 2 ? std::format("iw7_setscriptablepartstate( {}, {} )", arguments[0], arguments[1])
+						: "iw7_unsupported( " + join(arguments) + " )";
+				});
+
+				for (auto at = body.find("getscriptablearray("); at != std::string::npos; at = body.find("getscriptablearray(", at))
+				{
+					body.replace(at, std::string_view("getscriptablearray(").size(), "getentarray(");
+				}
+
+				for (const auto name : {"playcinematicforalllooping", "scriptmodelplayanim", "precachempanim"})
 				{
 					body = rewrite_calls(body, name, [](const std::vector<std::string>& arguments)
 					{
@@ -1835,7 +1884,8 @@ iw7_unsupported( a, b, c, d, e, f )
 			// gsc-tool writes the names that it has no text for as their IW7 token ids (_id_XXXX), which compile to the
 			// unrelated IW8 tokens of those ids: the script's own functions and fields take names of their own.
 			static const std::regex token_name(R"re(\b_id_([0-9A-Fa-f]+)\b)re");
-			return std::regex_replace(result, token_name, "iw7_$1") + std::string(map_script_helpers);
+			return std::regex_replace(result, token_name, "iw7_$1") + std::string(map_script_helpers) +
+				std::string(scriptable_state_helpers);
 		}
 	}
 
@@ -1978,14 +2028,41 @@ iw7_unsupported( a, b, c, d, e, f )
 			}
 		};
 
-		// The animated scriptables (export_animations): the map script plays each one's animation and the effects on the tags
-		// of its model, which follow the animation.
+		// The animated scriptables (export_animations): the map script fills the table of their states, which IW7's
+		// setscriptablepartstate (translated) sets, sets the first state of each part from the start and plays the effects on
+		// the tags of their models, which follow the animation.
 		if (!output.scriptable_animations.empty())
 		{
-			std::string calls;
+			std::string calls = "\tlevel.iw7_states = [];\n";
+			for (const auto& [model, states] : output.scriptable_states)
+			{
+				calls += std::format("\tlevel.iw7_states[\"{}\"] = [];\n", model);
+				for (const auto& state : states)
+				{
+					calls += std::format("\tlevel.iw7_states[\"{}\"][\"{}:{}\"] = iw7_state( \"{}\", \"{}\", ( {}, {}, {} ), {} );\n", model,
+						state.part, state.state, state.moves ? "move" : "anim", asset_name(state.anim->name), state.to[0], state.to[1],
+						state.to[2], state.time);
+				}
+			}
+
 			for (const auto& [targetname, anim] : output.scriptable_animations)
 			{
-				calls += std::format("\tiw7_animate( \"{}\", \"{}\" );\n", targetname, anim);
+				std::set<std::pair<std::string, std::string>> first;
+				for (const auto& model : output.scriptable_animation_models[targetname])
+				{
+					for (const auto& state : output.scriptable_states[model])
+					{
+						if (state.first)
+						{
+							first.emplace(state.part, state.state);
+						}
+					}
+				}
+
+				for (const auto& [part, state] : first)
+				{
+					calls += std::format("\tiw7_first_state( \"{}\", \"{}\", \"{}\" );\n", targetname, part, state);
+				}
 			}
 
 			for (const auto& effect : output.scriptable_tag_effects)
@@ -1996,13 +2073,13 @@ iw7_unsupported( a, b, c, d, e, f )
 			}
 
 			start_thread("iw7_animations");
-			map_script += "\n// The scriptables that animate: IW7 plays the animation of their first state from the start.\n"
+			map_script += "\n// The scriptables that animate: IW7 plays the animation of each part's first state from the start.\n"
 				"iw7_animations()\n{\n" + calls + "}\n" + std::string(R"gsc(
-iw7_animate( name, anim )
+iw7_first_state( name, part, state )
 {
     pieces = getentarray( name, "targetname" );
     foreach ( piece in pieces )
-        piece scriptmodelplayanim( anim );
+        piece iw7_setscriptablepartstate( part, state, 1 );
 }
 
 iw7_tag_effect( name, effect, tag )
@@ -2020,8 +2097,13 @@ iw7_tag_effect_play( effect, tag )
         playfxontag( level._effect[effect], self, tag );
 }
 )gsc");
-			ZONETOOL_INFO("iw7: the map script animates %zu kinds of scriptables with %zu effects on their tags",
-				output.scriptable_animations.size(), output.scriptable_tag_effects.size());
+			if (map_script.find("iw7_setscriptablepartstate( part, state, instant )") == std::string::npos)
+			{
+				map_script += scriptable_state_helpers;
+			}
+
+			ZONETOOL_INFO("iw7: the map script animates %zu kinds of scriptables (%zu models) with %zu effects on their tags",
+				output.scriptable_animations.size(), output.scriptable_states.size(), output.scriptable_tag_effects.size());
 		}
 
 		// The scriptables that break (export_entities): the map script breaks each when it took its health in damage. Their

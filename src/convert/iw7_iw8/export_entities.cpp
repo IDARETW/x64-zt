@@ -334,33 +334,33 @@ namespace zonetool::convert::iw7_iw8
 			return result;
 		}
 
-		// The animation that the first state of a part of a scriptable plays from the start (Frontier: the ops table's solar
-		// system idle, 1799 frames on 35 bones; the floor panels' one-frame closed pose, whose raise is a scripted state).
-		const iw7::XAnimParts* first_animation(const source_map& source, const iw7::ScriptableDef& def)
+		// The states of a scriptable's parts that play an animation (Frontier: the ops table's solar system idle, 1799
+		// frames on 35 bones, from its first state; the floor panels' closed pose from their first state and their raise,
+		// a scripted state that the map script sets).
+		std::vector<extraction::scriptable_state> animation_states(const source_map& source, const iw7::ScriptableDef& def)
 		{
+			std::vector<extraction::scriptable_state> states;
 			for (auto p = 0u; def.parts && p < def.numParts; p++)
 			{
 				const auto& part = def.parts[p];
-				if (!part.states || !part.numStates)
+				for (auto s = 0u; part.states && s < part.numStates; s++)
 				{
-					continue;
-				}
-
-				const auto& state = part.states[0];
-				for (auto e = 0u; state.base.events && e < state.base.numEvents; e++)
-				{
-					const auto& event = state.base.events[e];
-					if (event.type == iw7::Scriptable_EventType_Animation && event.data.animation.animation)
+					const auto& state = part.states[s];
+					for (auto e = 0u; state.base.events && e < state.base.numEvents; e++)
 					{
-						if (const auto anim = source.resolve(iw7::ASSET_TYPE_XANIMPARTS, event.data.animation.animation); anim && anim->name)
+						const auto& event = state.base.events[e];
+						const auto anim = event.type == iw7::Scriptable_EventType_Animation && event.data.animation.animation ?
+							source.resolve(iw7::ASSET_TYPE_XANIMPARTS, event.data.animation.animation) : nullptr;
+						if (anim && anim->name)
 						{
-							return anim;
+							states.push_back({part.name ? part.name : "", state.base.name ? state.base.name : "", anim, s == 0});
+							break;
 						}
 					}
 				}
 			}
 
-			return nullptr;
+			return states;
 		}
 
 		// The effects that the first state of each part of a scriptable plays, on the tags of the instance's model.
@@ -667,8 +667,10 @@ namespace zonetool::convert::iw7_iw8
 			entities += std::format("\"origin\" \"{}\"\n", vector_text(context.initialOrigin));
 			entities += std::format("\"angles\" \"{}\"\n", vector_text(context.initialAngles));
 			// An animated scriptable (a model of several bones) plays its first state's animation by the map script.
-			const auto* animation = def && model && model->numBones > 1 && model->boneNames && model->baseMat ?
-				first_animation(source, *def) : nullptr;
+			const auto states = def && model && model->numBones > 1 && model->boneNames && model->baseMat ?
+				animation_states(source, *def) : std::vector<extraction::scriptable_state>{};
+			const auto first = std::ranges::find_if(states, [](const auto& state) { return state.first; });
+			const auto* animation = first != states.end() ? first->anim : nullptr;
 			std::string animated;
 			if (const auto targetname = script_string(scriptables.instances[i].targetname); !targetname.empty())
 			{
@@ -694,11 +696,17 @@ namespace zonetool::convert::iw7_iw8
 
 			if (!animated.empty())
 			{
-				const std::string anim(asset_name(animation->name));
-				output.scriptable_animations.try_emplace(animated, anim);
-				output.xanims.try_emplace(anim, animation);
+				output.scriptable_animations.try_emplace(animated, std::string(asset_name(animation->name)));
 				output.animated_models.try_emplace(file_name(name), model);
-				output.scriptable_animation_models.try_emplace(animated, file_name(name));
+				output.scriptable_animation_models[animated].insert(file_name(name));
+				output.scriptable_states.try_emplace(file_name(name), states);
+			}
+
+			// IW7 keeps the instance's script_noteworthy after its targetname (the floor panels' "start", "green" and "red",
+			// which the map script raises them by).
+			if (const auto noteworthy = script_string(scriptables.instances[i].debugNameScr); !noteworthy.empty())
+			{
+				entities += std::format("\"script_noteworthy\" \"{}\"\n", noteworthy);
 			}
 
 			entities += "}\n";

@@ -92,18 +92,24 @@ Without a command, `zonetool.exe` opens an interactive console.
   state that swaps the model and plays effects and a sound; Frontier: 172 cups, bottles, screens and clocks of 41
   kinds) take a targetname `iw7_destructible_<kind>`, and the map script (`iw7_destructibles`) breaks each when it has
   taken its health in damage: the broken model (or none), the first effect, the sound. A script model that is all
-  glass keeps its glass in its collision, and a model with no solid collision keeps no physics. A kind whose first
-  state plays an animation (Frontier: the ops table's solar system idle, 1799 frames on 35 bones; the floor panels'
-  closed pose) takes a targetname `iw7_animated_<kind>` (or keeps its own), and the map script (`iw7_animations`)
-  plays it (`scriptmodelplayanim`) and its tag effects on the tags (`playfxontag`), which the animation moves. IW7
-  XAnimParts keep Replay's streams (`sub_1414D3460` consumes Frontier's exactly): they export as IW3 XAnim dumps
-  (`extracted/xanim`, listed in the world JSON's `xanims`), their models' skeletons as XMODEL_EXPORTs (`skeleton/`:
-  bones at their base poses, each vertex on its rigid list's bone; models with blended vertices and root-motion
-  anims do not animate). Their other states (the floor panels' scripted raise) and events do not convert.
+  glass keeps its glass in its collision, and a model with no solid collision keeps no physics. A kind whose part
+  states play animations (Frontier: the ops table's solar system idle, 1799 frames on 35 bones; the floor panels'
+  closed pose and their scripted raise) takes a targetname `iw7_animated_<kind>` (or keeps its own) and its instances
+  their `script_noteworthy` (IW7 keeps it after the targetname; x64-zt's struct calls it `debugName`). The map script
+  (`iw7_animations`) fills a table of those states by model, sets each part's first state from the start, and plays
+  the first state's tag effects on the tags (`playfxontag`); the map's own script sets the others
+  (`setscriptablepartstate` becomes `iw7_setscriptablepartstate`, `getscriptablearray` `getentarray`). A model that
+  is one bone, which its animations only move (the floor panels' `tag_raise`), moves as an entity by the bone's
+  translation at the end of each animation (decoded from its streams), so its collision moves with it; the others
+  play their animations on their skeletons (`scriptmodelplayanim`). IW7 XAnimParts keep Replay's streams
+  (`sub_1414D3460` consumes Frontier's exactly): they export as IW3 XAnim dumps (`extracted/xanim`, listed in the
+  world JSON's `xanims`), and their models' skeletons as XMODEL_EXPORTs (`skeleton/`: bones at their base poses,
+  each vertex on its rigid list's bone; models with blended vertices and root-motion anims do not animate). Their
+  other events do not convert.
   The map's own script (`scripts\mp\maps\<map>\<map>`) becomes the IW3 map script: the functions that its main
   reaches, with IW7's utilities replaced by IW3 ones or their IW3 versions, the names that gsc-tool writes as IW7
   token ids (`_id_XXXX`) renamed, and the effects that it plays on the tags of converted models (which have one bone)
-  on `tag_origin`; its animations, cinematics and scriptable states do nothing. The loop sounds that the map's sound
+  on `tag_origin`; its animations and cinematics do nothing. The loop sounds that the map's sound
   script places become IW3 createfx loop sounds, and the aliases of the map's sound bank (`<map>.all`) that the
   scripts name become IW3 alias definitions (`extracted/soundaliases/<alias>.iw3.json`) with their sounds as wave
   files, decoded from the FLAC frames of the bank's `.sabl`, which must be in the zone folder.
