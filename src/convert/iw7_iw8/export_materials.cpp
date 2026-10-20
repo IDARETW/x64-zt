@@ -107,7 +107,7 @@ namespace zonetool::convert::iw7_iw8
 		// The engine images that the pipeline makes itself: a zone holds them without pixels.
 		std::optional<std::string> builtin_image(const std::string_view name, const image_role role)
 		{
-			if (name == "$white" || name == "$black" || name == "$identitynormalmap")
+			if (name == "$white" || name == "$black" || name == "$gray" || name == "$identitynormalmap")
 			{
 				return std::string(name);
 			}
