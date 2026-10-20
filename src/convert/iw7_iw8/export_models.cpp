@@ -563,38 +563,310 @@ namespace zonetool::convert::iw7_iw8
 		}
 	}
 
+	namespace
+	{
+		// The translation (in the space of its parent) of a bone at the first and the last key of an animation that leaves
+		// it unrotated. Replay's part walk (sub_1414D3460) reads the rotation parts, then the translation parts with the
+		// bone of each in dataByte (key count, frame indices, min and size in dataInt, keys of 3 bytes or 3 shorts:
+		// min + key * size), then the constant ones and the still ones. A bone that the animation names in no part keeps
+		// its bind pose.
+		struct bone_translation
+		{
+			std::array<float, 3> first{};
+			std::array<float, 3> last{};
+		};
+
+		std::optional<bone_translation> translation_of(const iw7::XAnimParts& anim, const std::string& bone)
+		{
+			std::optional<unsigned> part;
+			for (auto i = 0u; anim.names && i < anim.boneCount[9]; i++)
+			{
+				part = !part && script_name(anim.names[i]) == bone ? std::optional(i) : part;
+			}
+
+			if (!part)
+			{
+				return bone_translation{};
+			}
+
+			if (*part >= anim.boneCount[0])
+			{
+				return std::nullopt;
+			}
+
+			std::size_t db{}, ds{}, di{}, rds{}, rdb{};
+			auto valid = true;
+			const auto short_at = [&](const std::size_t index) -> unsigned
+			{
+				valid = valid && anim.dataShort && index < anim.dataShortCount;
+				return valid ? static_cast<std::uint16_t>(anim.dataShort[index]) : 0u;
+			};
+
+			const auto byte_at = [&](const std::size_t index) -> unsigned
+			{
+				valid = valid && anim.dataByte && index < anim.dataByteCount;
+				return valid ? static_cast<std::uint8_t>(anim.dataByte[index]) : 0u;
+			};
+
+			const auto float_at = [&](const std::size_t index)
+			{
+				valid = valid && anim.dataInt && index < anim.dataIntCount;
+				float value{};
+				if (valid)
+				{
+					std::memcpy(&value, &anim.dataInt[index], sizeof(value));
+				}
+
+				return value;
+			};
+
+			const auto frames = [&](const unsigned keys)
+			{
+				if (anim.numframes >= 256)
+				{
+					ds += keys >= 0x40 ? ((keys - 1) >> 8) + 2 : keys + 1;
+				}
+				else
+				{
+					db += keys + 1;
+				}
+			};
+
+			for (const auto& [width, count] : {std::pair{2u, anim.boneCount[1]}, std::pair{4u, anim.boneCount[2]}})
+			{
+				for (auto i = 0u; i < count; i++)
+				{
+					const auto keys = short_at(ds++);
+					frames(keys);
+					rds += width * (keys + 1);
+				}
+			}
+
+			ds += 2u * anim.boneCount[3] + 4u * anim.boneCount[4];
+			for (const auto& [bytes_keys, count] : {std::pair{true, anim.boneCount[5]}, std::pair{false, anim.boneCount[6]}})
+			{
+				for (auto i = 0u; i < count; i++)
+				{
+					const auto owner = byte_at(db++);
+					const auto keys = short_at(ds++);
+					frames(keys);
+					std::array<float, 6> range{};
+					for (auto c = 0u; c < 6; c++)
+					{
+						range[c] = float_at(di + c);
+					}
+
+					di += 6;
+					if (owner == *part)
+					{
+						const auto key = [&, bytes_keys](const std::size_t at, const unsigned c) -> float
+						{
+							if (bytes_keys)
+							{
+								valid = valid && anim.randomDataByte && rdb + at * 3 + c < anim.randomDataByteCount;
+								return valid ? static_cast<float>(static_cast<std::uint8_t>(anim.randomDataByte[rdb + at * 3 + c])) : 0.0f;
+							}
+
+							valid = valid && anim.randomDataShort && rds + at * 3 + c < anim.randomDataShortCount;
+							return valid ? static_cast<float>(static_cast<std::uint16_t>(anim.randomDataShort[rds + at * 3 + c])) : 0.0f;
+						};
+
+						bone_translation result;
+						for (auto c = 0u; c < 3; c++)
+						{
+							result.first[c] = range[c] + key(0, c) * range[3 + c];
+							result.last[c] = range[c] + key(keys, c) * range[3 + c];
+						}
+
+						return valid ? std::optional(result) : std::nullopt;
+					}
+
+					(bytes_keys ? rdb : rds) += 3 * (keys + 1);
+				}
+			}
+
+			for (auto i = 0u; i < anim.boneCount[7]; i++)
+			{
+				const auto owner = byte_at(db++);
+				const std::array<float, 3> value{float_at(di), float_at(di + 1), float_at(di + 2)};
+				di += 3;
+				if (owner == *part)
+				{
+					return valid ? std::optional(bone_translation{value, value}) : std::nullopt;
+				}
+			}
+
+			return valid ? std::optional(bone_translation{}) : std::nullopt;
+		}
+
+		bool identity(const iw7::DObjAnimMat& pose)
+		{
+			return std::abs(pose.quat[0]) < 1e-4f && std::abs(pose.quat[1]) < 1e-4f && std::abs(pose.quat[2]) < 1e-4f &&
+				std::abs(std::abs(pose.quat[3]) - 1.0f) < 1e-4f;
+		}
+
+		// The one bone that holds every vertex of a model, when it is the child of a root bone at the origin and neither
+		// turns at the bind pose (the floor panels' tag_raise under tag_origin).
+		std::optional<unsigned> single_moving_bone(const source_map& source, const iw7::XModel& model)
+		{
+			std::optional<unsigned> bone;
+			for (auto lod = 0; lod < model.numLods && lod < 6; lod++)
+			{
+				const auto& info = model.lodInfo[lod];
+				const auto surfaces = source.resolve(iw7::ASSET_TYPE_XMODEL_SURFS, info.modelSurfs);
+				const auto streamed = info.modelSurfs ? source.streamed_surfaces(asset_name(info.modelSurfs->name)) : nullptr;
+				for (std::size_t s = 0; s < info.numsurfs; s++)
+				{
+					std::vector<std::pair<std::uint16_t, std::uint16_t>> lists;
+					auto blended = false;
+					if (surfaces && surfaces->surfs && s < surfaces->numsurfs)
+					{
+						const auto& surface = surfaces->surfs[s];
+						for (auto l = 0u; surface.rigidVertLists && l < surface.rigidVertListCount; l++)
+						{
+							lists.emplace_back(surface.rigidVertLists[l].boneOffsetIndex, surface.rigidVertLists[l].vertCount);
+						}
+
+						blended = std::ranges::any_of(surface.blendVertCounts, [](const auto count) { return count != 0; });
+					}
+					else if (streamed && s < streamed->size())
+					{
+						lists = (*streamed)[s].rigid_lists;
+						blended = (*streamed)[s].blended;
+					}
+
+					if (blended || lists.empty())
+					{
+						return std::nullopt;
+					}
+
+					for (const auto& [offset, count] : lists)
+					{
+						const unsigned index = offset >= model.numBones ? offset / 64u : offset;
+						if (count && bone && *bone != index)
+						{
+							return std::nullopt;
+						}
+
+						bone = count ? std::optional(index) : bone;
+					}
+				}
+			}
+
+			if (!bone || *bone < model.numRootBones || *bone >= model.numBones || !model.parentList)
+			{
+				return std::nullopt;
+			}
+
+			const auto parent = *bone - model.parentList[*bone - model.numRootBones];
+			const auto& root = model.baseMat[parent];
+			if (parent >= model.numRootBones || !identity(root) || !identity(model.baseMat[*bone]) ||
+				std::abs(root.trans[0]) + std::abs(root.trans[1]) + std::abs(root.trans[2]) > 1e-3f)
+			{
+				return std::nullopt;
+			}
+
+			return bone;
+		}
+	}
+
 	void export_animations(const source_map& source, extraction& output)
 	{
+		// Each model either moves as an entity (one bone that its animations only move) or plays its animations on its
+		// skeleton.
+		std::set<std::string> converted;
 		std::set<std::string> skeletons;
-		for (const auto& [name, model] : output.animated_models)
+		for (auto& [name, states] : output.scriptable_states)
 		{
-			if (model && write_skeleton(source, name, *model, output.root / "skeleton"))
+			const auto found = output.animated_models.find(name);
+			const auto* model = found != output.animated_models.end() ? found->second : nullptr;
+			if (!model)
 			{
-				skeletons.insert(name);
+				continue;
+			}
+
+			if (const auto bone = single_moving_bone(source, *model))
+			{
+				const auto bone_name = script_name(model->boneNames[*bone]);
+				const auto& bind = model->baseMat[*bone].trans;
+				auto moves = true;
+				for (auto& state : states)
+				{
+					const auto translation = translation_of(*state.anim, bone_name);
+					moves = moves && translation.has_value();
+					if (translation)
+					{
+						for (auto c = 0u; c < 3; c++)
+						{
+							state.to[c] = translation->last[c] - bind[c];
+						}
+
+						state.time = state.anim->framerate > 0.0f ? state.anim->numframes / state.anim->framerate : 0.0f;
+					}
+				}
+
+				if (moves)
+				{
+					output.moving_models.insert(name);
+					converted.insert(name);
+					for (auto& state : states)
+					{
+						state.moves = true;
+						ZONETOOL_INFO("iw7: scriptable model \"%s\" moves to (%g %g %g) over %gs in state %s:%s (%s)", name.data(),
+							state.to[0], state.to[1], state.to[2], state.time, state.part.data(), state.state.data(), state.anim->name);
+					}
+
+					continue;
+				}
+			}
+
+			if (!write_skeleton(source, name, *model, output.root / "skeleton"))
+			{
+				continue;
+			}
+
+			skeletons.insert(name);
+			std::erase_if(states, [&](const auto& state)
+			{
+				const std::string anim(asset_name(state.anim->name));
+				if (output.xanims.contains(anim))
+				{
+					return false;
+				}
+
+				if (!write_xanim(*state.anim, output.extracted / "xanim" / (anim + ".iw3.json")))
+				{
+					return true;
+				}
+
+				output.xanims.emplace(anim, state.anim);
+				return false;
+			});
+
+			if (!states.empty())
+			{
+				converted.insert(name);
 			}
 		}
 
-		std::set<std::string> written;
-		for (const auto& [name, anim] : output.xanims)
-		{
-			if (anim && write_xanim(*anim, output.extracted / "xanim" / (name + ".iw3.json")))
-			{
-				written.insert(name);
-			}
-		}
+		std::erase_if(output.scriptable_states, [&](const auto& entry) { return !converted.contains(entry.first); });
 
-		// The scriptables whose model or animation does not convert keep their bind pose, with their effects at the bind
-		// pose of their tags.
+		// The scriptables whose models do not convert keep their bind pose, with their effects at the bind pose of their
+		// tags; so do the effects of models that move as entities (they keep no tags).
 		std::erase_if(output.scriptable_animations, [&](const auto& entry)
 		{
-			const auto& [targetname, anim] = entry;
-			const auto model = output.scriptable_animation_models.find(targetname);
-			return !written.contains(anim) || model == output.scriptable_animation_models.end() || !skeletons.contains(model->second);
+			const auto models = output.scriptable_animation_models.find(entry.first);
+			return models == output.scriptable_animation_models.end() || std::ranges::any_of(models->second, [&](const auto& model)
+			{
+				return !converted.contains(model);
+			});
 		});
 
 		std::erase_if(output.scriptable_tag_effects, [&](const auto& effect)
 		{
-			if (output.scriptable_animations.contains(effect.targetname))
+			const auto models = output.scriptable_animation_models.find(effect.targetname);
+			if (output.scriptable_animations.contains(effect.targetname) && models != output.scriptable_animation_models.end() &&
+				std::ranges::none_of(models->second, [&](const auto& model) { return output.moving_models.contains(model); }))
 			{
 				return false;
 			}
@@ -603,14 +875,8 @@ namespace zonetool::convert::iw7_iw8
 			return true;
 		});
 
-		std::erase_if(output.xanims, [&](const auto& entry)
-		{
-			return !written.contains(entry.first) || std::ranges::none_of(output.scriptable_animations, [&](const auto& animation)
-			{
-				return animation.second == entry.first;
-			});
-		});
-		ZONETOOL_INFO("iw7: %zu kinds of scriptables animate (%zu animations, %zu skeletons, %zu effects on their tags)",
-			output.scriptable_animations.size(), output.xanims.size(), skeletons.size(), output.scriptable_tag_effects.size());
+		ZONETOOL_INFO("iw7: %zu kinds of scriptables animate (%zu models move, %zu skeletons, %zu animations, %zu effects on their tags)",
+			output.scriptable_animations.size(), output.moving_models.size(), skeletons.size(), output.xanims.size(),
+			output.scriptable_tag_effects.size());
 	}
 }

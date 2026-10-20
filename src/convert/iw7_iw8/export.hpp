@@ -68,7 +68,7 @@ namespace zonetool::convert::iw7_iw8
 		// closed pose): their instances are script models of a targetname that the map script animates. The animations
 		// export as IW3 XAnim dumps (extracted/xanim/<name>.iw3.json), the models with their skeletons (skeleton/).
 		std::map<std::string, std::string> scriptable_animations;
-		std::map<std::string, std::string> scriptable_animation_models;
+		std::map<std::string, std::set<std::string>> scriptable_animation_models;
 		std::map<std::string, const iw7::XAnimParts*> xanims;
 		std::map<std::string, const iw7::XModel*> animated_models;
 		// The effects that animated scriptables play on tags of their model, which follow the animation (at the bind pose
@@ -81,6 +81,23 @@ namespace zonetool::convert::iw7_iw8
 			scriptable_effect placement;
 		};
 		std::vector<tag_effect> scriptable_tag_effects;
+		// The states of the animated scriptables' parts that play an animation, by model: the map script sets them
+		// (IW7's setscriptablepartstate, and each part's first state from the start). A model that is one bone, which the
+		// animations only move, moves as an entity (its collision with it): by the bone's translation in model space at
+		// the end of the animation, over its length.
+		struct scriptable_state
+		{
+			std::string part;
+			std::string state;
+			const iw7::XAnimParts* anim{};
+			bool first{};
+			bool moves{};
+			std::array<float, 3> to{};
+			float time{};
+		};
+		std::map<std::string, std::vector<scriptable_state>> scriptable_states;
+		// The models of animated scriptables that move as entities (export_animations).
+		std::set<std::string> moving_models;
 
 		// Adds the material or model of a header and returns its name in the extraction.
 		std::string add_material(const source_map& source, iw7::Material* header);
