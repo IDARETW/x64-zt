@@ -153,6 +153,11 @@ Without a command, `zonetool.exe` opens an interactive console.
   depth scale and IW7's value.max in their radial scales. `IW7_NO_FLARES=1` leaves them out.
 - The IW7 source loads the base `common` and `global` zones after the multiplayer ones: they hold assets that map
   effects name, such as the spark debris shapes.
+- A model that the world places beyond the range of model bounds (its largest coordinate times its largest placement
+  scale above 60000) goes to the sky like the planets: Breakneck's `space_blackhole_01` (4932 units at scale 60, 296000
+  units) cut through the level as a static model, its disc white without its images, and flickered (owner tests
+  breakneck12, 14). Without a sky cube that converts (Breakneck's streams from imagefile paks that are not in the zone
+  folder) such models are left out.
 - IW7 extractions set `spatial_surfaces`: world surfaces merge only within 512-unit cells and up to 4096 triangles.
   Merged by material alone, Frontier drew 388 surfaces of up to 42793 triangles and 34000 units, which GPU culling and
   the shadow maps of local lights took whole (stock mp_hideout: 3301 surfaces, 28 triangles and 207 units at the median;
