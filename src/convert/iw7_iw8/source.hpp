@@ -74,7 +74,9 @@ namespace zonetool::convert::iw7_iw8
 		}
 
 		// Loads another zone of the game folder, for the assets that the map references.
-		bool load(std::string_view zone_name);
+		bool load(std::string_view zone_name, bool patch = false);
+		// Loads the zone of a model's own (IW7 keeps characters in <model>_tr) with its streamed surfaces; false without one.
+		bool load_model_zone(std::string_view model);
 
 		// The surfaces of a model surfaces asset that the map streams, or nullptr.
 		const std::vector<streamed_surface>* streamed_surfaces(std::string_view name) const
@@ -113,7 +115,8 @@ namespace zonetool::convert::iw7_iw8
 		std::unordered_set<const void*> held_;
 		std::unordered_map<std::string, std::vector<streamed_surface>> streamed_;
 
-		void add(std::unique_ptr<iw7::loaded_zone> zone);
+		// A patch zone's assets replace those of the zones before it, and it comes first among the zones.
+		void add(std::unique_ptr<iw7::loaded_zone> zone, bool patch = false);
 		void load_shared_streams(const iw7::loaded_zone& zone);
 		template <typename T>
 		T* first(iw7::XAssetType type) const;

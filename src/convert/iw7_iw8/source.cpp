@@ -49,6 +49,9 @@ namespace zonetool::convert::iw7_iw8
 			}
 		}
 
+		// IW7 loads patch_<map> with the map: its assets (newer versions, added models) replace the map zone's.
+		this->load("patch_" + this->name_, true);
+
 		// The materials and techsets of a map are in techsets_<map>.
 		if (!this->load("techsets_" + this->name_))
 		{
@@ -60,8 +63,10 @@ namespace zonetool::convert::iw7_iw8
 		// those materials. The base common and global zones (which the game loads before them) hold the rest that map
 		// effects name: the debris shapes of sparks (vfx_physfxpip_particle_spark) and other shared assets. The
 		// first zone that holds an asset gives it, so they only fill in.
-		for (const auto common : {"common_core_mp", "common_mp", "techsets_common", "techsets_common_core_mp", "techsets_common_mp",
-			"techsets_global_core_mp", "global_core_mp", "global_mp", "common", "global"})
+		// The patch of a common zone (newer versions, the props of later maps) comes before it.
+		for (const auto common : {"patch_common_core_mp", "common_core_mp", "patch_common_mp", "common_mp", "techsets_common",
+			"techsets_common_core_mp", "techsets_common_mp", "techsets_global_core_mp", "global_core_mp", "global_mp", "patch_common",
+			"common", "global"})
 		{
 			this->load(common);
 		}
@@ -213,7 +218,7 @@ namespace zonetool::convert::iw7_iw8
 		return found != pool->second.end() ? found->second : nullptr;
 	}
 
-	bool source_map::load(const std::string_view zone_name)
+	bool source_map::load(const std::string_view zone_name, const bool patch)
 	{
 		const auto path = game_files::find_zone(zone_name);
 		if (!path)
@@ -222,12 +227,24 @@ namespace zonetool::convert::iw7_iw8
 		}
 
 		ZONETOOL_INFO("Loading IW7 zone \"%s\"...", std::string(zone_name).data());
-		this->add(iw7::load_zone(*path));
+		this->add(iw7::load_zone(*path), patch);
 		return true;
 	}
 
-	void source_map::add(std::unique_ptr<iw7::loaded_zone> zone)
+	bool source_map::load_model_zone(const std::string_view model)
 	{
+		if (!this->load(std::string(model) + "_tr"))
+		{
+			return false;
+		}
+
+		this->load_shared_streams(*this->zones_.back());
+		return true;
+	}
+
+	void source_map::add(std::unique_ptr<iw7::loaded_zone> zone, const bool patch)
+	{
+		std::size_t replaced{};
 		for (const auto& asset : zone->assets)
 		{
 			if (!asset.referenced)
@@ -235,12 +252,26 @@ namespace zonetool::convert::iw7_iw8
 				this->held_.insert(asset.header);
 				const auto [entry, added] = this->assets_[asset.type].try_emplace(
 					std::string(asset_name(iw7::get_asset_name(asset.type, asset.header))), asset.header);
+				if (!added && patch)
+				{
+					entry->second = asset.header;
+					replaced++;
+					continue;
+				}
+
 				// An image with its pixels replaces an image without them (format 0) of the same name.
 				if (!added && asset.type == iw7::ASSET_TYPE_IMAGE && static_cast<iw7::GfxImage*>(entry->second)->imageFormat == 0)
 				{
 					entry->second = asset.header;
 				}
 			}
+		}
+
+		if (patch)
+		{
+			ZONETOOL_INFO("iw7: patch zone \"%s\" holds %zu assets (%zu replace the map's)", zone->name.data(), zone->assets.size(), replaced);
+			this->zones_.insert(this->zones_.begin(), std::move(zone));
+			return;
 		}
 
 		this->zones_.push_back(std::move(zone));
