@@ -45,8 +45,6 @@ constexpr unsigned kSpotSegments = 8;
 constexpr double kMaxCapStep = std::numbers::pi / 6; // 30 degrees per cap ring
 constexpr unsigned kOmniSegments = 6;
 constexpr unsigned kOmniBands = 6;
-// ComPrimaryLight bulb radius of every converted light (map_zone.h emitComWorldBody, +0x5C).
-constexpr double kBulbRadius = 1.0;
 constexpr size_t kMaxLeafLights = 16;
 
 double Dot(const Vec3 &a, const Vec3 &b)
@@ -114,9 +112,11 @@ void VolumeMesh(const Light &light, std::vector<Vec3> &points, std::vector<uint1
     {
         // The record builder (0x1419A9020, +72) moves the shader's cone apex back along the
         // axis by bulb / tan(outer), so the cone holds the bulb (28.6 units for a 2 degree
-        // spot); the lit points are also within the radius of the light origin.
+        // spot); the lit points are also within the radius of the light origin. A tube
+        // light lights from points up to its length away: the apex moves back by as much
+        // more as holds the cones of those points, and the reach grows by the length.
         const double outer = std::acos(std::clamp<double>(light.cosHalfFovOuter, 0.0175, 1.0));
-        const double apexOffset = kBulbRadius / std::tan(outer);
+        const double apexOffset = (light.bulbRadius + light.tubeLength) / std::tan(outer);
         Light apex = light;
         for (unsigned k = 0; k < 3; ++k)
             apex.origin[k] = float(light.origin[k] - light.direction[k] * apexOffset);
@@ -124,7 +124,7 @@ void VolumeMesh(const Light &light, std::vector<Vec3> &points, std::vector<uint1
         const double polar = std::atan(std::tan(outer) / ring);
         const unsigned rings = std::max(1u, unsigned(std::ceil(polar / kMaxCapStep)));
         const double step = polar / rings;
-        const double reach = (light.radius + apexOffset) / (ring * std::cos(step * .5));
+        const double reach = (light.radius + light.tubeLength + apexOffset) / (ring * std::cos(step * .5));
         points.push_back(apex.origin);                                 // 0 apex
         points.push_back(Point(apex, u, v, 0, 0, reach));              // 1 cap pole
         for (unsigned r = 1; r <= rings; ++r)
@@ -151,7 +151,7 @@ void VolumeMesh(const Light &light, std::vector<Vec3> &points, std::vector<uint1
     }
     const double ring = std::cos(std::numbers::pi / kOmniSegments);
     const double step = std::numbers::pi / kOmniBands;
-    const double reach = light.radius / (ring * std::cos(step * .5));
+    const double reach = (light.radius + light.tubeLength) / (ring * std::cos(step * .5));
     points.push_back(Point(light, u, v, 0, 0, reach));
     points.push_back(Point(light, u, v, std::numbers::pi, 0, reach));
     for (unsigned r = 1; r < kOmniBands; ++r)
@@ -271,7 +271,7 @@ bool Reaches(const Light &light, const replaybounds::Bounds &bounds)
         offset[k] = bounds.midpoint[k] - light.origin[k];
     const double sphere = std::sqrt(Dot(bounds.halfSize, bounds.halfSize));
     const double distance = std::sqrt(Dot(offset, offset));
-    if (distance > light.radius + sphere)
+    if (distance > light.radius + light.tubeLength + sphere)
         return false;
     if (light.type != 2)
         return true;
