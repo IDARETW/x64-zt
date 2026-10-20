@@ -181,7 +181,20 @@ namespace zonetool::convert::iw7_iw8
 					{"levels", 1}, {"width", width}},
 			}));
 
-			ZONETOOL_INFO("iw7: lightmap %u: %zux%zu", i, width, height);
+			// How much of the lightmap the knee compresses (the brightest channel of each layer A texel).
+			std::array<std::size_t, 3> above{};
+			auto brightest = 0.0f;
+			for (std::size_t t = 0; t < count; t++)
+			{
+				const auto value = std::max({layers[t * 4], layers[t * 4 + 1], layers[t * 4 + 2]});
+				brightest = std::isfinite(value) ? std::max(brightest, value) : brightest;
+				above[0] += value > 0.5f;
+				above[1] += value > 1.0f;
+				above[2] += value > 2.0f;
+			}
+
+			ZONETOOL_INFO("iw7: lightmap %u: %zux%zu (layer A over 0.5: %.2f%%, over 1: %.2f%%, over 2: %.2f%%, brightest %g)", i, width,
+				height, 100.0 * above[0] / count, 100.0 * above[1] / count, 100.0 * above[2] / count, brightest);
 		}
 
 		if (result.entries.size() != world.draw.lightMapCount)
