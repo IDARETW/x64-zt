@@ -868,6 +868,21 @@ struct MapSun
         bool authoredIntensity = false;
         // How far in front of the light its shadow map starts (ComPrimaryLight +0x74; shipped lights 8 to 60).
         float shadowNearPlaneBias = 8.0f;
+        // ComPrimaryLight +0x0C: an ID of the light (stock lights and IW7's each have their own; IW3's none).
+        uint32_t entityId = 0;
+        // Light shape and shadow parameters. The defaults are the shipped local-light defaults that IW3 lights take
+        // (mp_hideout, 124 lights: points with the smallest shipped bulb); IW7 lights keep their own.
+        float bulbRadius = 1.0f;                // +0x5C
+        float bulbLength[3]{};                  // +0x60 (tube lights)
+        bool isVolumetric = false;              // +4
+        bool needsDynamicShadows = true;        // +3, for shadow-mapped spots
+        float shadowSoftness = 0.55f;           // +0x78
+        float shadowBias = 0.75f;               // +0x7C
+        float shadowArea = 0.0018f;             // +0x80
+        float distanceFalloff = 0.2f;           // +0x84
+        float fadeOffset[2]{};                  // +0x54
+        float uvIntensity = 0.0f;               // +0x14 (UV vision)
+        float irIntensity = 0.0f;               // +0x18 (thermal vision)
         std::string definition;
     };
 
@@ -927,7 +942,10 @@ inline void emitComWorldBody(ZoneBuffer &zb, const char *assetName, const MapSun
         {
             light[1] = source->type;
             light[2] = source->canUseShadowMap ? 1 : 0;
+            stamp32(light, 0x0C, source->entityId);
             stampf(light, 0x10, index == 0 ? 0.0f : source->intensity);
+            stampf(light, 0x14, source->uvIntensity);
+            stampf(light, 0x18, source->irIntensity);
             for (unsigned component = 0; component < 3; ++component)
             {
                 stampf(light, 0x20 + 4 * component, source->color[component]);
@@ -944,18 +962,23 @@ inline void emitComWorldBody(ZoneBuffer &zb, const char *assetName, const MapSun
                 // shadow-mapped spots, the lights GfxWorld lightAABB lists
                 // (replay_locallights NeedsDynamicShadows). IW3 spot shadow maps
                 // include entities, so its shadowed spots qualify.
-                light[3] = source->type == 2 && source->canUseShadowMap ? 1 : 0;
+                light[3] = source->type == 2 && source->canUseShadowMap && source->needsDynamicShadows ? 1 : 0;
+                light[4] = source->isVolumetric ? 1 : 0;
                 // Shipped local-light defaults (mp_hideout, 124 lights): IW3 lights
                 // are points (smallest shipped bulb 1), shadow near-plane bias 8 (or past
                 // the light's fixture, dropEnclosedShadowedSpots),
                 // softness 0.55, bias 0.75, area 0.0018, distance falloff 0.2, and
                 // collimation cos(90 deg) = no collimation.
-                stampf(light, 0x5C, 1.0f);
+                stampf(light, 0x54, source->fadeOffset[0]);
+                stampf(light, 0x58, source->fadeOffset[1]);
+                stampf(light, 0x5C, source->bulbRadius);
+                for (unsigned component = 0; component < 3; ++component)
+                    stampf(light, 0x60 + 4 * component, source->bulbLength[component]);
                 stampf(light, 0x74, source->shadowNearPlaneBias);
-                stampf(light, 0x78, 0.55f);
-                stampf(light, 0x7C, 0.75f);
-                stampf(light, 0x80, 0.0018f);
-                stampf(light, 0x84, 0.2f);
+                stampf(light, 0x78, source->shadowSoftness);
+                stampf(light, 0x7C, source->shadowBias);
+                stampf(light, 0x80, source->shadowArea);
+                stampf(light, 0x84, source->distanceFalloff);
                 stampf(light, 0x88, -4.371138828673793e-08f);
             }
             stampf(light, 0x8C, source->rotationLimit);

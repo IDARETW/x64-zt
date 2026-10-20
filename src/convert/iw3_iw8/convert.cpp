@@ -926,6 +926,26 @@ iw8::MapSun loadLighting(const Args &args, const std::string &dumpDirectory,
                     sourceUpLength = std::sqrt(sourceUpLength);
                     for (float &component : light.up)
                         component /= sourceUpLength;
+                    // Sources with an authored up axis (IW7) keep its roll: it orients the spot's shadow
+                    // map. IW7 does not keep it orthogonal to the direction, so it is made so.
+                    if (source.value("authored_up", false))
+                    {
+                        const auto authored = readVector(source.at("up"), "up");
+                        float along = 0.0f;
+                        for (size_t component = 0; component < 3; ++component)
+                            along += authored[component] * light.direction[component];
+                        std::array<float, 3> up{};
+                        float length = 0.0f;
+                        for (size_t component = 0; component < 3; ++component)
+                        {
+                            up[component] = authored[component] - along * light.direction[component];
+                            length += up[component] * up[component];
+                        }
+                        length = std::sqrt(length);
+                        if (std::isfinite(length) && length > 1e-3f)
+                            for (size_t component = 0; component < 3; ++component)
+                                light.up[component] = up[component] / length;
+                    }
                 }
 
                 light.radius = source.at("radius").get<float>();
@@ -933,6 +953,26 @@ iw8::MapSun loadLighting(const Args &args, const std::string &dumpDirectory,
                 light.cosHalfFovInner = source.at("cos_half_fov_inner").get<float>();
                 light.rotationLimit = source.at("rotation_limit").get<float>();
                 light.translationLimit = source.at("translation_limit").get<float>();
+                light.entityId = source.value("entity_id", 0u);
+                // Light shape and shadow parameters of sources that have them (IW7).
+                light.bulbRadius = source.value("bulb_radius", light.bulbRadius);
+                if (const auto length = source.find("bulb_length"); length != source.end())
+                    for (size_t component = 0; component < 3; ++component)
+                        light.bulbLength[component] = length->at(component).get<float>();
+                light.isVolumetric = source.value("volumetric", light.isVolumetric);
+                light.needsDynamicShadows = source.value("needs_dynamic_shadows", light.needsDynamicShadows);
+                light.shadowSoftness = source.value("shadow_softness", light.shadowSoftness);
+                light.shadowBias = source.value("shadow_bias", light.shadowBias);
+                light.shadowArea = source.value("shadow_area", light.shadowArea);
+                light.distanceFalloff = source.value("distance_falloff", light.distanceFalloff);
+                if (const auto fade = source.find("fade_offset"); fade != source.end())
+                    for (size_t component = 0; component < 2; ++component)
+                        light.fadeOffset[component] = fade->at(component).get<float>();
+                light.uvIntensity = source.value("uv_intensity", light.uvIntensity);
+                light.irIntensity = source.value("ir_intensity", light.irIntensity);
+                if (!std::isfinite(light.bulbRadius) || light.bulbRadius <= 0.0f || !std::isfinite(light.shadowBias) ||
+                    !std::isfinite(light.distanceFalloff) || light.distanceFalloff <= 0.0f)
+                    throw std::runtime_error("invalid primary-light shape data");
                 light.definition = source.at("definition").get<std::string>();
                 // Converters of engines with physical light units give each local light its intensity.
                 if (const auto intensity = source.find("intensity"); intensity != source.end())
@@ -1125,7 +1165,13 @@ void limitShadowedSpotLights(iw8::MapSun &lighting)
             0.2126 * light.color[0] + 0.7152 * light.color[1] + 0.0722 * light.color[2];
         return double(light.intensity) * luminance * double(light.radius) * light.radius;
     };
+    // Spots that shadow entities come first (IW7 marks them per light; IW3's all are): the
+    // players' shadows need them.
     std::ranges::stable_sort(shadowed, [&](const size_t a, const size_t b) {
+        const bool dynamicA = lighting.primaryLights[a].needsDynamicShadows;
+        const bool dynamicB = lighting.primaryLights[b].needsDynamicShadows;
+        if (dynamicA != dynamicB)
+            return dynamicA;
         return importance(a) > importance(b);
     });
     for (size_t rank = kMaxShadowedSpots; rank < shadowed.size(); ++rank)
@@ -1716,6 +1762,11 @@ int writeMapPackage(const Args &args, const std::string &map, const std::string 
                 light.direction[component] = -source.direction[component];
             light.radius = source.radius;
             light.cosHalfFovOuter = source.cosHalfFovOuter;
+            light.bulbRadius = source.bulbRadius;
+            light.tubeLength = std::sqrt(source.bulbLength[0] * source.bulbLength[0] +
+                                         source.bulbLength[1] * source.bulbLength[1] +
+                                         source.bulbLength[2] * source.bulbLength[2]);
+            light.dynamicShadows = source.needsDynamicShadows;
             localLightSources.push_back(light);
         }
         const auto localLights = iw8::locallights::Build(localLightSources, sunPrimaryLightIndex,

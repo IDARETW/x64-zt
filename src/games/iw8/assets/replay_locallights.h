@@ -19,13 +19,19 @@ struct Light
     std::array<float, 3> direction{}; // emission axis (= -ComPrimaryLight dir)
     float radius = 0;
     float cosHalfFovOuter = 0;
+    // ComPrimaryLight bulb radius (+0x5C) and the length of its tube (bulbLength), which widen what it lights.
+    float bulbRadius = 1;
+    float tubeLength = 0;
+    // A shadow-mapped spot whose shadows hold entities (IW7 sets it per light; IW3's all do).
+    bool dynamicShadows = true;
 };
 
 // ComPrimaryLight +3 needsDynamicShadows. Shipped mp_hideout sets it on exactly
-// the shadow-mapped spots (37/37), and lightAABB lists exactly those lights.
+// the shadow-mapped spots that shadow entities (37 of its 65 shadow-mapped
+// lights), and lightAABB lists exactly those lights.
 inline bool NeedsDynamicShadows(const Light &light)
 {
-    return light.type == 2 && light.canUseShadowMap;
+    return light.type == 2 && light.canUseShadowMap && light.dynamicShadows;
 }
 
 // GfxWorld local-light structures in the layout of shipped Replay worlds:

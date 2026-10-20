@@ -138,6 +138,12 @@ Without a command, `zonetool.exe` opens an interactive console.
 - The extraction's world JSON sets `translucent_glass`: the pipeline then draws blended BSP surfaces in the
   translucent camera region (3, 26), after the sky. In the opaque region the sky covered Frontier's roof glass.
   IW3 conversions do not set it.
+- IW7 local lights keep their IDs (`entity_id` of the comworld JSON, ComPrimaryLight +0x0C): every stock and IW7
+  light has its own; IW3 lights have none and keep 0. They also keep their bulb radius, tube length (`bulb_length`;
+  67 of Frontier's lights are tubes), volumetric flag, shadow softness, bias and area, distance falloff and whether a
+  shadowed spot shadows entities; IW3 lights keep the shipped defaults (bulb 1, bias 0.75). A light volume holds the
+  tube: the cone apex moves back by (bulb + length) / tan(outer) and the reach grows by the length. The shadowed spots
+  that shadow entities rank first for Replay's 16 shadow maps (the players' shadows need them).
 - IW7 particle flares (element 3) take Replay's flare materials (`MTL_TYPE_EFFECT_FLARE`, screen-space flare
   vertices): common_mp's `ecf/vfx_postfx_*` / `ecf/gfx_flare_wtr` by the role in the IW7 name, with the stock material
   data (`stock_flare`). As effect sprites they drew screen-wide wedges that flickered with the occlusion queries
