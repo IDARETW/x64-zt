@@ -1997,6 +1997,39 @@ iw7_state( mode, animation, to, time )
 		std::string map_script;
 		if (const auto found = scripts.find(std::format("scripts/mp/maps/{0}/{0}", source.name())); found != scripts.end())
 		{
+			// The lighting dvars of the map script (the last value it sets wins, as at run time).
+			static const std::regex grid_dvar(R"re(setdvar\(\s*"(r_lightGridEnableTweaks|r_lightGridIntensity|r_volumetrics)"\s*,\s*(-?[0-9]*\.?[0-9]+)\s*\);)re",
+				std::regex::icase);
+			auto tweaks = false;
+			auto intensity = 1.0f;
+			for (auto it = std::sregex_iterator(found->second.begin(), found->second.end(), grid_dvar); it != std::sregex_iterator(); ++it)
+			{
+				const auto setting = std::stof((*it)[2].str());
+				if (_stricmp((*it)[1].str().data(), "r_lightGridEnableTweaks") == 0)
+				{
+					tweaks = setting != 0.0f;
+				}
+				else if (_stricmp((*it)[1].str().data(), "r_volumetrics") == 0)
+				{
+					output.volumetrics = setting != 0.0f;
+				}
+				else
+				{
+					intensity = setting;
+				}
+			}
+
+			if (tweaks && intensity > 0.0f && std::isfinite(intensity))
+			{
+				output.light_grid_intensity = intensity;
+				ZONETOOL_INFO("iw7: the map script sets the light-grid intensity to %g", intensity);
+			}
+
+			if (!output.volumetrics)
+			{
+				ZONETOOL_INFO("iw7: the map script turns volumetric lighting off");
+			}
+
 			std::set<std::string> loaded;
 			map_script = translate_map_script(source.name(), found->second, loaded, [&](const std::string& name)
 			{

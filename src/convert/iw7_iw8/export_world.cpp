@@ -282,7 +282,8 @@ namespace zonetool::convert::iw7_iw8
 		class iw7_light_grid
 		{
 		public:
-			explicit iw7_light_grid(const iw7::GfxLightGridProbeData& data)
+			// `intensity`: the map's light-grid intensity tweak (extraction::light_grid_intensity).
+			iw7_light_grid(const iw7::GfxLightGridProbeData& data, const float intensity)
 			{
 				if (!data.probes || !data.probePositions || !data.tetrahedrons || !data.tetrahedronNeighbors || !data.probeCount ||
 					!data.tetrahedronCount)
@@ -304,7 +305,7 @@ namespace zonetool::convert::iw7_iw8
 						for (auto k = 0; k < 9; k++)
 						{
 							const auto value = half_to_float(data.probes[p].coeffs[channel * 9 + k]);
-							this->sh_[p][channel * 9 + k] = std::isfinite(value) ? (k >= 1 && k <= 3 ? -value : value) : 0.0f;
+							this->sh_[p][channel * 9 + k] = std::isfinite(value) ? (k >= 1 && k <= 3 ? -value : value) * intensity : 0.0f;
 						}
 					}
 				}
@@ -761,7 +762,8 @@ namespace zonetool::convert::iw7_iw8
 		// Units: IW7's SH taken from above equals its lightmaps (Frontier: the median over the grid points over floors is
 		// 1.08 times), and the pipeline's light grid holds half the lightmap level, so the SH is halved. Basis: stock
 		// Replay probes and IW7's keep the L1 terms negated against the pipeline's (their sky-lit probes point down in
-		// the pipeline's basis: mp_hideout mean z -0.74, IW7 Frontier -0.63), which PackProbe negates when it packs.
+		// the pipeline's basis: mp_hideout mean z -0.74, IW7 Frontier -0.63), which PackProbe negates when it packs. The
+		// map's light-grid intensity tweak scales it, as IW7 scales its grid at run time.
 		void export_gpu_light_grid(const source_map& source, extraction& output)
 		{
 			const auto& data = source.world()->lightGrid.probeData;
@@ -796,7 +798,7 @@ namespace zonetool::convert::iw7_iw8
 				{
 					const auto order = coefficient % 9;
 					auto value = half_to_float(data.probes[p].coeffs[coefficient]);
-					value = std::isfinite(value) ? value * 0.5f : 0.0f;
+					value = std::isfinite(value) ? value * 0.5f * output.light_grid_intensity : 0.0f;
 					put(order >= 1 && order <= 3 ? -value : value);
 				}
 			}
@@ -1102,7 +1104,7 @@ namespace zonetool::convert::iw7_iw8
 		auto lightmaps = export_lightmaps(source, output);
 		auto probes = export_reflection_probes(source, output);
 		const floor_light floors(source, world, lightmaps);
-		iw7_light_grid grid(world.lightGrid.probeData);
+		iw7_light_grid grid(world.lightGrid.probeData, output.light_grid_intensity);
 		export_light_grid(source, floors, grid, output);
 		export_gpu_light_grid(source, output);
 
@@ -1127,8 +1129,13 @@ namespace zonetool::convert::iw7_iw8
 		auto model_indices = json::array();
 		std::size_t ground_lit{};
 		std::size_t grid_lit{};
+		// IW7's own lighting of its static models (STATIC_MODEL_FLAG_*_LIGHTING), for the log.
+		std::array<std::size_t, 4> iw7_lighting{};
 		for (auto i = 0u; i < dpvs.smodelCount; i++)
 		{
+			const auto flags = dpvs.smodelDrawInsts[i].flags;
+			iw7_lighting[(flags & iw7::STATIC_MODEL_FLAG_LIGHTGRID_LIGHTING) ? 0 : (flags & iw7::STATIC_MODEL_FLAG_VERTEXLIT_LIGHTING) ? 1
+				: (flags & iw7::STATIC_MODEL_FLAG_LIGHTMAP_LIGHTING) ? 2 : 3]++;
 			auto model = export_static_model(source, world, i, probes, floors, grid, output);
 			grid_lit += model.contains("lighting_colors");
 			if (output.exported_models.contains(model.at("model").get<std::string>()))
@@ -1278,5 +1285,7 @@ namespace zonetool::convert::iw7_iw8
 		ZONETOOL_INFO("iw7: exported %zu of %u world surfaces and %zu of %u static models (%zu lit by the floor under them)",
 			surface_indices.size(), world.surfaceCount, model_indices.size(), dpvs.smodelCount, ground_lit);
 		ZONETOOL_INFO("iw7: %zu of %u static models take IW7's light grid at their centre", grid_lit, dpvs.smodelCount);
+		ZONETOOL_INFO("iw7: IW7 lights its static models by the light grid %zu, vertex lighting %zu, lightmaps %zu, other %zu",
+			iw7_lighting[0], iw7_lighting[1], iw7_lighting[2], iw7_lighting[3]);
 	}
 }
