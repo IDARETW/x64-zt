@@ -72,8 +72,21 @@ Without a command, `zonetool.exe` opens an interactive console.
   materials become IW3 effect materials. The zones of the common effect materials (`techsets_common`,
   `techsets_common_core_mp`, `techsets_common_mp`, `techsets_global_core_mp`) and the global zones (`global_core_mp`,
   `global_mp`) must be in the zone folder too: a map zone holds some shared images without their pixels (format 0),
-  and an image of the same name with its pixels in another loaded zone replaces such an image. Sound,
-  cloud, physics light and emissive graph modules do not convert yet. The map's scriptables become script models of
+  and an image of the same name with its pixels in another loaded zone replaces such an image. Physics light modules
+  (debris that Havok simulates: shards of broken bottles and vases) keep their layout; their IW7 shapes (point lists in
+  game units, which the extraction writes in Havok units, `extracted/physicsfxshape/<name>.json`) become Replay physics shapes `mw120r/<map>/<name>` built
+  natively (a shape of a zone that is not loaded takes Replay's `vfx_physfxpip_particle_default`), and their pipelines
+  Replay's `physfxpip_sparks_callback` (sparks) or `physfxpip_debris_callback` (the rest), name-only references to the
+  common zones. IW7's emissive graphs are the first version of Replay's (two intensities); they take Replay's third (10
+  curves: white colours, the intensities at curves 3 and 8 times the map's light unit). Sound modules keep the aliases
+  of the map's sound bank, which convert with its sounds; the importer leaves out those that the map bank does not
+  hold. Decal modules (IW7: byte fade times, the projection axis at 15, the marks at 32) name their world material in
+  Replay's three slots, which converts as a decal material (decal camera region, `wc_l_sm_b0c0n0s0`); a decal whose
+  colour map cannot be read is left out. Spot lights (element 8) convert as Replay spots (element 6, module 10,
+  game-test PDB layout: the collimation, near plane 8 and `light_fx_default` of stock spots); Replay points them along
+  the effect's X axis (`sub_141BA6670`). No stock Replay effect spawns on a mesh, so a spawn mesh becomes the sphere of
+  its first model's bounds (Frontier: the ops table's sun). Replay has no cloud element (IW7's clouds draw as sprites)
+  and its cloud module no data: cloud modules are left out. The map's scriptables become script models of
   each instance's model at its initial placement (the game modes' own, such as Hardpoint's chevrons, are left out),
   which the pipeline makes static when no script uses them. The kinds that break (one part: a health state, then a
   state that swaps the model and plays effects and a sound; Frontier: 172 cups, bottles, screens and clocks of 41
@@ -125,6 +138,15 @@ Without a command, `zonetool.exe` opens an interactive console.
 - The extraction's world JSON sets `translucent_glass`: the pipeline then draws blended BSP surfaces in the
   translucent camera region (3, 26), after the sky. In the opaque region the sky covered Frontier's roof glass.
   IW3 conversions do not set it.
+- IW7 particle flares (element 3) take Replay's flare materials (`MTL_TYPE_EFFECT_FLARE`, screen-space flare
+  vertices): common_mp's `ecf/vfx_postfx_*` / `ecf/gfx_flare_wtr` by the role in the IW7 name, with the stock material
+  data (`stock_flare`). As effect sprites they drew screen-wide wedges that flickered with the occlusion queries
+  (Breakneck's sun and klaxon flares, owner test breakneck12). Replay's flare builder (`sub_141BA5920`) scales a flare by
+  value.min + value.max * (depth - range.min) / range.max, unclamped; IW7's ranges (1 to 99, value 0 to 1) are a
+  clamped ramp, which as Replay's scaled far flares by depth / 99 (still screen-filling, breakneck14). Flares take no
+  depth scale and IW7's value.max in their radial scales. `IW7_NO_FLARES=1` leaves them out.
+- The IW7 source loads the base `common` and `global` zones after the multiplayer ones: they hold assets that map
+  effects name, such as the spark debris shapes.
 - IW7 extractions set `spatial_surfaces`: world surfaces merge only within 512-unit cells and up to 4096 triangles.
   Merged by material alone, Frontier drew 388 surfaces of up to 42793 triangles and 34000 units, which GPU culling and
   the shadow maps of local lights took whole (stock mp_hideout: 3301 surfaces, 28 triangles and 207 units at the median;

@@ -1,5 +1,6 @@
 #include <std_include.hpp>
 #include "export.hpp"
+#include "images.hpp"
 
 #include <iw8/iw8_focus_structs.h>
 
@@ -66,10 +67,10 @@ namespace zonetool::convert::iw7_iw8
 		}
 
 		// Replay particle element types: IW7 draws clouds and spark clouds as sprites in Replay's element list, which has
-		// no cloud. Spot lights convert as omni lights (Replay's spot module is not checked against stock effects).
+		// no cloud.
 		std::optional<std::uint32_t> replay_element(const std::uint32_t element)
 		{
-			static constexpr std::array<std::uint32_t, 15> elements{0, 1, 0, 0, 2, 3, 4, 5, 5, 7, 8, 9, 10, 11, 12};
+			static constexpr std::array<std::uint32_t, 15> elements{0, 1, 0, 0, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12};
 			return element < elements.size() ? std::optional(elements[element]) : std::nullopt;
 		}
 
@@ -90,6 +91,52 @@ namespace zonetool::convert::iw7_iw8
 			static constexpr std::array<std::uint16_t, 23> update{33, 34, 35, 36, 37, 39, 41, 42, 44, 45, 46, 47, 48, 49, 51, 52, 53, 55, 56, 57,
 				58, 59, 60};
 			return type - 31u < update.size() ? update[type - 31u] : 0xFFFF;
+		}
+
+		// Replay's flare element (PARTICLE_ELEMENT_TYPE_FLARE).
+		constexpr std::uint32_t flare_element = 3;
+
+		std::vector<std::uint8_t> unhex(const std::string_view text)
+		{
+			std::vector<std::uint8_t> bytes(text.size() / 2);
+			for (std::size_t i = 0; i < bytes.size(); i++)
+			{
+				bytes[i] = static_cast<std::uint8_t>(std::stoul(std::string(text.substr(i * 2, 2)), nullptr, 16));
+			}
+
+			return bytes;
+		}
+
+		// A flare material of Replay's common_mp and the material data that stock flares give it (their two templates).
+		struct flare_material
+		{
+			const char* material;
+			const char* material_data;
+		};
+
+		const flare_material& stock_flare(const std::string_view iw7_material)
+		{
+			static constexpr char streaks[] = "20bcbe4d7f403731fad69b3fe8ab5ebe0000803f0000803f0000803f0000803f0000003f0000003f0000003f0000003f00000000000000006f12033b0000803f000000000000000000000000000000000000803f000000400000803f00000000cdcccc3c0000204200002042cdcccc3ccdcccc3e00000000cdcccc3ecdcccc3e000000000000000000000000000000000000803f0000803f0000803f0000803f0000803f0000803f0000803f0000803fcdccccbd000000000000000000000000";
+			static constexpr char stripes[] = "20bcbe4d7f4037317ff90140d0b6b9be0000803f0000803f0000803f0000803f0000003f0000003f0000003f0000003f0000803f000000006f12033b0000803f000000000000000000000000000000000000803f000000400000803f000000000000803f0000803f0000803f0000803f0ad7233c000000000ad7233c0ad7233c000000000000000000000000000000000000803f0000803f0000803f0000803f0000803f0000803f0000803f0000803fcdccccbd000000000000000000000000";
+			static constexpr char glow[] = "20bcbe4d7f403731fad69b3fe8ab5ebe0000803f0000803f0000803f0000803f0000003f0000003f0000003f0000003f00000000000000006f12033b0000803f000000000000000000000000000000000000803f000000400000803f000000000000003f0000004000000040cdcccc3c0ad7a33c000000000ad7a33ccdcccc3e000000000000000000000000000000000000803f0000803f0000803f0000803f0000803f0000803f0000803f0000803fcdccccbd000000000000000000000000";
+			static const flare_material blue{"ecf/vfx_postfx_anamorphic_blue_1", streaks};
+			static const flare_material streak{"ecf/vfx_postfx_flare_streak_1", streaks};
+			static const flare_material stripe{"ecf/vfx_postfx_stripe_1", stripes};
+			static const flare_material spectrum{"ecf/vfx_postfx_chroma_star_1", streaks};
+			static const flare_material round{"ecf/gfx_flare_wtr", glow};
+			const auto has = [&](const std::string_view part) { return iw7_material.find(part) != std::string_view::npos; };
+			return has("blue") ? blue : has("streak") ? streak : has("strip") ? stripe :
+				has("spectrum") || has("rainbow") || has("clr") ? spectrum : round;
+		}
+
+		// Replay's particle shape (common_mp), which the importer names without building it.
+		constexpr char default_fx_shape[] = "vfx_physfxpip_particle_default";
+
+		// The Replay pipeline of an IW7 debris pipeline (both in Replay's common zones): sparks bounce as Replay's sparks, the
+		// rest (plastic, wood, glass, concrete, cards) as its debris.
+		std::string replay_pipeline(const std::string_view name)
+		{
+			return name.find("spark") != std::string_view::npos ? "physfxpip_sparks_callback" : "physfxpip_debris_callback";
 		}
 
 		// Replay's emitter data flags (bits of the per-particle streams): the streams every emitter has, and those that
@@ -192,6 +239,7 @@ namespace zonetool::convert::iw7_iw8
 			effect_converter(const source_map& source, extraction& output)
 				: source_(source)
 				, output_(output)
+				, light_unit_(light_unit_scale(source))
 			{
 			}
 
@@ -250,6 +298,48 @@ namespace zonetool::convert::iw7_iw8
 			std::map<std::string, std::size_t> dropped_;
 			std::size_t converted_{};
 			std::string current_;
+
+			std::set<std::string> shapes_;
+			float light_unit_{};
+			std::optional<std::set<std::string>> bank_aliases_;
+
+			// The aliases of the map's sound bank (<map>.all).
+			const std::set<std::string>& bank_aliases()
+			{
+				if (!this->bank_aliases_)
+				{
+					this->bank_aliases_.emplace();
+					const auto* bank = static_cast<const iw7::SndBank*>(this->source_.find(iw7::ASSET_TYPE_SOUND_BANK, this->source_.name() + ".all"));
+					for (auto i = 0u; bank && bank->alias && i < bank->aliasCount; i++)
+					{
+						if (bank->alias[i].aliasName)
+						{
+							this->bank_aliases_->emplace(asset_name(bank->alias[i].aliasName));
+						}
+					}
+				}
+
+				return *this->bank_aliases_;
+			}
+
+			// Writes the points of an IW7 debris shape once, in Havok units (IW7 keeps game units: its
+			// vfx_debris_glass_shard_b is 32 times Replay's); returns its name.
+			std::string add_shape(const iw7::PhysicsFXShape& shape)
+			{
+				const std::string name(asset_name(shape.name));
+				if (this->shapes_.insert(name).second)
+				{
+					auto points = json::array();
+					for (auto i = 0u; i < shape.size; i++)
+					{
+						points.push_back({shape.vecs[i][0] / 32.0f, shape.vecs[i][1] / 32.0f, shape.vecs[i][2] / 32.0f});
+					}
+
+					write_json(this->output_.extracted / "physicsfxshape" / (file_name(name) + ".json"), {{"name", name}, {"points", std::move(points)}});
+				}
+
+				return name;
+			}
 
 			void drop(const std::string& what)
 			{
@@ -364,6 +454,7 @@ namespace zonetool::convert::iw7_iw8
 				case 3: return replay_module(iw7::PARTICLE_MODULE_INIT_FLARE);
 				case 4: return replay_module(iw7::PARTICLE_MODULE_INIT_GEO_TRAIL);
 				case 5: return replay_module(iw7::PARTICLE_MODULE_INIT_LIGHT_OMNI);
+				case 6: return replay_module(iw7::PARTICLE_MODULE_INIT_LIGHT_SPOT);
 				case 7: return replay_module(iw7::PARTICLE_MODULE_INIT_MODEL);
 				case 9: return replay_module(iw7::PARTICLE_MODULE_INIT_RUNNER);
 				default: return std::nullopt;
@@ -385,7 +476,8 @@ namespace zonetool::convert::iw7_iw8
 					const auto& group = state.moduleGroupDefs[g];
 					for (auto m = 0; !group.disabled && m < group.numModules; m++)
 					{
-						auto module = this->convert_module(group.moduleDefs[m], static_cast<std::uint16_t>(modules.size()));
+						auto module = this->convert_module(group.moduleDefs[m], static_cast<std::uint16_t>(modules.size()),
+							record.elementType == flare_element);
 						if (module)
 						{
 							types.insert(module->record.moduleType);
@@ -445,11 +537,19 @@ namespace zonetool::convert::iw7_iw8
 					complete = false;
 				}
 
+				// IW7_NO_FLARES=1 leaves the flares out (a switch for testing their conversion).
+				if (record.elementType == flare_element && std::getenv("IW7_NO_FLARES"))
+				{
+					this->drop("flare");
+					complete = false;
+				}
+
 				return {{"state", hex(record)}, {"groups", std::move(groups)}};
 			}
 
 			// Converts a module of the IW7 layout to Replay's, or leaves it out (counted by type).
-			std::optional<module_record> convert_module(const iw7::ParticleModuleDef& module, const std::uint16_t index)
+			std::optional<module_record> convert_module(const iw7::ParticleModuleDef& module, const std::uint16_t index,
+				const bool flare = false)
 			{
 				const auto& data = module.moduleData;
 				const auto type = static_cast<std::uint16_t>(module.moduleType);
@@ -530,13 +630,37 @@ namespace zonetool::convert::iw7_iw8
 					copy(sizeof(iw7::ParticleModuleSizeLerp));
 					return result;
 				case iw7::PARTICLE_MODULE_INIT_FLARE:
+				{
+					// The layouts agree. Replay's flare builder (sub_141BA5920) scales a flare by value.min + value.max * (depth
+					// - range.min) / range.max, unclamped, unless range.max is 0, and divides its size by its depth: a size in
+					// world units. IW7's ranges grow the flare from nothing over its first units to full size (range 1 to 99,
+					// value 0 to 1: a clamped ramp); as Replay's they scaled a far flare by its depth / 99, so that Breakneck's
+					// sun and klaxon flares covered the screen. Past the ramp (as flares are seen) IW7's scale is value.max:
+					// the flare takes no depth scale and value.max in its radial scales.
 					copy(sizeof(iw7::ParticleModuleInitFlare));
+					auto scaled = data.initFlare;
+					if (scaled.m_depthScaleRange.max > scaled.m_depthScaleRange.min)
+					{
+						const auto scale = scaled.m_depthScaleValue.max;
+						scaled.m_radialScaleX.min *= scale;
+						scaled.m_radialScaleX.max *= scale;
+						scaled.m_radialScaleY.min *= scale;
+						scaled.m_radialScaleY.max *= scale;
+					}
+
+					scaled.m_depthScaleRange = {};
+					scaled.m_depthScaleValue = {};
+					result.set(offsetof(iw7::ParticleModuleInitFlare, m_depthScaleRange), scaled.m_depthScaleRange);
+					result.set(offsetof(iw7::ParticleModuleInitFlare, m_depthScaleValue), scaled.m_depthScaleValue);
+					result.set(offsetof(iw7::ParticleModuleInitFlare, m_radialScaleX), scaled.m_radialScaleX);
+					result.set(offsetof(iw7::ParticleModuleInitFlare, m_radialScaleY), scaled.m_radialScaleY);
 					for (auto c = 0; c < 4; c++)
 					{
 						result.curve(offsetof(iw7::ParticleModuleInitFlare, m_curves) + c * 16, data.initFlare.m_curves[c]);
 					}
 
 					return result;
+				}
 				case iw7::PARTICLE_MODULE_INIT_SPAWN:
 					copy(sizeof(iw7::ParticleModuleInitSpawn));
 					result.curve(offsetof(iw7::ParticleModuleInitSpawn, m_curves), data.initSpawn.m_curves[0]);
@@ -644,7 +768,19 @@ namespace zonetool::convert::iw7_iw8
 					for (auto a = 0; a < list.numAssets; a++)
 					{
 						const auto* material = list.assetList[a].material;
-						if (material)
+						if (material && flare)
+						{
+							// Replay draws flares through flare materials (MTL_TYPE_EFFECT_FLARE: screen-space flare
+							// vertices); IW7's lens-flare materials converted as effect sprites drew those vertices as
+							// screen-wide quads through the screen centre (Breakneck's sun flare). Flares take Replay's
+							// own of the role (common_mp) with their stock material data.
+							const auto& stock = stock_flare(asset_name(material->name));
+							entries.push_back({{"entry", hex(std::array<std::uint8_t, 0x20>{}.data(), 0x20)},
+								{"assets", json::array({{0, "stockmaterial", stock.material}})}});
+							const auto bytes = unhex(stock.material_data);
+							std::memcpy(result.data() + offsetof(focus::ParticleModuleInitMaterial, materialData), bytes.data(), bytes.size());
+						}
+						else if (material)
 						{
 							const auto name = this->output_.add_material(this->source_, const_cast<iw7::Material*>(material));
 							this->output_.effect_materials.insert(name);
@@ -674,6 +810,12 @@ namespace zonetool::convert::iw7_iw8
 							const_cast<iw7::XModel*>(model))))
 						{
 							entries.push_back(linked_asset("xmodel", this->output_.add_model(this->source_, const_cast<iw7::XModel*>(model))));
+						}
+						else if (model && model->name)
+						{
+							ZONETOOL_INFO("iw7: effect \"%s\" names model \"%s\", whose surfaces are in no loaded zone or stream file%s",
+								this->current_.data(), model->name,
+								this->source_.resolve(iw7::ASSET_TYPE_XMODEL, const_cast<iw7::XModel*>(model)) ? "" : " (the model too)");
 						}
 					}
 
@@ -711,32 +853,44 @@ namespace zonetool::convert::iw7_iw8
 				}
 				case iw7::PARTICLE_MODULE_INIT_LIGHT_SPOT:
 				{
-					// An omni light of the spot's intensity and shadow values (its state draws an omni light).
-					focus::ParticleModuleInitLightOmni light{};
+					// Replay's spot (game-test PDB layout): the cone, bulb and intensities of IW7's, the collimation and
+					// light definition of stock spots (light_fx_default, collimation pi/2, near plane 8). The spot points
+					// along the effect's X axis (sub_141BA6670, like IW7's). IW7's layout is that of x64-zt's IW7
+					// structs (Breakneck's vfx_rivet_spotlight_orange: cone 60/50 degrees, bulb 4 by 1, brightness 16, UV
+					// 100, near plane 0.5, no shadow values); values outside their range take the stock spots' values.
 					const auto& source = data.initLightSpot;
-					result.record.moduleType = replay_module(iw7::PARTICLE_MODULE_INIT_LIGHT_OMNI);
-					light.fovOuter = 0.7853981852531433f;
-					light.bulbRadius = 2.0f;
-					light.bulbLength = 1.0f / 255.0f;
-					light.distanceFalloff = 1.0f;
-					light.brightness = 1.0f;
-					// The IW7 spot layout is not checked: values outside their range take the shipped local-light defaults.
 					const auto value = [](const float v, const float low, const float high, const float fallback)
 					{
 						return std::isfinite(v) && v >= low && v <= high ? v : fallback;
 					};
 
+					focus::ParticleModuleInitLightSpot light{};
+					light.fovOuter = value(source.m_fovOuter, 0.01f, 3.1f, 1.2217305f);
+					light.fovInner = std::min(value(source.m_fovInner, 0.0f, 3.1f, 0.0f), light.fovOuter);
+					light.bulbRadius = value(source.m_bulbRadius, 0.01f, 1000.0f, 1.0f);
+					light.bulbLength = value(source.m_bulbLength, 0.0f, 1000.0f, 1.0f / 255.0f);
+					light.distanceFalloff = 1.0f;
+					light.fovCollimation = 1.5707964f;
+					light.brightness = value(source.m_brightness, 0.0f, 1000.0f, 1.0f);
+					light.intensityUV = value(source.m_intensityUV, 0.0f, 1000.0f, 0.0f);
 					light.intensityIR = value(source.m_intensityIR, 0.0f, 1000.0f, 0.0f);
-					light.shadowSoftness = value(source.m_shadowSoftness, 0.0f, 10.0f, 0.55f);
-					light.shadowBias = value(source.m_shadowBias, 0.0f, 10.0f, 0.75f);
-					light.shadowArea = value(source.m_shadowArea, 0.0f, 10.0f, 0.0018f);
+					light.shadowSoftness = value(source.m_shadowSoftness, 0.01f, 10.0f, 0.55f);
+					light.shadowBias = value(source.m_shadowBias, 0.01f, 10.0f, 0.4f);
+					light.shadowArea = value(source.m_shadowArea, 0.0001f, 10.0f, 0.018f);
+					light.shadowNearPlane = value(source.m_shadowNearPlane, 0.1f, 1000.0f, 8.0f);
 					light.toneMappingScaleFactor = value(source.m_toneMappingScaleFactor, 0.0f, 100.0f, 1.0f);
 					light.disableVolumetric = source.m_disableVolumetric ? 1 : 0;
-					light.disableDynamicShadows = 1;
+					light.disableShadowMap = source.m_disableShadowMap ? 1 : 0;
+					light.disableDynamicShadows = source.m_disableDynamicShadows ? 1 : 0;
 					light.scriptScale = 1;
+					{
+						const auto* bytes = reinterpret_cast<const std::uint8_t*>(&source);
+						ZONETOOL_INFO("iw7: effect \"%s\" spot light module %s", this->current_.data(), hex(bytes, 64).data());
+					}
+
 					result.set(0, light);
 					base();
-					result.list(offsetof(focus::ParticleModuleInitLightOmni, linkedAssets),
+					result.list(offsetof(focus::ParticleModuleInitLightSpot, linkedAssets),
 						json::array({linked_asset("lightdef", "light_fx_default")}));
 					return result;
 				}
@@ -765,6 +919,164 @@ namespace zonetool::convert::iw7_iw8
 						json::array({linked_asset("lightdef", "light_fx_default")}));
 					return result;
 				}
+				case iw7::PARTICLE_MODULE_INIT_DECAL:
+				{
+					// IW7 (Frontier's raw modules): fade-in and fade-out times as bytes at 8 and 9 (its plant: 1 and 20), four
+					// bytes that its decals leave zero, the projection axis at 15 (5: -Z, along the impact normal, as most
+					// stock decals), the lerp colour at 16 and the marks at 32 (model, world and displacement materials).
+					// Replay: 16-bit times, no stop fade (0xFFFF, as every stock decal), the marks at 16, the lerp colour at
+					// 32, then lerp time, dynamic decal and projection axis; every stock decal names one material in its
+					// three slots.
+					const auto* bytes = reinterpret_cast<const std::uint8_t*>(&data);
+					focus::ParticleModuleInitDecal decal{};
+					decal.fadeInTime = bytes[8];
+					decal.fadeOutTime = bytes[9];
+					decal.stoppableFadeOutTime = 0xFFFF;
+					std::memcpy(&decal.lerpColor, bytes + 16, sizeof(decal.lerpColor));
+					decal.projectionAxis = bytes[15];
+					if (bytes[10] || bytes[11] || bytes[12] || bytes[13] || bytes[14])
+					{
+						ZONETOOL_INFO("iw7: effect \"%s\" has a decal with unknown bytes %02x %02x %02x %02x %02x", this->current_.data(),
+							bytes[10], bytes[11], bytes[12], bytes[13], bytes[14]);
+					}
+
+					result.set(0, decal);
+					base();
+					auto entries = json::array();
+					const auto& list = data.initDecal.m_linkedAssetList;
+					for (auto a = 0; list.assetList && a < list.numAssets; a++)
+					{
+						// The world material (wim/), else the model one (mim/).
+						const auto& marks = list.assetList[a].decal.materials;
+						auto* material = this->source_.resolve(iw7::ASSET_TYPE_MATERIAL, const_cast<iw7::Material*>(marks[1] ? marks[1] : marks[0]));
+						if (!material || !material->textureTable || !material->textureCount)
+						{
+							this->drop("decal without its material");
+							continue;
+						}
+
+						// A decal draws its colour map (its alpha is the decal's opacity): one that cannot be read (a stub of
+						// a pak that is not in the zone folder: Frontier's blood pool) would leave the decal material out.
+						const auto* color = color_image(this->source_, material);
+						if (!color || !color->name || (color->name[0] != '$' &&
+							load_image_faces(*color, DXGI_FORMAT_R8G8B8A8_UNORM, 64).size() != 1))
+						{
+							this->drop("decal whose colour map cannot be read");
+							continue;
+						}
+
+						const auto name = this->output_.add_material(this->source_, material);
+						this->output_.decal_materials.insert(name);
+						std::array<std::uint8_t, 0x20> entry{};
+						entries.push_back({{"entry", hex(entry.data(), entry.size())}, {"assets", json::array({
+							{0, "material", name}, {8, "material", name}, {16, "material", name}})}});
+					}
+
+					if (entries.empty())
+					{
+						this->drop("decal module without materials");
+						return std::nullopt;
+					}
+
+					result.list(offsetof(focus::ParticleModuleInitDecal, linkedAssets), std::move(entries));
+					return result;
+				}
+				case iw7::PARTICLE_MODULE_INIT_SOUND:
+				{
+					// Replay's layout is IW7's, each entry an alias name at +0 (stock entries: the string only). The aliases of
+					// the map's own sound bank convert with its sounds (export_sounds); the importer leaves out any that do not.
+					copy(sizeof(iw7::ParticleModuleInitSound));
+					auto entries = json::array();
+					const auto& list = data.initSound.m_linkedAssetList;
+					for (auto a = 0; list.assetList && a < list.numAssets; a++)
+					{
+						const auto* sound = list.assetList[a].sound;
+						const auto name = sound ? std::string(asset_name(sound)) : std::string();
+						if (name.empty() || !this->bank_aliases().contains(name))
+						{
+							this->drop("sound of another sound bank");
+							continue;
+						}
+
+						this->output_.sound_names.insert(name);
+						std::array<std::uint8_t, 0x20> entry{};
+						entries.push_back({{"entry", hex(entry.data(), entry.size())}, {"assets", json::array()},
+							{"strings", json::array({{0, name}})}});
+					}
+
+					if (entries.empty())
+					{
+						this->drop("sound module without sounds");
+						return std::nullopt;
+					}
+
+					result.list(offsetof(iw7::ParticleModuleInitSound, m_linkedAssetList), std::move(entries));
+					return result;
+				}
+				case iw7::PARTICLE_MODULE_EMISSIVE_GRAPH:
+				{
+					// IW7's emissive graph is Replay's first version (PARTICLE_EMISSIVE_CURVE_NUM_V1 = 2): an intensity for each
+					// of the two sets that module flag 4 picks between. Replay's is the third (10 curves): per set a colour (curves
+					// 0-2 and 5-7) times an intensity (3 and 8), which its update (sub_141BBD5E0) writes per particle, and a value
+					// (4 and 9) that only states with flag bit 42 read and Init leaves at 0. The colours are white; the intensities
+					// take the light unit of the map, as its other HDR values.
+					std::memcpy(result.data(), &data, offsetof(iw7::ParticleModuleEmissiveGraph, m_curves));
+					base();
+					constexpr auto curves = offsetof(iw7::ParticleModuleEmissiveGraph, m_curves);
+					for (const auto c : {0, 1, 2, 5, 6, 7})
+					{
+						result.constant_curve(curves + c * 16, 1.0f);
+					}
+
+					for (const auto c : {0, 1})
+					{
+						auto intensity = data.emissiveGraph.m_curves[c];
+						intensity.scale *= this->light_unit_;
+						result.curve(curves + (c ? 8 : 3) * 16, intensity);
+					}
+
+					return result;
+				}
+				case iw7::PARTICLE_MODULE_PHYSICS_LIGHT:
+				{
+					// Debris that Havok simulates. Replay's layout is IW7's; each entry names a pipeline at +0 (Replay's of the
+					// kind of debris, which its common zones hold) and a shape at +8 (IW7's points, which the importer builds as
+					// a Havok shape).
+					copy(sizeof(iw7::ParticleModulePhysicsLight));
+					auto entries = json::array();
+					const auto& list = data.physicsLight.m_linkedAssetList;
+					for (auto a = 0; list.assetList && a < list.numAssets; a++)
+					{
+						const auto& fx = list.assetList[a].physicsFXData;
+						const auto* pipeline = this->source_.resolve(iw7::ASSET_TYPE_PHYSICS_FX_PIPELINE, fx.physicsFXPipeline);
+						// A shape of a zone that is not loaded takes Replay's particle shape (common_mp).
+						const auto* shape = this->source_.resolve(iw7::ASSET_TYPE_PHYSICS_FX_SHAPE, fx.physicsFXShape);
+						auto shape_name = std::string(default_fx_shape);
+						if (shape && shape->vecs && shape->size >= 4)
+						{
+							shape_name = this->add_shape(*shape);
+						}
+						else
+						{
+							ZONETOOL_INFO("iw7: effect \"%s\" takes Replay's %s for a debris shape that the zones do not hold",
+								this->current_.data(), default_fx_shape);
+						}
+
+						const std::string_view pipeline_name = pipeline && pipeline->name ? asset_name(pipeline->name) : "";
+						std::array<std::uint8_t, 0x20> entry{};
+						entries.push_back({{"entry", hex(entry.data(), entry.size())}, {"assets", json::array({
+							{0, "physicsfxpipeline", replay_pipeline(pipeline_name)}, {8, "physicsfxshape", shape_name}})}});
+					}
+
+					if (entries.empty())
+					{
+						this->drop("debris module without shapes");
+						return std::nullopt;
+					}
+
+					result.list(offsetof(iw7::ParticleModulePhysicsLight, m_linkedAssetList), std::move(entries));
+					return result;
+				}
 				case iw7::PARTICLE_MODULE_INIT_OCCLUSION_QUERY:
 				{
 					// Replay adds a depth bias before the fade times and a ray cast flag after the world size. Its stock
@@ -791,7 +1103,11 @@ namespace zonetool::convert::iw7_iw8
 				case iw7::PARTICLE_MODULE_INIT_SPAWN_SHAPE_CYLINDER:
 				case iw7::PARTICLE_MODULE_INIT_SPAWN_SHAPE_ELLIPSOID:
 				case iw7::PARTICLE_MODULE_INIT_SPAWN_SHAPE_SPHERE:
+				case iw7::PARTICLE_MODULE_INIT_SPAWN_SHAPE_MESH:
 					return this->convert_spawn_shape(module, result);
+				case iw7::PARTICLE_MODULE_INIT_CLOUD:
+					// Replay has no cloud element (IW7's clouds draw as sprites) and its cloud module no data.
+					return std::nullopt;
 				case iw7::PARTICLE_MODULE_TEST_AGE:
 				case iw7::PARTICLE_MODULE_TEST_BIRTH:
 				case iw7::PARTICLE_MODULE_TEST_DEATH:
@@ -895,6 +1211,39 @@ namespace zonetool::convert::iw7_iw8
 					std::memcpy(&sphere.radius, bytes + 40, 8);
 					result.set(0, sphere);
 					curves(offsetof(focus::ParticleModuleInitSpawnShapeSphere, curves), 4);
+					return result;
+				}
+				case iw7::PARTICLE_MODULE_INIT_SPAWN_SHAPE_MESH:
+				{
+					// IW7: the mesh count at 32, the models at 40, their vertex and triangle counts at 56. No stock Replay
+					// effect spawns on a mesh (common zones, Shipment), so Replay's mesh tables are not checked: the
+					// particles spawn on the sphere of the first model's bounds (Frontier: the ops table's sun).
+					const auto& list = *reinterpret_cast<const iw7::ParticleLinkedAssetListDef*>(bytes + 40);
+					const auto* model = list.assetList && list.numAssets ? list.assetList[0].model : nullptr;
+					model = model ? this->source_.resolve(iw7::ASSET_TYPE_XMODEL, const_cast<iw7::XModel*>(model)) : nullptr;
+					if (!model)
+					{
+						this->drop("spawn mesh without its model");
+						return std::nullopt;
+					}
+
+					focus::ParticleModuleInitSpawnShapeSphere sphere{};
+					sphere.base = shape;
+					sphere.base.base.type = replay_module(iw7::PARTICLE_MODULE_INIT_SPAWN_SHAPE_SPHERE);
+					sphere.base.spawnType = 4;
+					auto radius = 0.0f;
+					for (std::size_t axis = 0; axis < 3; axis++)
+					{
+						sphere.base.offset.v[axis] += model->bounds.midPoint[axis];
+						radius = std::max(radius, model->bounds.halfSize[axis]);
+					}
+
+					sphere.radius = {radius, radius};
+					result.record.moduleType = sphere.base.base.type;
+					result.set(0, sphere);
+					curves(offsetof(focus::ParticleModuleInitSpawnShapeSphere, curves), 4);
+					ZONETOOL_INFO("iw7: effect \"%s\" spawns on the sphere of model \"%s\" (radius %g) for its spawn mesh",
+						this->current_.data(), model->name, radius);
 					return result;
 				}
 				default:

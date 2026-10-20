@@ -236,6 +236,16 @@ struct PreparedMap
     std::unordered_map<std::string, std::array<std::uint8_t, 192>> fxParticleMaterialData;
     std::vector<iw8::vfx::Effect> vfxEffects;
     std::string vfxLightDef;
+    // Debris shapes of native effects (IW7 physics-light modules) built as
+    // Replay PhysicsFXShape Havok data, and the common-zone assets (pipelines,
+    // the default particle shape) that native effects name.
+    struct FxShape
+    {
+        std::string name;
+        std::vector<std::uint8_t> havokData;
+    };
+    std::vector<FxShape> vfxShapes;
+    std::set<std::pair<IW8_XAssetType, std::string>> vfxReferences;
     std::string smallGlassEffect;
     iw8::impact::EffectOverrides impactOverrides;
     replayrender::StaticModels staticModels;

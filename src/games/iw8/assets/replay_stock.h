@@ -7,6 +7,7 @@
 #include <memory>
 #include <string>
 #include <utility>
+#include <vector>
 
 namespace iw8::stock
 {
@@ -47,4 +48,9 @@ class Copier
     struct Impl;
     std::unique_ptr<Impl> impl_;
 };
+// A name-only reference (the zeroed header with its name), which the loader resolves against the common zone that owns the
+// asset.
+void RegisterNameReference(ZoneWriter &writer, IW8_XAssetType type, const std::string &name);
+// A PhysicsFXShape of the map zone with its Havok data, without a sound.
+void RegisterPhysicsShape(ZoneWriter &writer, const std::string &name, std::vector<uint8_t> havokData);
 } // namespace iw8::stock

@@ -57,9 +57,11 @@ namespace zonetool::convert::iw7_iw8
 
 		// The multiplayer common zones hold models that maps place (flags, tag_origin) without holding them, their
 		// techsets zones the materials of the common effects that map effects use, and the global zones the images of
-		// those materials.
+		// those materials. The base common and global zones (which the game loads before them) hold the rest that map
+		// effects name: the debris shapes of sparks (vfx_physfxpip_particle_spark) and other shared assets. The
+		// first zone that holds an asset gives it, so they only fill in.
 		for (const auto common : {"common_core_mp", "common_mp", "techsets_common", "techsets_common_core_mp", "techsets_common_mp",
-			"techsets_global_core_mp", "global_core_mp", "global_mp"})
+			"techsets_global_core_mp", "global_core_mp", "global_mp", "common", "global"})
 		{
 			this->load(common);
 		}

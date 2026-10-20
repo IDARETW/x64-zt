@@ -2180,6 +2180,17 @@ PhysicsAsset BakePhysicsAssetNative(std::string name, const Mesh &mesh, const Ph
 }
 } // namespace
 
+std::vector<std::uint8_t> BuildFxShape(const std::vector<std::array<float, 3>> &points)
+{
+    namespace hk = zonetool::iw8::havok;
+    if (!g_nativeCompendium)
+        throw std::runtime_error("debris shapes need native Havok");
+    hk::object_builder builder(*g_nativeCompendium);
+    const auto levels = hk::fx_shape_levels(std::vector<hk::vector3>(points.begin(), points.end()));
+    hk::add_fx_shape(builder, levels);
+    return hk::write_self_describing_tagfile(hk::breadth_first(builder.finish("20180200", {})), *g_nativeCompendium);
+}
+
 void UseNativeHavok(const std::filesystem::path &zoneFolder, const bool checkWithReplay)
 {
     g_nativeCompendium = &zonetool::iw8::havok::replay_compendium(zoneFolder);

@@ -1292,6 +1292,10 @@ std::vector<OutputLedgerRow> outputLedgerRows(
         }
         if (!prepared->vfxLightDef.empty())
             set(ASSET_TYPE_LIGHTDEF, prepared->vfxLightDef, "light of IW3 effects / local lights");
+        for (const auto &shape : prepared->vfxShapes)
+            set(ASSET_TYPE_PHYSICSFXSHAPE, shape.name, "debris shape of a native effect (native Havok)");
+        for (const auto &[type, name] : prepared->vfxReferences)
+            set(type, name, "name-only reference to the common-zone asset (debris of a native effect)");
     }
     if (stock)
         for (const auto &[key, origin] : stock->Origins())
@@ -1645,6 +1649,14 @@ int writeMapPackage(const Args &args, const std::string &map, const std::string 
             }
             if (!prepared->vfxLightDef.empty())
                 iw8::vfx::RegisterLightDef(writer, prepared->vfxLightDef);
+            for (auto &shape : prepared->vfxShapes)
+                iw8::stock::RegisterPhysicsShape(writer, shape.name, std::move(shape.havokData));
+            for (const auto &[type, name] : prepared->vfxReferences)
+            {
+                iw8::stock::RegisterNameReference(writer, type, name);
+                if (type == ASSET_TYPE_MATERIAL)
+                    iw8::stock::RegisterNameReference(techsets, type, name);
+            }
             for (auto &effect : prepared->vfxEffects)
                 iw8::vfx::Register(writer, std::move(effect));
             iw8::RegisterDynamicEntityList(writer, prepared->dynamicEntities);
