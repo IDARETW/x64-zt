@@ -471,7 +471,7 @@ CollisionInput ReadCollision(const std::filesystem::path &path)
     }
 
     result.hulls.reserve(count);
-    constexpr std::uint32_t supportedContents = 0x33693; // + foliage 0x2
+    constexpr std::uint32_t supportedContents = kReplayContents;
     for (std::uint32_t hullIndex = 0; hullIndex < count; ++hullIndex)
     {
         if (cursor + (hasLadderRungOffset ? 34u

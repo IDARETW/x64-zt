@@ -17,6 +17,9 @@ namespace iw8::havok
 // collision filter only drops a destroyed piece whose filter info carries 0x10.
 // Mantling or sprinting through a pane also requires 0x10 and surface 9 or 40.
 inline constexpr std::uint32_t kBreakableGlassContents = 0x10u;
+// The contents bits that Replay names (q_PhysicsScript_CreateContents 0x10A5850):
+// solid 1, foliage 2, vehicletrigger 8, glass 0x10 through useclip 0x20000000.
+inline constexpr std::uint32_t kReplayContents = 0x27F7FFFBu;
 inline constexpr std::uint32_t kBreakableGlassSurfaceMaterial = 9u;
 inline constexpr std::uint32_t kGlassMaterialNameCrc = 0xF728E572u;
 

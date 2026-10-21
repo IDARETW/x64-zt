@@ -339,7 +339,7 @@ namespace zonetool::convert::iw7_iw8
 			const auto faces = load_image_faces(*image, DXGI_FORMAT_R32G32B32A32_FLOAT);
 			if (faces.size() != 6 || faces.front().GetMetadata().width != faces.front().GetMetadata().height)
 			{
-				ZONETOOL_WARNING("iw7: sky image \"%s\" (format %d) cannot be read", image->name, image->imageFormat);
+				ZONETOOL_WARNING("iw7: sky image \"%s\" cannot be read: %s", image->name, image_read_failure(*image).data());
 				continue;
 			}
 

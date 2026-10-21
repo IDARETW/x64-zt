@@ -782,6 +782,8 @@ namespace zonetool::convert::iw7_iw8
 			{"triangle_surfaces", std::move(writer.surfaces)},
 			// IW7's player clips at windows are made for its breakable glass, as Replay's are.
 			{"keep_window_clips", true},
+			// The contents of the brushes and triangles are Replay's bits (IW7's shape tags), which the pipeline keeps.
+			{"contents_encoding", "replay"},
 		});
 	}
 }

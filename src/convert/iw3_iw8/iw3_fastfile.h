@@ -247,6 +247,9 @@ struct PreparedMap
         std::vector<std::uint8_t> havokData;
     };
     std::vector<FxShape> vfxShapes;
+    // Particle sim animations of native effects (IW7's baked particles) with their
+    // converted effect materials.
+    std::vector<iw8::vfx::ParticleSim> vfxParticleSims;
     std::set<std::pair<IW8_XAssetType, std::string>> vfxReferences;
     std::string smallGlassEffect;
     iw8::impact::EffectOverrides impactOverrides;

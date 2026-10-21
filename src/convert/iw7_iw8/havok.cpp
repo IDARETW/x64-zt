@@ -208,8 +208,8 @@ namespace zonetool::convert::iw7_iw8
 		// quads and custom primitives) over vertices on a grid of 21, 21 and 22 bits in the bounds of the mesh (shared
 		// vertices, which a section names through its part of the shared vertex table) or of 11, 11 and 10 bits in the
 		// bounds of the section (packed vertices). A section reaches the shared vertices of its page (65536 each). A
-		// custom primitive (a, b, b, b) is a convex piece: entry a of the section table is its vertex count << 8 | 2, the
-		// next entry its first vertex, of consecutive shared vertices.
+		// custom primitive (a, b, b, b) is a convex piece: entry a of the section table is its vertex count << 8 | 2 with
+		// the format of its points, the next entry its first shared vertex.
 		void read_compressed_mesh(const packfile& file, const std::size_t data, havok_shape& shape, havok_shapes& shapes)
 		{
 			const auto tree = data + 0x10;
@@ -351,33 +351,53 @@ namespace zonetool::convert::iw7_iw8
 
 					if (indices[1] == indices[2] && indices[2] == indices[3])
 					{
-						// Type 2 is a convex piece; 34 (2 with the flag 0x20, one Frontier piece) reads the same way when
-						// its points lie in the section [inferred].
+						// A convex piece: entry a is its vertex count << 8 | 2, with the format of its points in bits 4 and 5;
+						// entry a + 1 its first shared vertex. 0: consecutive shared vertices. 0x10: 32-bit vertices in the
+						// bounds of the section (11, 11 and 10 bits, two to a shared vertex: Afghan's sky walls, Rally's clip).
+						// 0x20: 16-bit vertices in the bounds of the section (5, 5 and 6 bits, four to a shared vertex: the sky
+						// boxes of Frontier, Mansion and Parkour). The sections of these pieces have no packed vertices and no
+						// codec (FLT_MAX, -inf). Verified from the sky pieces, whose points are the corners of their sections;
+						// the scale between the corners is inferred.
 						const auto header = table_entry(indices[0]);
 						const auto type = header & 0xFF;
-						if (type != 2 && type != 34)
+						const auto format = type & 0x30;
+						if ((type & 0xCF) != 2 || format == 0x30)
 						{
 							report_unknown(std::format("compressed mesh primitive of type {}", type));
 							shapes.unknown++;
 							continue;
 						}
 
-						havok_convex convex;
-						convex.tag = tags[k];
 						const auto first = page | table_entry(indices[0] + 1u);
-						const auto misplaced = shapes.misplaced;
-						for (auto v = 0u; v < header >> 8; v++)
+						const auto count = header >> 8;
+						const auto per_word = format == 0x20 ? 4u : format == 0x10 ? 2u : 1u;
+						if (first + (count + per_word - 1) / per_word > shared.count)
 						{
-							convex.points.push_back(shared_vertex(first + v));
-							check(convex.points.back());
+							throw std::runtime_error("a Havok convex piece names vertices that the mesh does not have");
 						}
 
-						if (type == 34 && shapes.misplaced != misplaced)
+						havok_convex convex;
+						convex.tag = tags[k];
+						for (auto v = 0u; v < count; v++)
 						{
-							report_unknown("compressed mesh primitive of type 34 outside its section");
-							shapes.misplaced = misplaced;
-							shapes.unknown++;
-							continue;
+							if (!format)
+							{
+								convex.points.push_back(shared_vertex(first + v));
+							}
+							else
+							{
+								const auto word = file.get<std::uint64_t>(shared.data + (first + v / per_word) * std::size_t{8}) >>
+									(64 / per_word * (v % per_word));
+								const auto wide = format == 0x10;
+								const std::array<float, 3> q{
+									static_cast<float>(wide ? word & 0x7FF : word & 0x1F) / (wide ? 2047.0f : 31.0f),
+									static_cast<float>(wide ? word >> 11 & 0x7FF : word >> 5 & 0x1F) / (wide ? 2047.0f : 31.0f),
+									static_cast<float>(wide ? word >> 22 & 0x3FF : word >> 10 & 0x3F) / (wide ? 1023.0f : 63.0f)};
+								convex.points.push_back({domain[0] + q[0] * (domain[3] - domain[0]),
+									domain[1] + q[1] * (domain[4] - domain[1]), domain[2] + q[2] * (domain[5] - domain[2])});
+							}
+
+							check(convex.points.back());
 						}
 
 						shape.convexes.push_back(std::move(convex));

@@ -311,7 +311,7 @@ namespace zonetool::convert::iw7_iw8
 				}
 				else
 				{
-					ZONETOOL_WARNING("iw7: gloss image \"%s\" (format %d) cannot be read", gloss->name, gloss->imageFormat);
+					ZONETOOL_WARNING("iw7: gloss image \"%s\" cannot be read: %s", gloss->name, image_read_failure(*gloss).data());
 				}
 			}
 
@@ -356,7 +356,7 @@ namespace zonetool::convert::iw7_iw8
 				faces = load_faces(*alpha, DXGI_FORMAT_R8G8B8A8_UNORM);
 				if (faces.size() != 1)
 				{
-					ZONETOOL_WARNING("iw7: alpha image \"%s\" (format %d) cannot be read", alpha->name, alpha->imageFormat);
+					ZONETOOL_WARNING("iw7: alpha image \"%s\" cannot be read: %s", alpha->name, image_read_failure(*alpha).data());
 					return false;
 				}
 
@@ -395,8 +395,7 @@ namespace zonetool::convert::iw7_iw8
 			auto faces = load_faces(image, DXGI_FORMAT_R8G8B8A8_UNORM);
 			if (faces.size() != 1)
 			{
-				ZONETOOL_WARNING("iw7: image \"%s\" (format %d, map type %d) cannot be read", image.name, image.imageFormat,
-					image.mapType);
+				ZONETOOL_WARNING("iw7: image \"%s\" cannot be read: %s", image.name, image_read_failure(image).data());
 				return false;
 			}
 
@@ -936,6 +935,28 @@ namespace zonetool::convert::iw7_iw8
 		const std::size_t limit)
 	{
 		return load_faces(image, format, limit ? limit : max_image_size);
+	}
+
+	std::string image_read_failure(const iw7::GfxImage& image)
+	{
+		{
+			const std::lock_guard lock(read_mutex);
+			for (const auto& [pak, images] : missing_paks)
+			{
+				if (images.contains(image.name ? image.name : "?"))
+				{
+					return std::format("it streams from {}, which the game folder lacks", pak);
+				}
+			}
+		}
+
+		if (!image.streamed && !image.pixelData)
+		{
+			return "the loaded zones hold only its name";
+		}
+
+		return std::format("its pixels do not match format {}, map type {}", static_cast<int>(image.imageFormat),
+			static_cast<int>(image.mapType));
 	}
 
 	const iw7::GfxImage* color_image(const source_map& source, const iw7::Material* material)

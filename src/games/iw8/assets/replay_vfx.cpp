@@ -555,4 +555,62 @@ void RegisterLightDef(ZoneWriter &writer, std::string name)
         output.popStream();
     });
 }
+
+void RegisterParticleSim(ZoneWriter &writer, ParticleSim sim)
+{
+    if (sim.name.empty() || sim.material.empty())
+        throw std::runtime_error("Replay particle sim animation has no name or material");
+    // The counts of the header (+0x18 frames, +0x3C colours, +0x40 particles, +0x4A/+0x4B
+    // the optional orientation and index arrays) size the arrays the loader reads.
+    const auto count = [&](const std::size_t offset) {
+        uint32_t value{};
+        std::memcpy(&value, sim.header.data() + offset - 0x10, sizeof(value));
+        return std::size_t{value};
+    };
+    const auto particles = count(0x40);
+    const bool orientation = sim.header[0x4A - 0x10] != 0;
+    const bool indexed = sim.header[0x4B - 0x10] != 0;
+    if (sim.frames.size() != count(0x18) * 8 || sim.colorTable.size() != count(0x3C) * 16 ||
+        sim.particleData.size() != particles * 32 || sim.orientation3D.size() != (orientation ? particles * 8 : 0) ||
+        sim.index.size() != (indexed ? particles * 2 : 0))
+        throw std::runtime_error("Replay particle sim animation '" + sim.name + "' has arrays of the wrong size");
+    const auto assetName = sim.name;
+    writer.add(ASSET_TYPE_PARTICLESIMANIMATION, assetName, [sim = std::move(sim)](ZoneWriter &output) {
+        std::array<uint8_t, iw8sz::PARTICLESIMANIMATION> record{};
+        std::memcpy(record.data() + 0x10, sim.header.data(), sim.header.size());
+        StorePointer(record.data(), 0x00, PTR_FOLLOWS);
+        StorePointer(record.data(), 0x08, output.assetAlias(ASSET_TYPE_MATERIAL, sim.material));
+        StorePointer(record.data(), 0x50, sim.particleData.empty() ? PTR_NULL : PTR_FOLLOWS);
+        StorePointer(record.data(), 0x58, sim.orientation3D.empty() ? PTR_NULL : PTR_FOLLOWS);
+        StorePointer(record.data(), 0x60, sim.index.empty() ? PTR_NULL : PTR_FOLLOWS);
+        StorePointer(record.data(), 0x68, sim.frames.empty() ? PTR_NULL : PTR_FOLLOWS);
+        StorePointer(record.data(), 0x70, sim.colorTable.empty() ? PTR_NULL : PTR_FOLLOWS);
+        output.pushStream(XFILE_BLOCK_TEMP_PRELOAD);
+        output.align(7);
+        output.write(record.data(), record.size());
+        // Load_FxParticleSimAnimation's order and alignments (stock 'default', code_post_gfx).
+        output.pushStream(XFILE_BLOCK_VIRTUAL);
+        output.writeStr(sim.name);
+        const auto array = [&](const std::vector<uint8_t> &bytes, const uint64_t alignment) {
+            if (bytes.empty())
+                return;
+            output.align(alignment);
+            output.write(bytes.data(), bytes.size());
+        };
+        array(sim.particleData, 31);
+        array(sim.orientation3D, 7);
+        array(sim.index, 0);
+        array(sim.frames, 3);
+        array(sim.colorTable, 3);
+        output.popStream();
+        output.popStream();
+        // Preload_FxParticleSimAnimationPtr (0xE3BEA0; its postload 0xE3B3A0) places the
+        // header in stream 2 at a 32-byte boundary: reserve it there.
+        output.pushStream(XFILE_BLOCK_TEMP_POSTLOAD);
+        output.align(31);
+        output.reserveCalc(record.size());
+        output.align(31);
+        output.popStream();
+    });
+}
 } // namespace iw8::vfx
