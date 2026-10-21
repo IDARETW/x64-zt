@@ -672,7 +672,12 @@ namespace zonetool::convert::iw7_iw8
 		// the IW3 effect technique set of its blend (feathered, faded edge on), a cloud or a distortion. Without its colour
 		// map (an image of a pak that is not there) it adds black: white drew the table hologram's dot grid of Frontier as a
 		// white slab.
-		json export_effect_material(const iw7::Material* material, const std::optional<std::string>& color)
+		// The tint of an unlit one (IW7's effectunlit techniques: HDR tints, Scorch's lava squibs 1500, spark streaks up to
+		// 8000) takes the light unit of the map, as unlit world materials do: the pipeline scales effect tints into Replay's
+		// units (Scorch x23.9) as it does the world, and with IW7's raw tints those effects drew 1 / light unit (Scorch: 24.5x)
+		// too bright; their additive sprites saturated into white polygons across the screen (owner tests of cbf4948: Scorch
+		// flicker). A lit one's tint (smoke, steam: 1) is a colour, which the pipeline treats as IW3's.
+		json export_effect_material(const iw7::Material* material, const std::optional<std::string>& color, const float light_scale)
 		{
 			std::vector<std::string_view> tokens;
 			if (material && material->techniqueSet)
@@ -690,6 +695,14 @@ namespace zonetool::convert::iw7_iw8
 
 			const auto additive = !color || has("add") || has("blendadd");
 			const auto feather = has("zfeather");
+			// IW7_FXMAT_DUMP=1: each effect material's technique set and tint.
+			if (std::getenv("IW7_FXMAT_DUMP"))
+			{
+				const auto tint = material_constant(material, "colorTint").value_or(std::array{1.0f, 1.0f, 1.0f, 1.0f});
+				ZONETOOL_INFO("iw7 effect material %s: techset %s tint %g %g %g %g", material && material->name ? material->name : "?",
+					material && material->techniqueSet ? material->techniqueSet->name : "?", tint[0], tint[1], tint[2], tint[3]);
+			}
+
 			auto constants = json::array();
 			const auto constant = [&](const std::string_view iw3_name, const std::string_view iw7_name, const std::array<float, 4> fallback)
 			{
@@ -713,7 +726,13 @@ namespace zonetool::convert::iw7_iw8
 			{
 				const auto falloff = (has("falloff") || has("psfalloff")) && material_constant(material, "falloffParms");
 				technique = std::format("effect{}{}{}", feather ? "_zfeather" : "", falloff ? "_falloff" : "", additive ? "_add" : "");
-				constant("colorTint", "colorTint", {1.0f, 1.0f, 1.0f, 1.0f});
+				auto tint = material_constant(material, "colorTint").value_or(std::array{1.0f, 1.0f, 1.0f, 1.0f});
+				for (std::size_t c = 0; has("effectunlit") && c < 3; c++)
+				{
+					tint[c] *= light_scale;
+				}
+
+				constants.push_back({{"name", "colorTint"}, {"literal", tint}});
 				if (feather)
 				{
 					auto parameters = material_constant(material, "featherParms").value_or(std::array{0.05f, 0.0f, 0.0f, 0.0f});
@@ -864,14 +883,51 @@ namespace zonetool::convert::iw7_iw8
 			return 1;
 		}
 
+		// Each layer is one token that opens with its blend (b, t, a or m) and its digit: Frontier's t1, a2 and m2 layers
+		// were left out when only b counted, and their vertex data (vld) then fell out of step.
 		auto layers = 1;
-		for (const auto token : std::views::split(asset_name(material->techniqueSet->name), '_'))
+		for (auto layer = 1; layer <= 3; layer++)
 		{
-			const std::string_view text(token.begin(), token.end());
-			layers += text.size() > 1 && text[0] == 'b' && text[1] >= '1' && text[1] <= '3';
+			layers = material_layer_token(material, layer).empty() ? layers : layer + 1;
 		}
 
 		return std::min(layers, 4);
+	}
+
+	std::string_view material_layer_token(const iw7::Material* material, const int layer)
+	{
+		if (!material || !material->techniqueSet || layer < 1 || layer > 3)
+		{
+			return {};
+		}
+
+		for (const auto token : std::views::split(asset_name(material->techniqueSet->name), '_'))
+		{
+			const std::string_view text(token.begin(), token.end());
+			if (text.size() > 1 && text[0] >= 'a' && text[0] <= 'z' && text[1] == '0' + layer)
+			{
+				return text;
+			}
+		}
+
+		return {};
+	}
+
+	unsigned int material_layer_vertex_size(const iw7::Material* material, const int layer)
+	{
+		const auto token = material_layer_token(material, layer);
+		if (token.empty())
+		{
+			return 0;
+		}
+
+		const char digit = static_cast<char>('0' + layer);
+		const auto has = [&](const std::string_view prefix)
+		{
+			return token.find(std::string(prefix) + digit) != std::string_view::npos;
+		};
+
+		return 8 + (has("nl") || has("nal") || has("nbl") ? 4 : 0);
 	}
 
 	std::vector<DirectX::ScratchImage> load_image_faces(const iw7::GfxImage& image, const DXGI_FORMAT format,
@@ -922,6 +978,44 @@ namespace zonetool::convert::iw7_iw8
 		const auto path = output.extracted / "images" / (name + ".dds");
 		std::filesystem::create_directories(path.parent_path());
 		if (FAILED(DirectX::SaveToDDSFile(cube.GetImages(), cube.GetImageCount(), cube.GetMetadata(),
+			DirectX::DDS_FLAGS_FORCE_DX9_LEGACY, path.wstring().data())))
+		{
+			throw std::runtime_error(std::format("cannot write {}", path.string()));
+		}
+
+		return name;
+	}
+
+	// A neutral grey colour map for a material whose own cannot be read (a streamed image of an image pack that this
+	// install lacks: Scorch's 284 BC7 colour maps in imagefile2/52/69/84/85.pak drew white and blew the exposure out).
+	std::string export_missing_color_map(extraction& output)
+	{
+		const std::string name = "iw7_missing_colormap";
+		const auto path = output.extracted / "images" / (name + ".dds");
+		if (std::filesystem::exists(path))
+		{
+			return name;
+		}
+
+		constexpr std::size_t size = 4;
+		DirectX::ScratchImage image;
+		if (FAILED(image.Initialize2D(DXGI_FORMAT_R8G8B8A8_UNORM, size, size, 1, 1)))
+		{
+			throw std::runtime_error("cannot create the missing colour map");
+		}
+
+		const auto& face = *image.GetImage(0, 0, 0);
+		for (std::size_t y = 0; y < face.height; y++)
+		{
+			std::memset(face.pixels + y * face.rowPitch, 0x80, face.width * 4);
+			for (std::size_t x = 0; x < face.width; x++)
+			{
+				face.pixels[y * face.rowPitch + x * 4 + 3] = 0xFF;
+			}
+		}
+
+		std::filesystem::create_directories(path.parent_path());
+		if (FAILED(DirectX::SaveToDDSFile(image.GetImages(), image.GetImageCount(), image.GetMetadata(),
 			DirectX::DDS_FLAGS_FORCE_DX9_LEGACY, path.wstring().data())))
 		{
 			throw std::runtime_error(std::format("cannot write {}", path.string()));
@@ -1096,13 +1190,17 @@ namespace zonetool::convert::iw7_iw8
 
 		std::size_t missing{};
 		std::array<std::size_t, 7> kinds{};
+		std::size_t missing_color_maps{};
 		for (const auto& [name, material] : output.materials)
 		{
 			// IW7's tool materials (technique *_tools_*: nodraw, caulk_shadow) draw nothing: the fire alarm speakers'
 			// nodraw surface drew IW7's yellow "nodraw" texture (owner test of 58aac89). They take the pipeline's
 			// shadowcaster technique, which it never draws; shadow tools (caulk_shadow, not "nocast") still cast.
+			// IW7's camera region 11 holds them all (w_tools_*, w_shadowcaster: Scorch's "Shadow" rectangle, owner test of
+			// cbf4948).
 			if (const auto tools = material && material->techniqueSet ? asset_name(material->techniqueSet->name) : std::string_view{};
-				tools.find("_tools_") != std::string_view::npos || tools.ends_with("_tools"))
+				(material && material->cameraRegion == 11) || tools.find("_tools_") != std::string_view::npos ||
+				tools.ends_with("_tools") || tools.find("shadowcaster") != std::string_view::npos)
 			{
 				const auto casts = name.find("shadow") != std::string::npos && tools.find("nocast") == std::string_view::npos;
 				auto state = state_json("none", false, surface_kind::opaque);
@@ -1141,6 +1239,12 @@ namespace zonetool::convert::iw7_iw8
 				{
 					ZONETOOL_INFO("iw7: material \"%s\" loses its image %s (role %zu), which cannot be read", name.data(),
 						files.at(role_files.front()).image->name, role);
+					// Without its colour the material drew white ($white); a neutral grey keeps the scene readable.
+					if (role == static_cast<std::size_t>(image_role::color) && !images[role])
+					{
+						images[role] = export_missing_color_map(output);
+						missing_color_maps++;
+					}
 				}
 			}
 
@@ -1197,7 +1301,8 @@ namespace zonetool::convert::iw7_iw8
 					ZONETOOL_WARNING("iw7: effect material \"%s\" has no colour map and adds nothing", name.data());
 				}
 
-				write_json(output.extracted / "materials" / (name + ".json"), export_effect_material(material, color));
+				write_json(output.extracted / "materials" / (name + ".json"), export_effect_material(material, color,
+					light_unit_scale(source)));
 				continue;
 			}
 
@@ -1205,6 +1310,11 @@ namespace zonetool::convert::iw7_iw8
 			// adds black. The layers of a layered material blend over its surfaces as decals.
 			const auto layer = layer_of(name);
 			auto kind = layer ? material_class{surface_kind::blend} : classify_material(material);
+			// A layer blends as its token says: t tests its alpha (drawn as a blend over the surface), a adds, m multiplies.
+			if (const auto token = layer ? material_layer_token(material, layer) : std::string_view{}; !token.empty())
+			{
+				kind.kind = token[0] == 'a' ? surface_kind::additive : token[0] == 'm' ? surface_kind::multiply : surface_kind::blend;
+			}
 			// A premultiplied surface whose colour holds its alpha (IW7's patterned glass: the metal of the pattern
 			// covers, the glass between shows through) blends by that alpha.
 			const auto& color = images[static_cast<std::size_t>(image_role::color)];
@@ -1276,6 +1386,12 @@ namespace zonetool::convert::iw7_iw8
 
 		ZONETOOL_INFO("iw7: exported %zu materials (%zu not in the loaded zones) with %zu of their %zu images",
 			output.materials.size(), missing, static_cast<std::size_t>(written), files.size());
+		if (missing_color_maps)
+		{
+			ZONETOOL_INFO("iw7: %zu materials take the neutral grey colour map for an image that cannot be read (streamed from an image pack "
+				"this install lacks)", missing_color_maps);
+		}
+
 		ZONETOOL_INFO("iw7: %zu opaque, %zu alpha tested, %zu blended, %zu additive, %zu multiply, %zu sky and %zu distortion materials",
 			kinds[0], kinds[1], kinds[2], kinds[3], kinds[4], kinds[5], kinds[6]);
 	}
