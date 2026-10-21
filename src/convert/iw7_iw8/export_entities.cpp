@@ -365,7 +365,7 @@ namespace zonetool::convert::iw7_iw8
 
 		// The effects that the first state of each part of a scriptable plays, on the tags of the instance's model.
 		void add_scriptable_effects(const source_map& source, const iw7::ScriptableDef& def, const iw7::XModel* model,
-			const iw7::ScriptableInstanceContext& context, extraction& output, const std::string& animated)
+			const iw7::ScriptableInstanceContext& context, extraction& output)
 		{
 			for (auto p = 0u; def.parts && p < def.numParts; p++)
 			{
@@ -414,14 +414,13 @@ namespace zonetool::convert::iw7_iw8
 							continue;
 						}
 
-						// On an animated model the effect plays on its tag, which the animation moves (the ops table's planets).
+						// The effects play at the bind pose of their tags, as createfx one-shots (effect entities, which every client
+						// receives), also on animated models. Played on the tag (playfxontag) they followed the animation, but
+						// Replay sends playfxontag as an entity event, which a client that connects after it never receives:
+						// the map script plays them at the start, before the host's own client is in the game, and the ops
+						// table's planets never showed (owner test of 58aac89; they had shown as one-shots before 7668e89).
+						// IW7 plays them client-side in its scriptable system.
 						placement->effect = effect;
-						if (!animated.empty() && !tag.empty() && tag != "tag_origin")
-						{
-							output.scriptable_tag_effects.push_back({animated, effect, tag, *placement});
-							continue;
-						}
-
 						output.scriptable_effects.push_back(std::move(*placement));
 					}
 				}
@@ -456,6 +455,9 @@ namespace zonetool::convert::iw7_iw8
 		const auto scale = light_unit_scale(source);
 		auto lights = json::array();
 		std::size_t local_lights{};
+		std::size_t narrowed_spots{};
+		std::size_t leaning_ups{};
+		std::size_t large_bulbs{};
 		for (auto i = 0u; i < com_world->primaryLightCount; i++)
 		{
 			const auto& light = com_world->primaryLights[i];
@@ -495,7 +497,61 @@ namespace zonetool::convert::iw7_iw8
 			if (type == 2)
 			{
 				outer = std::clamp(outer, 0.001f, 0.998f);
+				// Replay's shadowed spots open at most 75 degrees (stock mp_hideout: cos 0.259 at the widest); IW7
+				// places a few near-hemispherical spots (Frontier: 89 degrees), whose shadow projection degenerates.
+				if (light.canUseShadowMap && outer < 0.259f)
+				{
+					outer = 0.259f;
+					narrowed_spots++;
+				}
+
 				inner = std::clamp(inner, outer + 0.001f, 1.0f);
+			}
+
+			// Replay keeps a spot's up perpendicular to its direction (stock: |dir.up| = 0 on every light); IW7's authored ups
+			// lean along it (Frontier: 66 of 119 spots by more than 0.1, and two shadowed spots have their up along the
+			// direction), which skews or breaks the shadow view and the light volume (owner: lights switching off and
+			// misplaced). Gram-Schmidt against the direction.
+			std::array<float, 3> up{light.up[0], light.up[1], light.up[2]};
+			{
+				const auto dot = up[0] * direction[0] + up[1] * direction[1] + up[2] * direction[2];
+				for (auto c = 0; c < 3; c++)
+				{
+					up[c] -= dot * direction[c];
+				}
+
+				auto length = std::sqrt(up[0] * up[0] + up[1] * up[1] + up[2] * up[2]);
+				if (length < 1.0e-3f)
+				{
+					// Any axis across the direction: the world axis the direction leans least on.
+					const std::array<float, 3> axis = std::abs(direction[2]) < 0.9f ? std::array{0.0f, 0.0f, 1.0f} : std::array{1.0f, 0.0f, 0.0f};
+					const auto along = axis[0] * direction[0] + axis[1] * direction[1] + axis[2] * direction[2];
+					for (auto c = 0; c < 3; c++)
+					{
+						up[c] = axis[c] - along * direction[c];
+					}
+
+					length = std::sqrt(up[0] * up[0] + up[1] * up[1] + up[2] * up[2]);
+				}
+
+				if (std::abs(dot) > 1.0e-3f)
+				{
+					leaning_ups++;
+				}
+
+				for (auto& c : up)
+				{
+					c /= length;
+				}
+			}
+
+			// Stock spots' bulbs reach 8 units; IW7's area lights reach 40, which moves Replay's cone apex (bulb radius
+			// over tan of the outer angle) far behind the fixture.
+			auto bulb_radius = std::max(light.bulbRadius, 1.0f);
+			if (bulb_radius > 8.0f)
+			{
+				bulb_radius = 8.0f;
+				large_bulbs++;
 			}
 
 			json entry =
@@ -505,7 +561,7 @@ namespace zonetool::convert::iw7_iw8
 				{"exponent", light.exponent},
 				{"color", vector_json(color.data(), 3)},
 				{"direction", vector_json(direction.data(), 3)},
-				{"up", vector_json(light.up, 3)},
+				{"up", vector_json(up.data(), 3)},
 				{"authored_up", true},
 				{"origin", vector_json(light.origin, 3)},
 				{"radius", light.radius},
@@ -515,7 +571,7 @@ namespace zonetool::convert::iw7_iw8
 				{"rotation_limit", light.rotationLimit},
 				{"translation_limit", light.translationLimit},
 				{"entity_id", light.entityId},
-				{"bulb_radius", std::max(light.bulbRadius, 1.0f)},
+				{"bulb_radius", bulb_radius},
 				{"bulb_length", vector_json(light.bulbLength, 3)},
 				{"volumetric", light.isVolumetric != 0 && output.volumetrics},
 				{"needs_dynamic_shadows", light.needsDynamicShadows != 0},
@@ -535,6 +591,12 @@ namespace zonetool::convert::iw7_iw8
 			}
 
 			lights.push_back(std::move(entry));
+		}
+
+		if (narrowed_spots || leaning_ups || large_bulbs)
+		{
+			ZONETOOL_INFO("iw7: lights: %zu shadowed spots narrowed to 75 degrees, %zu ups made perpendicular to their direction, "
+				"%zu bulb radii capped at 8", narrowed_spots, leaning_ups, large_bulbs);
 		}
 
 		// The attenuation that IW3's light_point_linear definition names: the pipeline matches it to Replay's own.
@@ -826,6 +888,61 @@ namespace zonetool::convert::iw7_iw8
 			}
 
 			const auto name = model ? asset_name(iw7::get_asset_name(iw7::ASSET_TYPE_XMODEL, model)) : std::string_view{};
+
+			// IW7_SCRIPTABLE_DUMP=1: each instance's definition, model source, parts and first states with their events.
+			if (std::getenv("IW7_SCRIPTABLE_DUMP"))
+			{
+				std::string parts;
+				for (auto part = 0u; def && def->parts && part < def->numParts; part++)
+				{
+					const auto& p = def->parts[part];
+					parts += std::format(" [{}:", p.name ? p.name : "?");
+					for (auto st = 0u; p.states && st < p.numStates && st < 4; st++)
+					{
+						const auto& state = p.states[st];
+						parts += std::format(" {}({}", state.base.name ? state.base.name : "?", static_cast<int>(state.type));
+						for (auto e = 0u; state.base.events && e < state.base.numEvents; e++)
+						{
+							const auto& event = state.base.events[e];
+							if (event.type == iw7::Scriptable_EventType_Model)
+							{
+								const auto* m = source.resolve(iw7::ASSET_TYPE_XMODEL, event.data.model.model);
+								parts += std::format(" model={}", m ? asset_name(iw7::get_asset_name(iw7::ASSET_TYPE_XMODEL, m)) : "null");
+							}
+							else if (event.type == iw7::Scriptable_EventType_HideShowBone)
+							{
+								parts += " hideshow";
+							}
+							else if (event.type == iw7::Scriptable_EventType_Animation)
+							{
+								parts += " anim";
+							}
+							else if (event.type == iw7::Scriptable_EventType_Collision)
+							{
+								const auto& collision = event.data.collision;
+								parts += std::format(" collision(cmodel {} collmap {} neverMoves {} canPush {} canTouch {} aiObstacle {})",
+									collision.clipmapCModelIndex, collision.collmapName ? collision.collmapName : "-", collision.neverMoves,
+									collision.canPush, collision.canTouch, collision.aiObstacle);
+							}
+							else
+							{
+								parts += std::format(" e{}", static_cast<int>(event.type));
+							}
+						}
+
+						parts += ")";
+					}
+
+					parts += "]";
+				}
+
+				ZONETOOL_INFO("iw7 scriptable %u: def %s flags %#x instance model %s (%s) at %s targetname %s noteworthy %s parts%s", i,
+					def && def->name ? def->name : "?", def ? def->flags : 0, name.empty() ? "-" : name.data(),
+					context.modelData.model ? "instance" : "def", vector_text(context.initialOrigin).data(),
+					script_string(scriptables.instances[i].targetname).data(), script_string(scriptables.instances[i].debugNameScr).data(),
+					parts.data());
+			}
+
 			const auto finite = std::ranges::all_of(context.initialOrigin, [](const float v) { return std::isfinite(v); }) &&
 				std::ranges::all_of(context.initialAngles, [](const float v) { return std::isfinite(v); });
 			// The game modes' scriptables (Hardpoint's zone chevrons) show only while their mode runs them. The ops table's
@@ -870,6 +987,18 @@ namespace zonetool::convert::iw7_iw8
 
 			if (!animated.empty())
 			{
+				const auto axis = angles_to_axes(context.initialAngles);
+				auto& placement = output.scriptable_placements.emplace_back();
+				placement.model = file_name(name);
+				for (auto c = 0u; c < 3; c++)
+				{
+					placement.origin[c] = context.initialOrigin[c];
+					for (auto k = 0u; k < 3; k++)
+					{
+						placement.axes[k][c] = static_cast<float>(axis[k][c]);
+					}
+				}
+
 				output.scriptable_animations.try_emplace(animated, std::string(asset_name(animation->name)));
 				output.animated_models.try_emplace(file_name(name), model);
 				output.scriptable_animation_models[animated].insert(file_name(name));
@@ -888,7 +1017,7 @@ namespace zonetool::convert::iw7_iw8
 			placed++;
 			if (def)
 			{
-				add_scriptable_effects(source, *def, model, context, output, animated);
+				add_scriptable_effects(source, *def, model, context, output);
 			}
 		}
 
@@ -897,8 +1026,91 @@ namespace zonetool::convert::iw7_iw8
 			output.scriptable_effects.size());
 		ZONETOOL_INFO("iw7: %zu of them break (%zu kinds: a health state, then the broken model, its effects and sound)", destructibles,
 			output.scriptable_destructibles.size());
-		ZONETOOL_INFO("iw7: %zu kinds of them animate (%zu animations, %zu effects on their tags)", output.scriptable_animations.size(),
-			output.xanims.size(), output.scriptable_tag_effects.size());
+		ZONETOOL_INFO("iw7: %zu kinds of them animate (%zu instances)", output.scriptable_animations.size(),
+			output.scriptable_placements.size());
+
+		// IW7's dynamic entities (MapEnts dynEntDefList: clutter props with physics, hinged doors, linked props) drew
+		// nothing (Frontier: 77 fire extinguishers, serving trays, bottles and other props of its rooms and tables). Each one
+		// that spawns with a model places an IW3 script model at its initial pose (quaternion and origin). Those of
+		// scriptable instances (DYNENT_TYPE_SCRIPTABLEINST) are the scriptables placed above; brush ones keep their brush
+		// model's static collision.
+		std::size_t dynents_placed{};
+		std::size_t dynents_brushes{};
+		std::size_t dynents_scriptable{};
+		std::size_t dynents_unflagged{};
+		std::size_t dynents_left{};
+		std::map<int, std::size_t> dynent_types;
+		for (auto list = 0; list < 2; list++)
+		{
+			for (auto i = 0u; map_ents->dynEntDefList[list] && i < map_ents->dynEntCount[list]; i++)
+			{
+				const auto& dynent = map_ents->dynEntDefList[list][i];
+				dynent_types[static_cast<int>(dynent.type)]++;
+				auto model = source.resolve(iw7::ASSET_TYPE_XMODEL, dynent.baseModel);
+				const auto& pose = dynent.initialPose;
+				const auto finite = std::ranges::all_of(pose.quat, [](const float v) { return std::isfinite(v); }) &&
+					std::ranges::all_of(pose.origin, [](const float v) { return std::isfinite(v); });
+				const double length = std::sqrt(pose.quat[0] * pose.quat[0] + pose.quat[1] * pose.quat[1] + pose.quat[2] * pose.quat[2] +
+					pose.quat[3] * pose.quat[3]);
+				if (std::getenv("IW7_DYNENT_DUMP"))
+				{
+					const auto* poses = map_ents->dynEntPoseList[0][list];
+					ZONETOOL_INFO("iw7 dynent %d/%u: type %d model %s brush %u active %d enabled %d physics %d transient %d at %s quat %g %g %g %g; "
+						"pose list at %s (%u poses, radius %g) link %d",
+						list, i, static_cast<int>(dynent.type), model ? iw7::get_asset_name(iw7::ASSET_TYPE_XMODEL, model) : "-", dynent.brushModel,
+						dynent.spawnActive, dynent.spawnEnabled, !dynent.noPhysics, dynent.isTransient, vector_text(pose.origin).data(),
+						pose.quat[0], pose.quat[1], pose.quat[2], pose.quat[3], poses ? vector_text(poses[i].pose.origin).data() : "-",
+						poses ? poses[i].numPoses : 0u, poses ? poses[i].radius : 0.0f, dynent.linkTo ? dynent.linkTo->anchorIndex : -1);
+				}
+
+				if (dynent.type == iw7::DYNENT_TYPE_SCRIPTABLEINST)
+				{
+					dynents_scriptable++;
+					continue;
+				}
+
+				if (!model)
+				{
+					dynents_brushes += dynent.brushModel != 0;
+					dynents_left += dynent.brushModel == 0;
+					continue;
+				}
+
+				// The spawn flags of x64-zt's unchecked layout read false on every clutter prop of Frontier (fire extinguishers,
+				// trays, bottles on its tables): they do not decide what spawns.
+				dynents_unflagged += !dynent.spawnActive && !dynent.spawnEnabled;
+				if (!finite || !(length > 0.0))
+				{
+					dynents_left++;
+					continue;
+				}
+
+				const auto x = pose.quat[0] / length, y = pose.quat[1] / length, z = pose.quat[2] / length, w = pose.quat[3] / length;
+				const axes rotation{{{1 - 2 * (y * y + z * z), 2 * (x * y + w * z), 2 * (x * z - w * y)},
+					{2 * (x * y - w * z), 1 - 2 * (x * x + z * z), 2 * (y * z + w * x)},
+					{2 * (x * z + w * y), 2 * (y * z - w * x), 1 - 2 * (x * x + y * y)}}};
+				const auto angles = axes_to_angles(rotation);
+				const auto name = asset_name(iw7::get_asset_name(iw7::ASSET_TYPE_XMODEL, model));
+				entities += "{\n\"classname\" \"script_model\"\n";
+				entities += std::format("\"model\" \"{}\"\n", name);
+				entities += std::format("\"origin\" \"{}\"\n", vector_text(pose.origin));
+				entities += std::format("\"angles\" \"{}\"\n", vector_text(angles.data()));
+				entities += "}\n";
+				output.models.try_emplace(file_name(name), model);
+				dynents_placed++;
+			}
+		}
+
+		std::string dynent_kinds;
+		for (const auto& [type, count] : dynent_types)
+		{
+			dynent_kinds += std::format("{}type {}: {}", dynent_kinds.empty() ? "" : ", ", type, count);
+		}
+
+		ZONETOOL_INFO("iw7: placed %zu of %u dynamic entities (%u and %u in the lists; %s) as script models; %zu of scriptables placed above, "
+			"%zu brush ones keep their static collision, %zu without a model or pose left out (%zu read as not spawning)",
+			dynents_placed, map_ents->dynEntCountTotal, map_ents->dynEntCount[0], map_ents->dynEntCount[1], dynent_kinds.data(), dynents_scriptable,
+			dynents_brushes, dynents_left, dynents_unflagged);
 
 		// IW7's breakable glass: an IW3 glass entity for each pane.
 		const auto panes = glass_panes(source);

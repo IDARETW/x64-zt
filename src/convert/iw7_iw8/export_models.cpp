@@ -943,8 +943,7 @@ namespace zonetool::convert::iw7_iw8
 
 		std::erase_if(output.scriptable_states, [&](const auto& entry) { return !converted.contains(entry.first); });
 
-		// The scriptables whose models do not convert keep their bind pose, with their effects at the bind pose of their
-		// tags; so do the effects of models that move as entities (they keep no tags).
+		// The scriptables whose models do not convert keep their bind pose.
 		std::erase_if(output.scriptable_animations, [&](const auto& entry)
 		{
 			const auto models = output.scriptable_animation_models.find(entry.first);
@@ -954,22 +953,8 @@ namespace zonetool::convert::iw7_iw8
 			});
 		});
 
-		std::erase_if(output.scriptable_tag_effects, [&](const auto& effect)
-		{
-			const auto models = output.scriptable_animation_models.find(effect.targetname);
-			if (output.scriptable_animations.contains(effect.targetname) && models != output.scriptable_animation_models.end() &&
-				std::ranges::none_of(models->second, [&](const auto& model) { return output.moving_models.contains(model); }))
-			{
-				return false;
-			}
-
-			output.scriptable_effects.push_back(effect.placement);
-			return true;
-		});
-
-		ZONETOOL_INFO("iw7: %zu kinds of scriptables animate (%zu models move, %zu skeletons, %zu animations, %zu effects on their tags)",
-			output.scriptable_animations.size(), output.moving_models.size(), skeletons.size(), output.xanims.size(),
-			output.scriptable_tag_effects.size());
+		ZONETOOL_INFO("iw7: %zu kinds of scriptables animate (%zu models move, %zu skeletons, %zu animations)",
+			output.scriptable_animations.size(), output.moving_models.size(), skeletons.size(), output.xanims.size());
 	}
 
 	// The skeletons of the other exported models with bones: entity models keep their tags (effects on tags, destructible

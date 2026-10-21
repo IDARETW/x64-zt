@@ -3331,42 +3331,314 @@ int EncodeBc7Mode6Block(const std::uint8_t (&pixels)[16][4], std::uint8_t *out)
     return bestError;
 }
 
-// BC7 mode 6 encoding of a RGBA8 mip chain laid out by MipChain (any size, down to 1x1): a level under four
-// texels across fills its block with its edge texels repeated, as the block grid of a smaller mip does.
-// `error` receives the squared error over every coded channel.
+// One endpoint pair and the indices of `count` channels from `first` of a block: principal-axis endpoints, then
+// rounds of index assignment and least-squares endpoints, each quantized to `endpointBits` as BC7 unquantizes them.
+// Returns the squared error over those channels.
+int FitBc7Endpoints(const int (&texels)[16][4], const int first, const int count, const int endpointBits,
+                    const int indexBits, int (&endpoints)[2][3], std::uint8_t (&indices)[16])
+{
+    static constexpr int weights2[4]{0, 21, 43, 64};
+    static constexpr int weights3[8]{0, 9, 18, 27, 37, 46, 55, 64};
+    const int *weights = indexBits == 3 ? weights3 : weights2;
+    const int levels = 1 << indexBits, maximum = (1 << endpointBits) - 1;
+    const auto expand = [&](const int q) { return (q << (8 - endpointBits)) | (q >> (2 * endpointBits - 8)); };
+    const auto quantize = [&](const float value) {
+        const int rounded = std::clamp(static_cast<int>(std::lround(value * maximum / 255.0f)), 0, maximum);
+        int best = rounded;
+        for (int q = std::max(0, rounded - 1); q <= std::min(maximum, rounded + 1); ++q)
+            if (std::abs(expand(q) - value) < std::abs(expand(best) - value))
+                best = q;
+        return best;
+    };
+    float mean[3]{};
+    for (const auto &texel : texels)
+        for (int c = 0; c < count; ++c)
+            mean[c] += texel[first + c] / 16.0f;
+    float axis[3]{1, 1, 1};
+    if (count > 1)
+    {
+        float covariance[3][3]{};
+        for (const auto &texel : texels)
+            for (int a = 0; a < count; ++a)
+                for (int b = 0; b < count; ++b)
+                    covariance[a][b] += (texel[first + a] - mean[a]) * (texel[first + b] - mean[b]);
+        for (int iteration = 0; iteration < 8; ++iteration)
+        {
+            float next[3]{};
+            for (int a = 0; a < count; ++a)
+                for (int b = 0; b < count; ++b)
+                    next[a] += covariance[a][b] * axis[b];
+            float length = 0;
+            for (int a = 0; a < count; ++a)
+                length = std::max(length, std::abs(next[a]));
+            if (length < 1e-6f)
+                break;
+            for (int a = 0; a < count; ++a)
+                axis[a] = next[a] / length;
+        }
+    }
+    float low = 1e30f, high = -1e30f, axisLength = 0;
+    for (const auto &texel : texels)
+    {
+        float t = 0;
+        for (int c = 0; c < count; ++c)
+            t += (texel[first + c] - mean[c]) * axis[c];
+        low = std::min(low, t);
+        high = std::max(high, t);
+    }
+    for (int c = 0; c < count; ++c)
+        axisLength += axis[c] * axis[c];
+    float ends[2][3]{};
+    for (int c = 0; c < count; ++c)
+    {
+        ends[0][c] = std::clamp(mean[c] + axis[c] * low / axisLength, 0.0f, 255.0f);
+        ends[1][c] = std::clamp(mean[c] + axis[c] * high / axisLength, 0.0f, 255.0f);
+    }
+    int bestError = INT_MAX;
+    for (int round = 0; round < 3; ++round)
+    {
+        int q[2][3]{}, value[2][3]{};
+        for (int e = 0; e < 2; ++e)
+            for (int c = 0; c < count; ++c)
+                value[e][c] = expand(q[e][c] = quantize(ends[e][c]));
+        int palette[8][3]{};
+        for (int i = 0; i < levels; ++i)
+            for (int c = 0; c < count; ++c)
+                palette[i][c] = ((64 - weights[i]) * value[0][c] + weights[i] * value[1][c] + 32) >> 6;
+        int error = 0;
+        std::uint8_t index[16];
+        for (int texel = 0; texel < 16; ++texel)
+        {
+            int best = INT_MAX;
+            for (int i = 0; i < levels; ++i)
+            {
+                int d = 0;
+                for (int c = 0; c < count; ++c)
+                {
+                    const int delta = palette[i][c] - texels[texel][first + c];
+                    d += delta * delta;
+                }
+                if (d < best)
+                {
+                    best = d;
+                    index[texel] = static_cast<std::uint8_t>(i);
+                }
+            }
+            error += best;
+        }
+        if (error < bestError)
+        {
+            bestError = error;
+            std::memcpy(endpoints, q, sizeof(q));
+            std::memcpy(indices, index, sizeof(index));
+        }
+        if (error == 0)
+            break;
+        float a00 = 0, a01 = 0, a11 = 0, b0[3]{}, b1[3]{};
+        for (int texel = 0; texel < 16; ++texel)
+        {
+            const float w = weights[index[texel]] / 64.0f, u = 1 - w;
+            a00 += u * u;
+            a01 += u * w;
+            a11 += w * w;
+            for (int c = 0; c < count; ++c)
+            {
+                b0[c] += u * texels[texel][first + c];
+                b1[c] += w * texels[texel][first + c];
+            }
+        }
+        const float determinant = a00 * a11 - a01 * a01;
+        if (std::abs(determinant) < 1e-6f)
+            break;
+        for (int c = 0; c < count; ++c)
+        {
+            ends[0][c] = std::clamp((b0[c] * a11 - b1[c] * a01) / determinant, 0.0f, 255.0f);
+            ends[1][c] = std::clamp((b1[c] * a00 - b0[c] * a01) / determinant, 0.0f, 255.0f);
+        }
+    }
+    return bestError;
+}
+
+// BC7 modes 4 and 5: colour and alpha each with their own endpoints and indices, after a rotation that may swap a
+// colour channel into alpha. They keep two channels that vary apart, which mode 6's single line cannot: IW7 response
+// maps (grey F0 in RGB, gloss in alpha) stayed RGBA8 under the PSNR guard and filled a fifth of Scorch's zone. Mode 4
+// gives one of them 3-bit indices (index mode 1: colour). Returns the squared error of the block.
+int EncodeBc7ScalarBlock(const std::uint8_t (&pixels)[16][4], const unsigned mode, const unsigned rotation,
+                         const unsigned indexMode, std::uint8_t *out)
+{
+    int texels[16][4];
+    for (int texel = 0; texel < 16; ++texel)
+        for (int c = 0; c < 4; ++c)
+            texels[texel][c] = pixels[texel][c];
+    if (rotation)
+        for (auto &texel : texels)
+            std::swap(texel[rotation - 1], texel[3]);
+    const int colorBits = mode == 4 ? 5 : 7, alphaBits = mode == 4 ? 6 : 8;
+    const int colorIndexBits = mode == 4 && indexMode ? 3 : 2, alphaIndexBits = mode == 4 && !indexMode ? 3 : 2;
+    int color[2][3], alpha[2][3];
+    std::uint8_t colorIndex[16], alphaIndex[16];
+    const int error = FitBc7Endpoints(texels, 0, 3, colorBits, colorIndexBits, color, colorIndex) +
+                      FitBc7Endpoints(texels, 3, 1, alphaBits, alphaIndexBits, alpha, alphaIndex);
+    // The first texel's index of each set drops its top bit: swap the endpoints of a set that has it set.
+    const auto anchor = [](int (&ends)[2][3], std::uint8_t (&index)[16], const int bits) {
+        if (index[0] >> (bits - 1))
+        {
+            std::swap(ends[0], ends[1]);
+            for (auto &value : index)
+                value = static_cast<std::uint8_t>((1 << bits) - 1 - value);
+        }
+    };
+    anchor(color, colorIndex, colorIndexBits);
+    anchor(alpha, alphaIndex, alphaIndexBits);
+    std::memset(out, 0, 16);
+    unsigned position = 0;
+    const auto put = [&](const unsigned value, const unsigned bits) {
+        for (unsigned bit = 0; bit < bits; ++bit, ++position)
+            if (value >> bit & 1u)
+                out[position >> 3] |= static_cast<std::uint8_t>(1u << (position & 7));
+    };
+    const auto putIndices = [&](const std::uint8_t (&index)[16], const int bits) {
+        put(index[0], bits - 1);
+        for (int texel = 1; texel < 16; ++texel)
+            put(index[texel], bits);
+    };
+    put(1u << mode, mode + 1);
+    put(rotation, 2);
+    if (mode == 4)
+        put(indexMode, 1);
+    for (int c = 0; c < 3; ++c)
+    {
+        put(static_cast<unsigned>(color[0][c]), colorBits);
+        put(static_cast<unsigned>(color[1][c]), colorBits);
+    }
+    put(static_cast<unsigned>(alpha[0][0]), alphaBits);
+    put(static_cast<unsigned>(alpha[1][0]), alphaBits);
+    // The 2-bit set comes first: colour, except under mode 4's index mode 1.
+    if (mode == 4 && indexMode)
+    {
+        putIndices(alphaIndex, alphaIndexBits);
+        putIndices(colorIndex, colorIndexBits);
+    }
+    else
+    {
+        putIndices(colorIndex, colorIndexBits);
+        putIndices(alphaIndex, alphaIndexBits);
+    }
+    return error;
+}
+
+// The best of BC7 mode 6 and modes 5 and 4 (every rotation and index mode) for a block; the others are searched
+// only where mode 6 leaves an error.
+int EncodeBc7Block(const std::uint8_t (&pixels)[16][4], std::uint8_t *out)
+{
+    int best = EncodeBc7Mode6Block(pixels, out);
+    if (best <= 16)
+        return best;
+    std::uint8_t candidate[16];
+    for (unsigned rotation = 0; rotation < 4; ++rotation)
+        for (unsigned variant = 0; variant < 3; ++variant)
+        {
+            const int error = EncodeBc7ScalarBlock(pixels, variant ? 4 : 5, rotation, variant == 2, candidate);
+            if (error < best)
+            {
+                best = error;
+                std::memcpy(out, candidate, 16);
+            }
+        }
+    return best;
+}
+
+std::atomic<std::size_t> g_bc7DecodeMismatches{0};
+
+// The squared error of a BC7 block as DirectXTex decodes it, over every channel.
+std::uint64_t Bc7DecodedError(const std::uint8_t *block, const std::uint8_t (&pixels)[16][4])
+{
+    DirectX::XMVECTOR decoded[16];
+    DirectX::D3DXDecodeBC7(decoded, block);
+    std::uint64_t error = 0;
+    for (int texel = 0; texel < 16; ++texel)
+    {
+        DirectX::XMFLOAT4 value;
+        DirectX::XMStoreFloat4(&value, decoded[texel]);
+        const float channels[4]{value.x, value.y, value.z, value.w};
+        for (int c = 0; c < 4; ++c)
+        {
+            const int delta = static_cast<int>(std::lround(channels[c] * 255.0f)) - pixels[texel][c];
+            error += static_cast<std::uint64_t>(delta * delta);
+        }
+    }
+    return error;
+}
+
+// BC7 encoding of a RGBA8 mip chain laid out by MipChain (any size, down to 1x1) with the best of modes 6, 5 and 4
+// per block: a level under four texels across fills its block with its edge texels repeated, as the block grid of a
+// smaller mip does. `error` receives the squared error over every coded channel as DirectXTex decodes the blocks, so
+// the caller's PSNR guard also holds against an encoding fault.
 std::vector<std::uint8_t> EncodeBc7Rectangle(const std::vector<std::uint8_t> &rgba, const unsigned width,
                                              const unsigned height, const unsigned levels, double &error)
 {
-    std::vector<std::uint8_t> output;
-    std::size_t source = 0;
-    error = 0;
+    struct Level
+    {
+        unsigned width, height;
+        std::size_t source, target;
+    };
+    std::vector<Level> table;
+    std::size_t source = 0, target = 0;
     for (unsigned level = 0; level < levels; ++level)
     {
         const unsigned levelWidth = std::max(1u, width >> level), levelHeight = std::max(1u, height >> level);
-        if (source + std::size_t{levelWidth} * levelHeight * 4 > rgba.size())
-            throw std::runtime_error("BC7 image input does not match its mip chain");
-        const unsigned blocksWide = (levelWidth + 3) / 4, blocksHigh = (levelHeight + 3) / 4;
-        const std::size_t target = output.size();
-        output.resize(target + std::size_t{blocksWide} * blocksHigh * 16);
+        table.push_back({levelWidth, levelHeight, source, target});
+        source += (std::size_t{levelWidth} * levelHeight * 4 + 15) & ~std::size_t{15};
+        target += std::size_t{(levelWidth + 3) / 4} * ((levelHeight + 3) / 4) * 16;
+    }
+    if (source != rgba.size())
+        throw std::runtime_error("BC7 image input does not match its mip chain");
+    std::vector<std::uint8_t> output(target);
+    std::vector<std::pair<unsigned, unsigned>> rows; // level, block row
+    for (unsigned level = 0; level < table.size(); ++level)
+        for (unsigned row = 0; row < (table[level].height + 3) / 4; ++row)
+            rows.emplace_back(level, row);
+    std::vector<std::uint64_t> rowErrors(rows.size());
+    std::atomic<std::size_t> next{0};
+    const auto encode = [&] {
         std::uint8_t block[16][4];
-        for (unsigned blockY = 0; blockY < blocksHigh; ++blockY)
+        for (std::size_t task; (task = next.fetch_add(1)) < rows.size();)
+        {
+            const Level &level = table[rows[task].first];
+            const unsigned blockY = rows[task].second, blocksWide = (level.width + 3) / 4;
+            std::uint64_t rowError = 0;
             for (unsigned blockX = 0; blockX < blocksWide; ++blockX)
             {
                 for (unsigned y = 0; y < 4; ++y)
                     for (unsigned x = 0; x < 4; ++x)
                         std::memcpy(block[y * 4 + x],
-                                    rgba.data() + source +
-                                        (std::size_t{std::min(blockY * 4 + y, levelHeight - 1)} * levelWidth +
-                                         std::min(blockX * 4 + x, levelWidth - 1)) *
+                                    rgba.data() + level.source +
+                                        (std::size_t{std::min(blockY * 4 + y, level.height - 1)} * level.width +
+                                         std::min(blockX * 4 + x, level.width - 1)) *
                                             4,
                                     4);
-                error += EncodeBc7Mode6Block(block, output.data() + target +
-                                                        (std::size_t{blockY} * blocksWide + blockX) * 16);
+                auto *out = output.data() + level.target + (std::size_t{blockY} * blocksWide + blockX) * 16;
+                const int estimate = EncodeBc7Block(block, out);
+                const auto decoded = Bc7DecodedError(out, block);
+                if (decoded != static_cast<std::uint64_t>(estimate))
+                    ++g_bc7DecodeMismatches;
+                rowError += decoded;
             }
-        source += (std::size_t{levelWidth} * levelHeight * 4 + 15) & ~std::size_t{15};
-    }
-    if (source != rgba.size())
-        throw std::runtime_error("BC7 image input does not match its mip chain");
+            rowErrors[task] = rowError;
+        }
+    };
+    const unsigned workerCount =
+        static_cast<unsigned>(std::clamp<std::size_t>(rows.size() / 8, 1, std::max(1u, std::thread::hardware_concurrency())));
+    std::vector<std::thread> workers;
+    for (unsigned worker = 1; worker < workerCount; ++worker)
+        workers.emplace_back(encode);
+    encode();
+    for (auto &worker : workers)
+        worker.join();
+    std::uint64_t total = 0;
+    for (const auto rowError : rowErrors)
+        total += rowError;
+    error = static_cast<double>(total);
     return output;
 }
 
@@ -5707,10 +5979,15 @@ RenderPlan PrepareRenderAssets(const std::filesystem::path &exportRoot, const Js
             plan.fxParticleMaterialData.emplace(name, *data);
     }
     if (bc7Images)
+    {
         zt::info("iw3: %zu resident image(s) block compressed (%.0f MB to %.0f MB; lowest PSNR %.1f colour, %.1f normal, "
                  "%.1f response dB), %zu kept uncompressed",
                  bc7Stats.compressed, bc7Stats.rawBytes / 1048576.0, bc7Stats.packedBytes / 1048576.0,
                  bc7Stats.lowest[0], bc7Stats.lowest[1], bc7Stats.lowest[2], bc7Stats.kept);
+        // The encoder's own error estimate against DirectXTex's decode: any difference is an encoding fault.
+        if (const auto mismatches = g_bc7DecodeMismatches.load())
+            zt::warn("iw3: %zu BC7 block(s) decode with another error than their encoder estimated", mismatches);
+    }
     return plan;
 }
 std::vector<std::uint8_t> BuildLoadscreenPreview(const std::filesystem::path &exportRoot,

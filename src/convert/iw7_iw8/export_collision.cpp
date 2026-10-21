@@ -470,8 +470,98 @@ namespace zonetool::convert::iw7_iw8
 			std::nullopt;
 		// The collision of the glass pieces, which goes to the brush models of their panes.
 		std::vector<const havok_convex*> glass;
+
+		// IW7 keeps the clip of a scriptable that moves as an entity in the world, as big as its model at its placement:
+		// Frontier's pop-up covers have clip of their raised shape, and IW7's map script raises them as players come near.
+		// The converted covers start lowered (their first state), and the clip stood over them as an invisible box (owner
+		// test of cbf4948). The clip pieces that lie mostly inside such a model are left out; the covers collide through
+		// their own models, which move with them. Solid pieces stay.
+		std::vector<std::pair<const extraction::scriptable_placement*, const iw7::XModel*>> movers;
+		for (const auto& placement : output.scriptable_placements)
+		{
+			const auto model = output.animated_models.find(placement.model);
+			if (output.moving_models.contains(placement.model) && model != output.animated_models.end() && model->second)
+			{
+				movers.emplace_back(&placement, model->second);
+			}
+		}
+
+		std::size_t mover_clip{};
+		const auto inside_mover = [&](const havok_convex& convex)
+		{
+			for (const auto& [placement, model] : movers)
+			{
+				std::array<float, 3> low{FLT_MAX, FLT_MAX, FLT_MAX};
+				std::array<float, 3> high{-FLT_MAX, -FLT_MAX, -FLT_MAX};
+				for (const auto& point : convex.points)
+				{
+					const std::array<float, 3> offset{point[0] - placement->origin[0], point[1] - placement->origin[1],
+						point[2] - placement->origin[2]};
+					for (auto k = 0u; k < 3; k++)
+					{
+						const auto& axis = placement->axes[k];
+						const auto local = offset[0] * axis[0] + offset[1] * axis[1] + offset[2] * axis[2];
+						low[k] = std::min(low[k], local);
+						high[k] = std::max(high[k], local);
+					}
+				}
+
+				// The share of the piece's box (in the model's space) inside the model's bounds, a unit wider.
+				auto share = 1.0f;
+				for (auto k = 0u; k < 3; k++)
+				{
+					const auto bound_low = model->bounds.midPoint[k] - model->bounds.halfSize[k] - 1.0f;
+					const auto bound_high = model->bounds.midPoint[k] + model->bounds.halfSize[k] + 1.0f;
+					const auto extent = high[k] - low[k];
+					const auto overlap = std::max(0.0f, std::min(high[k], bound_high) - std::max(low[k], bound_low));
+					share *= extent > 0.01f ? overlap / extent : (low[k] >= bound_low && high[k] <= bound_high ? 1.0f : 0.0f);
+				}
+
+				if (share >= 0.5f)
+				{
+					return true;
+				}
+			}
+
+			return false;
+		};
+
 		if (world_shapes && !world_shapes->shapes.empty())
 		{
+			// IW7_SHAPE_DUMP=1: each shape of the world's list, with its pieces' bounds and the contents of their tags.
+			if (std::getenv("IW7_SHAPE_DUMP"))
+			{
+				for (std::size_t s = 0; s < world_shapes->shapes.size(); s++)
+				{
+					const auto& shape = world_shapes->shapes[s];
+					std::array<float, 3> low{FLT_MAX, FLT_MAX, FLT_MAX};
+					std::array<float, 3> high{-FLT_MAX, -FLT_MAX, -FLT_MAX};
+					std::set<std::uint32_t> contents;
+					for (const auto& convex : shape.convexes)
+					{
+						for (const auto& point : convex.points)
+						{
+							for (auto c = 0; c < 3; c++)
+							{
+								low[c] = std::min(low[c], point[c]);
+								high[c] = std::max(high[c], point[c]);
+							}
+						}
+
+						contents.insert(convex.tag < world_shapes->tags.size() ? world_shapes->tags[convex.tag].contents : 0xFFFFFFFFu);
+					}
+
+					std::string kinds;
+					for (const auto value : contents)
+					{
+						kinds += std::format(" {:#x}", value);
+					}
+
+					ZONETOOL_INFO("iw7 world shape %zu: %zu convex pieces, %zu triangles, pieces from (%g %g %g) to (%g %g %g), contents%s", s,
+						shape.convexes.size(), shape.triangles.size(), low[0], low[1], low[2], high[0], high[1], high[2], kinds.data());
+				}
+			}
+
 			std::size_t world_brushes{};
 			for (const auto& shape : world_shapes->shapes)
 			{
@@ -484,6 +574,12 @@ namespace zonetool::convert::iw7_iw8
 					}
 
 					const auto* tag = tag_of(*world_shapes, convex.tag);
+					if (tag && !(tag->contents & 1) && !movers.empty() && inside_mover(convex))
+					{
+						mover_clip++;
+						continue;
+					}
+
 					world_brushes += tag && writer.add_brush(convex, *tag);
 				}
 
@@ -498,6 +594,11 @@ namespace zonetool::convert::iw7_iw8
 
 			ZONETOOL_INFO("iw7: exported the Havok collision of the world: %zu brushes and %zu triangles (%zu pieces of a form that "
 				"does not convert)", world_brushes, writer.triangles.size(), world_shapes->unknown);
+			if (mover_clip)
+			{
+				ZONETOOL_INFO("iw7: left out %zu clip pieces of the world inside %zu scriptables that move (their raised shapes)", mover_clip,
+					movers.size());
+			}
 			add_unbreakable_glass_collision(source, writer);
 		}
 		else

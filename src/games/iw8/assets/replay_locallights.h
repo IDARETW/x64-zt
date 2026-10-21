@@ -35,9 +35,11 @@ inline bool NeedsDynamicShadows(const Light &light)
 }
 
 // GfxWorld local-light structures in the layout of shipped Replay worlds:
-//  - frustumLights (+0x3CA0): per-light convex volume mesh. The light binning
-//    (0x186C4F0 -> 0x186F0A0) takes a static light's view-depth range from it;
-//    a light without a mesh is never binned and lights nothing.
+//  - frustumLights (+0x3CA0): per-light convex volume mesh, as shipped worlds
+//    carry. The light binning (0x186C4F0 -> 0x186F0A0) takes a static light's
+//    view-depth range and binning draws from it only without the per-client
+//    runtime volumes (0x186D2E0, live on Frontier 2026-10-21), which it builds
+//    from the light records each frame instead (0x186EAE0 spots, 0x186DE10 omnis).
 //  - lightViewFrustums (+0x3D60): 6-plane hexahedron per shadow-mapped spot
 //    (R_PrimaryLightFrustumTestSphere/Box, entity linking).
 //  - lightAABB (+0x3F80): BVH over needsDynamicShadows lights

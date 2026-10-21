@@ -76,16 +76,15 @@ namespace zonetool::convert::iw7_iw8
 		std::map<std::string, std::set<std::string>> scriptable_animation_models;
 		std::map<std::string, const iw7::XAnimParts*> xanims;
 		std::map<std::string, const iw7::XModel*> animated_models;
-		// The effects that animated scriptables play on tags of their model, which follow the animation (at the bind pose
-		// of the tag when the animation does not export).
-		struct tag_effect
+		// The instances of the animated scriptables: their model (by its name in the extraction) at its initial origin, with
+		// the forward, left and up axes of its initial angles.
+		struct scriptable_placement
 		{
-			std::string targetname;
-			std::string effect;
-			std::string tag;
-			scriptable_effect placement;
+			std::string model;
+			std::array<float, 3> origin{};
+			std::array<std::array<float, 3>, 3> axes{};
 		};
-		std::vector<tag_effect> scriptable_tag_effects;
+		std::vector<scriptable_placement> scriptable_placements;
 		// The states of the animated scriptables' parts that play an animation, by model: the map script sets them
 		// (IW7's setscriptablepartstate, and each part's first state from the start). A model that is one bone, which the
 		// animations only move, moves as an entity (its collision with it): by the bone's translation in model space at
@@ -153,6 +152,12 @@ namespace zonetool::convert::iw7_iw8
 	// each with its own textures (whose shader names end with the layer's digit) and tint (colorTint1 to colorTint3), by
 	// the weights in the green, blue and alpha channels of the vertex colours.
 	int material_layer_count(const iw7::Material* material);
+	// The technique-set token of a layer (1-3) of a layered material ("b1c1s1nl1pa1": blend b, alpha test t, add a,
+	// multiply m, then its maps), empty without one.
+	std::string_view material_layer_token(const iw7::Material* material, int layer);
+	// The bytes that a layer (1-3) keeps per vertex in GfxWorldTransientZone.vld: its UV (8), and a packed tangent frame
+	// (4) when it has a normal map of its own (nl, nal, nbl).
+	unsigned int material_layer_vertex_size(const iw7::Material* material, int layer);
 
 	// The brush model of trigger model N of the map entities: the trigger models follow the world's brush models.
 	unsigned int trigger_brush_model(const source_map& source, unsigned int trigger);

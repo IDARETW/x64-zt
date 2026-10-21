@@ -6,8 +6,9 @@ namespace zonetool::convert::iw7_iw8
 {
 	namespace
 	{
-		// IW3 keeps its reflection probes as cube maps of 64 pixels with their mip levels.
-		constexpr std::size_t probe_size = 64;
+		// The reflection probes export as cube maps of 128 pixels with their mip levels. IW3 keeps 64, but IW7's faces are
+		// larger, and at 64 the window reflections were blurred (owner test of cbf4948).
+		constexpr std::size_t probe_size = 128;
 		constexpr std::size_t probe_levels = 7;
 
 		std::array<float, 3> vector(const float* values)

@@ -790,7 +790,7 @@ float3 WaterColor(float2 uv, float3 view, float3 sunDirection, float3 sun, float
 // Lists: 8x8 screen tile x view-depth bin, as the probe clusters: t52[depth >> 5]
 // = [first:16][last word:11 at bit 5]; t50[tile * cb7[52].x + word] light bits.
 // t49 record (96 bytes): +0 colour, +16 spot axis (pointing back toward the
-// light), shadow slot in the low byte of +28, +28 flags (type at bits 8-9, 2 = spot) and line axis, +48
+// light), shadow slot in the low byte of +28, +28 flags (type at bits 8-9, 2 = spot), +32 the tube's half-length vector, +48
 // camera-relative origin and 1 / radius, +64 cone scale and bias, apex offset
 // and window (1 / ComPrimaryLight distance falloff), +44 bulb radius, +92 the falloff curve range (two halves) into t122.
 // Shadows: the screen-space mask t94 when cb7[109].x is negative (bytes for
@@ -862,17 +862,22 @@ void LocalLighting(float2 screenPixel, float viewDepth, float3 relativePosition,
             uint shadowIndex = flags & 255;
             float4 cone = asfloat(localLights.Load4(light * 96 + 64));
             uint falloffRange = localLights.Load(light * 96 + 92);
-            float3 toLight = origin - relativePosition;
+            // A tube light (+32: its half length along its axis, from the ComPrimaryLight bulb length) lights
+            // from the point of its segment nearest the surface, as the stock shader does.
+            float3 tube = LocalLightFloat3(light, 32);
+            float along = clamp(dot(relativePosition - origin, tube) / max(dot(tube, tube), 1e-8), -1, 1);
+            float3 nearest = origin + along * tube;
+            float3 toLight = nearest - relativePosition;
             float distance = length(toLight);
             float3 direction = toLight / max(distance, 1e-4);
             float spotFactor = 1;
             float facing = 1;
             float profileCoordinate = .5;
             if (spot) {
-                float3 apex = origin + spotDirection * cone.z;
+                float3 apex = nearest + spotDirection * cone.z;
                 float c = dot(spotDirection, normalize(apex - relativePosition));
                 spotFactor = saturate(c * cone.x + cone.y);
-                facing = dot(origin - relativePosition, spotDirection) > 0 ? 1 : 0;
+                facing = dot(nearest - relativePosition, spotDirection) > 0 ? 1 : 0;
                 float t = 1 - min(c * c, 1);
                 profileCoordinate = c > 0 ? t * .5 : 1 - t * .5;
             }

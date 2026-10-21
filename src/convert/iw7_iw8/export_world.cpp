@@ -95,6 +95,26 @@ namespace zonetool::convert::iw7_iw8
 
 			const auto layers = material_layer_count(resolved);
 
+			// IW7_LAYER_DUMP=1 logs the layer vertex data of layered surfaces (offset, count, first bytes): the layout
+			// study of GfxWorldTransientZone.vld.
+			if (layers > 1 && std::getenv("IW7_LAYER_DUMP"))
+			{
+				static std::size_t logged{};
+				const auto* layer_zone = source.resolve(iw7::ASSET_TYPE_GFXWORLD_TRANSIENT_ZONE, world.draw.transientZones[surface.transientZone]);
+				if (layer_zone && logged++ < 40)
+				{
+					std::string bytes;
+					for (auto b = 0u; layer_zone->vld.data && b < 48 && tris.vertexLayerData + b < layer_zone->vertexLayerDataSize; b++)
+					{
+						bytes += std::format("{:02x}", layer_zone->vld.data[tris.vertexLayerData + b]);
+					}
+
+					ZONETOOL_INFO("iw7 layers: %s layers %u verts %u first %u offset %u zone %u size %u: %s",
+						resolved ? resolved->name : "?", layers, tris.vertexCount, tris.firstVertex, tris.vertexLayerData,
+						surface.transientZone, layer_zone->vertexLayerDataSize, bytes.data());
+				}
+			}
+
 			const auto zone = source.resolve(iw7::ASSET_TYPE_GFXWORLD_TRANSIENT_ZONE,
 				world.draw.transientZones[surface.transientZone]);
 			if (!zone || !zone->vd.vertices || tris.firstVertex + tris.vertexCount > zone->vertexCount)
@@ -193,10 +213,38 @@ namespace zonetool::convert::iw7_iw8
 					continue;
 				}
 
+				// Each layer has its own UV in the transient zone's layer vertex data (vld): per vertex the records of the
+				// layers in turn (material_layer_vertex_size). The base UV put the decal sheets of layers (Frontier's
+				// wayfinding signs) as repeated, cut slices across the panels (owner test of cbf4948).
+				unsigned int record_size{};
+				unsigned int layer_offset{};
+				for (auto l = 1; l < layers; l++)
+				{
+					layer_offset += l < layer ? material_layer_vertex_size(resolved, l) : 0;
+					record_size += material_layer_vertex_size(resolved, l);
+				}
+
+				const auto layer_uv = [&](const std::uint16_t index) -> std::optional<std::array<float, 2>>
+				{
+					const auto at = static_cast<std::size_t>(tris.vertexLayerData) + static_cast<std::size_t>(index) * record_size + layer_offset;
+					if (!zone->vld.data || !record_size || at + 8 > zone->vertexLayerDataSize)
+					{
+						return std::nullopt;
+					}
+
+					std::array<float, 2> uv{};
+					std::memcpy(uv.data(), zone->vld.data + at, sizeof(uv));
+					return std::isfinite(uv[0]) && std::isfinite(uv[1]) ? std::optional(uv) : std::nullopt;
+				};
+
 				auto overlay = vertices;
 				for (std::size_t v = 0; v < overlay.size(); v++)
 				{
 					overlay[v]["color"] = {255, 255, 255, weight(order[v])};
+					if (const auto uv = layer_uv(order[v]))
+					{
+						overlay[v]["uv"] = {(*uv)[0], (*uv)[1]};
+					}
 				}
 
 				result.push_back(
@@ -1244,6 +1292,48 @@ namespace zonetool::convert::iw7_iw8
 		iw7_light_grid grid(world.lightGrid.probeData, output.light_grid_intensity);
 		export_light_grid(source, floors, grid, output);
 		export_gpu_light_grid(source, output);
+
+		// IW7_LAYER_DUMP=1: bytes of layer vertex data per vertex of each layered surface (the gap to the next surface's
+		// data in its transient zone), by technique set and layer count.
+		if (std::getenv("IW7_LAYER_DUMP"))
+		{
+			std::map<std::uint32_t, std::vector<std::tuple<std::uint32_t, std::uint32_t, unsigned, std::string>>> by_zone;
+			for (auto i = 0u; i < world.surfaceCount; i++)
+			{
+				const auto& surface = dpvs.surfaces[i];
+				const auto* material = source.resolve(iw7::ASSET_TYPE_MATERIAL, surface.material);
+				const auto layers = material_layer_count(material);
+				const auto technique = material && material->techniqueSet ? std::string(asset_name(material->techniqueSet->name)) : "?";
+				by_zone[surface.transientZone].emplace_back(surface.tris.vertexLayerData, surface.tris.vertexCount, layers, technique);
+			}
+
+			std::map<std::string, std::map<std::uint32_t, std::size_t>> strides;
+			for (auto& [zone, list] : by_zone)
+			{
+				std::ranges::sort(list);
+				list.erase(std::unique(list.begin(), list.end(), [](const auto& a, const auto& b) { return std::get<0>(a) == std::get<0>(b); }),
+					list.end());
+				for (std::size_t s = 0; s + 1 < list.size(); s++)
+				{
+					const auto& [offset, count, layers, technique] = list[s];
+					if (layers > 1 && count)
+					{
+						strides[std::format("{} layers {}", technique, layers)][(std::get<0>(list[s + 1]) - offset) / count]++;
+					}
+				}
+			}
+
+			for (const auto& [key, histogram] : strides)
+			{
+				std::string text;
+				for (const auto& [stride, n] : histogram)
+				{
+					text += std::format(" {}B x{}", stride, n);
+				}
+
+				ZONETOOL_INFO("iw7 layer stride: %s:%s", key.data(), text.data());
+			}
+		}
 
 		// The index of each surface among the surfaces with an area.
 		auto surfaces = json::array();

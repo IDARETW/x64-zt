@@ -327,6 +327,9 @@ namespace zonetool::convert::iw7_iw8
 
 			std::set<std::string> shapes_;
 			float light_unit_{};
+			// The state being converted draws through IW7's unlit effect materials (effectunlit), whose tints carry the map's
+			// light unit (export_effect_material); lit ones keep their tint.
+			bool unlit_state_{};
 			std::optional<std::set<std::string>> bank_aliases_;
 
 			// The aliases of the map's sound bank (<map>.all).
@@ -499,6 +502,30 @@ namespace zonetool::convert::iw7_iw8
 				record.elementType = element.value_or(0);
 				const auto source_flags = replay_state_flags(state.flags);
 
+				// Whether the state's materials are IW7's unlit effect materials (the emissive graph's intensities depend on it).
+				this->unlit_state_ = false;
+				for (auto g = 0; g < 3; g++)
+				{
+					const auto& group = state.moduleGroupDefs[g];
+					for (auto m = 0; !group.disabled && m < group.numModules; m++)
+					{
+						const auto& module = group.moduleDefs[m];
+						if (module.moduleType != iw7::PARTICLE_MODULE_INIT_MATERIAL)
+						{
+							continue;
+						}
+
+						const auto& list = module.moduleData.initMaterial.m_linkedAssetList;
+						for (auto a = 0; list.assetList && a < list.numAssets; a++)
+						{
+							const auto* material = list.assetList[a].material ? this->source_.resolve(iw7::ASSET_TYPE_MATERIAL,
+								const_cast<iw7::Material*>(list.assetList[a].material)) : nullptr;
+							this->unlit_state_ = this->unlit_state_ || (material && material->techniqueSet && material->techniqueSet->name &&
+								std::string_view(material->techniqueSet->name).find("effectunlit") != std::string_view::npos);
+						}
+					}
+				}
+
 				auto groups = json::array();
 				std::set<std::uint16_t> types;
 				for (auto g = 0; g < 3; g++)
@@ -565,6 +592,13 @@ namespace zonetool::convert::iw7_iw8
 				if (const auto needed = required_module(record.elementType); needed && !types.contains(*needed))
 				{
 					this->drop(std::format("state of element {} without its module {}", record.elementType, *needed));
+					complete = false;
+				}
+
+				// A flare state without its material (its image cannot be read) leaves its emitter out.
+				if (record.elementType == flare_element && !types.contains(replay_module(iw7::PARTICLE_MODULE_INIT_MATERIAL)))
+				{
+					this->drop("flare without its material");
 					complete = false;
 				}
 
@@ -808,17 +842,25 @@ namespace zonetool::convert::iw7_iw8
 					for (auto a = 0; a < list.numAssets; a++)
 					{
 						const auto* material = list.assetList[a].material;
-						// A flare whose own image cannot be read (Frontier's fixture glares: their glow images are stubs
-						// of paks the zone folder lacks) keeps its IW7 material, which the material export turns into
-						// one that adds nothing, as for such sprites: a stock flare in its place drew white glows at the
-						// fixtures that the occlusion test switched on and off with the view (owner test of 58aac89).
+						// A flare never draws through an effect sprite material: Replay draws its screen-space vertices as screen-wide
+						// wedges through the screen centre (Scorch's lava glare, owner test of cbf4948). A flare whose own image reads
+						// takes Replay's flare material of its role; one whose image cannot be read (Frontier's fixture glares: stubs of
+						// paks the zone folder lacks) is left out with its emitter, since a stock flare in its place drew white glows
+						// that the occlusion test switched on and off with the view (owner test of 58aac89). Read at the extraction's
+						// size, as the material export reads it (the small streams of an image can lie in a pak that the larger do not).
 						const auto readable = [&]
 						{
 							const auto* color = color_image(this->source_, material);
 							return color && color->name && (color->name[0] == '$' ||
-								load_image_faces(*color, DXGI_FORMAT_R8G8B8A8_UNORM, 64).size() == 1);
+								load_image_faces(*color, DXGI_FORMAT_R8G8B8A8_UNORM).size() == 1);
 						};
-						if (material && flare && readable())
+						if (material && flare && !readable())
+						{
+							this->drop("flare whose image cannot be read");
+							continue;
+						}
+
+						if (material && flare)
 						{
 							// Replay draws flares through flare materials (MTL_TYPE_EFFECT_FLARE: screen-space flare
 							// vertices); IW7's lens-flare materials converted as effect sprites drew those vertices as
@@ -1072,8 +1114,9 @@ namespace zonetool::convert::iw7_iw8
 					// IW7's emissive graph is Replay's first version (PARTICLE_EMISSIVE_CURVE_NUM_V1 = 2): an intensity for each
 					// of the two sets that module flag 4 picks between. Replay's is the third (10 curves): per set a colour (curves
 					// 0-2 and 5-7) times an intensity (3 and 8), which its update (sub_141BBD5E0) writes per particle, and a value
-					// (4 and 9) that only states with flag bit 42 read and Init leaves at 0. The colours are white; the intensities
-					// take the light unit of the map, as its other HDR values.
+					// (4 and 9) that only states with flag bit 42 read and Init leaves at 0. The colours are white. Exactly one of the
+					// tint and the emissive intensity carries the map's light unit: the tint of an unlit effect material
+					// (export_effect_material), else the intensities (the glow of lit embers and smoke).
 					std::memcpy(result.data(), &data, offsetof(iw7::ParticleModuleEmissiveGraph, m_curves));
 					base();
 					constexpr auto curves = offsetof(iw7::ParticleModuleEmissiveGraph, m_curves);
@@ -1085,7 +1128,7 @@ namespace zonetool::convert::iw7_iw8
 					for (const auto c : {0, 1})
 					{
 						auto intensity = data.emissiveGraph.m_curves[c];
-						intensity.scale *= this->light_unit_;
+						intensity.scale *= this->unlit_state_ ? 1.0f : this->light_unit_;
 						result.curve(curves + (c ? 8 : 3) * 16, intensity);
 					}
 
@@ -2226,8 +2269,8 @@ iw7_state( mode, animation, to, time )
 		};
 
 		// The animated scriptables (export_animations): the map script fills the table of their states, which IW7's
-		// setscriptablepartstate (translated) sets, sets the first state of each part from the start and plays the effects on
-		// the tags of their models, which follow the animation.
+		// setscriptablepartstate (translated) sets, and sets the first state of each part from the start. Their effects play
+		// at the bind pose of their tags (export_entities).
 		if (!output.scriptable_animations.empty())
 		{
 			std::string calls = "\tlevel.iw7_states = [];\n";
@@ -2262,13 +2305,6 @@ iw7_state( mode, animation, to, time )
 				}
 			}
 
-			for (const auto& effect : output.scriptable_tag_effects)
-			{
-				effects.try_emplace(effect.effect, effect.effect);
-				placed.insert(effect.effect);
-				calls += std::format("\tiw7_tag_effect( \"{}\", \"{}\", \"{}\" );\n", effect.targetname, effect.effect, effect.tag);
-			}
-
 			start_thread("iw7_animations");
 			map_script += "\n// The scriptables that animate: IW7 plays the animation of each part's first state from the start.\n"
 				"iw7_animations()\n{\n" + calls + "}\n" + std::string(R"gsc(
@@ -2278,29 +2314,14 @@ iw7_first_state( name, part, state )
     foreach ( piece in pieces )
         piece iw7_setscriptablepartstate( part, state, 1 );
 }
-
-iw7_tag_effect( name, effect, tag )
-{
-    pieces = getentarray( name, "targetname" );
-    foreach ( piece in pieces )
-        piece thread iw7_tag_effect_play( effect, tag );
-}
-
-iw7_tag_effect_play( effect, tag )
-{
-    self endon( "death" );
-    wait 0.05;
-    if ( isdefined( level._effect[effect] ) )
-        playfxontag( level._effect[effect], self, tag );
-}
 )gsc");
 			if (map_script.find("iw7_setscriptablepartstate( part, state, instant )") == std::string::npos)
 			{
 				map_script += scriptable_state_helpers;
 			}
 
-			ZONETOOL_INFO("iw7: the map script animates %zu kinds of scriptables (%zu models) with %zu effects on their tags",
-				output.scriptable_animations.size(), output.scriptable_states.size(), output.scriptable_tag_effects.size());
+			ZONETOOL_INFO("iw7: the map script animates %zu kinds of scriptables (%zu models)", output.scriptable_animations.size(),
+				output.scriptable_states.size());
 		}
 
 		// The scriptables that break (export_entities): the map script breaks each when it took its health in damage. Their
