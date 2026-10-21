@@ -7,6 +7,11 @@
 #include <vector>
 namespace replayrender
 {
+// The most world surfaces and surface materials the writer takes. Its indices are 32-bit
+// and Umbra's object IDs reach 2^24; stock maps hold up to 9378 world surfaces
+// (mp_aniyah_tac; mp_donetsk 82208). IW7 Depot needs more than 4096.
+inline constexpr std::size_t kMaxWorldSurfaces = 65535;
+
 struct Shader
 {
     unsigned type;

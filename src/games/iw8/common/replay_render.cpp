@@ -1076,7 +1076,7 @@ Mesh Load(const std::string &path)
     if (j.contains("additionalMaterials"))
     {
         if (!j.at("additionalMaterials").is_array() ||
-            j.at("additionalMaterials").size() > 4096)
+            j.at("additionalMaterials").size() > kMaxWorldSurfaces)
             throw std::runtime_error("Invalid surface material table");
         for (const auto &definition : j.at("additionalMaterials"))
             m.additionalMaterials.push_back(LoadMaterial(path, definition));
@@ -1084,7 +1084,7 @@ Mesh Load(const std::string &path)
     if (j.contains("assetMaterials"))
     {
         const auto &definitions = j.at("assetMaterials");
-        if (!definitions.is_array() || definitions.size() > 4096)
+        if (!definitions.is_array() || definitions.size() > kMaxWorldSurfaces)
             throw std::runtime_error("Invalid auxiliary material table");
         for (const auto &definition : definitions)
             m.assetMaterials.push_back(LoadMaterial(path, definition, true));
@@ -1123,7 +1123,7 @@ Mesh Load(const std::string &path)
     const unsigned atlasLayout = j.value("atlasVertexLayout", 1u);
     if (atlasLayout < 1 || atlasLayout > 3)
         throw std::runtime_error("Unsupported atlas vertex layout");
-    if (!list.is_array() || list.empty() || list.size() > 4096)
+    if (!list.is_array() || list.empty() || list.size() > kMaxWorldSurfaces)
         throw std::runtime_error("Invalid surface count");
     m.count = unsigned(list.size());
     if (j.contains("brushModels"))

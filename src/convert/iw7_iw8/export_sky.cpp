@@ -165,7 +165,7 @@ namespace zonetool::convert::iw7_iw8
 		// times their tint in IW7's units, which `scale` takes to the sky's.
 		void draw_distant_models(const source_map& source, const extraction& output, sky_faces& sky, const float scale)
 		{
-			if (output.distant_models.empty())
+			if (output.distant_models.empty() && output.distant_surfaces.empty())
 			{
 				return;
 			}
@@ -249,6 +249,27 @@ namespace zonetool::convert::iw7_iw8
 				}
 			}
 
+			// The world surfaces beyond the range of the world, in world space.
+			for (const auto& surface : output.distant_surfaces)
+			{
+				auto& draw = draws.emplace_back();
+				draw.mesh = &surface;
+				draw.kind = classify_material(surface.material);
+				draw.tint = material_color_tint(surface.material);
+				auto colors = textures.find(surface.material);
+				if (colors == textures.end())
+				{
+					colors = textures.emplace(surface.material, load_texture(source, surface.material)).first;
+				}
+
+				draw.colors = &colors->second;
+				for (const auto& vertex : surface.vertices)
+				{
+					draw.directions.push_back({vertex.position[0] - center[0], vertex.position[1] - center[1], vertex.position[2] - center[2]});
+					draw.normals.push_back(normalized({vertex.normal[0], vertex.normal[1], vertex.normal[2]}));
+				}
+			}
+
 			for (const auto blended : {false, true})
 			{
 				for (const auto& draw : draws)
@@ -315,7 +336,8 @@ namespace zonetool::convert::iw7_iw8
 				}
 			}
 
-			ZONETOOL_INFO("iw7: drew %zu surfaces of %zu distant models into the sky", draws.size(), meshes.size());
+			ZONETOOL_INFO("iw7: drew %zu surfaces of %zu distant models and %zu distant world surfaces into the sky", draws.size(),
+				meshes.size(), output.distant_surfaces.size());
 		}
 	}
 
