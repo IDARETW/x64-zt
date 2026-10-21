@@ -221,9 +221,11 @@ namespace zonetool::convert::iw7_iw8
 				source.slicePitch = slice_pitch;
 				source.pixels = pixels->data.data() + face * stride;
 
+				// DirectXTex does not convert an image to its own format (E_INVALIDARG: Scorch's RGBA8 LED dots and heat
+				// shimmer): those copy.
 				DirectX::ScratchImage decoded;
-				const auto decoded_result = DirectX::IsCompressed(source.format)
-					? DirectX::Decompress(source, format, decoded)
+				const auto decoded_result = source.format == format ? decoded.InitializeFromImage(source)
+					: DirectX::IsCompressed(source.format) ? DirectX::Decompress(source, format, decoded)
 					: DirectX::Convert(source, format, DirectX::TEX_FILTER_FORCE_NON_WIC, DirectX::TEX_THRESHOLD_DEFAULT, decoded);
 				if (FAILED(decoded_result))
 				{

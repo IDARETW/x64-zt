@@ -769,6 +769,30 @@ namespace zonetool::convert::iw7_iw8
 		std::set<std::uint32_t> written;
 		std::size_t aliases{};
 		std::size_t samples{};
+		std::size_t global_samples{};
+		// IW7 finds a sound by its id in any loaded bank: after the alias's own zone, the banks of the other loaded zones
+		// (common_mp holds those of common effects' aliases, Frontier's emt_sparks_runner), then the global stream bank,
+		// where base-game maps keep their streamed sounds (the zone ambience beds; their own .sabs hold a header only).
+		std::set<std::string> bank_zones;
+		for (const auto& [bank_name, asset] : source.assets(iw7::ASSET_TYPE_SOUND_BANK))
+		{
+			const auto* other = static_cast<const iw7::SndBank*>(asset);
+			bank_zones.insert(other->zone ? other->zone : source.name());
+		}
+
+		bank_zones.erase(source.name());
+		std::vector<asset_bank> global_banks;
+		for (const auto& zone : bank_zones)
+		{
+			global_banks.emplace_back(zone + ".sabl");
+			global_banks.emplace_back(zone + ".sabs");
+		}
+
+		for (const std::string zone : {"patch_code_post_gfx", "code_post_gfx"})
+		{
+			global_banks.emplace_back(zone + ".sabl");
+			global_banks.emplace_back(zone + ".sabs");
+		}
 		while (!pending.empty())
 		{
 			const auto name = pending.back();
@@ -784,8 +808,16 @@ namespace zonetool::convert::iw7_iw8
 			for (auto v = 0; v < found->second.first->count; v++)
 			{
 				const auto& alias = found->second.first->head[v];
-				const auto* source_bank = loaded.find(alias.assetId) ? &loaded : &streamed;
-				const auto entry = source_bank->find(alias.assetId);
+				const auto* source_bank = loaded.find(alias.assetId) ? &loaded : streamed.find(alias.assetId) ? &streamed : nullptr;
+				for (auto global = global_banks.begin(); !source_bank && global != global_banks.end(); ++global)
+				{
+					if (global->find(alias.assetId))
+					{
+						source_bank = &*global;
+					}
+				}
+
+				const auto entry = source_bank ? source_bank->find(alias.assetId) : nullptr;
 				if (!entry || entry->channelCount < 1 || entry->channelCount > 2)
 				{
 					continue;
@@ -805,6 +837,10 @@ namespace zonetool::convert::iw7_iw8
 						const auto pcm = decode_flac(bytes->data(), bytes->size(), entry->channelCount, entry->frameCount);
 						write_wav(output.extracted / "sound" / file, pcm, static_cast<unsigned>(entry->frameRate), entry->channelCount);
 						samples++;
+						if (source_bank != &loaded && source_bank != &streamed)
+						{
+							global_samples++;
+						}
 					}
 					catch (const std::exception& e)
 					{
@@ -871,6 +907,22 @@ namespace zonetool::convert::iw7_iw8
 
 			if (variations.empty())
 			{
+				// Why none converts: no bank holds the sound, or it has more channels than the importer takes.
+				std::string sounds;
+				for (auto v = 0; v < found->second.first->count; v++)
+				{
+					const auto id = found->second.first->head[v].assetId;
+					const iw7::SndAssetBankEntry* entry = loaded.find(id) ? loaded.find(id) : streamed.find(id);
+					for (auto global = global_banks.begin(); !entry && global != global_banks.end(); ++global)
+					{
+						entry = global->find(id);
+					}
+
+					sounds += std::format("{}{:08x} ({})", v ? ", " : "", id,
+						entry ? std::format("{} channels", static_cast<int>(entry->channelCount)) : std::string("in no bank"));
+				}
+
+				ZONETOOL_WARNING("iw7: alias \"%s\" has no sound that converts: %s", name.data(), sounds.data());
 				continue;
 			}
 
@@ -936,7 +988,8 @@ namespace zonetool::convert::iw7_iw8
 			ZONETOOL_WARNING("iw7: no sound globals (code_post_gfx); the aliases' curves export by name only and keep the default");
 		}
 
-		ZONETOOL_INFO("iw7: exported %zu of %zu sound aliases that the scripts name, with %zu sounds and %zu curves of %s", aliases,
-			output.sound_names.size(), samples, curve_count, bank->name ? bank->name : "?");
+		ZONETOOL_INFO("iw7: exported %zu of %zu sound aliases that the scripts name, with %zu sounds (%zu from other zones' banks "
+			"or the global stream bank) and %zu curves of %s", aliases, output.sound_names.size(), samples, global_samples,
+			curve_count, bank->name ? bank->name : "?");
 	}
 }
