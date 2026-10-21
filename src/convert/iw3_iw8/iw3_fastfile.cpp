@@ -101,6 +101,8 @@ struct SourceStaticModel
 {
     std::string name;
     std::size_t collisionLod{SIZE_MAX};
+    // XModel contents (IW7 sources give theirs: Replay's bits); IW3 models are solid.
+    std::uint32_t contents{1};
     std::vector<SourceStaticModelLod> lods;
     // IW3 skeleton of a scripted model that hides, shows, or plays effects on
     // parts by bone (destructible vehicles); empty keeps one tag_origin bone.
@@ -2646,6 +2648,7 @@ SourceStaticModel ReadSourceModel(const std::filesystem::path &root, const std::
     if (geometry.value("schema", 0) != 1 || geometry.at("name") != modelName ||
         !geometry.at("lods").is_array() || geometry.at("lods").size() != model.at("lods").size())
         throw std::runtime_error("IW3 model geometry does not match its LOD table: " + modelName);
+    converted.contents = geometry.value("contents", 1u);
     const auto skeleton = ReadSourceSkeleton(skeletonRoot, modelName, model.at("lods").size(),
                                              geometry.value("bone_count", 0) != 1);
     if (!skeleton.empty())
@@ -3990,7 +3993,7 @@ void BuildPreparedStaticModels(const SourceStaticModels &source, const RenderPla
                                      : static_cast<std::uint8_t>(sourceModel.collisionLod);
         prepared.model.shadowCutoffLod = 6;
         prepared.model.flags = 0;
-        prepared.model.contents = 1;
+        prepared.model.contents = sourceModel.contents;
         prepared.model.scale = 1.0f;
 
         replayrender::StaticModel staticModel;
