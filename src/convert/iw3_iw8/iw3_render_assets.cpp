@@ -4176,6 +4176,11 @@ RenderPlan PrepareRenderAssets(const std::filesystem::path &exportRoot, const Js
         if (probeLevels.empty())
             plan.glassEnvironment += "1";
         plan.glassEnvironment += "}\n";
+        // Sources with their own probe instances (IW7) reflect them as the stock
+        // shader does, instead of one probe per surface.
+        if (std::any_of(sourceProbes.begin(), sourceProbes.end(),
+                        [](const Json &probe) { return probe.contains("instances"); }))
+            plan.glassEnvironment += "#define MAP_PROBE_BOXES 1\n";
         // Every converted surface variant shares this preamble (map fog included).
         plan.glassEnvironment += surfaceShaderDefines;
     }

@@ -121,12 +121,30 @@ struct Cell
     std::vector<Portal> portals;
     std::vector<CellTree> trees;
 };
+// A GfxReflectionProbeInstance of the source (IW7's has Replay's layout): the
+// oriented box that the probe covers, its priority and feather, the projection
+// origin and the extents that box projection reflects to, and the rotation of
+// the capture.
+struct ReflectionProbeInstance
+{
+    std::array<float, 3> position{};
+    std::array<float, 4> rotation{0, 0, 0, 1};
+    std::array<float, 3> center{};
+    std::array<std::array<float, 3>, 3> axes{};
+    std::array<float, 3> halfSize{};
+    float priority = 0;
+    std::array<float, 3> feather{};
+    std::array<float, 3> expandNegative{};
+    std::array<float, 3> expandPositive{};
+};
 struct ReflectionProbe
 {
     std::array<float, 3> origin{};
     replaybounds::Bounds volume{};
     Image image;
     std::array<std::array<float, 9>, 4> sh{};
+    // The source's instances; none: one axis-aligned instance of the volume.
+    std::vector<ReflectionProbeInstance> instances;
 };
 struct NativeLightmapImage
 {
@@ -252,6 +270,9 @@ void EmitStaticModels(iw8::ZoneWriter &writer, const StaticModels &models,
                       unsigned lastSunPrimaryLightIndex);
 std::vector<std::vector<replaybounds::Bounds>>
 BuildCellTreeBounds(const Mesh &mesh, const StaticModels &models);
+// The draw table's reflection-probe instances: one fallback, then each probe's
+// own instances (one at least).
+uint32_t ReflectionProbeInstanceCount(const Mesh &mesh);
 void StampReflectionProbes(std::vector<uint8_t> &world, const Mesh &mesh,
                            const iw8::ZoneWriter &writer);
 void EmitReflectionProbes(iw8::ZoneWriter &writer, const Mesh &mesh);

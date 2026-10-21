@@ -856,6 +856,10 @@ namespace zonetool::convert::iw7_iw8
 						};
 						if (material && flare && !readable())
 						{
+							const auto* color = color_image(this->source_, material);
+							ZONETOOL_INFO("iw7: flare material \"%s\": colour map \"%s\" (format %d, streamed %u) cannot be read",
+								asset_name(material->name).data(), color && color->name ? color->name : "none",
+								color ? static_cast<int>(color->imageFormat) : -1, color ? static_cast<unsigned>(color->streamed) : 0u);
 							this->drop("flare whose image cannot be read");
 							continue;
 						}

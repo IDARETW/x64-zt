@@ -1510,6 +1510,7 @@ namespace zonetool::convert::iw7_iw8
 		};
 
 		write_json(output.extracted / (bsp_name(source) + ".replay-world.json"), value);
+		export_sun(source, output);
 		ZONETOOL_INFO("iw7: exported %zu of %u world surfaces and %zu of %u static models (%zu lit by the floor under them)",
 			surface_indices.size(), world.surfaceCount, model_indices.size(), dpvs.smodelCount, ground_lit);
 		ZONETOOL_INFO("iw7: %zu of %u static models take IW7's light grid at their centre", grid_lit, dpvs.smodelCount);

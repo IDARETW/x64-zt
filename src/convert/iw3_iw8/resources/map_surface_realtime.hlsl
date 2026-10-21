@@ -483,6 +483,14 @@ static float probeBlendLevel = 1;
 
 float3 ProbeReflection(float2 screenPixel, float viewDepth, float3 relativePosition,
                        float3 reflected, float gloss, int fixedProbe) {
+#ifdef MAP_PROBE_BOXES
+    // Sources with their own probe instances (IW7): every box that holds the
+    // point, front to back in the engine's priority order (the stock weight
+    // min(containment, remaining)), box projected and turned into the
+    // capture's frame, as the stock lit shader reflects them.
+    fixedProbe = -1;
+    float remaining = 1;
+#endif
     float mip = floor(5 - 5 * gloss);
     float blend = frac(-5 * gloss);
     float2 border = float2(4u << (uint)clamp(mip, 0, 3), 4u << (uint)clamp(mip + 1, 0, 3));
@@ -508,7 +516,12 @@ float3 ProbeReflection(float2 screenPixel, float viewDepth, float3 relativePosit
         float containment = saturate(min(min(inside.z, inside.y), inside.x));
         if (containment <= 0 && !fixedSlot)
             continue;
+#ifdef MAP_PROBE_BOXES
+        float weight = min(containment, remaining);
+        remaining -= weight;
+#else
         float weight = fixedSlot ? 1 : containment / (length(offset) + 64);
+#endif
         float3 direction = reflected;
         // IW3 samples a surface's own probe as a distant cubemap. Box projection
         // of that probe (whose box need not hold the surface) bent the ray
@@ -526,7 +539,15 @@ float3 ProbeReflection(float2 screenPixel, float viewDepth, float3 relativePosit
             float t = min(min(max(tz, 0), max(ty, 0)), max(tx, 0));
             direction = reflected * t + relativePosition - float3(p.v[0], p.v[1], p.v[2]);
         }
-        // Converted IW3 probes are axis-aligned (identity probe rotation).
+#ifdef MAP_PROBE_BOXES
+        // The capture's rotation (v[7..10], a quaternion), applied when not
+        // the identity; converted IW3 probes are axis-aligned.
+        float4 rotation = float4(p.v[7], p.v[8], p.v[9], p.v[10]);
+        if (rotation.w < 1) {
+            float3 turn = 2 * cross(rotation.xyz, direction);
+            direction += rotation.w * turn + cross(rotation.xyz, turn);
+        }
+#endif
         float2 uv = ProbeOctahedral(direction);
         float slot = asuint(p.v[3]) & 0xffff;
         float3 a = probeImages.SampleLevel(probeSampler, float3(uv * scale.x + bias.x, slot), mip).rgb;
@@ -537,6 +558,10 @@ float3 ProbeReflection(float2 screenPixel, float viewDepth, float3 relativePosit
         levelSum += probeLevels[(uint)slot] * weight;
 #else
         levelSum += weight;
+#endif
+#ifdef MAP_PROBE_BOXES
+        if (remaining <= 0)
+            break;
 #endif
     }
     probeBlendLevel = total > 0 ? levelSum / total : 1;

@@ -291,6 +291,9 @@ namespace zonetool::convert::iw7_iw8
 	std::string export_default_probe(extraction& output);
 	// Writes the sky cube map of the world and returns its image name, or an empty name (the pipeline's dark sky).
 	std::string export_sky(const source_map& source, extraction& output);
+
+	// Writes the sun file of the extraction from the world's sun flare data.
+	void export_sun(const source_map& source, extraction& output);
 	// The lightmaps of the world: their entries for the world export (the lightmap index of a surface converts when
 	// it is below their count), and for the static models, which take the light of the floor under them, the ambient
 	// light (A + B / 2, in IW7 units) and the sun visibility of each texel.

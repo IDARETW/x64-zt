@@ -167,6 +167,11 @@ namespace zonetool::convert::iw7_iw8
 			result.origins.push_back(origin);
 		}
 
+		// Each instance keeps IW7's placement of its cube map, which is Replay's instance layout: the box it covers (an
+		// oriented box with a priority and a feather), the projection origin and the extents that box projection
+		// reflects to, and the rotation of the capture.
+		auto rotated = 0u;
+		auto expanded = 0u;
 		for (auto i = 0u; i < data.reflectionProbeInstanceCount; i++)
 		{
 			const auto& instance = data.reflectionProbeInstances[i];
@@ -184,10 +189,36 @@ namespace zonetool::convert::iw7_iw8
 				instance.priority,
 				entries[instance.probeImageIndex],
 			});
+
+			const auto& rotation = instance.probeRotation;
+			if (std::abs(rotation[3]) < 0.9999f)
+			{
+				rotated++;
+			}
+
+			if (std::ranges::any_of(instance.expandProjectionNeg, [](const float v) { return v != 0.0f; }) ||
+				std::ranges::any_of(instance.expandProjectionPos, [](const float v) { return v != 0.0f; }))
+			{
+				expanded++;
+			}
+
+			result.entries[entries[instance.probeImageIndex]]["instances"].push_back(
+			{
+				{"position", vector(instance.probePosition)},
+				{"rotation", {rotation[0], rotation[1], rotation[2], rotation[3]}},
+				{"center", vector(box.center)},
+				{"axes", {vector(box.xAxis), vector(box.yAxis), vector(box.zAxis)}},
+				{"half_size", vector(box.halfSize)},
+				{"priority", instance.priority},
+				{"feather", vector(instance.feather)},
+				{"expand_negative", vector(instance.expandProjectionNeg)},
+				{"expand_positive", vector(instance.expandProjectionPos)},
+			});
 		}
 
-		ZONETOOL_INFO("iw7: %zu reflection probes (%u in the world, %u instances, %zu cube maps)", result.entries.size() - 1,
-			data.reflectionProbeCount, data.reflectionProbeInstanceCount, cube_count);
+		ZONETOOL_INFO("iw7: %zu reflection probes (%u in the world, %u instances, %zu cube maps; %u instances rotated, %u with "
+			"expanded projections)", result.entries.size() - 1, data.reflectionProbeCount, data.reflectionProbeInstanceCount,
+			cube_count, rotated, expanded);
 		return result;
 	}
 }

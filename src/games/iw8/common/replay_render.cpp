@@ -1240,6 +1240,38 @@ Mesh Load(const std::string &path)
                     throw std::runtime_error("Replay reflection-probe SH value is non-finite");
             }
         }
+        if (const auto instances = source.find("instances"); instances != source.end())
+        {
+            if (!instances->is_array() || instances->size() > UINT16_MAX)
+                throw std::runtime_error("Invalid Replay reflection-probe instances");
+            for (const auto &value : *instances)
+            {
+                ReflectionProbeInstance instance;
+                const auto copy = [&](const char *key, auto &target) {
+                    const auto values = vector(value.at(key), target.size());
+                    std::copy(values.begin(), values.end(), target.begin());
+                };
+                copy("position", instance.position);
+                copy("rotation", instance.rotation);
+                copy("center", instance.center);
+                const auto &axes = value.at("axes");
+                if (!axes.is_array() || axes.size() != 3)
+                    throw std::runtime_error("Invalid Replay reflection-probe instance axes");
+                for (std::size_t axis = 0; axis < 3; ++axis)
+                {
+                    const auto values = vector(axes.at(axis), 3);
+                    std::copy(values.begin(), values.end(), instance.axes[axis].begin());
+                }
+                copy("half_size", instance.halfSize);
+                copy("feather", instance.feather);
+                copy("expand_negative", instance.expandNegative);
+                copy("expand_positive", instance.expandPositive);
+                instance.priority = value.at("priority").get<float>();
+                if (!std::isfinite(instance.priority))
+                    throw std::runtime_error("Non-finite Replay reflection-probe priority");
+                probe.instances.push_back(instance);
+            }
+        }
         m.reflectionProbes.push_back(std::move(probe));
     }
     m.reflectionProbeArrayImage =
@@ -2123,6 +2155,23 @@ BuildCellTreeBounds(const Mesh &mesh, const StaticModels &models)
     return result;
 }
 
+uint32_t ReflectionProbeInstanceCount(const Mesh &mesh)
+{
+    // A source fallback (the lowest priority) takes the place of the written one.
+    bool sourceFallback = false;
+    size_t count = 1;
+    for (const auto &probe : mesh.reflectionProbes)
+    {
+        count += std::max<size_t>(probe.instances.size(), 1);
+        for (const auto &instance : probe.instances)
+            sourceFallback |= instance.priority <= std::numeric_limits<float>::lowest();
+    }
+    count -= sourceFallback ? 1 : 0;
+    if (count > UINT16_MAX)
+        throw std::runtime_error("Replay reflection-probe instances exceed the 16-bit indices");
+    return static_cast<uint32_t>(count);
+}
+
 void StampReflectionProbes(std::vector<uint8_t> &world, const Mesh &mesh,
                            const ZoneWriter &writer)
 {
@@ -2136,7 +2185,7 @@ void StampReflectionProbes(std::vector<uint8_t> &world, const Mesh &mesh,
     put(data, 0x18, PTR_FOLLOWS); // GfxReflectionProbe[]
     put(data, 0x28,
         writer.assetAlias(ASSET_TYPE_IMAGE, mesh.reflectionProbeArrayImage.name));
-    put(data, 0x58, static_cast<uint32_t>(mesh.reflectionProbes.size() + 1));
+    put(data, 0x58, ReflectionProbeInstanceCount(mesh));
     put(data, 0x60, PTR_FOLLOWS); // GfxReflectionProbeInstance[]
     put(data, 0x68, PTR_FOLLOWS); // four GfxSH9Color vectors per probe
 }
@@ -2146,6 +2195,47 @@ void EmitReflectionProbes(ZoneWriter &writer, const Mesh &mesh)
     if (mesh.reflectionProbes.empty())
         throw std::runtime_error("Replay reflection-probe table is empty");
 
+    // Instance 0 is the fallback. The others follow by priority, highest first (stable):
+    // the stock lit shader blends the probe boxes front to back in buffer order.
+    struct InstanceEntry
+    {
+        size_t probe;
+        const ReflectionProbeInstance *source; // null: one axis-aligned instance of the volume
+        float priority;
+    };
+    // A source fallback (IW7: a box of 262144 at the lowest priority) replaces the written one.
+    const ReflectionProbeInstance *sourceFallback = nullptr;
+    size_t fallbackProbe = 0;
+    // With source instances, a probe that none places (IW7 never reflects it) gets an empty box last.
+    const bool sourceInstances = std::any_of(mesh.reflectionProbes.begin(), mesh.reflectionProbes.end(),
+                                             [](const ReflectionProbe &probe) { return !probe.instances.empty(); });
+    constexpr float unplacedPriority = std::numeric_limits<float>::lowest() / 2;
+    std::vector<InstanceEntry> entries;
+    for (size_t index = 0; index < mesh.reflectionProbes.size(); ++index)
+    {
+        const auto &probe = mesh.reflectionProbes[index];
+        if (probe.instances.empty())
+            entries.push_back({index, nullptr, sourceInstances ? unplacedPriority : 10.0f});
+        for (const auto &instance : probe.instances)
+        {
+            if (!sourceFallback && instance.priority <= std::numeric_limits<float>::lowest())
+            {
+                sourceFallback = &instance;
+                fallbackProbe = index;
+                continue;
+            }
+            entries.push_back({index, &instance, instance.priority});
+        }
+    }
+    std::stable_sort(entries.begin(), entries.end(),
+                     [](const InstanceEntry &a, const InstanceEntry &b) { return a.priority > b.priority; });
+    if (entries.size() + 1 != ReflectionProbeInstanceCount(mesh))
+        throw std::runtime_error("Replay reflection-probe instance table is inconsistent");
+    std::vector<std::vector<uint16_t>> probeInstances(mesh.reflectionProbes.size());
+    probeInstances[fallbackProbe].push_back(0);
+    for (size_t entry = 0; entry < entries.size(); ++entry)
+        probeInstances[entries[entry].probe].push_back(static_cast<uint16_t>(entry + 1));
+
     writer.align(7);
     for (size_t index = 0; index < mesh.reflectionProbes.size(); ++index)
     {
@@ -2154,7 +2244,7 @@ void EmitReflectionProbes(ZoneWriter &writer, const Mesh &mesh)
         put(probe, 0x00, PTR_FOLLOWS); // livePath
         std::memcpy(probe + 0x08, source.origin.data(), sizeof(source.origin));
         put(probe, 0x20, PTR_FOLLOWS); // probeInstances[]
-        put(probe, 0x28, static_cast<uint16_t>(index == 0 ? 2 : 1));
+        put(probe, 0x28, static_cast<uint16_t>(probeInstances[index].size()));
         put(probe, 0x2A, std::numeric_limits<uint16_t>::max());
         writer.write(probe, sizeof(probe));
     }
@@ -2162,13 +2252,8 @@ void EmitReflectionProbes(ZoneWriter &writer, const Mesh &mesh)
     {
         writer.writeStr("_e" + std::to_string(index) + "_p15");
         writer.align(1);
-        if (!index)
-        {
-            writer.writeT<uint16_t>(0);
-            writer.writeT<uint16_t>(1);
-        }
-        else
-            writer.writeT(static_cast<uint16_t>(index + 1));
+        for (const auto instance : probeInstances[index])
+            writer.writeT(instance);
     }
 
     const auto emitInstance = [&](const ReflectionProbe &source, const uint16_t imageIndex,
@@ -2182,7 +2267,8 @@ void EmitReflectionProbes(ZoneWriter &writer, const Mesh &mesh)
         const auto center = fallback ? source.origin : source.volume.midpoint;
         const std::array<float, 3> halfSize =
             fallback ? std::array<float, 3>{131072.0f, 131072.0f, 131072.0f}
-                     : source.volume.halfSize;
+            : sourceInstances ? std::array<float, 3>{}
+                              : source.volume.halfSize;
         std::memcpy(instance + 0x28, center.data(), sizeof(center));
         constexpr std::array<float, 3> xAxis{1.0f, 0.0f, 0.0f};
         constexpr std::array<float, 3> yAxis{0.0f, 1.0f, 0.0f};
@@ -2192,7 +2278,9 @@ void EmitReflectionProbes(ZoneWriter &writer, const Mesh &mesh)
         std::memcpy(instance + 0x4C, zAxis.data(), sizeof(zAxis));
         std::memcpy(instance + 0x58, halfSize.data(), sizeof(halfSize));
         put(instance, 0x64,
-            fallback ? std::numeric_limits<float>::lowest() : 10.0f);
+            fallback ? std::numeric_limits<float>::lowest()
+            : sourceInstances ? unplacedPriority
+                              : 10.0f);
         const std::array<float, 3> feather =
             fallback ? std::array<float, 3>{8.0f, 8.0f, 8.0f}
                      : std::array<float, 3>{1.0f, 1.0f, 4.0f};
@@ -2200,13 +2288,42 @@ void EmitReflectionProbes(ZoneWriter &writer, const Mesh &mesh)
         writer.write(instance, sizeof(instance));
     };
 
+    const auto emitSourceInstance = [&](const ReflectionProbeInstance &source,
+                                        const uint16_t imageIndex, const bool fallback) {
+        uint8_t instance[144]{};
+        put(instance, 0x00, PTR_FOLLOWS); // livePath
+        std::memcpy(instance + 0x08, source.position.data(), sizeof(source.position));
+        put(instance, 0x14, imageIndex);
+        instance[0x17] = fallback ? 1 : 0;
+        std::memcpy(instance + 0x18, source.rotation.data(), sizeof(source.rotation));
+        std::memcpy(instance + 0x28, source.center.data(), sizeof(source.center));
+        for (size_t axis = 0; axis < 3; ++axis)
+            std::memcpy(instance + 0x34 + axis * 12, source.axes[axis].data(),
+                        sizeof(source.axes[axis]));
+        std::memcpy(instance + 0x58, source.halfSize.data(), sizeof(source.halfSize));
+        put(instance, 0x64, source.priority);
+        std::memcpy(instance + 0x68, source.feather.data(), sizeof(source.feather));
+        std::memcpy(instance + 0x74, source.expandNegative.data(), sizeof(source.expandNegative));
+        std::memcpy(instance + 0x80, source.expandPositive.data(), sizeof(source.expandPositive));
+        writer.write(instance, sizeof(instance));
+    };
+
     writer.align(7);
-    emitInstance(mesh.reflectionProbes.front(), 0, true);
-    for (size_t index = 0; index < mesh.reflectionProbes.size(); ++index)
-        emitInstance(mesh.reflectionProbes[index], static_cast<uint16_t>(index), false);
+    if (sourceFallback)
+        emitSourceInstance(*sourceFallback, static_cast<uint16_t>(fallbackProbe), true);
+    else
+        emitInstance(mesh.reflectionProbes.front(), 0, true);
+    for (const auto &entry : entries)
+    {
+        const auto image = static_cast<uint16_t>(entry.probe);
+        if (entry.source)
+            emitSourceInstance(*entry.source, image, false);
+        else
+            emitInstance(mesh.reflectionProbes[entry.probe], image, false);
+    }
     writer.writeStr("");
-    for (size_t index = 0; index < mesh.reflectionProbes.size(); ++index)
-        writer.writeStr("b" + std::to_string(index) + "_e" + std::to_string(index) + "_p15");
+    for (size_t entry = 0; entry < entries.size(); ++entry)
+        writer.writeStr("b" + std::to_string(entry) + "_e" + std::to_string(entries[entry].probe) + "_p15");
 
     writer.align(63);
     for (const auto &probe : mesh.reflectionProbes)
