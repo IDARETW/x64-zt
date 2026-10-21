@@ -182,6 +182,39 @@ namespace zonetool::convert::iw7_iw8
 				return {};
 			}
 
+			// Replay's world vertices reach 100000 units (replay_render: "Position out of range"): a surface beyond them
+			// (Parkour's mountains) is drawn into the sky, as the distant models are. The sky's own surface stays.
+			constexpr float largest_world_coordinate = 100000.0f;
+			const auto beyond = std::ranges::any_of(order, [&](const std::uint16_t index)
+			{
+				const auto& xyz = vertex(index).xyz;
+				return std::abs(xyz[0]) > largest_world_coordinate || std::abs(xyz[1]) > largest_world_coordinate ||
+					std::abs(xyz[2]) > largest_world_coordinate;
+			});
+			if (beyond && classify_material(resolved).kind != surface_kind::sky)
+			{
+				mesh_surface distant;
+				distant.material = resolved;
+				for (const auto index : order)
+				{
+					const auto& source_vertex = vertex(index);
+					const auto normal = unpack_unit_vec(source_vertex.normal);
+					distant.vertices.push_back({{source_vertex.xyz[0], source_vertex.xyz[1], source_vertex.xyz[2]},
+						{normal[0], normal[1], normal[2]}, {source_vertex.texCoord[0], source_vertex.texCoord[1]}});
+				}
+
+				for (std::size_t t = 0; t + 2 < indices.size(); t += 3)
+				{
+					distant.triangles.push_back({indices[t].get<std::uint16_t>(), indices[t + 1].get<std::uint16_t>(),
+						indices[t + 2].get<std::uint16_t>()});
+				}
+
+				ZONETOOL_WARNING("iw7: a world surface of \"%s\" (%zu triangles) reaches beyond %.0f units: the sky draws it",
+					resolved && resolved->name ? resolved->name : "?", distant.triangles.size(), largest_world_coordinate);
+				output.distant_surfaces.push_back(std::move(distant));
+				return {};
+			}
+
 			const auto material_name = output.add_material(source, surface.material);
 			for (auto& value : center)
 			{

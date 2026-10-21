@@ -38,6 +38,15 @@ namespace zonetool::convert::iw7_iw8
 				if (digits && digits != std::string_view::npos && line.substr(digits).starts_with(" \""))
 				{
 					const auto id = static_cast<std::uint32_t>(std::stoul(std::string(line.substr(0, digits))));
+					// A key without a token is 0 followed by its name ("0 \"uselmapcompression\" \"0\"": Mansion, Rally).
+					if (!id)
+					{
+						result += line.substr(digits + 1);
+						result += '\n';
+						start = end + 1;
+						continue;
+					}
+
 					const auto found = names.find(id);
 					result += found != names.end() && !found->second.empty() ? std::format("\"{}\"", found->second)
 						: std::format("\"_id_{:X}\"", id);

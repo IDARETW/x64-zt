@@ -5474,7 +5474,7 @@ Json BuildRender(const Json &world, const VisibilityGroups &visibility,
                                          {"surfaceCount", surfaceCount},
                                          {"bounds", {model.minimum, model.maximum}}});
     }
-    if (output["surfaces"].empty() || output["surfaces"].size() > 4096)
+    if (output["surfaces"].empty() || output["surfaces"].size() > replayrender::kMaxWorldSurfaces)
     {
         throw std::runtime_error("IW3 render geometry exceeds Replay surface limits");
     }

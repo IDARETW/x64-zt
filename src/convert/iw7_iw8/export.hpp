@@ -12,6 +12,8 @@ namespace zonetool::iw7
 
 namespace zonetool::convert::iw7_iw8
 {
+	struct mesh_surface;
+
 	// The extraction that the IW3 map pipeline reads (the layout of its OAT Unlinker export): extracted/maps/mp/ holds
 	// the world, collision and common world exports with the entities, the other folders hold materials, images and
 	// models. Every writer adds to `extracted`.
@@ -27,6 +29,9 @@ namespace zonetool::convert::iw7_iw8
 		std::set<std::string> exported_models;
 		// The models beyond the range of Replay model bounds (planets): the sky draws them.
 		std::set<std::string> distant_models;
+		// The world surfaces beyond the range of Replay world vertices (Parkour's mountains), in world space: the sky draws
+		// them.
+		std::vector<mesh_surface> distant_surfaces;
 		// The materials of glass panes, which convert as lit glass (IW7 draws them premultiplied).
 		std::set<std::string> glass_materials;
 		// The materials of effects, which convert as the pipeline's effect materials.
