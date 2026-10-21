@@ -420,4 +420,63 @@ namespace zonetool::convert::iw7_iw8
 				output.distant_models.size()).data());
 		return {};
 	}
+
+	// IW7 keeps the sun's sprite, flare, blind and glare in the world (sunflare_t); IW3 keeps them in sun/<map>.sun, which
+	// the pipeline reads into Replay's sunflare (angles as degrees, fade times as seconds). The sprite's shader stays out:
+	// the pipeline would draw it as a disc in the sky, and IW7's sky shows its own sun.
+	void export_sun(const source_map& source, extraction& output)
+	{
+		const auto& sun = source.world()->sun;
+		if (!sun.hasValidData)
+		{
+			ZONETOOL_INFO("iw7: the world has no sun flare data; Replay's blind and glare apply");
+			return;
+		}
+
+		const auto degrees = [](const float dot)
+		{
+			return std::acos(std::clamp(dot, -1.0f, 1.0f)) * 180.0f / std::numbers::pi_v<float>;
+		};
+
+		const auto seconds = [](const int milliseconds)
+		{
+			return static_cast<float>(milliseconds) / 1000.0f;
+		};
+
+		const std::vector<std::pair<std::string_view, float>> values =
+		{
+			{"r_sunsprite_size", sun.spriteSize},
+			{"r_sunflare_min_size", sun.flareMinSize},
+			{"r_sunflare_min_angle", degrees(sun.flareMinDot)},
+			{"r_sunflare_max_size", sun.flareMaxSize},
+			{"r_sunflare_max_angle", degrees(sun.flareMaxDot)},
+			{"r_sunflare_max_alpha", sun.flareMaxAlpha},
+			{"r_sunflare_fadein", seconds(sun.flareFadeInTime)},
+			{"r_sunflare_fadeout", seconds(sun.flareFadeOutTime)},
+			{"r_sunblind_min_angle", degrees(sun.blindMinDot)},
+			{"r_sunblind_max_angle", degrees(sun.blindMaxDot)},
+			{"r_sunblind_max_darken", sun.blindMaxDarken},
+			{"r_sunblind_fadein", seconds(sun.blindFadeInTime)},
+			{"r_sunblind_fadeout", seconds(sun.blindFadeOutTime)},
+			{"r_sunglare_min_angle", degrees(sun.glareMinDot)},
+			{"r_sunglare_max_angle", degrees(sun.glareMaxDot)},
+			{"r_sunglare_max_lighten", sun.glareMaxLighten},
+			{"r_sunglare_fadein", seconds(sun.glareFadeInTime)},
+			{"r_sunglare_fadeout", seconds(sun.glareFadeOutTime)},
+		};
+
+		std::string text;
+		for (const auto& [key, value] : values)
+		{
+			text += std::format("{} \"{}\"\n", key, std::isfinite(value) ? value : 0.0f);
+		}
+
+		const auto path = output.extracted / "sun" / (source.name() + ".sun");
+		std::filesystem::create_directories(path.parent_path());
+		std::ofstream(path, std::ios::binary) << text;
+		ZONETOOL_INFO("iw7: sun: sprite %g (%s), flare %g..%g alpha %g (%s), blind darken %g, glare lighten %g", sun.spriteSize,
+			sun.spriteMaterial && sun.spriteMaterial->name ? sun.spriteMaterial->name : "no material", sun.flareMinSize,
+			sun.flareMaxSize, sun.flareMaxAlpha, sun.flareMaterial && sun.flareMaterial->name ? sun.flareMaterial->name : "no material",
+			sun.blindMaxDarken, sun.glareMaxLighten);
+	}
 }

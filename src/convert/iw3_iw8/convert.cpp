@@ -1982,8 +1982,9 @@ int writeMapPackage(const Args &args, const std::string &map, const std::string 
         // clock (the game appends the running seconds), location, unit.
         // IW3 maps name no location; "Classified" is the stock wording for one.
         std::string operation = metadata.title.empty() ? map : metadata.title;
-        if (operation.ends_with(" (Classic)"))
-            operation.resize(operation.size() - 10);
+        for (const std::string_view suffix : {" (Classic)", " (IW7)"})
+            if (operation.ends_with(suffix))
+                operation.resize(operation.size() - suffix.size());
         const char *teams[]{"allies", "axis"};
         for (size_t team = 0; team < 2; ++team)
         {

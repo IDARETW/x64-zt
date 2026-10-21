@@ -1212,11 +1212,37 @@ inline void emitComWorldBody(ZoneBuffer &zb, const char *assetName, const MapSun
                 // the light's fixture, dropEnclosedShadowedSpots),
                 // softness 0.55, bias 0.75, area 0.0018, distance falloff 0.2, and
                 // collimation cos(90 deg) = no collimation.
+                // Shipped local lights (mp_hideout, 124 of 124) set spawnFlags by their
+                // shadows: 0 with dynamic shadows, 32 with a static shadow map, 40
+                // without one.
+                light[0] = source->canUseShadowMap ? (light[3] ? 0 : 32) : 40;
                 stampf(light, 0x54, source->fadeOffset[0]);
                 stampf(light, 0x58, source->fadeOffset[1]);
                 stampf(light, 0x5C, source->bulbRadius);
+                // Shipped local lights keep their tube along cross(up, dir), at least
+                // 1/255 long (124 of 124, perpendicular to dir within 3e-8). Replay
+                // gives a zero tube (1, 1, 1) / 255 (R_InitPrimaryLights 18D9839),
+                // which leans off dir and sends the runtime light volume through its
+                // capsule path (sub_14186EAE0: radius scaled, caps reprojected).
+                std::array<float, 3> tube{source->bulbLength[0], source->bulbLength[1],
+                                          source->bulbLength[2]};
+                const float tubeLength =
+                    std::sqrt(tube[0] * tube[0] + tube[1] * tube[1] + tube[2] * tube[2]);
+                if (!(tubeLength >= 1.0f / 255.0f))
+                {
+                    const auto &up = source->up;
+                    const auto &dir = source->direction;
+                    std::array<float, 3> right{up[1] * dir[2] - up[2] * dir[1],
+                                               up[2] * dir[0] - up[0] * dir[2],
+                                               up[0] * dir[1] - up[1] * dir[0]};
+                    const float rightLength =
+                        std::sqrt(right[0] * right[0] + right[1] * right[1] + right[2] * right[2]);
+                    if (std::isfinite(rightLength) && rightLength > 1e-6f)
+                        for (unsigned component = 0; component < 3; ++component)
+                            tube[component] = right[component] / rightLength / 255.0f;
+                }
                 for (unsigned component = 0; component < 3; ++component)
-                    stampf(light, 0x60 + 4 * component, source->bulbLength[component]);
+                    stampf(light, 0x60 + 4 * component, tube[component]);
                 stampf(light, 0x74, source->shadowNearPlaneBias);
                 stampf(light, 0x78, source->shadowSoftness);
                 stampf(light, 0x7C, source->shadowBias);

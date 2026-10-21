@@ -321,10 +321,10 @@ void emitGfxMapBody(ZoneWriter &zw, const char *assetName, const std::string &me
     const auto &lights = localLights ? *localLights : noLocalLights;
     if (!lights.Empty() && lights.lightCount != primaryLightCount)
         throw std::runtime_error("GfxWorld local-light data does not match the primary lights");
-    // Draw-table probe instances: the authored probes plus one fallback.
+    // Draw-table probe instances: one fallback, then each probe's own.
     const auto umbraTome = replayrender::BuildUmbraTome(
         mesh, staticModels, lights.umbraLights,
-        static_cast<uint32_t>(mesh.reflectionProbes.size() + 1));
+        replayrender::ReflectionProbeInstanceCount(mesh));
     const auto cellCount = static_cast<uint32_t>(mesh.cells.size());
     const auto cellWordCount = (cellCount + 31u) >> 5;
     std::vector<uint8_t> gw(kSizeGfxWorld, 0);
@@ -443,11 +443,11 @@ void emitGfxMapBody(ZoneWriter &zw, const char *assetName, const std::string &me
     stamp64(gw.data(), 0x3EF8, PTR_FOLLOWS); // cellHasSunLitSurfsBits[cellWordCount]
     const uint32_t primaryLightVisDataCount = (primaryLightCount + 31u) >> 5;
     // The draw table has one fallback reflection-probe instance in addition
-    // to the authored probes. R_InitWorld clears this family from the draw
+    // to the probes' own. R_InitWorld clears this family from the draw
     // instance count without checking the DPVS pointer, so the count and
     // resident stream-4 allocation must be emitted together.
     const uint32_t reflectionProbeInstanceCount =
-        static_cast<uint32_t>(mesh.reflectionProbes.size() + 1);
+        replayrender::ReflectionProbeInstanceCount(mesh);
     const uint32_t reflectionProbeVisDataCount =
         (reflectionProbeInstanceCount + 31u) >> 5;
     stamp32(gw.data(), replaymap::PrimaryLightVisDataCount, primaryLightVisDataCount);

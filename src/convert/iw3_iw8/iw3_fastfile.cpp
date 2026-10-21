@@ -5615,6 +5615,10 @@ Json BuildRender(const Json &world, const VisibilityGroups &visibility,
                                               {"volume", {minimum, maximum}},
                                               {"image", probe.image},
                                               {"sh", probe.sh}});
+        // Sources with their own probe instances (IW7) keep them.
+        if (const auto &source = world.at("reflection_probes").at(sourceIndex);
+            source.contains("instances"))
+            output["reflectionProbes"].back()["instances"] = source.at("instances");
     }
     output["glassPanes"] = BuildGlassPanes(models, plan, entities, collision, glassModels,
                                           glassTargets, entityModels);
