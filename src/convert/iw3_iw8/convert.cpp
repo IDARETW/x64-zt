@@ -1355,6 +1355,8 @@ std::vector<OutputLedgerRow> outputLedgerRows(
             set(ASSET_TYPE_LIGHTDEF, prepared->vfxLightDef, "light of IW3 effects / local lights");
         for (const auto &shape : prepared->vfxShapes)
             set(ASSET_TYPE_PHYSICSFXSHAPE, shape.name, "debris shape of a native effect (native Havok)");
+        for (const auto &sim : prepared->vfxParticleSims)
+            set(ASSET_TYPE_PARTICLESIMANIMATION, sim.name, "particle sim animation of a native effect");
         for (const auto &[type, name] : prepared->vfxReferences)
             set(type, name, "name-only reference to the common-zone asset (debris of a native effect)");
     }
@@ -1714,6 +1716,8 @@ int writeMapPackage(const Args &args, const std::string &map, const std::string 
                 iw8::vfx::RegisterLightDef(writer, prepared->vfxLightDef);
             for (auto &shape : prepared->vfxShapes)
                 iw8::stock::RegisterPhysicsShape(writer, shape.name, std::move(shape.havokData));
+            for (auto &sim : prepared->vfxParticleSims)
+                iw8::vfx::RegisterParticleSim(writer, std::move(sim));
             for (const auto &[type, name] : prepared->vfxReferences)
             {
                 iw8::stock::RegisterNameReference(writer, type, name);

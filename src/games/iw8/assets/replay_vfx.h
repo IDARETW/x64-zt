@@ -72,4 +72,21 @@ struct Effect
 // whose Replay 1.20 pointer layout is pinned in iw8_focus_structs.h.
 void Register(ZoneWriter &writer, Effect effect);
 void RegisterLightDef(ZoneWriter &writer, std::string name);
+
+// A FxParticleSimAnimation (0x78): baked particles that FX_GenParticleSimAnimationVerts
+// (0x17FD1E0) draws through its material. `header` is the 0x3C bytes at +0x10 (playback
+// rate, duration, frame count, bounds, sizes, counts and flags); the arrays follow in
+// load order with the counts of the header.
+struct ParticleSim
+{
+    std::string name;
+    std::string material;
+    std::array<uint8_t, 0x3C> header{};
+    std::vector<uint8_t> particleData;
+    std::vector<uint8_t> orientation3D;
+    std::vector<uint8_t> index;
+    std::vector<uint8_t> frames;
+    std::vector<uint8_t> colorTable;
+};
+void RegisterParticleSim(ZoneWriter &writer, ParticleSim sim);
 } // namespace iw8::vfx

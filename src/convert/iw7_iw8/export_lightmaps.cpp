@@ -45,7 +45,8 @@ namespace zonetool::convert::iw7_iw8
 			auto faces = image ? load_image_faces(*image, format, max_lightmap_size) : std::vector<DirectX::ScratchImage>{};
 			if (faces.size() != 1)
 			{
-				ZONETOOL_WARNING("iw7: lightmap image \"%s\" cannot be read", image && image->name ? image->name : "?");
+				ZONETOOL_WARNING("iw7: lightmap image \"%s\" cannot be read: %s", image && image->name ? image->name : "?",
+					image ? image_read_failure(*image).data() : "the world has no image there");
 				return {};
 			}
 

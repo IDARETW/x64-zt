@@ -326,6 +326,7 @@ namespace zonetool::convert::iw7_iw8
 			std::string current_;
 
 			std::set<std::string> shapes_;
+			std::set<std::string> particle_sims_;
 			float light_unit_{};
 			// The state being converted draws through IW7's unlit effect materials (effectunlit), whose tints carry the map's
 			// light unit (export_effect_material); lit ones keep their tint.
@@ -370,6 +371,41 @@ namespace zonetool::convert::iw7_iw8
 					}
 
 					write_json(this->output_.extracted / "physicsfxshape" / (file_name(name) + ".json"), {{"name", name}, {"points", std::move(points)}});
+				}
+
+				return name;
+			}
+
+			// Writes an IW7 particle sim animation once (its frames of baked particles, in Replay's layout, which
+			// FX_GenParticleSimAnimationVerts 0x17FD1E0 reads) with its material as an effect material; returns its name, or
+			// nothing when its material or its particles are missing (Replay draws every animation through its material).
+			std::optional<std::string> add_particle_sim(const iw7::FxParticleSimAnimation& sim)
+			{
+				const auto& header = sim.header;
+				const auto* material = sim.material ? this->source_.resolve(iw7::ASSET_TYPE_MATERIAL, sim.material) : nullptr;
+				if (!sim.name || !material || !header.frameCount || !sim.frames || (header.particleDataCount && !sim.particleData) ||
+					(header.colorTableSize && !sim.colorTable) || (header.hasOrientation3D && header.particleDataCount &&
+					!sim.particleDataOrientation3D) || (header.hasIndex && header.particleDataCount && !sim.particleDataIndex))
+				{
+					return std::nullopt;
+				}
+
+				const std::string name(asset_name(sim.name));
+				if (this->particle_sims_.insert(name).second)
+				{
+					const auto material_name = this->output_.add_material(this->source_, sim.material);
+					this->output_.effect_materials.insert(material_name);
+					const auto count = header.particleDataCount;
+					write_json(this->output_.extracted / "particlesimanimation" / (file_name(name) + ".json"), {
+						{"name", name},
+						{"material", material_name},
+						{"header", hex(header)},
+						{"particle_data", hex(sim.particleData, sizeof(*sim.particleData) * count)},
+						{"orientation_3d", header.hasOrientation3D ? hex(sim.particleDataOrientation3D,
+							sizeof(*sim.particleDataOrientation3D) * count) : ""},
+						{"index", header.hasIndex ? hex(sim.particleDataIndex, sizeof(*sim.particleDataIndex) * count) : ""},
+						{"frames", hex(sim.frames, sizeof(*sim.frames) * header.frameCount)},
+						{"color_table", hex(sim.colorTable, sizeof(*sim.colorTable) * header.colorTableSize)}});
 				}
 
 				return name;
@@ -857,9 +893,31 @@ namespace zonetool::convert::iw7_iw8
 						if (material && flare && !readable())
 						{
 							const auto* color = color_image(this->source_, material);
-							ZONETOOL_INFO("iw7: flare material \"%s\": colour map \"%s\" (format %d, streamed %u) cannot be read",
-								asset_name(material->name).data(), color && color->name ? color->name : "none",
-								color ? static_cast<int>(color->imageFormat) : -1, color ? static_cast<unsigned>(color->streamed) : 0u);
+							std::string reason;
+							if (color && color->name)
+							{
+								reason = std::format("colour map \"{}\": {}", color->name, image_read_failure(*color));
+							}
+							else if (!material->textureCount)
+							{
+								// Frontier's fixture glares (el/vfx_postfx_lensflare_*: techsets_common_core_mp's) flickered when
+								// they were drawn with Replay's flare materials (owner test): they stay out.
+								reason = "the map's zone holds only a reference to it (another zone's material)";
+							}
+							else
+							{
+								// The textures that hold no colour map: semantic, shader name characters and image.
+								reason = std::format("no colour map in {} textures:", material->textureCount);
+								for (auto t = 0; t < material->textureCount; t++)
+								{
+									const auto& texture = material->textureTable[t];
+									const auto* image = this->source_.resolve(iw7::ASSET_TYPE_IMAGE, texture.image);
+									reason += std::format(" {}/{}{} {}", static_cast<int>(texture.semantic), texture.nameStart, texture.nameEnd,
+										image && image->name ? image->name : "?");
+								}
+							}
+
+							ZONETOOL_INFO("iw7: flare material \"%s\" cannot be read: %s", asset_name(material->name).data(), reason.data());
 							this->drop("flare whose image cannot be read");
 							continue;
 						}
@@ -926,6 +984,33 @@ namespace zonetool::convert::iw7_iw8
 					}
 
 					result.list(offsetof(iw7::ParticleModuleInitModel, m_linkedAssetList), std::move(entries));
+					return result;
+				}
+				case iw7::PARTICLE_MODULE_INIT_PARTICLE_SIM:
+				{
+					// Replay's particle sim module is IW7's (its list, scale factor and hold-last-frame byte); its sprites draw the
+					// animation's baked particles (Afghan's background battle).
+					copy(sizeof(iw7::ParticleModuleInitParticleSim));
+					auto entries = json::array();
+					const auto& list = data.initParticleSim.m_linkedAssetList;
+					for (auto a = 0; list.assetList && a < list.numAssets; a++)
+					{
+						const auto* sim = list.assetList[a].particleSim ? this->source_.resolve(iw7::ASSET_TYPE_PARTICLE_SIM_ANIMATION,
+							list.assetList[a].particleSim) : nullptr;
+						if (const auto name = sim ? this->add_particle_sim(*sim) : std::nullopt)
+						{
+							entries.push_back(linked_asset("particlesimanimation", *name));
+						}
+					}
+
+					if (entries.empty())
+					{
+						this->drop(list.numAssets ? "particle sim module whose animations the zones do not hold" :
+							"particle sim module that IW7 leaves empty");
+						return std::nullopt;
+					}
+
+					result.list(offsetof(iw7::ParticleModuleInitParticleSim, m_linkedAssetList), std::move(entries));
 					return result;
 				}
 				case iw7::PARTICLE_MODULE_INIT_RUNNER:

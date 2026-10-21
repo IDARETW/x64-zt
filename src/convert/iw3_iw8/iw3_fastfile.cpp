@@ -5950,6 +5950,13 @@ std::optional<std::vector<CollisionHull>> SplitSlantedBrushFaces(
 CollisionData ReadCollision(const Json &collision)
 {
     const auto &sourceBrushes = collision.at("brushes");
+    // Extractions of games whose contents are Replay's bits (IW7's shape tags) keep the bits
+    // that Replay names: the IW3 remapping drops sky (0x800) and strips clipshot and missile
+    // clip from player clips.
+    const bool replayContents = collision.value("contents_encoding", std::string{}) == "replay";
+    const auto contentsOf = [&](const std::uint32_t source) {
+        return replayContents ? source & iw8::havok::kReplayContents : ConvertContents(source);
+    };
     const auto &sourceModels = collision.at("submodels");
     const auto &nodes = collision.at("leaf_brush_nodes");
     if (!sourceBrushes.is_array() || !sourceModels.is_array() || sourceModels.empty() ||
@@ -6010,7 +6017,7 @@ CollisionData ReadCollision(const Json &collision)
     for (std::size_t brushIndex = 0; brushIndex < sourceBrushes.size(); ++brushIndex)
     {
         const auto &brush = sourceBrushes.at(brushIndex);
-        const std::uint32_t contents = ConvertContents(brush.at("contents").get<std::uint32_t>());
+        const std::uint32_t contents = contentsOf(brush.at("contents").get<std::uint32_t>());
         if (!contents)
             continue;
         std::vector<Vec4> planes;
@@ -6226,7 +6233,7 @@ CollisionData ReadCollision(const Json &collision)
                 ++unreferencedTriangles;
                 continue;
             }
-            contents = ConvertContents(sourceContents.get<std::uint32_t>());
+            contents = contentsOf(sourceContents.get<std::uint32_t>());
             if (!contents)
             {
                 ++unsupportedTriangleContents;
@@ -7993,6 +8000,9 @@ struct NativeFx
     // the extraction's shapes (physicsfxshape/<name>.json).
     std::set<std::string> pipelines;
     std::set<std::string> shapes;
+    // Particle sim animations of particle sim modules (particlesimanimation/<name>.json),
+    // whose materials `materials` holds.
+    std::set<std::string> particleSims;
     // Sound aliases of sound modules (inline strings), which the map bank takes.
     std::set<std::string> sounds;
     // Replay materials of the common zones (flares), named without converting.
@@ -8029,12 +8039,45 @@ std::vector<iw8_focus::ParticleCurveControlPointDef> NativeCurve(const Json &poi
     return result;
 }
 
+// The particle sim animations of the extraction (IW7's, in Replay's layout), by
+// name, with the material by its name in the extraction.
+std::map<std::string, iw8::vfx::ParticleSim> ReadNativeFxParticleSims(const std::filesystem::path &root)
+{
+    std::map<std::string, iw8::vfx::ParticleSim> result;
+    std::error_code error;
+    if (!std::filesystem::is_directory(root / "particlesimanimation", error))
+        return result;
+    const auto bytes = [](const Json &value) {
+        const auto text = value.get<std::string>();
+        return NativeBytes(value, text.size() / 2, "particle sim array");
+    };
+    for (const auto &file : std::filesystem::directory_iterator(root / "particlesimanimation"))
+    {
+        if (!file.is_regular_file() || file.path().extension() != ".json")
+            continue;
+        const Json source = ReadJson(file.path());
+        iw8::vfx::ParticleSim sim;
+        sim.name = source.at("name").get<std::string>();
+        sim.material = source.at("material").get<std::string>();
+        const auto header = NativeBytes(source.at("header"), sim.header.size(), "particle sim header");
+        std::memcpy(sim.header.data(), header.data(), header.size());
+        sim.particleData = bytes(source.at("particle_data"));
+        sim.orientation3D = bytes(source.at("orientation_3d"));
+        sim.index = bytes(source.at("index"));
+        sim.frames = bytes(source.at("frames"));
+        sim.colorTable = bytes(source.at("color_table"));
+        result.emplace(sim.name, std::move(sim));
+    }
+    return result;
+}
+
 std::vector<NativeFx> ReadNativeFx(const std::filesystem::path &root)
 {
     std::vector<NativeFx> result;
     std::error_code error;
     if (!std::filesystem::is_directory(root / "vfx", error))
         return result;
+    const auto particleSims = ReadNativeFxParticleSims(root);
     for (const auto &file : std::filesystem::recursive_directory_iterator(root / "vfx"))
     {
         if (!file.is_regular_file() || file.path().extension() != ".json")
@@ -8098,6 +8141,16 @@ std::vector<NativeFx> ReadNativeFx(const std::filesystem::path &root)
                                             assetType = ASSET_TYPE_PHYSICSFXPIPELINE, fx.pipelines.insert(name);
                                         else if (type == "physicsfxshape")
                                             assetType = ASSET_TYPE_PHYSICSFXSHAPE, fx.shapes.insert(name);
+                                        else if (type == "particlesimanimation")
+                                        {
+                                            const auto sim = particleSims.find(name);
+                                            if (sim == particleSims.end())
+                                                throw std::runtime_error("native effect links particle sim animation " + name +
+                                                                         ", which the extraction lacks");
+                                            assetType = ASSET_TYPE_PARTICLESIMANIMATION;
+                                            fx.particleSims.insert(name);
+                                            fx.materials.insert(sim->second.material);
+                                        }
                                         else
                                             throw std::runtime_error("native effect links an asset of an unknown type: " + type);
                                         entry.assets.push_back({offset, {assetType, name}});
@@ -8157,7 +8210,8 @@ constexpr char kDefaultFxShape[] = "vfx_physfxpip_particle_default";
 // converted IW3 effects have them.
 iw8::vfx::Effect ResolveNativeFx(const NativeFx &fx, const PreparedMap &map,
                                  const std::unordered_map<std::string, std::string> &effectAliases,
-                                 const std::unordered_map<std::string, std::string> &shapeAliases)
+                                 const std::unordered_map<std::string, std::string> &shapeAliases,
+                                 const std::unordered_map<std::string, std::string> &particleSimAliases)
 {
     auto effect = fx.effect;
     effect.name = effectAliases.at(fx.effect.name);
@@ -8187,6 +8241,14 @@ iw8::vfx::Effect ResolveNativeFx(const NativeFx &fx, const PreparedMap &map,
                                     asset.second = map.vfxLightDef;
                                 else if (asset.first == ASSET_TYPE_PHYSICSFXSHAPE)
                                     asset.second = shapeAliases.at(asset.second);
+                                else if (asset.first == ASSET_TYPE_PARTICLESIMANIMATION)
+                                {
+                                    const auto sim = particleSimAliases.find(asset.second);
+                                    if (sim == particleSimAliases.end())
+                                        throw std::runtime_error("its particle sim animation " + asset.second +
+                                                                 " does not convert");
+                                    asset.second = sim->second;
+                                }
                             }
                     if (module.native.moduleType ==
                             static_cast<std::uint16_t>(iw8_focus::ParticleModuleType::initMaterial) &&
@@ -8613,6 +8675,7 @@ PreparedMap::PreparedMap(PreparedMap &&other) noexcept
     , vfxEffects(std::move(other.vfxEffects))
     , vfxLightDef(std::move(other.vfxLightDef))
     , vfxShapes(std::move(other.vfxShapes))
+    , vfxParticleSims(std::move(other.vfxParticleSims))
     , vfxReferences(std::move(other.vfxReferences))
     , smallGlassEffect(std::move(other.smallGlassEffect))
     , impactOverrides(std::move(other.impactOverrides))
@@ -8655,6 +8718,7 @@ PreparedMap &PreparedMap::operator=(PreparedMap &&other) noexcept
         vfxEffects = std::move(other.vfxEffects);
         vfxLightDef = std::move(other.vfxLightDef);
         vfxShapes = std::move(other.vfxShapes);
+        vfxParticleSims = std::move(other.vfxParticleSims);
         vfxReferences = std::move(other.vfxReferences);
         smallGlassEffect = std::move(other.smallGlassEffect);
         impactOverrides = std::move(other.impactOverrides);
@@ -10641,6 +10705,32 @@ PreparedMap PrepareFastfile(const ImportOptions &options)
                          "(%zu common-zone reference(s))",
                          result.vfxShapes.size(), result.vfxReferences.size());
         }
+        // Particle sim animations: the extraction's baked particles, drawn through their
+        // converted effect materials.
+        std::unordered_map<std::string, std::string> particleSimAliases;
+        {
+            const auto particleSims = ReadNativeFxParticleSims(exportRoot);
+            for (const auto &fx : nativeFx)
+                for (const auto &name : fx.particleSims)
+                {
+                    if (particleSimAliases.contains(name))
+                        continue;
+                    try
+                    {
+                        auto sim = particleSims.at(name);
+                        sim.name = "mw120r/" + options.map + "/" + name;
+                        sim.material = VfxMaterial(result, sim.material);
+                        particleSimAliases.emplace(name, sim.name);
+                        result.vfxParticleSims.push_back(std::move(sim));
+                    }
+                    catch (const std::exception &error)
+                    {
+                        zt::warn("iw3: particle sim animation %s does not convert: %s", name.c_str(), error.what());
+                    }
+                }
+            if (!result.vfxParticleSims.empty())
+                zt::info("iw3: converted %zu particle sim animation(s) of native effects", result.vfxParticleSims.size());
+        }
         // An effect that does not resolve leaves the map with the effects that start
         // it; scripts then load it as an absent effect.
         std::set<std::string> registered;
@@ -10662,7 +10752,8 @@ PreparedMap PrepareFastfile(const ImportOptions &options)
             {
                 if (!children)
                     throw std::runtime_error("an effect that it starts does not convert");
-                result.vfxEffects.push_back(ResolveNativeFx(fx, result, effectAliases, shapeAliases));
+                result.vfxEffects.push_back(
+                    ResolveNativeFx(fx, result, effectAliases, shapeAliases, particleSimAliases));
                 return true;
             }
             catch (const std::exception &error)

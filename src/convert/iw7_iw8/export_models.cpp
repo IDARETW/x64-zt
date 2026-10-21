@@ -470,9 +470,19 @@ namespace zonetool::convert::iw7_iw8
 				return false;
 			};
 
-			if (!model.boneNames || !model.baseMat || !model.parentList || model.numBones < 2 || model.numBones > 128)
+			// A model of one bone (tag_origin) has no skeleton to write.
+			if (model.numBones < 2)
 			{
-				return fail("bones");
+				return false;
+			}
+
+			// The pipeline reads at most 128 bones (as IW3 models have). The parent list holds the bones after the roots: a
+			// model of root bones only has none.
+			if (!model.boneNames || !model.baseMat || (model.numBones > model.numRootBones && !model.parentList) || model.numBones > 128)
+			{
+				return fail(model.numBones > 128 ? std::format("{} bones", model.numBones).data() :
+					std::format("{} bones, {} roots, names {}, base poses {}, parents {}", model.numBones, model.numRootBones,
+						model.boneNames != nullptr, model.baseMat != nullptr, model.parentList != nullptr).data());
 			}
 
 			std::string bones = std::format("NUMBONES {}\n", model.numBones);
