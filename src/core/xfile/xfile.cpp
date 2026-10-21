@@ -1205,9 +1205,14 @@ namespace zonetool::xfile
 			stream.close();
 			if (!stream)
 			{
+				// The stream gives no cause; errno holds the C runtime's (ENOSPC on a full disk). A 2.2 GB write in one call
+				// works, so the size alone does not fail it (Scorch's 2+ GiB zone, 2026-10-21).
+				const auto cause = std::generic_category().message(errno);
 				std::error_code ignored;
 				std::filesystem::remove(partial, ignored);
-				throw std::runtime_error(std::format("cannot write {}", partial.string()));
+				const auto space = std::filesystem::space(partial.parent_path(), ignored);
+				throw std::runtime_error(std::format("cannot write {} ({} bytes: {}; {} MB free)", partial.string(),
+					header.size() + file.payload.size(), cause, ignored ? 0 : space.available >> 20));
 			}
 		}
 
