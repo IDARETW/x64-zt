@@ -410,6 +410,20 @@ namespace zonetool::iw7
 		zone->reader->resolve_deferred_offsets();
 		assets->add_assets_named_later();
 
+		// IW7_READ_TRACE=<file> writes a line "A <type> <name>" for each asset that the zone holds.
+		char trace_path[MAX_PATH]{};
+		if (GetEnvironmentVariableA("IW7_READ_TRACE", trace_path, sizeof(trace_path)))
+		{
+			std::ofstream trace(trace_path, std::ios::binary | std::ios::trunc);
+			for (const auto& asset : zone->assets)
+			{
+				if (!asset.referenced)
+				{
+					trace << "A " << static_cast<int>(asset.type) << ' ' << get_asset_name(asset.type, asset.header) << '\n';
+				}
+			}
+		}
+
 		return zone;
 	}
 }

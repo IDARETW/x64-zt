@@ -210,6 +210,7 @@ namespace zonetool::convert::iw7_iw8
 				{"name", name},
 				// The importer warns about a missing skeleton export only for models with bones to keep.
 				{"bone_count", model->numBones},
+				{"contents", static_cast<std::uint32_t>(model->contents)},
 				{"lods", std::move(geometry_lods)},
 			});
 
@@ -303,12 +304,17 @@ namespace zonetool::convert::iw7_iw8
 	void export_models(const source_map& source, extraction& output)
 	{
 		std::size_t written{};
+		std::map<std::uint32_t, std::size_t> contents;
 		for (const auto& [name, model] : output.models)
 		{
 			if (export_model(source, name, model, output))
 			{
 				output.exported_models.insert(name);
 				written++;
+				if (const auto* resolved = source.resolve(iw7::ASSET_TYPE_XMODEL, const_cast<iw7::XModel*>(model)))
+				{
+					contents[static_cast<std::uint32_t>(resolved->contents)]++;
+				}
 			}
 			else if (!output.distant_models.contains(name))
 			{
@@ -316,7 +322,13 @@ namespace zonetool::convert::iw7_iw8
 			}
 		}
 
-		ZONETOOL_INFO("iw7: exported %zu of %zu static models", written, output.models.size());
+		std::string kinds;
+		for (const auto& [value, count] : contents)
+		{
+			kinds += std::format("{}{:#x} x{}", kinds.empty() ? "" : ", ", value, count);
+		}
+
+		ZONETOOL_INFO("iw7: exported %zu of %zu static models (contents %s)", written, output.models.size(), kinds.data());
 	}
 
 	namespace
