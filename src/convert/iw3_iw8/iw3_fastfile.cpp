@@ -7003,7 +7003,8 @@ Json BuildLighting(const Json &world, const Json &commonWorld, const std::string
             {"direction", Unit(direction)},
             {"up", {0.0f, 0.0f, 0.0f}},
             {"sun_primary_light_index", world.at("sun_primary_light_index")},
-            {"primary_lights", commonWorld.at("primary_lights")}};
+            {"primary_lights", commonWorld.at("primary_lights")},
+            {"ies_profiles", commonWorld.contains("ies_profiles") ? commonWorld.at("ies_profiles") : Json::array()}};
 }
 
 void CopyCompass(const std::filesystem::path &extracted, const std::filesystem::path &prepared,

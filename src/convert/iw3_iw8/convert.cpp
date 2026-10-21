@@ -998,6 +998,21 @@ iw8::MapSun loadLighting(const Args &args, const std::string &dumpDirectory,
                 lighting.primaryLights.push_back(std::move(light));
             }
         }
+        // IES profiles of the source's light definitions (IW7), already in Replay's segment sampling.
+        if (const auto profiles = data.find("ies_profiles"); profiles != data.end())
+            for (const auto &source : *profiles)
+            {
+                iw8::ies::Profile profile;
+                profile.definition = source.at("definition").get<std::string>();
+                profile.profile = source.at("profile").get<std::string>();
+                const auto &texels = source.at("texels");
+                if (profile.definition.empty() || profile.definition.size() > 255 || !texels.is_array() ||
+                    texels.size() != profile.texels.size())
+                    throw std::runtime_error("invalid source IES profile");
+                for (size_t texel = 0; texel < profile.texels.size(); ++texel)
+                    profile.texels[texel] = texels.at(texel).get<uint8_t>();
+                lighting.iesProfiles.push_back(std::move(profile));
+            }
     }
 
     if (lighting.primaryLights.empty())
@@ -1401,6 +1416,8 @@ std::vector<OutputLedgerRow> outputLedgerRows(
                     origin = "stock IES light (section 19)";
                 else if (name == "light_point_linear")
                     origin = "IW3 local lights (comworld)";
+                else
+                    origin = "IES light definition of the source's local lights (comworld)";
                 break;
             case ASSET_TYPE_IMAGE:
                 if (name == iw8::heightfield::kHeightmapName || name == iw8::heightfield::kOutdoorName)
@@ -1727,8 +1744,9 @@ int writeMapPackage(const Args &args, const std::string &map, const std::string 
         const std::array<float, 3> sunDirection{lighting.direction[0], lighting.direction[1],
                                                 lighting.direction[2]};
         // The world's IES lookup strip and the stock IES LightDefs (flashlight,
-        // NVG illuminator), as shipped maps carry; registered before the world.
-        iw8::ies::Register(writer);
+        // NVG illuminator), as shipped maps carry, with the source lights' IES
+        // definitions (IW7); registered before the world.
+        iw8::ies::Register(writer, lighting.iesProfiles);
         // Native GfxWorld heightfield and outdoor mask (shipped worlds carry
         // both); the images precede the world that references them.
         std::optional<iw8::heightfield::Data> heightfield;

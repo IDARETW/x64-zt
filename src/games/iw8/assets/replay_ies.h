@@ -2,6 +2,11 @@
 
 #include "../zone/iw8_zone.h"
 
+#include <array>
+#include <cstdint>
+#include <string>
+#include <vector>
+
 namespace iw8::ies
 {
 // The world's IES lookup strip (GfxWorldDraw +0xF0) and the IES LightDefs that
@@ -15,6 +20,16 @@ namespace iw8::ies
 //    local lights keep their profile-less definitions (segment 0).
 constexpr const char *kLookupName = "*ieslookup";
 
-// Registers the strip and both LightDefs; must precede the gfx_map asset.
-void Register(ZoneWriter &writer);
+// The IES profile of a source light definition (IW7): 128 texels in a segment's
+// sampling (texel j = profile coordinate j / 255, the spot's forward
+// hemisphere), registered as a LightDef of the definition's name.
+struct Profile
+{
+    std::string definition, profile;
+    std::array<uint8_t, 128> texels{};
+};
+
+// Registers the strip and the LightDefs (the stock two, then `profiles` from
+// segment 3 on, the strip growing by powers of two); must precede the gfx_map asset.
+void Register(ZoneWriter &writer, const std::vector<Profile> &profiles = {});
 } // namespace iw8::ies

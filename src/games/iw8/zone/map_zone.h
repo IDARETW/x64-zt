@@ -5,6 +5,7 @@
 #include "iw8_zonebuffer.h"
 #include "../common/physics_asset_serialization.h"
 #include "../assets/replay_dynentity.h"
+#include "../assets/replay_ies.h"
 #include "../common/replay_havok.h"
 #include "replay_client_triggers.h"
 #include "replay_map_layout.h"
@@ -1134,6 +1135,8 @@ struct MapSun
     // Stock light units per IW3 unit (--style iw8, iw3::LightUnitScale); 1 for iw3.
     float lightUnitScale = 1.0f;
     std::vector<PrimaryLight> primaryLights;
+    // The IES profiles of the source's light definitions (IW7), registered with the world's IES strip.
+    std::vector<iw8::ies::Profile> iesProfiles;
 };
 
 // Emit one ComWorld asset body (com_map 24): struct(0xA8)->TEMP_PRELOAD(1),

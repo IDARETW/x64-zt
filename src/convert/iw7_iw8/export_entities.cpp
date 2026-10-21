@@ -458,6 +458,54 @@ namespace zonetool::convert::iw7_iw8
 		std::size_t narrowed_spots{};
 		std::size_t leaning_ups{};
 		std::size_t large_bulbs{};
+
+		// IW7 IES light definitions (Frontier: 24 wall sconces of `light_ies_sconce_zmb`) sample the map's 128-texel R8
+		// strip `*ieslookup` at coordOffset + coordinate * coordScale, the coordinate from the spot's angle as Replay's
+		// (both shaders: c > 0 ? (1 - c^2) / 2 : 1 - (1 - c^2) / 2). A spot takes its profile as a Replay segment (texel j =
+		// coordinate j / 255), linear between IW7's texels as its sampler reads them. Without it the sconces lit their
+		// whole cone evenly; IW7's peaks 16 degrees off the axis and stays under 8% across most of the cone.
+		auto ies_profiles = json::array();
+		std::unordered_map<std::string, bool> ies_definitions;
+		std::size_t ies_lights{};
+		const auto* ies_lookup = static_cast<const iw7::GfxImage*>(source.find(iw7::ASSET_TYPE_IMAGE, "*ieslookup"));
+		const auto ies_definition = [&](const char* def_name) -> std::string
+		{
+			if (!def_name || !ies_lookup || !ies_lookup->pixelData || ies_lookup->streamed ||
+				ies_lookup->imageFormat != DXGI_FORMAT_R8_UNORM || !ies_lookup->width || ies_lookup->dataLen1 < ies_lookup->width)
+			{
+				return {};
+			}
+
+			const std::string name(asset_name(def_name));
+			if (const auto found = ies_definitions.find(name); found != ies_definitions.end())
+			{
+				return found->second ? name : std::string{};
+			}
+
+			const auto* def = static_cast<const iw7::GfxLightDef*>(source.find(iw7::ASSET_TYPE_LIGHT_DEF, name));
+			const auto usable = def && def->iesProfile && *def->iesProfile && def->coordScale > 0.0f;
+			ies_definitions.emplace(name, usable);
+			if (!usable)
+			{
+				return {};
+			}
+
+			const auto width = static_cast<float>(ies_lookup->width);
+			auto texels = json::array();
+			for (auto texel = 0; texel < 128; texel++)
+			{
+				const auto coordinate = static_cast<float>(texel) / 255.0f;
+				const auto x = std::clamp((def->coordOffset + coordinate * def->coordScale) * width - 0.5f, 0.0f, width - 1.0f);
+				const auto low = static_cast<std::size_t>(x);
+				const auto high = std::min<std::size_t>(low + 1, ies_lookup->width - 1);
+				const auto t = x - static_cast<float>(low);
+				const auto value = ies_lookup->pixelData[low] * (1.0f - t) + ies_lookup->pixelData[high] * t;
+				texels.push_back(std::clamp(static_cast<int>(std::lround(value)), 0, 255));
+			}
+
+			ies_profiles.push_back({{"definition", name}, {"profile", def->iesProfile}, {"texels", std::move(texels)}});
+			return name;
+		};
 		for (auto i = 0u; i < com_world->primaryLightCount; i++)
 		{
 			const auto& light = com_world->primaryLights[i];
@@ -554,6 +602,18 @@ namespace zonetool::convert::iw7_iw8
 				large_bulbs++;
 			}
 
+			// Spots keep an IES definition of IW7's (the profile covers their forward hemisphere); the others take Replay's
+			// linear light definition.
+			auto definition = intensity ? std::string("light_point_linear") : std::string{};
+			if (type == 2 && intensity)
+			{
+				if (auto ies = ies_definition(light.defName); !ies.empty())
+				{
+					definition = std::move(ies);
+					ies_lights++;
+				}
+			}
+
 			json entry =
 			{
 				{"type", type},
@@ -582,7 +642,7 @@ namespace zonetool::convert::iw7_iw8
 				{"fade_offset", {light.fadeOffsetRt[0], light.fadeOffsetRt[1]}},
 				{"uv_intensity", light.uvIntensity},
 				{"ir_intensity", light.irIntensity},
-				{"definition", intensity ? "light_point_linear" : ""},
+				{"definition", definition},
 			};
 
 			if (intensity)
@@ -607,12 +667,18 @@ namespace zonetool::convert::iw7_iw8
 			std::ofstream(path, std::ios::binary | std::ios::trunc).write("bfalloff_linear", 16);
 		}
 
+		if (ies_lights)
+		{
+			ZONETOOL_INFO("iw7: lights: %zu spots keep the IES profiles of %zu light definitions", ies_lights, ies_profiles.size());
+		}
+
 		write_json(output.extracted / (bsp_name(source) + ".replay-comworld.json"),
 		{
 			{"schema", 1},
 			{"name", bsp_name(source)},
 			{"in_use", true},
 			{"primary_lights", std::move(lights)},
+			{"ies_profiles", std::move(ies_profiles)},
 		});
 
 		ZONETOOL_INFO("iw7: exported %u primary lights with %zu local lights", com_world->primaryLightCount, local_lights);
