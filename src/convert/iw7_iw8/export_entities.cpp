@@ -642,7 +642,7 @@ namespace zonetool::convert::iw7_iw8
 				{"entity_id", light.entityId},
 				{"bulb_radius", bulb_radius},
 				{"bulb_length", vector_json(light.bulbLength, 3)},
-				{"volumetric", light.isVolumetric != 0 && output.volumetrics},
+				{"volumetric", light.isVolumetric != 0},
 				{"needs_dynamic_shadows", light.needsDynamicShadows != 0},
 				{"shadow_softness", light.shadowSoftness},
 				{"shadow_bias", light.shadowBias},

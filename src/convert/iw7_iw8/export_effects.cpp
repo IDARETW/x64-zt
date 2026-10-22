@@ -333,6 +333,8 @@ namespace zonetool::convert::iw7_iw8
 			bool unlit_state_{};
 			// The state being converted has an atlas module: its materials keep their atlas (extraction::atlas_materials).
 			bool atlas_state_{};
+			// The state being converted draws oriented sprites (their velocity frame orients them).
+			bool oriented_state_{};
 			std::optional<std::set<std::string>> bank_aliases_;
 
 			// The aliases of the map's sound bank (<map>.all).
@@ -546,6 +548,7 @@ namespace zonetool::convert::iw7_iw8
 				// and whether the state has an atlas module.
 				this->unlit_state_ = false;
 				this->atlas_state_ = false;
+				this->oriented_state_ = state.elementType == iw7::PARTICLE_ELEMENT_TYPE_ORIENTED_SPRITE;
 				for (auto g = 0; g < 3; g++)
 				{
 					const auto& group = state.moduleGroupDefs[g];
@@ -717,10 +720,27 @@ namespace zonetool::convert::iw7_iw8
 						sizeof(iw7::ParticleLinkedAssetListDef));
 					return result;
 				}
+				case iw7::PARTICLE_MODULE_INIT_RELATIVE_VELOCITY:
+				{
+					copy(16);
+					// Replay orients an oriented sprite by its velocity frame, and none of its own (137 in common_mp, 112 of
+					// them LOCAL) keeps the bolt frame that 80% of its other velocity modules use (LOCAL_WITH_BOLT_INFO).
+					// Scorch's sun (vfx_div_sun_sm, a createfx one-shot) is two such sprites with LOCAL_WITH_BOLT_INFO:
+					// they lay flat in the sky instead of facing the map. Oriented sprites take the frame without the bolt.
+					const auto& source = data.initRelativeVelocity;
+					if (this->oriented_state_ && source.m_velocityType >= iw7::PARTICLE_RELATIVE_VELOCITY_TYPE_LOCAL_WITH_BOLT_INFO)
+					{
+						auto velocity = source;
+						velocity.m_velocityType = static_cast<iw7::ParticleRelativeVelocityType>(
+							velocity.m_velocityType - iw7::PARTICLE_RELATIVE_VELOCITY_TYPE_LOCAL_WITH_BOLT_INFO);
+						velocity.m_useBoltInfo = false;
+						result.set(0, velocity);
+					}
+					return result;
+				}
 				case iw7::PARTICLE_MODULE_INIT_CAMERA_OFFSET:
 				case iw7::PARTICLE_MODULE_INIT_PLAYER_FACING:
 				case iw7::PARTICLE_MODULE_INIT_MIRROR_TEXTURE:
-				case iw7::PARTICLE_MODULE_INIT_RELATIVE_VELOCITY:
 				case iw7::PARTICLE_MODULE_INIT_TAIL:
 				case iw7::PARTICLE_MODULE_GRAVITY:
 					copy(16);
@@ -2327,9 +2347,13 @@ iw7_state( mode, animation, to, time )
 				ZONETOOL_INFO("iw7: the map script sets the light-grid intensity to %g", intensity);
 			}
 
+			// IW7 Frontier's script turns volumetrics off (r_volumetrics 0). Its lights converted without volumetrics and the
+			// converted script set the dvar too: Frontier's lit areas went dark up close and flickered from afar, which no map
+			// with volumetric lights showed (Scorch, owner test 2026-10-22). The lights keep IW7's own setting and the converted
+			// script leaves Replay's dvar alone; the vision has no volumetric air, so volumetric lights add no haze.
 			if (!output.volumetrics)
 			{
-				ZONETOOL_INFO("iw7: the map script turns volumetric lighting off");
+				ZONETOOL_INFO("iw7: the map script turns volumetric lighting off; the converted map keeps Replay's volumetrics");
 			}
 
 			std::set<std::string> loaded;
@@ -2343,6 +2367,8 @@ iw7_state( mode, animation, to, time )
 
 				return model != nullptr;
 			});
+			static const std::regex volumetrics_dvar(R"re([ \t]*setdvar\(\s*"r_volumetrics"\s*,[^;]*\);[ \t]*\r?\n?)re", std::regex::icase);
+			map_script = std::regex_replace(map_script, volumetrics_dvar, "");
 			ZONETOOL_INFO("iw7: translated the map script (%zu bytes) with %zu effects of its own", map_script.size(), loaded.size());
 			placed.insert(loaded.begin(), loaded.end());
 
