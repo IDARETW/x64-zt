@@ -1519,6 +1519,8 @@ namespace zonetool::convert::iw7_iw8
 			{"name", bsp_name(source)},
 			{"bounds", bounds},
 			{"sky", export_sky(source, output)},
+			{"fog", export_fog(source)},
+			{"grading_clut", export_grading_clut(source, output)},
 			{"sun", {{"ambient", {0.5f, 0.5f, 0.5f}}, {"angles", {-45.0f, 0.0f, 0.0f}}, {"color", {1.0f, 1.0f, 1.0f}},
 				{"intensity", 1.0f}}},
 			{"sun_primary_light_index", sun_index},

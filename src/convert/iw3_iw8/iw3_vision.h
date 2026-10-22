@@ -19,6 +19,27 @@ struct ExpFog
     std::array<float, 3> color{};
 };
 
+// The vision fog of an IW7 map (the IW7 front end's world export "fog"): IW7's fog fields, which Replay's vision
+// has under the same names (fields 35-48), with the colour intensities in light units where the sun has a luminance
+// of 1. The surface shader bakes it; the sky cube carries its sky fog.
+struct NativeFog
+{
+    float density{70000.0f}; // the halfway distance
+    float start{};
+    std::array<float, 3> color{1.0f, 1.0f, 1.0f};
+    float colorIntensity{1.0f};
+    float maxOpacity{};
+    float sunDensity{70000.0f};
+    std::array<float, 3> sunColor{1.0f, 1.0f, 1.0f};
+    float sunColorIntensity{1.0f};
+    float sunBeginFadeAngle{};
+    float sunEndFadeAngle{360.0f};
+    std::array<float, 3> sunDirection{1.0f, 0.0f, 0.0f};
+    float skyIntensity{};
+    float skyMinAngle{};
+    float skyMaxAngle{90.0f};
+};
+
 // The r_film* block of the map's vision file. IW3 applies it to the final
 // gamma-encoded image (R_UpdateColorManipulation + the postfx film shader).
 struct Film
@@ -89,18 +110,23 @@ Iw8LightingMatch MatchIw8Lighting(const std::array<float, 3> &iw3CompiledSun);
 // HLSL preamble for the converted world/static-model pixel shader; empty without fog.
 std::string FogShaderDefines(const std::optional<ExpFog> &fog, MapStyle style,
                              const std::optional<SunSprite> &sun = std::nullopt,
-                             float lightUnitScale = 1.0f);
+                             float lightUnitScale = 1.0f,
+                             const std::optional<NativeFog> &nativeFog = std::nullopt);
 
 // Replay GfxGradingClut payload: 32^3 R16G16B16A16_UNORM texels (red fastest), each
 // the ST2084-encoded BT.2020 output for the ST2084-encoded BT.2020 input at its grid
 // point, as consumed by cs_universal_clut_generate.
 inline constexpr unsigned GradingClutSize = 32;
 std::vector<std::uint8_t> BuildGradingClutPixels(const Film &film);
+// The same from an IW7 colour grading lookup table: size^3 RGBA8 texels (red fastest), indexed and
+// valued in sRGB.
+std::vector<std::uint8_t> BuildGradingClutPixels(const std::vector<std::uint8_t> &rgba, unsigned size);
 
 // Replay-format vision file (all 218 fields, engine defaults unless converted).
 // sunDirection points toward the sun (iw8 atmospheric scattering).
 std::string BuildReplayVision(const std::optional<ExpFog> &fog, const std::string &gradingClut,
                               MapStyle style, const std::array<float, 3> &sunDirection,
                               const Iw8LightingReference *exposure = nullptr,
-                              float lightUnitScale = 1.0f);
+                              float lightUnitScale = 1.0f,
+                              const std::optional<NativeFog> &nativeFog = std::nullopt);
 } // namespace iw3

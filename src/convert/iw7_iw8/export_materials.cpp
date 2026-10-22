@@ -678,7 +678,8 @@ namespace zonetool::convert::iw7_iw8
 		// units (Scorch x23.9) as it does the world, and with IW7's raw tints those effects drew 1 / light unit (Scorch: 24.5x)
 		// too bright; their additive sprites saturated into white polygons across the screen (owner tests of cbf4948: Scorch
 		// flicker). A lit one's tint (smoke, steam: 1) is a colour, which the pipeline treats as IW3's.
-		json export_effect_material(const iw7::Material* material, const std::optional<std::string>& color, const float light_scale)
+		json export_effect_material(const iw7::Material* material, const std::optional<std::string>& color, const float light_scale,
+			const bool atlas)
 		{
 			std::vector<std::string_view> tokens;
 			if (material && material->techniqueSet)
@@ -774,8 +775,9 @@ namespace zonetool::convert::iw7_iw8
 				entries.push_back(i == 4 ? 0 : -1);
 			}
 
-			const auto rows = material ? std::max<unsigned>(material->info.textureAtlasRowCount, 1) : 1u;
-			const auto columns = material ? std::max<unsigned>(material->info.textureAtlasColumnCount, 1) : 1u;
+			// Without a particle that picks its cells (extraction::atlas_materials), the whole texture draws.
+			const auto rows = material && atlas ? std::max<unsigned>(material->info.textureAtlasRowCount, 1) : 1u;
+			const auto columns = material && atlas ? std::max<unsigned>(material->info.textureAtlasColumnCount, 1) : 1u;
 			return
 			{
 				{"$schema", "http://openassettools.dev/schema/material.v1.json"},
@@ -1221,9 +1223,12 @@ namespace zonetool::convert::iw7_iw8
 			// shadowcaster technique, which it never draws; shadow tools (caulk_shadow, not "nocast") still cast.
 			// IW7's camera region 11 holds them all (w_tools_*, w_shadowcaster: Scorch's "Shadow" rectangle, owner test of
 			// cbf4948).
+			// Model nodraw materials (mo/nodraw, mopw/model_nodraw: Scorch's pillar signs) use a lit technique and
+			// IW7's own "nodraw" image: they are tools by name.
 			if (const auto tools = material && material->techniqueSet ? asset_name(material->techniqueSet->name) : std::string_view{};
 				(material && material->cameraRegion == 11) || tools.find("_tools_") != std::string_view::npos ||
-				tools.ends_with("_tools") || tools.find("shadowcaster") != std::string_view::npos)
+				tools.ends_with("_tools") || tools.find("shadowcaster") != std::string_view::npos ||
+				name.ends_with("/nodraw") || name.ends_with("/model_nodraw") || name == "nodraw")
 			{
 				const auto casts = name.find("shadow") != std::string::npos && tools.find("nocast") == std::string_view::npos;
 				auto state = state_json("none", false, surface_kind::opaque);
@@ -1325,7 +1330,7 @@ namespace zonetool::convert::iw7_iw8
 				}
 
 				write_json(output.extracted / "materials" / (name + ".json"), export_effect_material(material, color,
-					light_unit_scale(source)));
+					light_unit_scale(source), output.atlas_materials.contains(name)));
 				continue;
 			}
 

@@ -3697,8 +3697,30 @@ struct PromotedScriptModel
 // model path (GPU static-model draw, sun shadows and static collision).
 // Gametype objects, exploders, old-school pickups and linked prefab members
 // remain entities for Replay's own scripts and the glass conversion.
+// Whether every surface of a model is a tool material (shadowcaster): IW7's tag_origin is one
+// model_nodraw triangle. Such a model draws nothing as a static model.
+bool DrawsOnlyTools(const std::filesystem::path &root, const std::string &modelName)
+{
+    const SourceStaticModel model = ReadSourceModel(root, modelName, true);
+    bool any = false;
+    for (const auto &lod : model.lods)
+        for (const Surface &surface : lod.surfaces)
+        {
+            std::error_code error;
+            auto path = SafeChild(root, std::filesystem::path("materials") / (surface.material + ".json"));
+            if (!std::filesystem::is_regular_file(path, error) && surface.material.starts_with("mc/"))
+                path = SafeChild(root, std::filesystem::path("materials") / (surface.material.substr(3) + ".json"));
+            if (!std::filesystem::is_regular_file(path, error) ||
+                ReadJson(path).value("techniqueSet", std::string{}) != "shadowcaster")
+                return false;
+            any = true;
+        }
+    return any;
+}
+
 std::vector<PromotedScriptModel> TakeUnscriptedScriptModels(std::string &text,
-                                                            const std::set<std::string> &scripted)
+                                                            const std::set<std::string> &scripted,
+                                                            const std::filesystem::path &root)
 {
     std::vector<std::pair<std::size_t, std::size_t>> spans;
     const auto entities = ParseEntityFields(text, &spans);
@@ -3708,6 +3730,7 @@ std::vector<PromotedScriptModel> TakeUnscriptedScriptModels(std::string &text,
             targeted.insert(target->second);
     std::vector<PromotedScriptModel> promoted;
     std::vector<std::size_t> removed;
+    std::map<std::string, bool> toolModels;
     for (std::size_t index = 0; index < entities.size(); ++index)
     {
         const auto &entity = entities[index];
@@ -3726,6 +3749,11 @@ std::vector<PromotedScriptModel> TakeUnscriptedScriptModels(std::string &text,
             name && (*name == "exploder" || *name == "oldschool_pickup" ||
                      *name == "destructible" || *name == "interactive_tv" ||
                      targeted.contains(*name) || scripted.contains(*name)))
+            continue;
+        // A model that draws nothing (tag_origin) stays a script model, without surfaces.
+        if (!toolModels.contains(*model))
+            toolModels.emplace(*model, DrawsOnlyTools(root, *model));
+        if (toolModels.at(*model))
             continue;
         PromotedScriptModel placement;
         placement.model = *model;
@@ -4000,7 +4028,18 @@ void BuildPreparedStaticModels(const SourceStaticModels &source, const RenderPla
         staticModel.name = assetName;
         replaybounds::Accumulator modelBounds;
         std::uint32_t surfaceOffset = 0;
-        for (std::size_t lodIndex = 0; lodIndex < sourceModel.lods.size(); ++lodIndex)
+        // A model drawn only by tool surfaces (IW7's tag_origin: one nodraw triangle) keeps no
+        // surface, as stock tag_player does (one LOD without surfaces or XModelSurfs): script
+        // models still take it. A static placement needs a drawn surface.
+        const bool drawn = std::ranges::any_of(sourceModel.lods, [&](const SourceStaticModelLod &lod) {
+            return std::ranges::any_of(lod.surfaces, [&](const Surface &surface) {
+                const auto found = plan.materials.find(surface.material);
+                return found == plan.materials.end() || found->second.kind != SurfaceKind::skipped;
+            });
+        });
+        if (!drawn && (!entityDraw || sourceModel.lods.empty()))
+            throw std::runtime_error("IW3 static model has no visible surfaces: " + sourceModel.name);
+        for (std::size_t lodIndex = 0; drawn && lodIndex < sourceModel.lods.size(); ++lodIndex)
         {
             const SourceStaticModelLod &sourceLod = sourceModel.lods[lodIndex];
             dumpsrc::XseFile xse;
@@ -4266,6 +4305,17 @@ void BuildPreparedStaticModels(const SourceStaticModels &source, const RenderPla
             surfaceOffset += static_cast<std::uint32_t>(converted.surfaces.size());
             prepared.lods.push_back(std::move(converted));
             staticModel.lods.push_back(std::move(staticLod));
+        }
+        if (!drawn)
+        {
+            convert::xmodel::Iw8LodInfo lod;
+            lod.dist = sourceModel.lods.back().distance;
+            prepared.model.lods.push_back(std::move(lod));
+            // Its bounds are those of the tool surfaces (stock tag_player's bone bounds are its nodraw triangle's).
+            modelBounds.Add(Vec3{});
+            for (const Surface &surface : sourceModel.lods.front().surfaces)
+                for (const Vertex &vertex : surface.vertices)
+                    modelBounds.Add(vertex.position);
         }
 
         const replaybounds::Bounds bounds = modelBounds.Finish();
@@ -4713,9 +4763,16 @@ Json BuildGlassPanes(const std::vector<BrushModel> &models, const RenderPlan &pl
             halfHeight * 32.0f > 32767.0f)
             throw std::runtime_error("IW3 glass pane dimensions exceed Replay limits");
 
+        // A pane without a textured face in its plane (one of IW7 Depot's 418 glass pieces)
+        // keeps its brush model, unbroken, as the glass that does not convert does.
         const auto intactFace = BestGlassFaceUv(model, plan, plane, center, true);
         if (!intactFace)
-            throw std::runtime_error("IW3 glass pane has no nondegenerate textured face");
+        {
+            zt::warn("iw3: glass brush model *%u (%.1f x %.1f x %.1f) has no nondegenerate textured face in its plane; "
+                     "it stays an unbreakable brush model",
+                     modelIndex, size[0], size[1], size[2]);
+            continue;
+        }
         const std::string paneMaterial = intactFace->material;
         std::array<float, 4> texVecs{};
         for (std::size_t index = 0; index < texVecs.size(); ++index)
@@ -5269,6 +5326,13 @@ Json BuildRender(const Json &world, const VisibilityGroups &visibility,
             const bool bg = mb.kind == SurfaceKind::glass;
             if (ag != bg)
                 return !ag;
+            // Replay draws blended decals (depth bias: IW7's decal region, IW3's
+            // polygon offset) from its own range before the translucent range
+            // (R_AddAllBspDrawSurfacesCamera 0x18D19C0): stock Shipment keeps 19
+            // such surfaces between its opaque and translucent ones. In the
+            // translucent range they depth-fought the wall under them.
+            if (ag && ma.depthBias != mb.depthBias)
+                return ma.depthBias;
             // Blended world layers share a few materials and one sort key, and
             // Replay draws its translucent range in surface order: keep IW3's
             // layer order (rank = IW3 sort - 8, flags bits 12-17).
@@ -5376,6 +5440,7 @@ Json BuildRender(const Json &world, const VisibilityGroups &visibility,
                                               {"atlasVertexLayout", nativeWorld ? 1u : 3u},
                                               {"lightmapIndex", 0u},
                                               {"opaque", material.kind == SurfaceKind::opaque},
+                                              {"decal", material.kind == SurfaceKind::glass && material.depthBias},
                                               {"sunShadowMask", material.castsShadow ? sunShadowMask : 0u},
                                               {"reflectionProbe", surface.reflectionProbe},
                                               {"materialParameters", material.environment}});
@@ -9441,15 +9506,58 @@ PreparedMap PrepareFastfile(const ImportOptions &options)
         result.gradingClutName = "mw120r_" + options.map + "_clut";
         result.gradingClutPixels = BuildGradingClutPixels(*film);
     }
+    // An IW7 extraction carries its vision's colour grading lookup table.
+    else if (const auto clut = world.find("grading_clut"); clut != world.end() && clut->is_object())
+    {
+        const auto size = clut->at("size").get<unsigned>();
+        std::vector<std::uint8_t> rgba;
+        if (!zt::read_file(SafeChild(exportRoot, clut->at("file").get<std::string>()).string(), rgba))
+            throw std::runtime_error("cannot read the extraction's colour grading lookup table");
+        result.gradingClutName = "mw120r_" + options.map + "_clut";
+        result.gradingClutPixels = BuildGradingClutPixels(rgba, size);
+        zt::info("iw3: colour grading from the extraction's %u^3 lookup table %s", size,
+                 clut->at("file").get<std::string>().c_str());
+    }
+    // An IW7 extraction carries its map's vision fog (IW7's fields, as Replay names them).
+    std::optional<NativeFog> nativeFog;
+    if (const auto fog = world.find("fog"); fog != world.end() && fog->is_object())
+    {
+        const auto vector = [&](const char *key, std::array<float, 3> &value) {
+            if (const auto &entry = fog->at(key); entry.is_array() && entry.size() == 3)
+                for (std::size_t axis = 0; axis < 3; ++axis)
+                    value[axis] = entry[axis].get<float>();
+        };
+        NativeFog value;
+        value.density = fog->at("density").get<float>();
+        value.start = fog->at("start").get<float>();
+        vector("color", value.color);
+        value.colorIntensity = fog->at("color_intensity").get<float>();
+        value.maxOpacity = fog->at("max_opacity").get<float>();
+        value.sunDensity = fog->at("sun_density").get<float>();
+        vector("sun_color", value.sunColor);
+        value.sunColorIntensity = fog->at("sun_color_intensity").get<float>();
+        value.sunBeginFadeAngle = fog->at("sun_begin_fade_angle").get<float>();
+        value.sunEndFadeAngle = fog->at("sun_end_fade_angle").get<float>();
+        vector("sun_dir", value.sunDirection);
+        value.skyIntensity = fog->at("sky_intensity").get<float>();
+        value.skyMinAngle = fog->at("sky_min_angle").get<float>();
+        value.skyMaxAngle = fog->at("sky_max_angle").get<float>();
+        if (expFog)
+            throw std::runtime_error("the map has both a setExpFog and a native vision fog");
+        nativeFog = value;
+        zt::info("iw3: native fog: halfway %g from %g, colour (%g %g %g) x %g, max opacity %g, sky %g", value.density,
+                 value.start, value.color[0], value.color[1], value.color[2], value.colorIntensity, value.maxOpacity,
+                 value.skyIntensity);
+    }
     {
         const std::string vision = BuildReplayVision(expFog, result.gradingClutName, options.style,
                                                      SunDirection(world, entities), lightingMatch.exposure,
-                                                     lightingMatch.lightUnitScale);
+                                                     lightingMatch.lightUnitScale, nativeFog);
         result.rawFiles.push_back(
             {"vision/" + options.map + ".vision",
              std::vector<std::uint8_t>(vision.begin(), vision.end())});
         zt::info("iw3: converted vision (%s lighting, fog %s, grading CLUT %s)",
-                 options.style == MapStyle::iw8 ? "iw8" : "iw3", expFog ? "yes" : "no",
+                 options.style == MapStyle::iw8 ? "iw8" : "iw3", expFog ? "yes" : nativeFog ? "native" : "no",
                  result.gradingClutName.empty() ? "none" : result.gradingClutName.c_str());
     }
     {
@@ -9888,7 +9996,7 @@ PreparedMap PrepareFastfile(const ImportOptions &options)
             zt::warn("iw3: map scripts were not translated: %s", error.what());
         }
     }
-    AddPromotedStaticModels(world, exportRoot, TakeUnscriptedScriptModels(entities, scriptStrings),
+    AddPromotedStaticModels(world, exportRoot, TakeUnscriptedScriptModels(entities, scriptStrings, exportRoot),
                             sourceStaticModels);
     timing.lap("read world");
     SourceStaticModels sourceEntityModels;
@@ -10387,7 +10495,7 @@ PreparedMap PrepareFastfile(const ImportOptions &options)
                             shadowModelMaterialNames, options.searchPaths, mapDirectory,
                             options.map, options.scratchRoot / ".iw3-render-cache",
                             FogShaderDefines(expFog, options.style, ReadMapSun(exportRoot, sourceMap),
-                                             lightingMatch.lightUnitScale),
+                                             lightingMatch.lightUnitScale, nativeFog),
                             static_cast<unsigned>(sourceStaticModels.instances.size()),
                             entityLightVolume ? &*entityLightVolume : nullptr,
                             lightingMatch.lightUnitScale, options.style == MapStyle::iw3);

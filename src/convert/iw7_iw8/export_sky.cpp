@@ -2,6 +2,8 @@
 #include "export.hpp"
 #include "images.hpp"
 
+#include <utils/compression.hpp>
+
 #include <numeric>
 
 namespace zonetool::convert::iw7_iw8
@@ -347,6 +349,218 @@ namespace zonetool::convert::iw7_iw8
 		return clamped <= 0.0031308f ? clamped * 12.92f : 1.055f * std::pow(clamped, 1.0f / 2.4f) - 0.055f;
 	}
 
+	namespace
+	{
+		// The text of a raw file that the loaded zones hold, or nothing.
+		std::string raw_file(const source_map& source, const std::string& name)
+		{
+			const auto* raw = static_cast<const iw7::RawFile*>(source.find(iw7::ASSET_TYPE_RAWFILE, name));
+			if (!raw || !raw->buffer || raw->len <= 0)
+			{
+				return {};
+			}
+
+			return raw->compressedLen > 0 ? utils::compression::zlib::decompress(std::string(raw->buffer, raw->compressedLen))
+				: std::string(raw->buffer, raw->len);
+		}
+
+		// The sky's colour scale: IW7's sky shader multiplies the cube map by r_hdrSkyIntensity times r_hdrSkyColorTint
+		// (w_sky PS: cb2[11]), which the map's vision file sets (10 on Scorch, 2.3 on Frontier).
+		vec3 sky_color_scale(const source_map& source)
+		{
+			const auto vision = vision_settings(source);
+			vec3 tint{1.0f, 1.0f, 1.0f};
+			auto intensity = 1.0f;
+			if (const auto found = vision.find("r_hdrSkyIntensity"); found != vision.end())
+			{
+				std::istringstream(found->second) >> intensity;
+			}
+
+			if (const auto found = vision.find("r_hdrSkyColorTint"); found != vision.end())
+			{
+				std::istringstream(found->second) >> tint[0] >> tint[1] >> tint[2];
+			}
+
+			return {tint[0] * intensity, tint[1] * intensity, tint[2] * intensity};
+		}
+
+		// The forward, left and up axes of the sky's rotation: worldspawn key 0x102A4 (it has no name in the token list),
+		// the angles that IW7's sky shader turns view directions back by before it samples the cube map (w_sky VS: cb2
+		// rows 12-14, CONST_SRC_CODE_SKY_ROTATION_MATRIX_INVERSE). Inferred from Scorch, the only map with it ("0 167 0"):
+		// its cube map paints the sun at azimuth -1.2 degrees, which the rotation turns to 165.8 degrees, where the map
+		// places its sun effect (164 degrees from the playing area, at the same 48 degree elevation).
+		std::array<vec3, 3> sky_axes(const source_map& source)
+		{
+			std::array<float, 3> angles{};
+			const auto* map_ents = source.map_ents();
+			if (map_ents && map_ents->entityString)
+			{
+				// The worldspawn is the first entity.
+				const std::string_view entities(map_ents->entityString, strnlen(map_ents->entityString, map_ents->numEntityChars));
+				const auto first = entities.substr(0, entities.find('}'));
+				constexpr std::string_view key = "\n66212 \"";
+				if (const auto found = first.find(key); found != std::string_view::npos)
+				{
+					const auto start = found + key.size();
+					std::istringstream(std::string(first.substr(start, first.find('"', start) - start))) >> angles[0] >> angles[1]
+						>> angles[2];
+				}
+			}
+
+			constexpr auto radians = std::numbers::pi_v<float> / 180.0f;
+			const auto sp = std::sin(angles[0] * radians), cp = std::cos(angles[0] * radians);
+			const auto sy = std::sin(angles[1] * radians), cy = std::cos(angles[1] * radians);
+			const auto sr = std::sin(angles[2] * radians), cr = std::cos(angles[2] * radians);
+			return {{{cp * cy, cp * sy, -sp}, {sr * sp * cy - cr * sy, sr * sp * sy + cr * cy, sr * cp},
+				{cr * sp * cy + sr * sy, cr * sp * sy - sr * cy, cr * cp}}};
+		}
+
+		// The colour of a cube map (faces of linear RGBA texels) along a direction, filtered bilinearly within its face.
+		color sample_cube(const std::vector<DirectX::ScratchImage>& faces, const vec3& direction)
+		{
+			auto best = 0u;
+			for (auto f = 1u; f < cube_faces.size(); f++)
+			{
+				if (dot(direction, cube_faces[f].w) > dot(direction, cube_faces[best].w))
+				{
+					best = f;
+				}
+			}
+
+			const auto& face = cube_faces[best];
+			const auto size = static_cast<int>(faces[best].GetMetadata().width);
+			const auto w = dot(direction, face.w);
+			const auto x = (dot(direction, face.u) / w + 1.0f) * 0.5f * static_cast<float>(size) - 0.5f;
+			const auto y = (dot(direction, face.v) / w + 1.0f) * 0.5f * static_cast<float>(size) - 0.5f;
+			const auto x0 = static_cast<int>(std::floor(x));
+			const auto y0 = static_cast<int>(std::floor(y));
+			const auto fx = x - static_cast<float>(x0);
+			const auto fy = y - static_cast<float>(y0);
+			const auto* texels = reinterpret_cast<const float*>(faces[best].GetPixels());
+			color result{};
+			for (auto k = 0; k < 4; k++)
+			{
+				const auto tx = std::clamp(x0 + (k & 1), 0, size - 1);
+				const auto ty = std::clamp(y0 + (k >> 1), 0, size - 1);
+				const auto weight = ((k & 1) ? fx : 1.0f - fx) * ((k >> 1) ? fy : 1.0f - fy);
+				for (auto c = 0; c < 4; c++)
+				{
+					result[c] += texels[(static_cast<std::size_t>(ty) * size + tx) * 4 + c] * weight;
+				}
+			}
+
+			return result;
+		}
+	}
+
+	std::map<std::string, std::string> vision_settings(const source_map& source)
+	{
+		std::map<std::string, std::string> result;
+		std::istringstream vision(raw_file(source, "vision/" + source.name() + ".vision"));
+		for (std::string line; std::getline(vision, line);)
+		{
+			std::istringstream fields(line);
+			std::string key;
+			std::string value;
+			if (fields >> key >> std::quoted(value))
+			{
+				result[key] = value;
+			}
+		}
+
+		return result;
+	}
+
+	json export_fog(const source_map& source)
+	{
+		const auto vision = vision_settings(source);
+		if (vision.empty())
+		{
+			return nullptr;
+		}
+
+		const auto scalar = [&](const char* key, const float fallback)
+		{
+			auto value = fallback;
+			if (const auto found = vision.find(key); found != vision.end())
+			{
+				std::istringstream(found->second) >> value;
+			}
+
+			return value;
+		};
+
+		const auto vector = [&](const char* key, const vec3& fallback)
+		{
+			auto value = fallback;
+			if (const auto found = vision.find(key); found != vision.end())
+			{
+				std::istringstream(found->second) >> value[0] >> value[1] >> value[2];
+			}
+
+			return json::array({value[0], value[1], value[2]});
+		};
+
+		// IW7 fogs as Replay does (setExpFog's IW6 fields: fogDensity is the halfway distance); the colours are in IW7's
+		// light units, which the converted lights take to a sun of luminance 1.
+		const auto scale = light_unit_scale(source);
+		return
+		{
+			{"density", scalar("fogDensity", 70000.0f)},
+			{"start", scalar("fogStartDist", 0.0f)},
+			{"color", vector("fogColor", {1.0f, 1.0f, 1.0f})},
+			{"color_intensity", scalar("fogColorIntensity", 1.0f) * scale},
+			{"max_opacity", scalar("fogMaxOpacity", 0.0f)},
+			{"sun_density", scalar("fogSunDensity", 70000.0f)},
+			{"sun_color", vector("fogSunColor", {1.0f, 1.0f, 1.0f})},
+			{"sun_color_intensity", scalar("fogSunColorIntensity", 1.0f) * scale},
+			{"sun_begin_fade_angle", scalar("fogSunBeginFadeAngle", 0.0f)},
+			{"sun_end_fade_angle", scalar("fogSunEndFadeAngle", 360.0f)},
+			{"sun_dir", vector("fogSunDir", {1.0f, 0.0f, 0.0f})},
+			{"sky_intensity", scalar("fogSkyIntensity", 0.0f)},
+			{"sky_min_angle", scalar("fogSkyMinAngle", 0.0f)},
+			{"sky_max_angle", scalar("fogSkyMaxAngle", 90.0f)},
+		};
+	}
+
+	json export_grading_clut(const source_map& source, const extraction& output)
+	{
+		// The vision's colour grading lookup table (clut0Image: Scorch's mp_divide_clut, 32^3 RGBA8, red along x, green
+		// along y, blue along z), written as its texels for the pipeline's Replay grading CLUT.
+		const auto vision = vision_settings(source);
+		const auto found = vision.find("clut0Image");
+		if (found == vision.end() || found->second.empty())
+		{
+			return nullptr;
+		}
+
+		const auto* image = static_cast<const iw7::GfxImage*>(source.find(iw7::ASSET_TYPE_IMAGE, found->second));
+		const auto size = image ? static_cast<std::size_t>(image->width) : 0u;
+		const auto bytes = size * size * size * 4;
+		if (!image || image->mapType != iw7::MAPTYPE_3D || image->height != size || image->depth != size || size < 2 ||
+			(image->imageFormat != DXGI_FORMAT_R8G8B8A8_UNORM && image->imageFormat != DXGI_FORMAT_R8G8B8A8_UNORM_SRGB) ||
+			image->streamed || !image->pixelData || image->dataLen1 < bytes)
+		{
+			ZONETOOL_WARNING("iw7: the vision's colour grading table \"%s\" does not convert (%s)", found->second.data(),
+				image ? std::format("map type {}, format {}, {}x{}x{}, {} bytes{}", static_cast<int>(image->mapType),
+					static_cast<int>(image->imageFormat), image->width, image->height, image->depth, image->dataLen1,
+					image->streamed ? ", streamed" : "").data() : "not in the loaded zones");
+			return nullptr;
+		}
+
+		const auto file = std::filesystem::path("images") / (file_name(found->second) + ".clut.rgba");
+		std::filesystem::create_directories((output.extracted / file).parent_path());
+		std::ofstream stream(output.extracted / file, std::ios::binary);
+		stream.write(reinterpret_cast<const char*>(image->pixelData), static_cast<std::streamsize>(bytes));
+		if (!stream)
+		{
+			throw std::runtime_error(std::format("cannot write {}", (output.extracted / file).string()));
+		}
+
+		ZONETOOL_INFO("iw7: colour grading table \"%s\" (%zu^3)", found->second.data(), size);
+		return {{"file", file.generic_string()}, {"size", size}};
+	}
+
 	std::string export_sky(const source_map& source, extraction& output)
 	{
 		const auto& world = *source.world();
@@ -387,15 +601,55 @@ namespace zonetool::convert::iw7_iw8
 			std::ranges::nth_element(luminances, bright);
 			const auto exposure = light_unit_scale(source);
 
+			// IW7 draws the cube map turned by the sky's rotation and scaled by the vision's sky intensity.
+			const auto axes = sky_axes(source);
+			const auto scale = sky_color_scale(source);
+
+			// Then it fogs the sky toward the fog colour by the view's angle from the zenith (the shader takes (1 - z) * pi
+			// / 2 for it), between the vision's sky fog angles and times its sky fog intensity; toward the sun (between the
+			// sun fog's end and begin angles) the colour turns to the sun fog colour (w_sky PS: cb2 rows 0-4). The colours
+			// are in the converted units, as the sky's.
+			const auto fog = export_fog(source);
+			const auto sky_fog = [&](const vec3& view, color& value)
+			{
+				if (!fog.is_object() || fog["sky_intensity"].get<float>() <= 0.0f)
+				{
+					return;
+				}
+
+				constexpr auto radians = std::numbers::pi_v<float> / 180.0f;
+				const auto direction = normalized(view);
+				const auto minimum = fog["sky_min_angle"].get<float>() * radians;
+				const auto maximum = fog["sky_max_angle"].get<float>() * radians;
+				const auto amount = std::clamp(((1.0f - direction[2]) * std::numbers::pi_v<float> * 0.5f - minimum) /
+					std::max(maximum - minimum, 1e-4f), 0.0f, 1.0f) * fog["sky_intensity"].get<float>();
+				const auto sun = normalized({fog["sun_dir"][0].get<float>(), fog["sun_dir"][1].get<float>(), fog["sun_dir"][2].get<float>()});
+				const auto end = std::cos(std::min(fog["sun_end_fade_angle"].get<float>(), 180.0f) * radians);
+				const auto begin = std::cos(std::min(fog["sun_begin_fade_angle"].get<float>(), 180.0f) * radians);
+				const auto toward = std::clamp((dot(direction, sun) - end) / std::max(begin - end, 1e-4f), 0.0f, 1.0f);
+				for (auto c = 0; c < 3; c++)
+				{
+					const auto plain = fog["color"][c].get<float>() * fog["color_intensity"].get<float>();
+					const auto sunward = fog["sun_color"][c].get<float>() * fog["sun_color_intensity"].get<float>();
+					value[c] += (plain + (sunward - plain) * toward - value[c]) * amount;
+				}
+			};
 			sky_faces sky{size};
 			for (auto face = 0u; face < 6; face++)
 			{
-				const auto* colors = reinterpret_cast<const float*>(faces[face].GetPixels());
+				const auto& axis = cube_faces[face];
 				sky.colors[face].resize(texels);
 				sky.depths[face].assign(texels, 0.0f);
 				for (std::size_t t = 0; t < texels; t++)
 				{
-					sky.colors[face][t] = {colors[t * 4] * exposure, colors[t * 4 + 1] * exposure, colors[t * 4 + 2] * exposure, 1.0f};
+					const auto a = (static_cast<float>(t % size) + 0.5f) / static_cast<float>(size) * 2.0f - 1.0f;
+					const auto b = (static_cast<float>(t / size) + 0.5f) / static_cast<float>(size) * 2.0f - 1.0f;
+					const vec3 view{axis.w[0] + a * axis.u[0] + b * axis.v[0], axis.w[1] + a * axis.u[1] + b * axis.v[1],
+						axis.w[2] + a * axis.u[2] + b * axis.v[2]};
+					const auto sample = sample_cube(faces, {dot(view, axes[0]), dot(view, axes[1]), dot(view, axes[2])});
+					sky.colors[face][t] = {sample[0] * exposure * scale[0], sample[1] * exposure * scale[1],
+						sample[2] * exposure * scale[2], 1.0f};
+					sky_fog(view, sky.colors[face][t]);
 				}
 			}
 
@@ -432,8 +686,9 @@ namespace zonetool::convert::iw7_iw8
 				throw std::runtime_error(std::format("cannot write {}", path.string()));
 			}
 
-			ZONETOOL_INFO("iw7: sky \"%s\": %zux%zu faces, mean luminance %g, 99.9th percentile %g, exposure %g", image->name, size,
-				size, mean, *bright, exposure);
+			ZONETOOL_INFO("iw7: sky \"%s\": %zux%zu faces, mean luminance %g, 99.9th percentile %g, exposure %g, intensity %g %g %g, "
+				"rotation forward %g %g %g", image->name, size, size, mean, *bright, exposure, scale[0], scale[1], scale[2], axes[0][0],
+				axes[0][1], axes[0][2]);
 			return name;
 		}
 

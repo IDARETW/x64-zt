@@ -1434,8 +1434,23 @@ float4 main(Input input) : SV_TARGET0 {
     // ln2 / halfway. The sky is not fogged in IW3.
     float fogFactor = 1;
 #if defined(MAP_FOG) && MAP_DEBUG_MODE == 0
+#if defined(MAP_FOG_LINEAR)
+    // IW7 fog (its lit effect PS, vertcol_simple_fog_vol): the fog of its halfway distance and the
+    // fog of its sun halfway distance, each covering at most the maximum opacity, lerped toward the
+    // sun (between the end and begin fade angles); the colour lerps the same way.
+    float fogSun = saturate((dot(normalize(input.relativePosition), MAP_FOG_SUN_DIR) - MAP_FOG_SUN_FADE.x) *
+                            MAP_FOG_SUN_FADE.y);
+    if (!sky)
+    {
+        float fogDistance = length(input.relativePosition) - MAP_FOG_START;
+        float fogPlain = max(saturate(exp(-MAP_FOG_DENSITY * fogDistance)), 1 - MAP_FOG_MAX_OPACITY);
+        float fogSunward = max(saturate(exp(-MAP_FOG_SUN_DENSITY * fogDistance)), 1 - MAP_FOG_MAX_OPACITY);
+        fogFactor = lerp(fogPlain, fogSunward, fogSun);
+    }
+#else
     if (!sky)
         fogFactor = saturate(exp(-MAP_FOG_DENSITY * (length(input.relativePosition) - MAP_FOG_START)));
+#endif
 #endif
     // IW3 falloff (1024; vertcol_simple_fog_foa, zfeather_foa_nf_eo):
     // f = saturate((N.V)^2 * parms.x + parms.y), colour *= f *
@@ -1465,12 +1480,18 @@ float4 main(Input input) : SV_TARGET0 {
         return float4(min(color * alpha * fogFactor * MAP_LIGHT_UNIT_SCALE * replayLighting[42].x, 32255.0),
                       alpha);
 #if defined(MAP_FOG) && MAP_DEBUG_MODE == 0
+#if defined(MAP_FOG_LINEAR)
+    // IW7 blends toward its HDR fog colour in linear light.
+    if (!sky)
+        color = lerp(lerp(MAP_FOG_COLOR, MAP_FOG_SUN_COLOR, fogSun), color, fogFactor);
+#else
     // Blended toward the fog colour in CoD4's gamma-encoded framebuffer.
     if (!sky)
     {
         float3 encoded = pow(max(color, 0), 1.0 / 2.2);
         color = pow(lerp(MAP_FOG_COLOR, encoded, fogFactor), 2.2);
     }
+#endif
 #endif
     if (iw8Window)
         reflection += specular;

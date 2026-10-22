@@ -1549,15 +1549,22 @@ Mesh Load(const std::string &path)
                             return type == 0;
                         });
         const bool opaque = s.value("opaque", false) || !material || sky || maskedPrepass;
+        const bool decal = !opaque && s.value("decal", false);
         const unsigned modelRelativeSurface = i - m.brushModels[activeModel].firstSurface;
         if (opaque && opaqueInModel != modelRelativeSurface)
             throw std::runtime_error("Opaque surfaces must precede transparent surfaces");
+        // Replay's three world ranges (R_AddAllBspDrawSurfacesCamera 0x18D19C0): opaque,
+        // then the lit decals (their own draw list), then the translucent surfaces.
+        if (decal && activeModel == 0 && m.opaqueCount + m.decalCount != i)
+            throw std::runtime_error("Decal surfaces must precede translucent surfaces");
         if (opaque)
         {
             ++opaqueInModel;
             if (activeModel == 0)
                 ++m.opaqueCount;
         }
+        else if (decal && activeModel == 0)
+            ++m.decalCount;
         m.surfaceMaterials.push_back(material);
         if (vertices.size() < 3 || vertices.size() > 65535 || indices.empty() ||
             indices.size() % 3 || indices.size() / 3 > 65535)
@@ -1753,11 +1760,14 @@ void StampWorld(std::vector<uint8_t> &w, const Mesh &m)
         return;
     put(w.data(), 0xC8, m.count);
     put(w.data(), 0xCC, m.count);
-    // Replay 18D19C0: opaque D0/D4, decal D8/DC, translucent E0/E4.
+    // Replay 18D19C0: opaque D0/D4, decal D8/DC, translucent E0/E4 (stock Shipment:
+    // 0..1015, 1015..1034, 1034..1039; the emissive range E8/EC stays empty).
     for (size_t off = 0xD4; off <= 0xEC; off += 4)
         put(w.data(), off, m.worldSurfaceCount());
-    for (size_t off : {0xD4, 0xD8, 0xDC, 0xE0})
+    for (size_t off : {0xD4, 0xD8})
         put(w.data(), off, m.opaqueCount);
+    for (size_t off : {0xDC, 0xE0})
+        put(w.data(), off, m.opaqueCount + m.decalCount);
     for (size_t off : {0xF0, 0xF8, 0x100, 0x108})
         put(w.data(), off, PTR_FOLLOWS);
     put(w.data(), 0x3F9C, m.words());

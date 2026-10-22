@@ -221,8 +221,11 @@ void writeXModel(ZoneWriter &zw, const cx::Iw8XModelRecord &rec)
     float previousDistance = 0;
     for (const auto &lod : rec.lods)
     {
-        if (!std::isfinite(lod.dist) || lod.dist < previousDistance || !lod.numsurfs ||
-            lod.surfsName.empty() || size_t(lod.surfIndex) + lod.numsurfs > rec.numsurfs)
+        // A model without surfaces (stock tag_player) has LODs without surfaces or XModelSurfs.
+        const bool empty = !rec.numsurfs && !lod.numsurfs && lod.surfsName.empty();
+        if (!std::isfinite(lod.dist) || lod.dist < previousDistance ||
+            (!empty && (!lod.numsurfs || lod.surfsName.empty())) ||
+            size_t(lod.surfIndex) + lod.numsurfs > rec.numsurfs)
             throw std::runtime_error("writeXModel: invalid LOD for " + rec.name);
         previousDistance = lod.dist;
     }

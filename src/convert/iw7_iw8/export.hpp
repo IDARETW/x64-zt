@@ -36,6 +36,11 @@ namespace zonetool::convert::iw7_iw8
 		std::set<std::string> glass_materials;
 		// The materials of effects, which convert as the pipeline's effect materials.
 		std::set<std::string> effect_materials;
+		// The effect materials that particles with an atlas module draw. IW7 gives each particle its texture rectangle from
+		// its atlas module (the particle vertex shader reads the rectangle from the particle data), so a particle without one
+		// draws the whole texture: Scorch's sun body and glow are single images in materials of a 4x2 atlas. Replay's atlas
+		// techniques cut every particle to an atlas cell, so the other effect materials convert without an atlas.
+		std::set<std::string> atlas_materials;
 		// The world materials of particle decals, which convert as the pipeline's decal materials (Replay decal volumes).
 		std::set<std::string> decal_materials;
 		// IW7's light-grid intensity tweak, which the map script sets (r_lightGridEnableTweaks, r_lightGridIntensity: 1.33 on
@@ -296,6 +301,14 @@ namespace zonetool::convert::iw7_iw8
 	std::string export_default_probe(extraction& output);
 	// Writes the sky cube map of the world and returns its image name, or an empty name (the pipeline's dark sky).
 	std::string export_sky(const source_map& source, extraction& output);
+	// The settings of the map's vision file (vision/<map>.vision, a raw file of the map zone) by name, values unquoted.
+	std::map<std::string, std::string> vision_settings(const source_map& source);
+	// The map's fog for the pipeline's world export: IW7's vision fog fields, which Replay's vision has under the same
+	// names, with the colour intensities in the units of the converted lights. Null without a vision file.
+	json export_fog(const source_map& source);
+	// Writes the vision's colour grading lookup table into the extraction; returns its file and size for the world
+	// export, or null.
+	json export_grading_clut(const source_map& source, const extraction& output);
 
 	// Writes the sun file of the extraction from the world's sun flare data.
 	void export_sun(const source_map& source, extraction& output);

@@ -1563,9 +1563,12 @@ int writeMapPackage(const Args &args, const std::string &map, const std::string 
         auto baked = bakeSunShadow(1.0f, nullptr);
         if (!baked)
             baked = bakeSunShadow(2.0f, nullptr);
-        if (!baked && compassBounds)
+        // The crops: the minimap region with a 4096-unit margin, then (IW7 Depot: 112 MB) a 2048-unit
+        // one. Replay's format takes one or two units per texel (the shipped values).
+        for (const auto &[margin, sampleSize] : {std::pair{4096.0f, 2.0f}, std::pair{2048.0f, 2.0f}})
         {
-            constexpr float margin = 4096.0f;
+            if (baked || !compassBounds)
+                break;
             replaybounds::Bounds focus = renderMesh.sceneBounds;
             const float minX = std::min(compassBounds->northwestX, compassBounds->southeastX) - margin;
             const float maxX = std::max(compassBounds->northwestX, compassBounds->southeastX) + margin;
@@ -1577,7 +1580,7 @@ int writeMapPackage(const Args &args, const std::string &map, const std::string 
             focus.halfSize[1] = (maxY - minY) * 0.5f;
             info("sun-shadow: baking only casters that shadow the minimap region +%.0f units "
                  "(%.0f..%.0f, %.0f..%.0f)", margin, minX, maxX, minY, maxY);
-            baked = bakeSunShadow(2.0f, &focus);
+            baked = bakeSunShadow(sampleSize, &focus);
         }
         if (!baked)
             throw std::runtime_error("compressed sun-shadow does not fit the native format even at two "
