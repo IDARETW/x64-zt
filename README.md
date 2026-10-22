@@ -40,7 +40,7 @@ Rows are the source game. Columns are the target game.
 - **IW7 → H1** converts images, materials and models only
 - **H1 → S2** and **S1 → S2** are experiments done for map assets (world, collision, map ents), models, materials and images. effects, sounds, animations, scriptables and weapons are not converted yet
 - **IW3 → IW8** converts whole multiplayer maps into Replay 1.20 zones: the world with its lightmaps, light grid, probes, sky, fog and sun shadows, collision (Havok data built natively), static and entity models, materials and images, local lights, effects, sounds, breakable glass, bot navigation, the minimap and the map scripts (translated to IW8 GSC)
-- **IW7 → IW8** converts multiplayer maps the same way: IW7's world, collision, models, materials, lightmaps, probes, sky, lights, glass, effects (module by module), map sounds, map scripts and scriptables (breaking props, animated props) become an extraction that the IW3 → IW8 pipeline builds. Tested on Frontier and Breakneck, still in progress
+- **IW7 → IW8** converts multiplayer maps the same way: IW7's world, collision, models, materials, lightmaps, probes, sky, lights, glass, effects (module by module), map sounds, map scripts and scriptables (breaking props, animated props) become an extraction that the IW3 → IW8 pipeline builds, with the vision's sky intensity, fog and colour grading. Frontier, Scorch, Depot, Mansion, Parkour, Rally and Breakneck convert and load; still in progress
 
 <details>
 <summary>v1 legend (<code>main</code>), for comparison</summary>
@@ -64,13 +64,30 @@ zonetool.exe -game h1 dumpzone mp_shipment
 
 Run `zonetool.exe` without a command to open the interactive console.
 
-Converting a map to Replay 1.20 (IW3 or IW7 source, see `AGENTS.md` for every option):
+Converting a map to Replay 1.20 (IW3 or IW7 source):
 
 ```bash
 zonetool.exe -game iw7 -path "C:/IW7" dumpzone mp_frontier --target iw8 --map mp_iw7_frontier --replay "E:/IW8/game_dx12_ship_replay.exe" --gsc_tool gsc-tool.exe --acts acts.exe
 ```
 
 The zones go to `output/<map>/`. IW3 maps also need `--unlinker <OpenAssetTools Unlinker.exe>`. `--acts` validates the built zones with Atian tools, and `--metadata <json>` gives the map its id, title and description in the map list.
+
+| Option | Effect |
+|---|---|
+| `--map <id>` | The converted map's name (default: the zone's) |
+| `--replay <exe>` | Replay's executable; its folder gives the stock zones (default: the iw8 game folder) |
+| `--unlinker <exe>` | OpenAssetTools' Unlinker, which reads IW3 zones (IW3 maps only) |
+| `--gsc_tool <exe>` | gsc-tool, which decompiles and compiles the map scripts |
+| `--acts <exe>` | Validates the built zones with Atian tools (loads them through Replay's own readers) |
+| `--metadata <json>` | The map's id, title and description in the map list |
+| `--stock_cache <dir>` | Keeps the stock assets the maps reference between runs |
+| `--style iw3\|iw8` | `iw3` (default) keeps the source's look; `iw8` shows the map in Replay's lighting units with its probes and sun specular (used for IW7 maps) |
+| `--havok native\|native-check\|exe` | Builds the collision natively (default), checks it with the executable, or bakes it with the executable |
+| `--detail_collision 0\|1` | Static models' detail collision (default 1) |
+| `--bc7_images 0\|1` | Block-compresses world and model images (default: IW7 maps do) |
+| `--navigation 0` | Leaves out the bot navigation |
+| `--search_path <dir>` | Another IW3 folder to read map files from |
+| `--dump 1` | Also dumps the built zones (`dump/<zone>/`), which `buildzone` builds again |
 
 | Command | Result |
 |---|---|
