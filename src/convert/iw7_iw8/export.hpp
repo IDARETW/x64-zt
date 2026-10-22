@@ -46,7 +46,8 @@ namespace zonetool::convert::iw7_iw8
 		// IW7's light-grid intensity tweak, which the map script sets (r_lightGridEnableTweaks, r_lightGridIntensity: 1.33 on
 		// Frontier and Breakneck) and Replay lacks: the converted light grid holds it.
 		float light_grid_intensity = 1.0f;
-		// The map script turns IW7's volumetric lighting off (r_volumetrics 0: Frontier): its lights convert without volumetrics.
+		// The map script turns IW7's volumetric lighting off (r_volumetrics 0: Frontier). Logged only: the lights keep their
+		// own volumetric setting and the converted script drops the dvar (export_effects).
 		bool volumetrics = true;
 		// The layers of layered IW7 materials (techsets "..._b1..._b2..."), which convert as materials of their own: by
 		// name in the extraction, the layer (1 to 3) of the material that `materials` holds.
