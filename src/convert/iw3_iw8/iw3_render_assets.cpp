@@ -140,6 +140,9 @@ struct SourceFxMaterial
     // srcalpha/one blending, drawn by the one/one additive family with the
     // colour map premultiplied by its alpha (the same result).
     bool premultiplied{};
+    // An alpha-blended material that the extraction marks lit (IW7's lit effects), drawn through Replay's lit
+    // effect technique when UseLitEffects is on.
+    bool lit{};
     // IW3 zfeather featherParms (x = 1 / depth), falloff (falloffParms .z/.w,
     // begin/end colours) and eye offset (eyeOffsetParms.x).
     std::optional<std::array<float, 4>> feather, falloff, eyeOffset;
@@ -1586,6 +1589,8 @@ std::array<float, 4> FxLiteral(const Json &value, const char *field)
     return result;
 }
 
+bool g_litEffects = false;
+
 SourceFxMaterial ReadFxMaterial(const std::filesystem::path &root,
                                 const std::vector<std::filesystem::path> &sourcePaths,
                                 const std::string &name)
@@ -1661,6 +1666,8 @@ SourceFxMaterial ReadFxMaterial(const std::filesystem::path &root,
     const auto &atlas = source.at("textureAtlas");
     material.rows = atlas.at("rows").get<unsigned>();
     material.columns = atlas.at("columns").get<unsigned>();
+    material.lit = g_litEffects && source.value("lit", false) &&
+                   (material.family == FxMaterialFamily::alpha || material.family == FxMaterialFamily::alphaFeather);
     if (!material.rows || !material.columns || material.rows > 255 || material.columns > 255 ||
         !std::has_single_bit(material.columns) ||
         static_cast<std::uint64_t>(material.rows) * material.columns > 65535)
@@ -3813,6 +3820,10 @@ Json BuildFxMaterialDefinition(const SourceFxMaterial &source)
         "elcq/unlit_6_effect_bad_tca_802_4_0_1_0_0_0_100060023_0_0_3_0_0";
     constexpr std::string_view cloudTechset =
         "elcq/unlit_6_effect_bad_ta0_802_4_0_1_0_0_0_100020023_0_0_2_0_0";
+    // The lit twin of alphaTechset (stock vfx_postfx_bokeh_sharp_sheet_1_lit, techsets_common): its PS samples the
+    // albedo's alpha, lights the particle from the per-particle lighting array and writes a real output alpha.
+    constexpr std::string_view litTechset =
+        "elcq/unlit_6_effect_bad_ta0_802_1004_0_1_0_0_0_10000020b_0_0_2_0_0";
     if (source.family == FxMaterialFamily::decal)
     {
         std::vector<std::uint8_t> info(32);
@@ -3862,6 +3873,53 @@ Json BuildFxMaterialDefinition(const SourceFxMaterial &source)
         Put(constants, offset, index);
         std::memcpy(constants.data() + offset + 4, value.data(), 16);
     };
+    if (source.lit)
+    {
+        // Stock vfx_postfx_bokeh_sharp_sheet_1_lit: albedo at slot 0 (MaterialTextureID_albedoMap) and transmittance at
+        // slot 0x44 (transmittanceMap); constants 9 layerData1 (packed bytes the PS reads from cb3 row 1), 18
+        // absorptionScale (row 2) and the atlas (94, 95). Its shaders read the atlas from vertex rows 9-10 and pixel row
+        // 9 (disassembled VS 372e0e1a / PS a9864c07), so the vertex rows are 176 bytes and the pixel block 160; the
+        // shadow technique's buffer holds the vertex rows and the first 48 pixel bytes, as stock. No tint constant: the
+        // particle colour and the scene's light give the colour.
+        info[0x14] = 2;
+        info[0x15] = 4;
+        info[0x16] = 2;
+        const std::array<std::uint32_t, 4> layerData{0xFFFFFFFFu, 0x00FF17E7u, 0x0000BC00u, 0u};
+        const std::array<float, 4> absorption{1, 1, 1, 1};
+        const std::array<float, 4> atlas{static_cast<float>(source.columns), static_cast<float>(source.rows),
+                                         1.0f / static_cast<float>(source.columns),
+                                         1.0f / static_cast<float>(source.rows)};
+        const std::array<std::uint32_t, 4> atlasBits{
+            source.rows * source.columns, source.columns - 1,
+            static_cast<std::uint32_t>(std::countr_zero(source.columns)), 0u};
+        appendConstant(9u, layerData);
+        appendConstant(18u, absorption);
+        appendConstant(94u, atlas);
+        appendConstant(95u, atlasBits);
+        std::vector<std::uint8_t> vertexConstants(176);
+        std::memcpy(vertexConstants.data() + 144, atlas.data(), 16);
+        std::memcpy(vertexConstants.data() + 160, atlasBits.data(), 16);
+        std::vector<std::uint8_t> pixelConstants(160);
+        std::memcpy(pixelConstants.data() + 16, layerData.data(), 16);
+        std::memcpy(pixelConstants.data() + 32, absorption.data(), 16);
+        std::memcpy(pixelConstants.data() + 144, atlas.data(), 16);
+        std::vector<std::uint8_t> bufferIndices(195, 0xFF);
+        bufferIndices[29] = 0;
+        bufferIndices[30] = 1;
+        return {{"schema", 1},
+                {"source", source.name},
+                {"info", Hex(info)},
+                {"techset", litTechset},
+                {"textures", Json::array({{{"header", "0000000000000000"}, {"image", ""}},
+                                          {{"header", "4400000000000000"}, {"image", ""}}})},
+                {"constants", Hex(constants)},
+                {"bufferIndices", Hex(bufferIndices)},
+                {"buffers", Json::array({Json::array({Hex(vertexConstants), "", "",
+                                                       Hex(std::vector<std::uint8_t>(pixelConstants.begin(),
+                                                                                     pixelConstants.begin() + 48))}),
+                                          Json::array({Hex(vertexConstants), "", "", Hex(pixelConstants)})})},
+                {"imageDefinitions", Json::array()}};
+    }
     if (additive)
     {
         // Native Replay one-image additive contracts carry a target-owned
@@ -3954,6 +4012,11 @@ int g_bc7Images = -1;
 void UseBc7Images(const int mode)
 {
     g_bc7Images = mode;
+}
+
+void UseLitEffects(const bool lit)
+{
+    g_litEffects = lit;
 }
 
 RenderPlan PrepareRenderAssets(const std::filesystem::path &exportRoot, const Json &world,
@@ -5964,7 +6027,15 @@ RenderPlan PrepareRenderAssets(const std::filesystem::path &exportRoot, const Js
             // disassembled): they add the colour. Premultiplied by its alpha, the colour map adds what
             // the alpha blend would; as it was, every texel of alpha above 0 drew at full colour (IW7's
             // debris atlases, whose cells keep alpha 1/255 and their grey, drew as grey squares).
-            if (source.premultiplied || source.family == FxMaterialFamily::alpha ||
+            if (source.lit)
+            {
+                // The lit technique blends by the albedo's alpha; the transmittance is white (absorptionScale 1
+                // then leaves only the front-lit term).
+                residentImage(direct, 0, sourceImage.front(), {1, 1, 1, 1}, "fx");
+                residentImage(direct, 1, SolidImage({255, 255, 255, 255}), {1, 1, 1, 1}, "fxlit", false, nullptr,
+                              true);
+            }
+            else if (source.premultiplied || source.family == FxMaterialFamily::alpha ||
                 source.family == FxMaterialFamily::alphaFeather || source.family == FxMaterialFamily::cloud)
             {
                 Image premultiplied = sourceImage.front();
