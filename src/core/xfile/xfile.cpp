@@ -3,6 +3,7 @@
 
 #include <io/game_files.hpp>
 #include <utils/cryptography.hpp>
+#include <utils/io.hpp>
 
 #include <zlib.h>
 #include <lz4.h>
@@ -412,7 +413,8 @@ namespace zonetool::xfile
 			std::uint32_t version;
 			std::uint8_t compress;
 			std::uint8_t compress_type;
-			std::uint8_t unknown[2];
+			std::uint8_t stream_compress_type;
+			std::uint8_t unknown;
 			std::uint32_t unknown2;
 			std::uint32_t file_time_high;
 			std::uint32_t file_time_low;
@@ -1279,53 +1281,13 @@ namespace zonetool::xfile
 
 		return file;
 	}
+
 	namespace
 	{
 		constexpr std::size_t s2_block_size = 0x10000;
 		constexpr std::uint8_t s2_write_codec = 3;
 		constexpr int s2_lz4_level = 9;
-
-		std::vector<std::string> compress_s2_blocks(const std::string_view payload)
-		{
-			const auto block_count = (payload.size() + s2_block_size - 1) / s2_block_size;
-			std::vector<std::string> blocks(block_count);
-
-			const auto worker_count = std::max(1u, std::min<unsigned>(std::thread::hardware_concurrency(), static_cast<unsigned>(block_count)));
-			std::atomic_size_t next{};
-
-			const auto work = [&]
-			{
-				for (auto index = next++; index < block_count; index = next++)
-				{
-					const auto source = payload.substr(index * s2_block_size, s2_block_size);
-					auto& block = blocks[index];
-					block.resize(LZ4_compressBound(static_cast<int>(source.size())));
-
-					const auto size = LZ4_compress_HC(source.data(), block.data(), static_cast<int>(source.size()),
-						static_cast<int>(block.size()), s2_lz4_level);
-					if (size <= 0)
-					{
-						throw std::runtime_error("lz4 compression failed");
-					}
-
-					block.resize(size);
-				}
-			};
-
-			std::vector<std::thread> workers;
-			for (auto i = 1u; i < worker_count; i++)
-			{
-				workers.emplace_back(work);
-			}
-
-			work();
-			for (auto& worker : workers)
-			{
-				worker.join();
-			}
-
-			return blocks;
-		}
+		constexpr std::uintmax_t s2_stream_batch_size = 0x10000000;
 
 		template <typename T>
 		void append(std::string& output, const T& value)
@@ -1337,9 +1299,158 @@ namespace zonetool::xfile
 		{
 			output.append(reinterpret_cast<const char*>(keys.data()), keys.size() * sizeof(XStreamFileKey));
 		}
+
+		template <typename Work>
+		void run_parallel(const std::size_t count, const Work& work)
+		{
+			const auto worker_count = std::max(1u, std::min<unsigned>(std::thread::hardware_concurrency(), static_cast<unsigned>(count)));
+			std::atomic_size_t next{};
+
+			const auto run = [&]
+			{
+				for (auto index = next++; index < count; index = next++)
+				{
+					work(index);
+				}
+			};
+
+			std::vector<std::thread> workers;
+			for (auto i = 1u; i < worker_count; i++)
+			{
+				workers.emplace_back(run);
+			}
+
+			run();
+			for (auto& worker : workers)
+			{
+				worker.join();
+			}
+		}
+
+		std::size_t s2_block_count(const std::string_view data)
+		{
+			return (data.size() + s2_block_size - 1) / s2_block_size;
+		}
+
+		std::string compress_s2_block(const std::string_view data, const std::size_t index)
+		{
+			const auto source = data.substr(index * s2_block_size, s2_block_size);
+			std::string block(LZ4_compressBound(static_cast<int>(source.size())), '\0');
+
+			const auto size = LZ4_compress_HC(source.data(), block.data(), static_cast<int>(source.size()),
+				static_cast<int>(block.size()), s2_lz4_level);
+			if (size <= 0)
+			{
+				throw std::runtime_error("lz4 compression failed");
+			}
+
+			block.resize(size);
+			return block;
+		}
+
+		std::string make_s2_container(const std::string_view data, const std::vector<std::string>& blocks)
+		{
+			std::string container;
+			append(container, static_cast<std::uint64_t>(data.size()));
+			container.append({0, 0, 1, static_cast<char>(s2_write_codec)});
+			for (std::size_t i = 0; i < blocks.size(); i++)
+			{
+				const auto decompressed_size = std::min(s2_block_size, data.size() - i * s2_block_size);
+				append(container, static_cast<std::uint32_t>(blocks[i].size()));
+				append(container, static_cast<std::uint32_t>(decompressed_size));
+				container.append(blocks[i]);
+				container.append(((blocks[i].size() + 3) & ~std::size_t(3)) - blocks[i].size(), '\0');
+			}
+
+			return container;
+		}
+
+		std::string compress_s2_container(const std::string_view data)
+		{
+			std::vector<std::string> blocks(s2_block_count(data));
+			run_parallel(blocks.size(), [&](const std::size_t index)
+			{
+				blocks[index] = compress_s2_block(data, index);
+			});
+
+			return make_s2_container(data, blocks);
+		}
+
+		std::string compress_s2_stream(const std::string_view data)
+		{
+			std::vector<std::string> blocks(s2_block_count(data));
+			for (std::size_t i = 0; i < blocks.size(); i++)
+			{
+				blocks[i] = compress_s2_block(data, i);
+			}
+
+			return make_s2_container(data, blocks);
+		}
+
+		std::string make_s2_zone(const format& format, const fastfile& file, const std::string_view payload)
+		{
+			const auto container = compress_s2_container(payload);
+
+			s2_file_header header{};
+			std::memcpy(header.magic, format.unsigned_magic.data(), sizeof(header.magic));
+			header.header_version = s2_header_version;
+			header.version = format.version;
+			header.compress = 1;
+			header.compress_type = 2;
+			header.stream_compress_type = 2;
+			header.unknown = 0;
+			header.unknown2 = static_cast<std::uint32_t>(s2_block_size);
+			header.stream_key_count = static_cast<std::uint32_t>(file.stream_keys.size());
+
+			std::string output;
+			append(output, header);
+			append_stream_keys(output, file.stream_keys);
+			append(output, static_cast<std::uint32_t>(file.shared_stream_keys.size()));
+			append_stream_keys(output, file.shared_stream_keys);
+
+			const auto file_size = output.size() + 2 * sizeof(std::uint64_t) + 3 * sizeof(std::uint64_t)
+				+ format.block_count * sizeof(std::uint64_t) + container.size();
+			append(output, static_cast<std::uint64_t>(file_size));
+			append(output, static_cast<std::uint64_t>(file_size));
+			append(output, static_cast<std::uint64_t>(payload.size()));
+			append(output, std::uint64_t{});
+			append(output, static_cast<std::uint64_t>(format.block_count));
+			for (std::size_t i = 0; i < format.block_count; i++)
+			{
+				append(output, i < file.block_sizes.size() ? file.block_sizes[i] : std::uint64_t{});
+			}
+
+			output.append(container);
+			return output;
+		}
+
+		std::size_t next_stream_batch(const std::span<const std::filesystem::path> streams, std::size_t index)
+		{
+			std::uintmax_t size{};
+			while (index < streams.size() && size < s2_stream_batch_size)
+			{
+				size += std::filesystem::file_size(streams[index++]);
+			}
+
+			return index;
+		}
+
+		std::vector<std::string> read_stream_batch(const std::span<const std::filesystem::path> streams)
+		{
+			std::vector<std::string> data(streams.size());
+			for (std::size_t i = 0; i < streams.size(); i++)
+			{
+				if (!utils::io::read_file(streams[i].string(), &data[i]))
+				{
+					throw std::runtime_error(std::format("cannot read \"{}\"", streams[i].string()));
+				}
+			}
+
+			return data;
+		}
 	}
 
-	std::string write_s2(const format& format, const fastfile& file, const std::string_view payload)
+	void write_s2(const std::filesystem::path& path, const format& format, const fastfile& file, const std::string_view payload)
 	{
 		if (format.container != container::s2)
 		{
@@ -1351,51 +1462,50 @@ namespace zonetool::xfile
 			throw std::runtime_error("signed s2 zones are not supported");
 		}
 
-		const auto blocks = compress_s2_blocks(payload);
-
-		std::string container(sizeof(std::uint64_t), '\0');
-		*reinterpret_cast<std::uint64_t*>(container.data()) = payload.size();
-		container.append({0, 0, 1, static_cast<char>(s2_write_codec)});
-		for (std::size_t i = 0; i < blocks.size(); i++)
+		std::filesystem::create_directories(path.parent_path());
+		if (!utils::io::write_file(path.string(), make_s2_zone(format, file, payload)))
 		{
-			const auto decompressed_size = std::min(s2_block_size, payload.size() - i * s2_block_size);
-			append(container, static_cast<std::uint32_t>(blocks[i].size()));
-			append(container, static_cast<std::uint32_t>(decompressed_size));
-			container.append(blocks[i]);
-			container.append(((blocks[i].size() + 3) & ~std::size_t(3)) - blocks[i].size(), '\0');
+			throw std::runtime_error(std::format("cannot write \"{}\"", path.string()));
 		}
-
-		s2_file_header header{};
-		std::memcpy(header.magic, format.unsigned_magic.data(), sizeof(header.magic));
-		header.header_version = s2_header_version;
-		header.version = format.version;
-		header.compress = 1;
-		header.compress_type = 2;
-		header.unknown[0] = 1;
-		header.unknown[1] = 0;
-		header.unknown2 = static_cast<std::uint32_t>(s2_block_size);
-		header.stream_key_count = static_cast<std::uint32_t>(file.stream_keys.size());
-
-		std::string output;
-		append(output, header);
-		append_stream_keys(output, file.stream_keys);
-		append(output, static_cast<std::uint32_t>(file.shared_stream_keys.size()));
-		append_stream_keys(output, file.shared_stream_keys);
-
-		const auto file_size = output.size() + 2 * sizeof(std::uint64_t) + 3 * sizeof(std::uint64_t)
-			+ format.block_count * sizeof(std::uint64_t) + container.size();
-		append(output, static_cast<std::uint64_t>(file_size));
-		append(output, static_cast<std::uint64_t>(file_size));
-		append(output, static_cast<std::uint64_t>(payload.size()));
-		append(output, std::uint64_t{});
-		append(output, static_cast<std::uint64_t>(format.block_count));
-		for (std::size_t i = 0; i < format.block_count; i++)
-		{
-			append(output, i < file.block_sizes.size() ? file.block_sizes[i] : std::uint64_t{});
-		}
-
-		output.append(container);
-		return output;
 	}
 
+	std::vector<stream_location> write_s2_pak(const std::filesystem::path& path, const std::string_view header,
+		const std::span<const std::filesystem::path> streams)
+	{
+		std::filesystem::create_directories(path.parent_path());
+		std::ofstream output(path, std::ios::binary | std::ios::trunc);
+		output.write(header.data(), header.size());
+
+		std::vector<stream_location> locations;
+		locations.reserve(streams.size());
+
+		std::uint64_t offset = header.size();
+		for (std::size_t first = 0; first < streams.size();)
+		{
+			const auto batch = streams.subspan(first, next_stream_batch(streams, first) - first);
+			const auto data = read_stream_batch(batch);
+
+			std::vector<std::string> entries(batch.size());
+			run_parallel(entries.size(), [&](const std::size_t index)
+			{
+				entries[index] = compress_s2_stream(data[index]);
+			});
+
+			for (const auto& entry : entries)
+			{
+				locations.emplace_back(offset, static_cast<std::uint32_t>(entry.size()));
+				output.write(entry.data(), entry.size());
+				offset += entry.size();
+			}
+
+			first += batch.size();
+		}
+
+		if (!output)
+		{
+			throw std::runtime_error(std::format("cannot write \"{}\"", path.string()));
+		}
+
+		return locations;
+	}
 }

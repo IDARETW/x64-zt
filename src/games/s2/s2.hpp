@@ -87,7 +87,6 @@ namespace zonetool::s2
 	const char* type_to_string(XAssetType type);
 	std::int32_t type_to_int(const std::string& type);
 	bool is_valid_asset_type(const std::string& type);
-	void set_zone_key_folder(const std::filesystem::path& folder);
 }
 
 #include "assets/asset_base.hpp"
@@ -105,8 +104,10 @@ namespace zonetool::s2
 #include "assets/xmodelsurfs.hpp"
 #include "assets/skeletonscript.hpp"
 #include "assets/xmodel.hpp"
+#include "assets/xmodel_cast.hpp"
 #include "assets/fx.hpp"
 #include "assets/xanim.hpp"
+#include "assets/xanim_cast.hpp"
 #include "assets/tracerdef.hpp"
 #include "assets/leaderboard.hpp"
 #include "assets/ddl.hpp"
