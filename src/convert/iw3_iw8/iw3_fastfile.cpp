@@ -3388,12 +3388,11 @@ unsigned MaterialIndex(const RenderPlan &plan, const MaterialPlan &material,
         material.worldWater < 0)
         return 0;
     const std::string suffix = material.worldWater >= 0 ? "_water" + std::to_string(material.worldWater)
+                               : material.kind == SurfaceKind::glass ? "_" + GlassVariantKind(material)
                                : material.worldDetail >= 0 ? "_detail" + std::to_string(material.worldDetail)
                                : material.kind == SurfaceKind::opaque ? "_opaque_bias"
-                               : material.kind == SurfaceKind::cutout
-                                   ? "_" + CutoutVariantKind(material)
-                               : material.kind == SurfaceKind::glass ? "_" + GlassVariantKind(material)
-                                                                     : "_sky";
+                               : material.kind == SurfaceKind::cutout ? "_" + CutoutVariantKind(material)
+                                                                      : "_sky";
     for (std::size_t index = 0; index < plan.additionalMaterials.size(); ++index)
         if (plan.additionalMaterials[index].at("material").get<std::string>().ends_with(suffix))
             return static_cast<unsigned>(index + 1);
@@ -10576,6 +10575,13 @@ PreparedMap PrepareFastfile(const ImportOptions &options)
                       grid->minimum[2], grid->dims[0], grid->dims[1], grid->dims[2], grid->width,
                       grid->paletteStart, presetStart, presetCount);
         entityLightVolume->defines = defines;
+        if (grid->blocks[0])
+            entityLightVolume->defines += "#define MAP_ENTITY_GRID_BLOCKS uint2(" + std::to_string(grid->blocks[0]) +
+                                          ", " + std::to_string(grid->blocks[1]) +
+                                          ")\n#define MAP_ENTITY_GRID_PAGES " + std::to_string(grid->pageStart) +
+                                          "u\n";
+        if (grid->sh && grid->recordTexels == 8)
+            entityLightVolume->defines += "#define MAP_ENTITY_GRID_SH8 1\n";
     }
     RenderPlan renderPlan =
         PrepareRenderAssets(exportRoot, world, materialNames, worldMaterialNames,

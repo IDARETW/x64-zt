@@ -43,6 +43,7 @@
 #include <filesystem>
 #include <fstream>
 #include <limits>
+#include <map>
 #include <memory>
 #include <optional>
 #include <string_view>
@@ -1195,6 +1196,69 @@ void limitShadowedSpotLights(iw8::MapSun &lighting)
          kMaxShadowedSpots, shadowed.size());
 }
 
+// The attenuation strip of an IW3 light def (raw/lights/<def>: a sampler byte and the image name; the image a
+// luminance, RGB or RGBA .iwi whose first row runs from the light to its radius), from the IW3 roots. Empty when
+// the files are not there.
+std::vector<float> lightDefFalloff(const Args &args, const std::string &definition)
+{
+    const auto plainName = [](const std::string &name) {
+        return !name.empty() && name.size() < 64 && name.find_first_of("/\\:.") == std::string::npos;
+    };
+    if (!plainName(definition))
+        return {};
+    std::vector<std::filesystem::path> roots;
+    for (const std::string &root : args.iw3Roots)
+    {
+        roots.emplace_back(root);
+        roots.emplace_back(std::filesystem::path(root) / "raw");
+    }
+    for (const std::string &root : args.searchPaths)
+        roots.emplace_back(root);
+    for (const auto &root : roots)
+    {
+        std::vector<uint8_t> def;
+        if (!read_file((root / "lights" / definition).string(), def) || def.size() < 3)
+            continue;
+        const std::string image(reinterpret_cast<const char *>(def.data()) + 1,
+                                strnlen(reinterpret_cast<const char *>(def.data()) + 1, def.size() - 1));
+        std::vector<uint8_t> iwi;
+        if (!plainName(image) || !read_file((root / "images" / (image + ".iwi")).string(), iwi) || iwi.size() < 28 ||
+            std::memcmp(iwi.data(), "IWi", 3) != 0 || iwi[3] != 6)
+            continue;
+        const unsigned format = iwi[4];
+        const unsigned width = iwi[6] | (iwi[7] << 8);
+        const unsigned height = iwi[8] | (iwi[9] << 8);
+        const unsigned bytes = format == 1 ? 4 : format == 2 ? 3 : format == 4 ? 1 : 0;
+        if (!bytes || !width || width > 4096 || !height || iwi.size() < 28 + size_t(width) * height * bytes)
+            continue;
+        // Levels are stored smallest first: the full level ends the file.
+        const uint8_t *row = iwi.data() + iwi.size() - size_t(width) * height * bytes;
+        std::vector<float> curve(width);
+        for (unsigned x = 0; x < width; ++x)
+        {
+            const unsigned channels = std::min(bytes, 3u);
+            float sum = 0.0f;
+            for (unsigned channel = 0; channel < channels; ++channel)
+                sum += row[x * bytes + channel];
+            curve[x] = sum / (255.0f * channels);
+        }
+        return curve;
+    }
+    return {};
+}
+
+// A falloff strip at a fraction of the radius, filtered and clamped as the light shader samples it.
+float sampleFalloff(const std::vector<float> &curve, const double fraction)
+{
+    const double texel = std::clamp(fraction, 0.0, 1.0) * curve.size() - 0.5;
+    const auto first = static_cast<ptrdiff_t>(std::floor(texel));
+    const auto at = [&](const ptrdiff_t index) {
+        return curve[static_cast<size_t>(std::clamp<ptrdiff_t>(index, 0, ptrdiff_t(curve.size()) - 1))];
+    };
+    const float weight = static_cast<float>(texel - double(first));
+    return at(first) + (at(first + 1) - at(first)) * weight;
+}
+
 // IW3 lights a surface with diffuse = color * r_diffuseColorScale (1) * falloff(d / radius),
 // in the units of the IW3 sun the world keeps (R_SetLightProperties; light_point_linear
 // samples falloff_linear = 1 - d/r). Replay's record builder (0x19A9020) turns ComPrimaryLight
@@ -1202,9 +1266,17 @@ void limitShadowedSpotLights(iw8::MapSun &lighting)
 // applies the sphere form factor ~ N.L * bulb^2 / d^2: irradiance = intensity * color * N.L / d^2,
 // inside a window that is 1 up to 80% of the radius (1 / distance falloff 0.2). Each IW3 spot or
 // omni gets the intensity that gives IW3's brightness where its axis meets the world (a spot's
-// lit surface), capped at half its radius.
-void calibrateLocalLights(iw8::MapSun &lighting, const std::vector<float> &solidTriangles)
+// lit surface), capped at half its radius. Other light defs (light_point_quadratic: about
+// (1 - d/r)^2) scale that by their falloff strip over light_point_linear's at the same point.
+void calibrateLocalLights(const Args &args, iw8::MapSun &lighting, const std::vector<float> &solidTriangles)
 {
+    std::map<std::string, std::vector<float>> falloffs;
+    const auto falloffOf = [&](const std::string &definition) -> const std::vector<float> & {
+        auto found = falloffs.find(definition);
+        if (found == falloffs.end())
+            found = falloffs.emplace(definition, lightDefFalloff(args, definition)).first;
+        return found->second;
+    };
     for (size_t index = 0; index < lighting.primaryLights.size(); ++index)
     {
         auto &light = lighting.primaryLights[index];
@@ -1215,9 +1287,6 @@ void calibrateLocalLights(iw8::MapSun &lighting, const std::vector<float> &solid
             light.intensity *= lighting.lightUnitScale;
             continue;
         }
-        if (light.definition != "light_point_linear")
-            warn("local light %zu: IW3 light def '%s' falloff assumed linear", index,
-                 light.definition.c_str());
         double reference = light.radius * 0.5;
         if (light.type == 2)
         {
@@ -1251,7 +1320,24 @@ void calibrateLocalLights(iw8::MapSun &lighting, const std::vector<float> &solid
             reference = nearest;
         }
         reference = std::max(reference, 16.0);
-        const double falloff = 1.0 - reference / light.radius;
+        double falloff = 1.0 - reference / light.radius;
+        if (light.definition != "light_point_linear")
+        {
+            const auto &own = falloffOf(light.definition);
+            const auto &linear = falloffOf("light_point_linear");
+            const double fraction = reference / light.radius;
+            if (!own.empty() && !linear.empty() && sampleFalloff(linear, fraction) > 1.0e-3f)
+            {
+                const double ratio = sampleFalloff(own, fraction) / sampleFalloff(linear, fraction);
+                falloff *= ratio;
+                info("local light %zu: IW3 light def '%s' falls to %.3f of light_point_linear at %.2f of its "
+                     "radius",
+                     index, light.definition.c_str(), ratio, fraction);
+            }
+            else
+                warn("local light %zu: IW3 light def '%s' falloff assumed linear (no falloff image found)", index,
+                     light.definition.c_str());
+        }
         light.intensity = static_cast<float>(falloff * reference * reference) * lighting.lightUnitScale;
         info("local light %zu: IW3 color %.3f %.3f %.3f, reference %.1f of radius %.0f -> intensity %.1f",
              index, light.color[0], light.color[1], light.color[2], reference, light.radius,
@@ -1524,7 +1610,7 @@ int writeMapPackage(const Args &args, const std::string &map, const std::string 
     }
     const auto renderMesh = replayrender::Load(renderPath);
     timing.lap("render load");
-    calibrateLocalLights(lighting, renderMesh.solidTriangles);
+    calibrateLocalLights(args, lighting, renderMesh.solidTriangles);
     dropEnclosedShadowedSpots(lighting, renderMesh.solidTriangles, prepared ? &prepared->shadowScene : nullptr);
     limitShadowedSpotLights(lighting);
     // Use the final ComWorld sun vector, including any requested profile.

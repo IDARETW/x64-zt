@@ -61,10 +61,12 @@ inline std::string CutoutVariantKind(const MaterialPlan &material)
            (material.depthBias ? "_bias" : "");
 }
 
-// World blended surfaces share generated atlas materials per blend and depth bias.
+// World blended surfaces share generated atlas materials per blend, detail row
+// (_d<row>: IW3 wc_l_sm_b0c0d0 layers such as decal cracks) and depth bias.
 inline std::string GlassVariantKind(const MaterialPlan &material)
 {
     return std::string("glass") + (material.blend ? "_b" + std::to_string(material.blend) : "") +
+           (material.worldDetail >= 0 ? "_d" + std::to_string(material.worldDetail) : "") +
            (material.depthBias ? "_bias" : "");
 }
 

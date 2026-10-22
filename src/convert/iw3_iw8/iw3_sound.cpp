@@ -1001,13 +1001,20 @@ Role RoleFor(const std::string &name, const bool looping)
 
 // Stock Replay map-bank curves (mp_shipment.all vfCurves), copied by value.
 // IW3 SNDCURVE text: "SNDCURVE", the knot count, then "distance volume" knots,
-// both normalized; Replay vfCurves use the same (distance, volume) points.
+// both normalized; Replay vfCurves use the same (distance, volume) points. A curve
+// the map's zone does not hold (weapon2, weapon4: common zones) comes from the IW3
+// roots' soundaliases.
 std::optional<iw8::sound::Curve> ReadIw3Curve(const std::filesystem::path &exportRoot,
+                                              const std::vector<std::filesystem::path> &searchPaths,
                                               const std::string &name)
 {
     std::string text;
-    if (name.empty() || name.find_first_of("/\\.") != std::string::npos ||
-        !zt::read_file_str((exportRoot / "soundaliases" / (name + ".vfcurve")).string(), text))
+    if (name.empty() || name.find_first_of("/\\.") != std::string::npos)
+        return std::nullopt;
+    bool found = zt::read_file_str((exportRoot / "soundaliases" / (name + ".vfcurve")).string(), text);
+    for (std::size_t root = 0; !found && root < searchPaths.size(); ++root)
+        found = zt::read_file_str((searchPaths[root] / "soundaliases" / (name + ".vfcurve")).string(), text);
+    if (!found)
         return std::nullopt;
     ledger::Use("soundcurve", name);
     std::istringstream input(text);
@@ -1920,7 +1927,7 @@ std::optional<ConvertedSounds> Convert(const std::filesystem::path &exportRoot,
             // clamped to [0, 1] (0x141B71959); the donut fade (flags bits 4-6) is off.
             auto found = iw3Curves.find(source.curve);
             if (!source.curve.empty() && found == iw3Curves.end())
-                found = iw3Curves.emplace(source.curve, ReadIw3Curve(exportRoot, source.curve)).first;
+                found = iw3Curves.emplace(source.curve, ReadIw3Curve(exportRoot, searchPaths, source.curve)).first;
             if (!source.curve.empty() && found->second)
                 alias.volumeFalloffCurve = iw8::sound::HashName(found->second->name);
             else

@@ -4132,11 +4132,13 @@ RenderPlan PrepareRenderAssets(const std::filesystem::path &exportRoot, const Js
     for (const auto &material : materials)
         if (atlasMaterial(material))
             tileNumbers.emplace(TileKey(material), 0);
-    // IW3 world detail maps sample their own colour-atlas tile (opaque world
-    // surfaces; models bind the detail image directly).
+    // IW3 world detail maps sample their own colour-atlas tile (opaque and blended
+    // world surfaces; models bind the detail image directly).
     const auto worldDetailed = [&](const SourceMaterial &material) {
-        return !material.detail.empty() && material.kind == SurfaceKind::opaque &&
-               !material.depthBias && worldSurfaceMaterials.contains(material.name);
+        return !material.detail.empty() &&
+               ((material.kind == SurfaceKind::opaque && !material.depthBias) ||
+                material.kind == SurfaceKind::glass) &&
+               worldSurfaceMaterials.contains(material.name);
     };
     const auto detailTileKey = [](const std::string &image) { return "detail" + image; };
     for (const auto &material : materials)
@@ -5356,7 +5358,21 @@ RenderPlan PrepareRenderAssets(const std::filesystem::path &exportRoot, const Js
         }
         else
         {
-            variant = CreateVariant(techset, worldMaterial, stem, map, kind);
+            // glass..._d<row>: a blended layer with an IW3 detail map, drawn with the detail
+            // variant's shader.
+            Json base;
+            if (const auto at = name.find("_d"); name.starts_with("glass") && at != std::string::npos &&
+                                                 at + 2 < name.size() && std::isdigit(static_cast<unsigned char>(name[at + 2])))
+            {
+                const auto &detail = plan.worldDetails.at(std::stoul(name.substr(at + 2)));
+                char defines[192];
+                std::snprintf(defines, sizeof(defines),
+                              "#define MAP_WORLD_DETAIL_TILE %zu\n#define MAP_DETAIL_SCALE float2(%.9g, %.9g)\n",
+                              detail.tile, detail.scale[0], detail.scale[1]);
+                base = BuildTechset(map, columns, plan.atlasSize, TechniqueGeometry::world, plan.glassEnvironment,
+                                    false, {}, lightmapDefines, true, {}, defines);
+            }
+            variant = CreateVariant(base.is_null() ? techset : base, worldMaterial, stem, map, kind);
             if (name.starts_with("glass") && name.ends_with("_bias"))
             {
                 ApplyDepthBias(variant["techset"]);
