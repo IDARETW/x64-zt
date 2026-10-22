@@ -112,8 +112,13 @@ Json ReadJson(const std::filesystem::path &path)
     return value;
 }
 
+constexpr std::uint64_t kArrayLimit = 64ull * 1024 * 1024;
+// IW7 SH per light-grid entry: Skyway's 1.5M entries are 166 MB.
+constexpr std::uint64_t kShArrayLimit = 512ull * 1024 * 1024;
+
 std::vector<std::uint8_t> ReadArray(const std::filesystem::path &root, const Json &metadata,
-                                    const char *key, const std::size_t expected)
+                                    const char *key, const std::size_t expected,
+                                    const std::uint64_t limit = kArrayLimit)
 {
     const Json &description = metadata.at(key);
     const std::string relative = description.at("file").get<std::string>();
@@ -122,7 +127,7 @@ std::vector<std::uint8_t> ReadArray(const std::filesystem::path &root, const Jso
     if (relative.empty() || relativePath.is_absolute() || relative.find(':') != std::string::npos ||
         relative.find('\\') != std::string::npos ||
         std::ranges::find(relativePath, "..") != relativePath.end() || declared != expected ||
-        declared > 64ull * 1024 * 1024)
+        declared > limit)
         throw std::runtime_error(std::string("invalid IW3 light-grid ") + key + " descriptor");
 
     std::error_code error;
@@ -1713,7 +1718,8 @@ std::optional<EntityLightGrid> BuildEntityLightGrid(const std::filesystem::path 
     }
     const std::size_t entryTexels = std::size_t(grid.dims[0]) * grid.dims[1] * grid.dims[2];
     grid.width = 4096;
-    grid.paletteStart = static_cast<unsigned>((entryTexels + grid.width - 1) / grid.width * grid.width);
+    const auto rows = [&](const std::size_t texels) { return (texels + grid.width - 1) / grid.width; };
+    const auto aligned = [&](const std::size_t texels) { return rows(texels) * grid.width; };
     const auto pointOf = [&](const Cell &cell) {
         const std::array<int, 3> point{(cell.position[0] + 131072) / 32 - grid.minimum[0],
                                        (cell.position[1] + 131072) / 32 - grid.minimum[1],
@@ -1721,85 +1727,177 @@ std::optional<EntityLightGrid> BuildEntityLightGrid(const std::filesystem::path 
         if (point[0] < 0 || point[1] < 0 || point[2] < 0 || point[0] >= int(grid.dims[0]) ||
             point[1] >= int(grid.dims[1]) || point[2] >= int(grid.dims[2]))
             throw std::runtime_error("IW3 light-grid entry is outside its bounds");
-        return (std::size_t(point[2]) * grid.dims[1] + point[1]) * grid.dims[0] + point[0];
+        return std::array<unsigned, 3>{unsigned(point[0]), unsigned(point[1]), unsigned(point[2])};
+    };
+    // A grid whose box does not fit the image (Greenband: 0.12% of 1379x1300x247 points) is
+    // indexed by a table of 8x8x8-point blocks (a page number per texel, 0 = no entry) followed
+    // by the 512 points of each page.
+    const std::array<unsigned, 3> blocks{(grid.dims[0] + 7) / 8, (grid.dims[1] + 7) / 8, (grid.dims[2] + 7) / 8};
+    const std::size_t blockCount = std::size_t(blocks[0]) * blocks[1] * blocks[2];
+    const auto blockOf = [&](const std::array<unsigned, 3> &point) {
+        return (std::size_t(point[2] / 8) * blocks[1] + point[1] / 8) * blocks[0] + point[0] / 8;
+    };
+    std::vector<std::uint32_t> blockPages;
+    std::size_t pageCount = 0;
+    const auto sparseTexels = [&] {
+        if (blockPages.empty())
+        {
+            blockPages.assign(blockCount, 0);
+            for (const Cell &cell : cells)
+                if (auto &page = blockPages[blockOf(pointOf(cell))]; !page)
+                    page = static_cast<std::uint32_t>(++pageCount);
+        }
+        return aligned(blockCount + pageCount * 512);
+    };
+    // The index after which `payload` texels still fit the 4096 rows: the box (false), else the
+    // block table (true).
+    const auto indexFor = [&](const std::size_t payload) -> std::optional<bool> {
+        if (rows(aligned(entryTexels) + payload) <= 4096)
+            return false;
+        if (blockCount < entryTexels && rows(sparseTexels() + payload) <= 4096)
+            return true;
+        return std::nullopt;
+    };
+    const auto useIndex = [&](const bool sparse, const std::size_t payload) {
+        grid.blocks = sparse ? blocks : std::array<unsigned, 3>{};
+        grid.pageStart = sparse ? static_cast<unsigned>(blockCount) : 0;
+        grid.paletteStart = static_cast<unsigned>(sparse ? sparseTexels() : aligned(entryTexels));
+        grid.height = static_cast<unsigned>(rows(grid.paletteStart + payload));
+        grid.pixels.assign(std::size_t(grid.width) * grid.height * 4, 0);
+        if (sparse)
+            for (std::size_t block = 0; block < blockCount; ++block)
+                if (const std::uint32_t page = blockPages[block])
+                {
+                    grid.pixels[block * 4 + 0] = static_cast<std::uint8_t>(page);
+                    grid.pixels[block * 4 + 1] = static_cast<std::uint8_t>(page >> 8);
+                    grid.pixels[block * 4 + 2] = static_cast<std::uint8_t>(page >> 16);
+                    grid.pixels[block * 4 + 3] = 255;
+                }
+    };
+    const auto texelOf = [&](const Cell &cell) {
+        const auto point = pointOf(cell);
+        if (!grid.blocks[0])
+            return (std::size_t(point[2]) * grid.dims[1] + point[1]) * grid.dims[0] + point[0];
+        return grid.pageStart + std::size_t(blockPages[blockOf(point)] - 1) * 512 + (point[0] & 7) +
+               8 * ((point[1] & 7) + 8 * (point[2] & 7));
+    };
+    const auto describeIndex = [&] {
+        if (grid.blocks[0])
+            zt::info("iw3: entity light grid indexed by %ux%ux%u blocks of 8x8x8 points (%zu pages)", blocks[0],
+                     blocks[1], blocks[2], pageCount);
     };
 
-    // The extraction's own light grid at each entry: records of its SH.
+    // The extraction's own light grid at each entry: a record of its SH per entry inside IW7's
+    // mesh (the others are NaN and stay empty), as halves (14 texels) or, when those do not fit,
+    // as signed bytes of the record's largest coefficient (8 texels).
     if (metadata.contains("sh"))
     {
-        constexpr unsigned recordTexels = 14;
-        const std::size_t total = grid.paletteStart + (cells.size() + 1) * recordTexels;
-        if ((total + grid.width - 1) / grid.width <= 4096 && cells.size() * 27 * sizeof(float) <= 64ull * 1024 * 1024)
+        const std::uint64_t shBytes = std::uint64_t(cells.size()) * 27 * sizeof(float);
+        std::vector<float> sh;
+        std::vector<bool> finite;
+        std::size_t valid = 0;
+        if (shBytes <= kShArrayLimit)
         {
-            const auto bytes = ReadArray(sourceRoot, metadata, "sh", cells.size() * 27 * sizeof(float));
-            std::vector<float> sh(cells.size() * 27);
+            const auto bytes = ReadArray(sourceRoot, metadata, "sh", shBytes, kShArrayLimit);
+            sh.resize(cells.size() * 27);
             std::memcpy(sh.data(), bytes.data(), bytes.size());
-            grid.sh = true;
-            grid.paletteColors = cells.size() + 1;
-            grid.height = static_cast<unsigned>((total + grid.width - 1) / grid.width);
-            grid.pixels.assign(std::size_t(grid.width) * grid.height * 4, 0);
-            const auto writeRecord = [&](const std::size_t record, const float *values) {
-                std::array<std::uint16_t, recordTexels * 2> halves{};
-                for (unsigned k = 0; k < 27; ++k)
-                    halves[k] = FloatToHalf(values[k]);
-                std::memcpy(grid.pixels.data() + (grid.paletteStart + record * recordTexels) * 4, halves.data(),
-                            sizeof(halves));
-            };
-            std::array<double, 27> sum{};
-            std::size_t valid = 0;
+            finite.resize(cells.size());
             for (std::size_t entry = 0; entry < cells.size(); ++entry)
             {
                 const float *values = sh.data() + entry * 27;
-                if (!std::all_of(values, values + 27, [](const float value) { return std::isfinite(value); }))
+                finite[entry] = std::all_of(values, values + 27, [](const float value) { return std::isfinite(value); });
+                valid += finite[entry];
+            }
+        }
+        const std::size_t records = valid + 1;
+        std::optional<bool> sparse;
+        unsigned recordTexels = 0;
+        if (valid)
+            for (const unsigned texels : {14u, 8u})
+                if ((sparse = indexFor(records * texels)))
+                {
+                    recordTexels = texels;
+                    break;
+                }
+        if (sparse)
+        {
+            grid.sh = true;
+            grid.recordTexels = recordTexels;
+            grid.paletteColors = records;
+            useIndex(*sparse, records * recordTexels);
+            const auto writeRecord = [&](const std::size_t record, const float *values) {
+                std::uint8_t *target = grid.pixels.data() + (grid.paletteStart + record * recordTexels) * 4;
+                if (recordTexels == 14)
+                {
+                    std::array<std::uint16_t, 28> halves{};
+                    for (unsigned k = 0; k < 27; ++k)
+                        halves[k] = FloatToHalf(values[k]);
+                    std::memcpy(target, halves.data(), sizeof(halves));
+                    return;
+                }
+                // Bytes 0-26: the coefficients in 127ths of the largest; bytes 28-29: that largest (a half).
+                float largest = 0;
+                for (unsigned k = 0; k < 27; ++k)
+                    largest = std::max(largest, std::abs(values[k]));
+                if (largest <= 0)
+                    return;
+                for (unsigned k = 0; k < 27; ++k)
+                    target[k] = static_cast<std::uint8_t>(static_cast<std::int8_t>(
+                        std::clamp(std::lround(values[k] / largest * 127.0f), -127l, 127l)));
+                const std::uint16_t scale = FloatToHalf(largest);
+                std::memcpy(target + 28, &scale, sizeof(scale));
+            };
+            std::array<double, 27> sum{};
+            std::uint32_t record = 0;
+            for (std::size_t entry = 0; entry < cells.size(); ++entry)
+            {
+                if (!finite[entry])
                     continue;
+                const float *values = sh.data() + entry * 27;
                 for (unsigned k = 0; k < 27; ++k)
                     sum[k] += values[k];
-                ++valid;
-                const std::size_t texel = pointOf(cells[entry]);
-                const auto record = static_cast<std::uint32_t>(entry + 1);
+                ++record;
+                const std::size_t texel = texelOf(cells[entry]);
                 grid.pixels[texel * 4 + 0] = static_cast<std::uint8_t>(record);
                 grid.pixels[texel * 4 + 1] = static_cast<std::uint8_t>(record >> 8);
                 grid.pixels[texel * 4 + 2] = static_cast<std::uint8_t>(record >> 16);
                 grid.pixels[texel * 4 + 3] = 255;
                 writeRecord(record, values);
             }
-            if (valid)
-            {
-                std::array<float, 27> mean{};
-                for (unsigned k = 0; k < 27; ++k)
-                    mean[k] = static_cast<float>(sum[k] / static_cast<double>(valid));
-                writeRecord(0, mean.data());
-                zt::info("iw3: entity light grid %ux%ux%u points from the extraction's own light grid (%zu of %zu "
-                         "entries, %ux%u image)",
-                         grid.dims[0], grid.dims[1], grid.dims[2], valid, cells.size(), grid.width, grid.height);
-                return grid;
-            }
-            grid.sh = false;
-            zt::warn("iw3: the extraction's light grid holds no entry; entities take the light-grid colours");
+            std::array<float, 27> mean{};
+            for (unsigned k = 0; k < 27; ++k)
+                mean[k] = static_cast<float>(sum[k] / static_cast<double>(valid));
+            writeRecord(0, mean.data());
+            zt::info("iw3: entity light grid %ux%ux%u points from the extraction's own light grid (%zu of %zu "
+                     "entries, %ux%u image)",
+                     grid.dims[0], grid.dims[1], grid.dims[2], valid, cells.size(), grid.width, grid.height);
+            describeIndex();
+            if (recordTexels != 14)
+                zt::info("iw3: entity light grid SH records in bytes of each record's largest coefficient");
+            return grid;
         }
+        if (shBytes <= kShArrayLimit && !valid)
+            zt::warn("iw3: the extraction's light grid holds no entry; entities take the light-grid colours");
         else
-            zt::warn("iw3: the extraction's light grid at %zu entries needs %zu image rows (Replay allows 4096); "
+            zt::warn("iw3: the extraction's light grid at %zu entries does not fit the 4096-row entity grid image; "
                      "entities take the light-grid colours",
-                     cells.size(), (total + grid.width - 1) / grid.width);
+                     cells.size());
     }
     grid.paletteColors = colorCount;
-    const std::size_t total = grid.paletteStart + colorCount * 56;
-    // One texel per point of the grid's box: a resident RGBA8 image holds at
-    // most 4096 rows. Greenband's IW3 grid spans 1379x1300x247 points with
-    // 0.12% populated (a 108106-row image); such maps keep the earlier entity
-    // lighting (no MAP_ENTITY_GRID).
-    if ((total + grid.width - 1) / grid.width > 4096)
+    // One texel per point of the grid's box (or of its pages), then 56 colours per palette entry:
+    // a resident RGBA8 image holds at most 4096 rows.
+    const auto sparse = indexFor(colorCount * 56);
+    if (!sparse)
     {
         zt::warn("iw3: entity light grid %ux%ux%u points needs %zu image rows (Replay allows 4096); entities "
                  "use the lighting without the IW3 grid",
-                 grid.dims[0], grid.dims[1], grid.dims[2], (total + grid.width - 1) / grid.width);
+                 grid.dims[0], grid.dims[1], grid.dims[2], rows(aligned(entryTexels) + colorCount * 56));
         return std::nullopt;
     }
-    grid.height = static_cast<unsigned>((total + grid.width - 1) / grid.width);
-    grid.pixels.assign(std::size_t(grid.width) * grid.height * 4, 0);
+    useIndex(*sparse, colorCount * 56);
     for (const Cell &cell : cells)
     {
-        const std::size_t texel = pointOf(cell);
+        const std::size_t texel = texelOf(cell);
         const unsigned color = cell.entry.color + 1u;
         grid.pixels[texel * 4 + 0] = static_cast<std::uint8_t>(color);
         grid.pixels[texel * 4 + 1] = static_cast<std::uint8_t>(color >> 8);
@@ -1816,6 +1914,7 @@ std::optional<EntityLightGrid> BuildEntityLightGrid(const std::filesystem::path 
         }
     zt::info("iw3: entity light grid %ux%ux%u points, %zu palette colours (%ux%u image)", grid.dims[0],
              grid.dims[1], grid.dims[2], colorCount, grid.width, grid.height);
+    describeIndex();
     return grid;
 }
 } // namespace iw3

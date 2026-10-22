@@ -288,6 +288,22 @@ static const uint kModelLightingTexelColors[64] = {
 float4 EntityGridTexel(uint index) {
     return entityGrid.Load(int3(index % MAP_ENTITY_GRID_WIDTH, index / MAP_ENTITY_GRID_WIDTH, 0));
 }
+// The bytes of grid point p (inside the box): the dense box, or (MAP_ENTITY_GRID_BLOCKS)
+// the table of 8x8x8-point blocks and their pages; zero = no entry.
+uint4 EntityGridPoint(int3 p) {
+#ifdef MAP_ENTITY_GRID_BLOCKS
+    uint3 b = (uint3)p >> 3;
+    uint4 t = (uint4)round(EntityGridTexel(b.x + MAP_ENTITY_GRID_BLOCKS.x * (b.y + MAP_ENTITY_GRID_BLOCKS.y * b.z)) * 255);
+    uint page = t.r | (t.g << 8) | (t.b << 16);
+    if (page == 0)
+        return 0;
+    uint3 l = (uint3)p & 7;
+    return (uint4)round(EntityGridTexel(MAP_ENTITY_GRID_PAGES + (page - 1) * 512 + l.x + 8 * (l.y + 8 * l.z)) * 255);
+#else
+    return (uint4)round(EntityGridTexel(
+        (uint)p.x + (uint)MAP_ENTITY_GRID_DIMS.x * ((uint)p.y + (uint)MAP_ENTITY_GRID_DIMS.y * (uint)p.z)) * 255);
+#endif
+}
 #ifndef MAP_ENTITY_PRESET_COUNT
 #define MAP_ENTITY_PRESET_START 0u
 #define MAP_ENTITY_PRESET_COUNT 0u
@@ -331,6 +347,19 @@ float3 EntityPresetAmbient(uint volume, float3 n) {
 // static models' colours (iw7 model_lighting_colors: 0.5 * light_level through
 // the lightmaps' knee, ambient = 2 * colour).
 void EntityGridAddSh(uint record, float w, inout float sh[27]) {
+#ifdef MAP_ENTITY_GRID_SH8
+    // 8-texel records: 27 signed bytes in 127ths of the largest coefficient, then
+    // that largest as a half (bytes 28-29).
+    uint base = MAP_ENTITY_GRID_PALETTE + record * 8;
+    uint4 s = (uint4)round(EntityGridTexel(base + 7) * 255);
+    float scale = w * f16tof32(s.r | (s.g << 8)) / 127;
+    [unroll] for (uint t = 0; t < 7; ++t) {
+        uint4 b = (uint4)round(EntityGridTexel(base + t) * 255);
+        [unroll] for (uint c = 0; c < 4; ++c)
+            if (t * 4 + c < 27)
+                sh[t * 4 + c] += scale * (float)((int)(b[c] << 24) >> 24);
+    }
+#else
     uint base = MAP_ENTITY_GRID_PALETTE + record * 14;
     [unroll] for (uint t = 0; t < 14; ++t) {
         uint4 b = (uint4)round(EntityGridTexel(base + t) * 255);
@@ -338,6 +367,7 @@ void EntityGridAddSh(uint record, float w, inout float sh[27]) {
         if (t * 2 + 1 < 27)
             sh[t * 2 + 1] += w * f16tof32(b.b | (b.a << 8));
     }
+#endif
 }
 float EntityLightLevel(float v) {
     return v <= .5 ? v : .5 + .5 * (1 - exp((.5 - v) * 2));
@@ -364,8 +394,7 @@ float3 EntityGridAmbient(float3 root, float3 n) {
                   ((shCorner & 4) ? f.z : 1 - f.z);
         if (w < .001 || any(p < 0) || any(p >= MAP_ENTITY_GRID_DIMS))
             continue;
-        uint4 t = (uint4)round(EntityGridTexel(
-            (uint)p.x + (uint)MAP_ENTITY_GRID_DIMS.x * ((uint)p.y + (uint)MAP_ENTITY_GRID_DIMS.y * (uint)p.z)) * 255);
+        uint4 t = EntityGridPoint(p);
         uint record = t.r | (t.g << 8) | (t.b << 16);
         if (record == 0)
             continue;
@@ -396,8 +425,7 @@ float3 EntityGridAmbient(float3 root, float3 n) {
                   ((corner & 4) ? f.z : 1 - f.z);
         uint color = 0;
         if (all(p >= 0) && all(p < MAP_ENTITY_GRID_DIMS)) {
-            uint4 t = (uint4)round(EntityGridTexel(
-                (uint)p.x + (uint)MAP_ENTITY_GRID_DIMS.x * ((uint)p.y + (uint)MAP_ENTITY_GRID_DIMS.y * (uint)p.z)) * 255);
+            uint4 t = EntityGridPoint(p);
             color = t.r + t.g * 256;
         }
         colors[corner] = color ? color - 1 : 0;

@@ -71,8 +71,14 @@ std::vector<std::array<std::uint8_t, 256>> SampleStaticModelLighting(
 // With `sh` (extractions that keep their own light grid at each entry, IW7's
 // <grid>.sh.bin) an entry texel holds R + 256 G + 65536 B = record, 0 = no
 // entry, and from paletteStart each record is 14 texels of 28 halves (the 27
-// SH coefficients of red, green and blue in EvaluateShBasis, then a pad);
-// record 0 is the fallback (the mean of the entries), record n + 1 entry n.
+// SH coefficients of red, green and blue in EvaluateShBasis, then a pad), or
+// 8 texels (27 signed bytes in 127ths of the largest coefficient, a pad byte,
+// that largest as a half); record 0 is the fallback (the mean of the entries),
+// then one record per entry with SH, in entry order (IW7 leaves the entries
+// outside its grid mesh NaN: no entry). With `blocks`, the entry texels are instead a table of
+// 8x8x8-point blocks (texel bx + blocks.x * (by + blocks.y * bz): R + 256 G +
+// 65536 B = page, 0 = no entry) and from `pageStart` 512 texels per page
+// (x + 8 * (y + 8 * z) within the block).
 struct EntityLightGrid
 {
     std::array<int, 3> minimum{}; // grid coordinates (32, 32, 64 units from -131072)
@@ -82,6 +88,9 @@ struct EntityLightGrid
     unsigned paletteStart{};
     std::size_t paletteColors{}; // 56 texels each from paletteStart (records with sh)
     bool sh{};
+    unsigned recordTexels{}; // with sh: 14 or 8
+    std::array<unsigned, 3> blocks{}; // zero: the dense box
+    unsigned pageStart{};
     std::vector<std::uint8_t> pixels;
 };
 std::optional<EntityLightGrid> BuildEntityLightGrid(const std::filesystem::path &sourceRoot,
