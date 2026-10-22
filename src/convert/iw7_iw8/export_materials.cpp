@@ -786,6 +786,9 @@ namespace zonetool::convert::iw7_iw8
 				{"_version", 1},
 				{"cameraRegion", "emissive"},
 				{"constants", std::move(constants)},
+				// IW7 lights the particles of its lit effect materials (not effectunlit) by the scene: the pipeline can
+				// draw the alpha-blended ones through Replay's lit effect technique (--lit_effects 1).
+				{"lit", !has("effectunlit") && !additive && !has("distortion") && !has("cloud")},
 				{"gameFlags", json::array()},
 				{"sortKey", material ? std::min(material->info.sortKey + 2u, 63u) : 26u},
 				{"stateBits", json::array({state})},

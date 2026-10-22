@@ -48,9 +48,15 @@ std::vector<uint8_t> unhex(const std::string &s)
 
 namespace
 {
+// Stock vfx_postfx_bokeh_sharp_sheet_1_lit's lit alpha atlas technique (techsets_common).
+bool nativeLitEffectTechset(const std::string_view name)
+{
+    return name == "elcq/unlit_6_effect_bad_ta0_802_1004_0_1_0_0_0_10000020b_0_0_2_0_0";
+}
+
 bool nativeEffectTechset(const std::string_view name)
 {
-    return name ==
+    return nativeLitEffectTechset(name) || name ==
                "elcq/unlit_6_effect_bad_ta0_802_4_0_1_0_0_0_100000023_0_0_2_0_0" ||
            name ==
                "elcq/unlit_6_effect_bad_ta0_802_1004_0_1_0_0_0_100000023_0_0_2_0_0" ||
@@ -592,6 +598,12 @@ Material LoadMaterial(const std::string &path, const nlohmann::json &j,
                     m.materialInfo[0x1B] != 1)
                     throw std::runtime_error("Replay distortion material has invalid metadata");
             }
+            else if (nativeLitEffectTechset(m.techset))
+            {
+                if (materialType != 0x40200Cu || m.materialInfo[0x14] != 2 || m.materialInfo[0x15] != 4 ||
+                    m.materialInfo[0x16] != 2 || !m.materialInfo[0x1A] || !m.materialInfo[0x1B])
+                    throw std::runtime_error("Replay lit effect material has invalid metadata");
+            }
             else if (materialType != 0x40200Cu || m.materialInfo[0x14] != 1 ||
                 (oneBuffer ? m.materialInfo[0x15] != (simpleAdditive ? 2 : 1) ||
                                   m.materialInfo[0x16] != 1 ||
@@ -723,7 +735,22 @@ Material LoadMaterial(const std::string &path, const nlohmann::json &j,
                 m.buffers.size() == 1 && m.buffers.front()[0].size() == 16 &&
                 m.buffers.front()[1].empty() && m.buffers.front()[2].empty() &&
                 m.buffers.front()[3].size() == 96;
-            if (distortion ? !distortionBindings
+            // Lit alpha atlas: albedo (slot 0) and transmittance (slot 0x44); shadow buffer = 176 vertex bytes + 48
+            // pixel bytes, emissive buffer = 176 vertex bytes + 160 pixel bytes.
+            const bool lit = nativeLitEffectTechset(m.techset);
+            const bool litBindings =
+                m.images.size() == 2 && m.textureHeaders.size() == 16 && m.textureHeaders[0] == 0 &&
+                m.textureHeaders[8] == 0x44 &&
+                std::all_of(m.textureHeaders.begin() + 1, m.textureHeaders.begin() + 8,
+                            [](const uint8_t value) { return value == 0; }) &&
+                std::all_of(m.textureHeaders.begin() + 9, m.textureHeaders.end(),
+                            [](const uint8_t value) { return value == 0; }) &&
+                m.buffers.size() == 2 && m.buffers.front()[0].size() == 176 && m.buffers.front()[1].empty() &&
+                m.buffers.front()[2].empty() && m.buffers.front()[3].size() == 48 &&
+                m.buffers.back()[0].size() == 176 && m.buffers.back()[1].empty() && m.buffers.back()[2].empty() &&
+                m.buffers.back()[3].size() == 160;
+            if (lit ? !litBindings
+                    : distortion ? !distortionBindings
                            : (!common || (oneBuffer ? !oneBufferBindings : !featherBuffers)))
                 throw std::runtime_error("Replay effect material alias has invalid bindings");
         }
