@@ -10189,7 +10189,9 @@ PreparedMap PrepareFastfile(const ImportOptions &options)
         const auto &contents = collision.at("triangle_contents");
         for (std::size_t index = 0; index < triangles.size(); ++index)
         {
-            if (index < contents.size() && (contents.at(index).get<std::uint32_t>() & 0x2001u) == 0)
+            // Triangles no leaf references carry null contents (Aerodrome): they block nothing.
+            if (index < contents.size() &&
+                (contents.at(index).is_null() || (contents.at(index).get<std::uint32_t>() & 0x2001u) == 0))
                 continue;
             std::array<Vec3, 3> triangle;
             for (unsigned corner = 0; corner < 3; ++corner)
