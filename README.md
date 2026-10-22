@@ -72,6 +72,8 @@ zonetool.exe -game iw7 -path "C:/IW7" dumpzone mp_frontier --target iw8 --map mp
 
 The zones go to `output/<map>/`. IW3 maps also need `--unlinker <OpenAssetTools Unlinker.exe>`. `--acts` validates the built zones with Atian tools, and `--metadata <json>` gives the map its id, title and description in the map list.
 
+An IW7 map reads the game folder's `zone` files: the map's zones, the common zones, the `imagefile*.pak` / `assetfile*.pak` streams and the map's sound banks (`<map>.sabl`, `.sabs`). A missing pak leaves its images, or its models' surfaces, out of the map, and a missing bank leaves the map's sounds silent; the log names each one.
+
 | Option | Effect |
 |---|---|
 | `--map <id>` | The converted map's name (default: the zone's) |
