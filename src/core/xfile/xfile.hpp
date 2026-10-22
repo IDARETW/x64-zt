@@ -42,6 +42,12 @@ namespace zonetool::xfile
 		std::uint64_t preload_walk_size{};
 	};
 
+	struct stream_location
+	{
+		std::uint64_t offset;
+		std::uint32_t size;
+	};
+
 	fastfile read(const std::filesystem::path& path, const format& format);
 	// Writes an unsigned zone with the payload stored (not compressed).
 	void write(const std::filesystem::path& path, const format& format, const fastfile& file);
@@ -49,7 +55,11 @@ namespace zonetool::xfile
 	// Reads one stream of an IW7 shared stream file (assetfile<N>.pak): signed blocks that hold a compressed payload.
 	std::string read_iw7_shared_stream(std::string_view data, const format& format);
 
-	std::string write_s2(const format& format, const fastfile& file, std::string_view payload);
+	void write_s2(const std::filesystem::path& path, const format& format, const fastfile& file, std::string_view payload);
+
+	// compresses every stream like the fastfile streams and writes them after header, in order
+	std::vector<stream_location> write_s2_pak(const std::filesystem::path& path, std::string_view header,
+		std::span<const std::filesystem::path> streams);
 
 	std::string decompress_s2_stream(std::string_view data);
 }

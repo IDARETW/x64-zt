@@ -1,5 +1,9 @@
 #pragma once
 
+#include <xfile/xfile.hpp>
+
+#include "image_pak.hpp"
+
 namespace zonetool::s2
 {
 	class zone_interface : public zone_base
@@ -10,7 +14,7 @@ namespace zonetool::s2
 		std::vector<std::shared_ptr<asset_interface>> m_assets;
 		std::shared_ptr<zone_memory> m_zonemem;
 
-		std::vector<XStreamFileKey> collect_image_stream_keys() const;
+		std::vector<XStreamFileKey> collect_image_stream_keys(std::vector<image_pak::image_streams>& images) const;
 
 	public:
 		zone_interface(std::string name);

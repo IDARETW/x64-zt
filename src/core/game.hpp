@@ -10,10 +10,12 @@ namespace zonetool
 	using asset_dumper = void(*)(std::int32_t type, void* header);
 	using converter_setup = void(*)(const std::filesystem::path& target_game_path);
 	using converter_finish = void(*)(const std::string& zone_name);
+	using converter_required_zones = std::vector<std::string>(*)(const std::string& zone_name);
 	using dump_command = void(*)(const std::filesystem::path& zone_folder, const std::filesystem::path& zone_path, const converter* converter);
 	using asset_dump_command = void(*)(const std::filesystem::path& zone_folder, const std::filesystem::path& zone_path,
 		const std::string& type, const std::string& name, const converter* converter);
 	using zone_command = void(*)(const std::filesystem::path& zone_folder, const std::filesystem::path& zone_path);
+	using listing_command = std::string(*)(const std::filesystem::path& zone_folder, const std::filesystem::path& zone_path);
 	using build_command = void(*)(const std::filesystem::path& zone_folder, const std::string& name);
 	using token_name_resolver = std::string(*)(std::uint32_t id);
 
@@ -27,6 +29,7 @@ namespace zonetool
 		dump_command dump_zone;
 		asset_dump_command dump_asset;
 		zone_command verify_zone;
+		listing_command list_zone;
 		build_command build_zone;
 		token_name_resolver token_name;
 	};
@@ -48,7 +51,7 @@ namespace zonetool
 		asset_dumper dump_asset;
 		converter_setup setup;
 		converter_finish finish;
-		std::span<const std::string_view> required_zones;
+		converter_required_zones required_zones;
 		// Converts a whole zone (for example a map) instead of each asset.
 		zone_converter convert_zone;
 	};

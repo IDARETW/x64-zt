@@ -3,6 +3,7 @@
 
 #include <io/game_files.hpp>
 #include <xfile/xfile.hpp>
+#include "../zone/image_pak.hpp"
 #include <utils/flags.hpp>
 #include <utils/io.hpp>
 
@@ -15,33 +16,7 @@ namespace zonetool::s2
 {
 	namespace
 	{
-#pragma pack(push, 1)
-		struct toc_header
-		{
-			char magic[8];
-			std::uint32_t version;
-			std::uint32_t hash_size;
-			std::uint32_t entry_count;
-		};
-
-		struct toc_stream
-		{
-			std::uint64_t offset;
-			std::uint32_t size;
-			std::uint16_t file_index;
-		};
-
-		struct toc_entry
-		{
-			std::uint64_t hash[2];
-			toc_stream streams[4];
-		};
-#pragma pack(pop)
-
-		static_assert(sizeof(toc_header) == 20);
-		static_assert(sizeof(toc_entry) == 72);
-
-		constexpr std::string_view toc_magic = "S2ffi100";
+		using image_pak::toc_entry;
 
 		struct image_stream_location
 		{
@@ -59,23 +34,21 @@ namespace zonetool::s2
 		void read_toc(const std::filesystem::path& path, std::unordered_map<std::uint64_t, image_stream_entry>& entries)
 		{
 			std::string data;
-			if (!game_files::read(path, data) || data.size() < sizeof(toc_header))
+			if (!game_files::read(path, data) || data.empty())
 			{
 				return;
 			}
 
-			const auto header = reinterpret_cast<const toc_header*>(data.data());
-			if (std::string_view(header->magic, sizeof(header->magic)) != toc_magic
-				|| sizeof(toc_header) + header->entry_count * sizeof(toc_entry) > data.size())
+			const auto toc = image_pak::parse_toc(data);
+			if (!toc)
 			{
 				ZONETOOL_WARNING("Image toc \"%s\" is not valid", path.string().data());
 				return;
 			}
 
-			const auto toc = reinterpret_cast<const toc_entry*>(data.data() + sizeof(toc_header));
-			for (auto i = 0u; i < header->entry_count; i++)
+			for (const auto& entry : *toc)
 			{
-				entries.try_emplace(toc[i].hash[0], path.parent_path(), toc[i]);
+				entries.try_emplace(entry.hash[0], path.parent_path(), entry);
 			}
 		}
 
@@ -98,8 +71,30 @@ namespace zonetool::s2
 			return entries;
 		}
 
+		std::optional<image_stream_location> find_zone_stream(const XStreamFileLocation& location)
+		{
+			const auto in_fastfile = location.fileIndex == XStreamFileLocation::fastfile_index;
+			if (!location.size || (!in_fastfile && location.fileIndex != XStreamFileLocation::zone_pak_index))
+			{
+				return {};
+			}
+
+			return image_stream_location
+			{
+				.pak = filesystem::get_zone_folder() + (in_fastfile
+					? filesystem::get_fastfile() + ".ff" : image_pak::get_pak_name(filesystem::get_fastfile())),
+				.offset = location.offset,
+				.size = location.size,
+			};
+		}
+
 		std::optional<image_stream_location> find_image_stream(const XStreamFileKey& key)
 		{
+			if (key.slot != XStreamFileKey::unresolved_slot)
+			{
+				return find_zone_stream(std::bit_cast<XStreamFileLocation>(key));
+			}
+
 			const auto& entries = image_stream_entries();
 			const auto entry = entries.find(key.hash);
 			if (entry == entries.end() || key.index >= std::size(entry->second.entry.streams))
@@ -124,11 +119,6 @@ namespace zonetool::s2
 
 	std::optional<std::string> read_image_stream(const XStreamFileKey& key)
 	{
-		if (!key.hash)
-		{
-			return {};
-		}
-
 		const auto location = find_image_stream(key);
 		if (!location)
 		{
@@ -304,6 +294,19 @@ namespace zonetool::s2
 			return std::format("streamed_images\\{}_stream{}.pixels", clean_image_name(name), stream);
 		}
 
+		bool is_toc_stream(const XStreamFileKey& key)
+		{
+			return key.slot == XStreamFileKey::unresolved_slot;
+		}
+
+		bool has_fastfile_streams(const GfxImage* image)
+		{
+			return std::ranges::any_of(get_image_stream_keys(image), [](const XStreamFileKey& key)
+			{
+				return !is_toc_stream(key) && find_zone_stream(std::bit_cast<XStreamFileLocation>(key));
+			});
+		}
+
 		bool save_dds(const std::string& relative_path, const DirectX::Image* images, const std::size_t count, const DirectX::TexMetadata& metadata)
 		{
 			const auto full_path = filesystem::get_dump_path() + relative_path;
@@ -388,7 +391,7 @@ namespace zonetool::s2
 
 				if (!dump_dds)
 				{
-					utils::io::write_file(filesystem::get_dump_path() + streamed_image_path(image->name, i), *pixels, false);
+					dump_image_stream(image, i, *pixels);
 					continue;
 				}
 
@@ -434,20 +437,22 @@ namespace zonetool::s2
 
 			if (is_streamed_image(image))
 			{
-				const auto keys = get_image_stream_keys(image);
-				for (auto i = 0u; i < image_stream_count; i++)
+				// separate storage per key, the dumper writes a pointer it has seen before as a reference to the first one
+				std::array<XStreamFileKey, image_stream_count> keys{};
+				std::ranges::copy(get_image_stream_keys(image) | std::views::take(image_stream_count), keys.begin());
+				for (auto& key : keys)
 				{
-					XStreamFileKey key{};
-					if (i < keys.size())
-					{
-						key = keys[i];
-					}
 					write.dump_single(&key);
 				}
 			}
 
 			write.close();
 		}
+	}
+
+	void dump_image_stream(const GfxImage* image, const std::size_t stream, const std::string_view pixels)
+	{
+		utils::io::write_file(filesystem::get_dump_path() + streamed_image_path(image->name, stream), std::string(pixels), false);
 	}
 
 	GfxImage* gfx_image::parse_custom(const std::string& name, zone_memory* mem)
@@ -481,11 +486,19 @@ namespace zonetool::s2
 
 			if (is_streamed_image(asset))
 			{
-				for (auto& key : this->parsed_stream_keys_)
+				for (auto i = 0u; i < image_stream_count; i++)
 				{
+					auto& key = this->parsed_stream_keys_[i];
 					key = *read.read_single<XStreamFileKey>();
+
+					// older dumps wrote keys 1-3 as references to key 0, a toc key always looks up its own stream of the entry
+					if (is_toc_stream(key))
+					{
+						key.index = static_cast<std::uint16_t>(i);
+					}
 				}
 				this->has_parsed_stream_keys_ = true;
+				this->find_stream_pixels(asset);
 			}
 			read.close();
 
@@ -494,6 +507,28 @@ namespace zonetool::s2
 		}
 
 		return this->parse_custom(name, mem);
+	}
+
+	void gfx_image::find_stream_pixels(const GfxImage* asset)
+	{
+		for (auto i = 0u; i < image_stream_count; i++)
+		{
+			if (!asset->streams[i].width || is_toc_stream(this->parsed_stream_keys_[i]))
+			{
+				continue;
+			}
+
+			this->parsed_stream_keys_[i] = {};
+
+			const auto path = streamed_image_path(asset->name, i);
+			if (!filesystem::file(path).exists())
+			{
+				ZONETOOL_WARNING("Stream %u of image \"%s\" has no \"%s\"", i, asset->name, path.data());
+				continue;
+			}
+
+			this->stream_pixel_paths_[i] = filesystem::get_file_path(path) + path;
+		}
 	}
 
 	std::span<const XStreamFileKey> gfx_image::stream_keys() const
@@ -547,9 +582,10 @@ namespace zonetool::s2
 	void gfx_image::dump(GfxImage* asset)
 	{
 		const auto streamed = is_streamed_image(asset);
-		const auto dump_streams = utils::flags::has_flag("dump_streamed_image");
+		const auto dump_dds = utils::flags::has_flag("dds");
+		const auto dump_pixels = streamed && (has_fastfile_streams(asset) || (!dump_dds && utils::flags::has_flag("dump_streamed_image")));
 
-		if (utils::flags::has_flag("dds"))
+		if (dump_dds)
 		{
 			if (streamed)
 			{
@@ -560,7 +596,8 @@ namespace zonetool::s2
 				dump_loaded_image_dds(asset);
 			}
 		}
-		else if (streamed && dump_streams)
+
+		if (dump_pixels)
 		{
 			dump_streamed_image_pixels(asset, false);
 		}
