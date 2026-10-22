@@ -1564,8 +1564,9 @@ int writeMapPackage(const Args &args, const std::string &map, const std::string 
         if (!baked)
             baked = bakeSunShadow(2.0f, nullptr);
         // The crops: the minimap region with a 4096-unit margin, then (IW7 Depot: 112 MB) a 2048-unit
-        // one. Replay's format takes one or two units per texel (the shipped values).
-        for (const auto &[margin, sampleSize] : {std::pair{4096.0f, 2.0f}, std::pair{2048.0f, 2.0f}})
+        // one, then 1024 and none (IW7 Flip). Replay's format takes one or two units per texel (the shipped values).
+        for (const auto &[margin, sampleSize] : {std::pair{4096.0f, 2.0f}, std::pair{2048.0f, 2.0f},
+                                                  std::pair{1024.0f, 2.0f}, std::pair{0.0f, 2.0f}})
         {
             if (baked || !compassBounds)
                 break;
@@ -1582,10 +1583,13 @@ int writeMapPackage(const Args &args, const std::string &map, const std::string 
                  "(%.0f..%.0f, %.0f..%.0f)", margin, minX, maxX, minY, maxY);
             baked = bakeSunShadow(sampleSize, &focus);
         }
-        if (!baked)
-            throw std::runtime_error("compressed sun-shadow does not fit the native format even at two "
-                                     "units per texel over the play space");
-        sunShadow = std::move(*baked);
+        // Without a compressed sun shadow Replay shadows entities from its cascades only; the converted
+        // surfaces keep their own baked sun depth.
+        if (baked)
+            sunShadow = std::move(*baked);
+        else
+            warn("sun-shadow: the compressed sun shadow does not fit Replay's format even at two units per texel over "
+                 "the play space; the map ships without it");
     }
     if (!sunShadow.bytes.empty())
         info("sun-shadow: baked %u cells at %u resolution (%u uniform, %u quadtree), %zu native "

@@ -3698,10 +3698,9 @@ struct PromotedScriptModel
 // Gametype objects, exploders, old-school pickups and linked prefab members
 // remain entities for Replay's own scripts and the glass conversion.
 // Whether every surface of a model is a tool material (shadowcaster): IW7's tag_origin is one
-// model_nodraw triangle. Such a model draws nothing as a static model.
-bool DrawsOnlyTools(const std::filesystem::path &root, const std::string &modelName)
+// model_nodraw triangle, its *_shadowcaster props cast only shadows. Such a model draws nothing.
+bool OnlyToolSurfaces(const std::filesystem::path &root, const SourceStaticModel &model)
 {
-    const SourceStaticModel model = ReadSourceModel(root, modelName, true);
     bool any = false;
     for (const auto &lod : model.lods)
         for (const Surface &surface : lod.surfaces)
@@ -3716,6 +3715,39 @@ bool DrawsOnlyTools(const std::filesystem::path &root, const std::string &modelN
             any = true;
         }
     return any;
+}
+
+bool DrawsOnlyTools(const std::filesystem::path &root, const std::string &modelName)
+{
+    return OnlyToolSurfaces(root, ReadSourceModel(root, modelName, true));
+}
+
+// Takes the placements of models that draw nothing (Fallen's prop_haybale_fn_shadowcaster) out of the static
+// models: Replay has no static model without surfaces, and they only cast the baked sun shadow.
+SourceStaticModels TakeShadowOnlyStaticModels(const std::filesystem::path &root, SourceStaticModels &staticModels)
+{
+    std::vector<bool> shadowOnly(staticModels.models.size());
+    for (std::size_t index = 0; index < staticModels.models.size(); ++index)
+        shadowOnly[index] = OnlyToolSurfaces(root, staticModels.models[index]);
+    SourceStaticModels taken, kept;
+    std::vector<std::size_t> remap(staticModels.models.size());
+    for (std::size_t index = 0; index < staticModels.models.size(); ++index)
+    {
+        auto &target = shadowOnly[index] ? taken : kept;
+        remap[index] = target.models.size();
+        target.models.push_back(std::move(staticModels.models[index]));
+    }
+    for (auto &instance : staticModels.instances)
+    {
+        auto &target = shadowOnly.at(instance.model) ? taken : kept;
+        instance.model = remap[instance.model];
+        target.instances.push_back(std::move(instance));
+    }
+    staticModels = std::move(kept);
+    if (!taken.instances.empty())
+        zt::info("iw3: %zu placement(s) of %zu model(s) that draw only tool surfaces cast only the baked sun shadow",
+                 taken.instances.size(), taken.models.size());
+    return taken;
 }
 
 std::vector<PromotedScriptModel> TakeUnscriptedScriptModels(std::string &text,
@@ -4042,6 +4074,14 @@ void BuildPreparedStaticModels(const SourceStaticModels &source, const RenderPla
         for (std::size_t lodIndex = 0; drawn && lodIndex < sourceModel.lods.size(); ++lodIndex)
         {
             const SourceStaticModelLod &sourceLod = sourceModel.lods[lodIndex];
+            // A LOD no farther than the one before it never shows (IW7 Nova); Replay's static-model table needs
+            // strictly increasing distances.
+            if (!prepared.model.lods.empty() && !(sourceLod.distance > prepared.model.lods.back().dist))
+            {
+                zt::info("iw3: model %s LOD %zu ends at %g, no farther than the LOD before it; left out",
+                         sourceModel.name.c_str(), lodIndex, sourceLod.distance);
+                continue;
+            }
             dumpsrc::XseFile xse;
             xse.loaded = true;
             xse.name = assetName + "_lod" + std::to_string(lodIndex);
@@ -4220,9 +4260,17 @@ void BuildPreparedStaticModels(const SourceStaticModels &source, const RenderPla
                 xse.surfaces.push_back(std::move(converted));
                 surfaceMaterials.push_back(&material);
             }
+            // A LOD drawn only by tools (IW7 Geneva's foliage_tree_populus: a shadow-only last LOD) shows nothing
+            // from the previous LOD's distance on: the model ends there.
             if (xse.surfaces.empty())
-                throw std::runtime_error("IW3 static model LOD has no visible surfaces: " +
-                                         sourceModel.name);
+            {
+                if (lodIndex == 0)
+                    throw std::runtime_error("IW3 static model LOD has no visible surfaces: " +
+                                             sourceModel.name);
+                zt::info("iw3: model %s LOD %zu draws only tool surfaces; the model ends at LOD %zu",
+                         sourceModel.name.c_str(), lodIndex, lodIndex - 1);
+                break;
+            }
 
             conv_xsurf::Iw8Surfs converted = conv_xsurf::convert(xse);
             if (!converted.ok || converted.surfaces.size() != surfaceMaterials.size())
@@ -4320,6 +4368,8 @@ void BuildPreparedStaticModels(const SourceStaticModels &source, const RenderPla
 
         const replaybounds::Bounds bounds = modelBounds.Finish();
         prepared.model.numsurfs = static_cast<std::uint16_t>(surfaceOffset);
+        if (prepared.model.collLod != UINT8_MAX && prepared.model.collLod >= prepared.model.lods.size())
+            prepared.model.collLod = UINT8_MAX;
         prepared.model.himipRadiusInvSq.reserve(prepared.model.numsurfs);
         for (const auto &lod : staticModel.lods)
             for (const auto &surface : lod.surfaces)
@@ -4759,9 +4809,16 @@ Json BuildGlassPanes(const std::vector<BrushModel> &models, const RenderPlan &pl
                 plane[planeIndex++] = axis;
         const float halfWidth = size[plane[0]] * 0.5f;
         const float halfHeight = size[plane[1]] * 0.5f;
+        // A pane beyond the size range of Replay's glass (half extents of 1/8 to 32767/32 units, the 16-bit Havok
+        // units of its pieces; IW7 Flip) keeps its brush model, unbroken, as the glass that does not convert does.
         if (halfWidth < 0.125f || halfHeight < 0.125f || halfWidth * 32.0f > 32767.0f ||
             halfHeight * 32.0f > 32767.0f)
-            throw std::runtime_error("IW3 glass pane dimensions exceed Replay limits");
+        {
+            zt::warn("iw3: glass brush model *%u (%.1f x %.1f x %.1f) is beyond the size range of Replay's glass; "
+                     "it stays an unbreakable brush model",
+                     modelIndex, size[0], size[1], size[2]);
+            continue;
+        }
 
         // A pane without a textured face in its plane (one of IW7 Depot's 418 glass pieces)
         // keeps its brush model, unbroken, as the glass that does not convert does.
@@ -5697,7 +5754,8 @@ Json BuildRender(const Json &world, const VisibilityGroups &visibility,
 
 std::vector<Vec3> HullFromPlanes(const std::vector<Vec4> &source)
 {
-    if (source.size() < 4 || source.size() > 64)
+    // IW3 brushes keep under 64 sides; IW7's can have more (Hawkwar), with the six bounding planes added.
+    if (source.size() < 4 || source.size() > 256)
     {
         throw std::runtime_error("IW3 collision brush has an invalid plane count");
     }
@@ -5802,6 +5860,27 @@ std::vector<Vec3> HullFromPlanes(const std::vector<Vec4> &source)
     // cut its whole box away) collides with nothing; callers skip it.
     if (points.size() < 4)
         return {};
+    // A convex hull of more than 252 vertices (IW7 Riot's rounded brushes) does not build; its vertices are welded on
+    // a coarser grid (the mean of each cell) until it fits.
+    for (float cell = 0.25f; points.size() > 252 && cell <= 64.0f; cell *= 2.0f)
+    {
+        std::map<std::array<long, 3>, std::pair<Vec3, unsigned>> cells;
+        for (const Vec3 &point : points)
+        {
+            auto &[sum, count] = cells[{std::lround(std::floor(point[0] / cell)), std::lround(std::floor(point[1] / cell)),
+                                        std::lround(std::floor(point[2] / cell))}];
+            sum = Add(sum, point);
+            ++count;
+        }
+        if (cells.size() > 252)
+            continue;
+        std::vector<Vec3> welded;
+        for (const auto &[key, value] : cells)
+            welded.push_back(Multiply(value.first, 1.0f / static_cast<float>(value.second)));
+        zt::info("iw3: a collision brush of %zu vertices keeps %zu, welded on a %g-unit grid", points.size(),
+                 welded.size(), cell);
+        points = std::move(welded);
+    }
     if (points.size() > 252)
         throw std::runtime_error("IW3 collision brush exceeds 252 vertices");
     return points;
@@ -9998,6 +10077,7 @@ PreparedMap PrepareFastfile(const ImportOptions &options)
     }
     AddPromotedStaticModels(world, exportRoot, TakeUnscriptedScriptModels(entities, scriptStrings, exportRoot),
                             sourceStaticModels);
+    const SourceStaticModels shadowOnlyStaticModels = TakeShadowOnlyStaticModels(exportRoot, sourceStaticModels);
     timing.lap("read world");
     SourceStaticModels sourceEntityModels;
     auto keptEntityModelNames = convert::iw3ReplayEntityModels(entities);
@@ -10047,10 +10127,16 @@ PreparedMap PrepareFastfile(const ImportOptions &options)
     std::vector<std::string> shadowModelMaterialNames;
     for (const Surface &surface : brushModels.front().surfaces)
         shadowWorldMaterialNames.push_back(surface.material);
-    for (const SourceStaticModel &model : sourceStaticModels.models)
-        if (!model.lods.empty())
-            for (const Surface &surface : model.lods.front().surfaces)
-                shadowModelMaterialNames.push_back(surface.material);
+    for (const SourceStaticModels *models :
+         std::array<const SourceStaticModels *, 2>{&sourceStaticModels, &shadowOnlyStaticModels})
+        for (const SourceStaticModel &model : models->models)
+            if (!model.lods.empty())
+                for (const Surface &surface : model.lods.front().surfaces)
+                {
+                    shadowModelMaterialNames.push_back(surface.material);
+                    if (models == &shadowOnlyStaticModels)
+                        materialNames.push_back(surface.material);
+                }
     for (const BrushModel &model : brushModels)
         for (const Surface &surface : model.surfaces)
         {
@@ -10617,7 +10703,18 @@ PreparedMap PrepareFastfile(const ImportOptions &options)
             throw std::runtime_error("cannot write the static-model lighting image");
     }
     result.shadowScene = std::move(renderPlan.shadowScene);
-    BuildShadowScene(brushModels, sourceStaticModels, renderPlan, result.shadowScene);
+    {
+        SourceStaticModels casters = sourceStaticModels;
+        const std::size_t offset = casters.models.size();
+        casters.models.insert(casters.models.end(), shadowOnlyStaticModels.models.begin(),
+                              shadowOnlyStaticModels.models.end());
+        for (auto instance : shadowOnlyStaticModels.instances)
+        {
+            instance.model += offset;
+            casters.instances.push_back(std::move(instance));
+        }
+        BuildShadowScene(brushModels, casters, renderPlan, result.shadowScene);
+    }
     {
         // Baked sun visibility for every converted receiver (world, static
         // models, entities) over the play space: the minimap region plus a
