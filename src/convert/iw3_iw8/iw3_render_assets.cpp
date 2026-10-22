@@ -5958,7 +5958,14 @@ RenderPlan PrepareRenderAssets(const std::filesystem::path &exportRoot, const Js
             const auto &sourceImage = image(source.image);
             if (sourceImage.size() != 1)
                 throw std::runtime_error("IW3 FX material color map is a cubemap: " + name);
-            if (source.premultiplied)
+            // The stock unlit techniques of the alpha, feathered alpha and cloud families
+            // (unlit_6_effect_bad_ta0_*_100000023 / _100020023, as stock vfx_postfx_bokeh_sharp_sheet_1)
+            // never sample the colour map's alpha and write an output alpha of 0 (PS b0ec5d88,
+            // disassembled): they add the colour. Premultiplied by its alpha, the colour map adds what
+            // the alpha blend would; as it was, every texel of alpha above 0 drew at full colour (IW7's
+            // debris atlases, whose cells keep alpha 1/255 and their grey, drew as grey squares).
+            if (source.premultiplied || source.family == FxMaterialFamily::alpha ||
+                source.family == FxMaterialFamily::alphaFeather || source.family == FxMaterialFamily::cloud)
             {
                 Image premultiplied = sourceImage.front();
                 const auto multiply = [](std::vector<std::uint8_t> &rgba) {
