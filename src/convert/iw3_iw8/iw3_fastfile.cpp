@@ -4736,6 +4736,99 @@ std::optional<GlassFaceUv> BestGlassFaceUv(const BrushModel &model, const Render
     return best;
 }
 
+// A glass pane that no axis plane of its brush model holds (IW7 Riot and Paris turn panes by
+// 45 degrees): its plane is that of its largest intact glass triangle, its height along the
+// world's up (the x axis for a level pane), its extents those of its glass vertices.
+struct GlassPaneFrame
+{
+    Vec3 u{};
+    Vec3 v{};
+    Vec3 normal{};
+    Vec3 center{};
+    float halfWidth{};
+    float halfHeight{};
+    float depth{};
+    GlassFaceUv face;
+};
+
+std::optional<GlassPaneFrame> TiltedGlassFrame(const BrushModel &model, const RenderPlan &plan)
+{
+    const auto glassSurface = [&](const Surface &surface) -> const MaterialPlan * {
+        const auto material = plan.materials.find(surface.material);
+        if (material == plan.materials.end() || material->second.glassMaterial.empty() ||
+            surface.material.find("shattered") != std::string::npos)
+            return nullptr;
+        return &material->second;
+    };
+    const Surface *best = nullptr;
+    std::size_t bestIndex = 0;
+    float bestArea = 0.0002f;
+    for (const Surface &surface : model.surfaces)
+        if (glassSurface(surface))
+            for (std::size_t index = 0; index + 2 < surface.indices.size(); index += 3)
+            {
+                const Vec3 &a = surface.vertices.at(surface.indices[index]).position;
+                const Vec3 edges = Cross(Subtract(surface.vertices.at(surface.indices[index + 1]).position, a),
+                                         Subtract(surface.vertices.at(surface.indices[index + 2]).position, a));
+                const float area = std::sqrt(Dot(edges, edges));
+                if (area > bestArea)
+                {
+                    bestArea = area;
+                    best = &surface;
+                    bestIndex = index;
+                }
+            }
+    if (!best)
+        return std::nullopt;
+    const Vertex &a = best->vertices.at(best->indices[bestIndex]);
+    const Vertex &b = best->vertices.at(best->indices[bestIndex + 1]);
+    const Vertex &c = best->vertices.at(best->indices[bestIndex + 2]);
+    GlassPaneFrame frame;
+    frame.normal = Unit(Cross(Subtract(b.position, a.position), Subtract(c.position, a.position)));
+    const Vec3 up = std::abs(frame.normal[2]) > 0.9f ? Vec3{1.0f, 0.0f, 0.0f} : Vec3{0.0f, 0.0f, 1.0f};
+    frame.v = Unit(Subtract(up, Multiply(frame.normal, Dot(up, frame.normal))));
+    frame.u = Cross(frame.v, frame.normal);
+    constexpr float unbounded = std::numeric_limits<float>::max();
+    std::array<float, 3> low{unbounded, unbounded, unbounded}, high{-unbounded, -unbounded, -unbounded};
+    for (const Surface &surface : model.surfaces)
+        if (glassSurface(surface))
+            for (const Vertex &vertex : surface.vertices)
+            {
+                const std::array<float, 3> along{Dot(vertex.position, frame.u), Dot(vertex.position, frame.v),
+                                                 Dot(vertex.position, frame.normal)};
+                for (std::size_t axis = 0; axis < 3; ++axis)
+                {
+                    low[axis] = std::min(low[axis], along[axis]);
+                    high[axis] = std::max(high[axis], along[axis]);
+                }
+            }
+    frame.halfWidth = (high[0] - low[0]) * 0.5f;
+    frame.halfHeight = (high[1] - low[1]) * 0.5f;
+    frame.depth = high[2] - low[2];
+    frame.center = Add(Add(Multiply(frame.u, (low[0] + high[0]) * 0.5f), Multiply(frame.v, (low[1] + high[1]) * 0.5f)),
+                       Multiply(frame.normal, (low[2] + high[2]) * 0.5f));
+    // The texture gradient over the pane's (u, v), as BestGlassFaceUv takes it over an axis plane.
+    const float ax = Dot(a.position, frame.u), ay = Dot(a.position, frame.v);
+    const float bx = Dot(b.position, frame.u) - ax, by = Dot(b.position, frame.v) - ay;
+    const float cx = Dot(c.position, frame.u) - ax, cy = Dot(c.position, frame.v) - ay;
+    const float determinant = bx * cy - by * cx;
+    if (std::abs(determinant) <= 0.0001f)
+        return std::nullopt;
+    frame.face.material = glassSurface(*best)->glassMaterial;
+    const float sampleX = Dot(frame.center, frame.u) - ax, sampleY = Dot(frame.center, frame.v) - ay;
+    for (std::size_t channel = 0; channel < 2; ++channel)
+    {
+        const float buv = b.uv[channel] - a.uv[channel];
+        const float cuv = c.uv[channel] - a.uv[channel];
+        const float dx = (buv * cy - cuv * by) / determinant;
+        const float dy = (cuv * bx - buv * cx) / determinant;
+        frame.face.gradient[channel * 2] = dx;
+        frame.face.gradient[channel * 2 + 1] = dy;
+        frame.face.atSample[channel] = a.uv[channel] + dx * sampleX + dy * sampleY;
+    }
+    return frame;
+}
+
 Json BuildGlassPanes(const std::vector<BrushModel> &models, const RenderPlan &plan,
                      const std::string &entityText, CollisionData &collision,
                      std::set<std::uint32_t> &glassModels,
@@ -4806,8 +4899,28 @@ Json BuildGlassPanes(const std::vector<BrushModel> &models, const RenderPlan &pl
         for (std::size_t axis = 0; axis < 3; ++axis)
             if (axis != thin)
                 plane[planeIndex++] = axis;
-        const float halfWidth = size[plane[0]] * 0.5f;
-        const float halfHeight = size[plane[1]] * 0.5f;
+        float halfWidth = size[plane[0]] * 0.5f;
+        float halfHeight = size[plane[1]] * 0.5f;
+        float paneDepth = size[thin];
+        Vec3 localU{plane[0] == 0 ? 1.0f : 0.0f, plane[0] == 1 ? 1.0f : 0.0f, plane[0] == 2 ? 1.0f : 0.0f};
+        Vec3 localV{plane[1] == 0 ? 1.0f : 0.0f, plane[1] == 1 ? 1.0f : 0.0f, plane[1] == 2 ? 1.0f : 0.0f};
+        Vec3 localNormal{};
+        localNormal[thin] = 1.0f;
+        auto intactFace = BestGlassFaceUv(model, plan, plane, center, true);
+        bool tilted = false;
+        if (!intactFace)
+            if (const auto frame = TiltedGlassFrame(model, plan))
+            {
+                halfWidth = frame->halfWidth;
+                halfHeight = frame->halfHeight;
+                paneDepth = frame->depth;
+                localU = frame->u;
+                localV = frame->v;
+                localNormal = frame->normal;
+                center = frame->center;
+                intactFace = frame->face;
+                tilted = true;
+            }
         // A pane beyond the size range of Replay's glass (half extents of 1/8 to 32767/32 units, the 16-bit Havok
         // units of its pieces; IW7 Flip) keeps its brush model, unbroken, as the glass that does not convert does.
         if (halfWidth < 0.125f || halfHeight < 0.125f || halfWidth * 32.0f > 32767.0f ||
@@ -4819,9 +4932,8 @@ Json BuildGlassPanes(const std::vector<BrushModel> &models, const RenderPlan &pl
             continue;
         }
 
-        // A pane without a textured face in its plane (one of IW7 Depot's 418 glass pieces)
-        // keeps its brush model, unbroken, as the glass that does not convert does.
-        const auto intactFace = BestGlassFaceUv(model, plan, plane, center, true);
+        // A pane without a textured face (one of IW7 Depot's 418 glass pieces) keeps its brush
+        // model, unbroken, as the glass that does not convert does.
         if (!intactFace)
         {
             zt::warn("iw3: glass brush model *%u (%.1f x %.1f x %.1f) has no nondegenerate textured face in its plane; "
@@ -4829,6 +4941,10 @@ Json BuildGlassPanes(const std::vector<BrushModel> &models, const RenderPlan &pl
                      modelIndex, size[0], size[1], size[2]);
             continue;
         }
+        if (tilted)
+            zt::info("iw3: glass brush model *%u is a pane out of its axis planes (%.1f x %.1f); its plane is that of "
+                     "its largest glass face",
+                     modelIndex, halfWidth * 2.0f, halfHeight * 2.0f);
         const std::string paneMaterial = intactFace->material;
         std::array<float, 4> texVecs{};
         for (std::size_t index = 0; index < texVecs.size(); ++index)
@@ -4875,10 +4991,6 @@ Json BuildGlassPanes(const std::vector<BrushModel> &models, const RenderPlan &pl
         }
 
         const auto axis = EntityAxis(entity);
-        const Vec3 localU{plane[0] == 0 ? 1.0f : 0.0f, plane[0] == 1 ? 1.0f : 0.0f,
-                          plane[0] == 2 ? 1.0f : 0.0f};
-        const Vec3 localV{plane[1] == 0 ? 1.0f : 0.0f, plane[1] == 1 ? 1.0f : 0.0f,
-                          plane[1] == 2 ? 1.0f : 0.0f};
         const Vec3 worldU = Transform(axis, localU);
         const Vec3 worldV = Transform(axis, localV);
         const Vec3 worldNormal = Unit(Cross(worldU, worldV));
@@ -4946,11 +5058,17 @@ Json BuildGlassPanes(const std::vector<BrushModel> &models, const RenderPlan &pl
                 high[thin] = center[thin] + 0.25f;
             }
             for (unsigned corner = 0; corner < 8; ++corner)
-                paneHull.points.push_back(
-                    Add(Transform(axis, Vec3{corner & 1 ? high[0] : low[0],
-                                             corner & 2 ? high[1] : low[1],
-                                             corner & 4 ? high[2] : low[2]}),
-                        entityOrigin));
+            {
+                // A tilted pane's box lies in its own frame.
+                const float halfDepth = std::max(paneDepth * 0.5f, 0.25f);
+                const Vec3 local =
+                    tilted ? Add(Add(center, Multiply(localU, corner & 1 ? halfWidth : -halfWidth)),
+                                 Add(Multiply(localV, corner & 2 ? halfHeight : -halfHeight),
+                                     Multiply(localNormal, corner & 4 ? halfDepth : -halfDepth)))
+                           : Vec3{corner & 1 ? high[0] : low[0], corner & 2 ? high[1] : low[1],
+                                  corner & 4 ? high[2] : low[2]};
+                paneHull.points.push_back(Add(Transform(axis, local), entityOrigin));
+            }
             collision.hulls.push_back(std::move(paneHull));
             zt::info("iw3: glass pane %u has no collision brush; gave it a box hull", glassId);
         }
@@ -4992,7 +5110,7 @@ Json BuildGlassPanes(const std::vector<BrushModel> &models, const RenderPlan &pl
         // FxGlassDef stores fracture extrusion in eighths of an IW world unit.
         // Keep the full brush depth for collision, but convert its half-depth for
         // the native shard geometry (an 8-unit IW3 pane becomes 0.5 here).
-        const float fractureHalfThickness = std::max(0.125f, size[thin] / 16.0f);
+        const float fractureHalfThickness = std::max(0.125f, paneDepth / 16.0f);
         panes.push_back({{"material", paneMaterial},
                          {"materialShattered", paneMaterial},
                          {"texVecs", texVecs},
