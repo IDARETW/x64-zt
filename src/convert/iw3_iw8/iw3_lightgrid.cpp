@@ -1089,7 +1089,9 @@ std::vector<std::uint8_t> BuildMeshPayload(const std::vector<std::uint8_t> &sour
 
     std::vector<std::uint8_t> output;
     output.reserve(264ull + probeCount * 44ull + tetrahedronCount * 32ull + rootCount * 12ull + voxelCount * 4ull);
-    AppendBytes(output, Magic.data(), Magic.size());
+    // IW8GLG02: the tetrahedra carry Replay's visible bit (bit 31 of each corner) and the writer gives every one a
+    // fully visible light-visibility record (Replay lights entities by their static local lights through it).
+    AppendBytes(output, "IW8GLG02", 8);
     Append(output, probeCount);
     Append(output, tetrahedronCount);
     Append(output, static_cast<std::uint32_t>(rootCount));
@@ -1156,7 +1158,12 @@ std::vector<std::uint8_t> BuildMeshPayload(const std::vector<std::uint8_t> &sour
         for (const auto value : position)
             Append(output, static_cast<float>(value));
     for (const auto &tetrahedron : tetrahedra)
-        AppendBytes(output, tetrahedron.data(), sizeof(tetrahedron));
+    {
+        auto flagged = tetrahedron;
+        for (auto &index : flagged)
+            index |= 0x80000000u;
+        AppendBytes(output, flagged.data(), sizeof(flagged));
+    }
     for (const auto &neighbor : neighbors)
         AppendBytes(output, neighbor.data(), sizeof(neighbor));
     for (std::uint32_t y = 0; y < dimensions[1]; ++y)

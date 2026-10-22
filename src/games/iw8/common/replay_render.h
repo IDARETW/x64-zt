@@ -243,6 +243,9 @@ struct Mesh : Material
     std::vector<GlassPane> glassPanes;
     std::vector<unsigned> surfaceMaterials;
     unsigned opaqueCount = 0;
+    // World surfaces of Replay's lit decal range (blended with a depth bias), which
+    // follow the opaque ones and precede the translucent ones.
+    unsigned decalCount = 0;
     std::vector<uint8_t> surfaces, bounds, drawSurfs, surfData, positions, aux, indices;
     // Nine floats per opaque, non-sky world-model triangle (GfxWorld heightfield).
     std::vector<float> solidTriangles;

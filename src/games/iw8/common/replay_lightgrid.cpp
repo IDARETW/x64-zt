@@ -43,8 +43,9 @@ Grid Load(const std::string &meshPath)
     if (!input.read(reinterpret_cast<char *>(grid.payload.data()), size))
         throw std::runtime_error("Cannot read native light grid");
     const auto *p = grid.payload.data();
-    if (std::memcmp(p, "IW8GLG01", 8))
+    if (std::memcmp(p, "IW8GLG01", 8) && std::memcmp(p, "IW8GLG02", 8))
         throw std::runtime_error("Unknown native light-grid format");
+    grid.visibility = std::memcmp(p, "IW8GLG02", 8) == 0;
     std::memcpy(grid.counts.data(), p + 8, 16);
     const auto [probes, tets, roots, voxels] = grid.counts;
     if (!probes || probes > 2000000 || !tets || tets > 8000000 || !roots || roots > 1000000 ||
@@ -68,7 +69,7 @@ Grid Load(const std::string &meshPath)
             throw std::runtime_error("Nonfinite light-grid probe position");
     position += size_t(probes) * 12;
     for (size_t i = 0; i < size_t(tets) * 4; ++i)
-        if (Read<uint32_t>(p, position + i * 4) >= probes)
+        if ((Read<uint32_t>(p, position + i * 4) & 0x0FFFFFFFu) >= probes)
             throw std::runtime_error("Invalid light-grid tetrahedron probe");
     position += size_t(tets) * 16;
     for (size_t i = 0; i < size_t(tets) * 4; ++i)
@@ -109,6 +110,13 @@ void Emit(iw8::ZoneWriter &w, const Grid &grid)
         Put(body.data(), offset, iw8::PTR_FOLLOWS);
     Put(body.data(), 200, 1u);
     Put(body.data(), 224, tets);
+    if (grid.visibility)
+    {
+        // tetrahedronCountVisible (+0xE4) and tetrahedronVisibility (+0x178): 16 words per
+        // visible tetrahedron, a byte per corner for each of 16 light slots, all visible.
+        Put(body.data(), 228, tets);
+        Put(body.data(), 376, iw8::PTR_FOLLOWS);
+    }
     Put(body.data(), 448, voxels);
     std::memcpy(body.data() + 528, p + 24, 112);
     w.align(7);
@@ -146,6 +154,12 @@ void Emit(iw8::ZoneWriter &w, const Grid &grid)
     w.write(emptyNode.data(), emptyNode.size());
     array(63, size_t(tets) * 16);
     array(63, size_t(tets) * 16);
+    if (grid.visibility)
+    {
+        w.align(63);
+        const std::vector<uint8_t> visible(size_t(tets) * 64, 0xFF);
+        w.write(visible.data(), visible.size());
+    }
     cursor += size_t(roots) * 12;
     array(63, size_t(voxels) * 4);
 }

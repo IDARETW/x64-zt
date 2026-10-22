@@ -460,7 +460,8 @@ Iw8LightingMatch MatchIw8Lighting(const std::array<float, 3> &sun)
 }
 
 std::string FogShaderDefines(const std::optional<ExpFog> &fog, const MapStyle style,
-                             const std::optional<SunSprite> &sun, const float lightUnitScale)
+                             const std::optional<SunSprite> &sun, const float lightUnitScale,
+                             const std::optional<NativeFog> &nativeFog)
 {
     // iw8: the surface shader adds Replay's probe reflections and sun specular
     // (MAP_IW8_LIGHTING) and draws the map's IW3 sun sprite and flare in the sky
@@ -475,6 +476,35 @@ std::string FogShaderDefines(const std::optional<ExpFog> &fog, const MapStyle st
                     Number(sun->direction[1]) + "," + Number(sun->direction[2]) + "," +
                     Number(sun->radiusDegrees * 3.14159265f / 180.0f) +
                     ")\n#define MAP_SUN_FLARE " + Number(sun->flareAlpha) + "\n";
+    if (nativeFog)
+    {
+        // IW7 fog (Replay's vision fields): linear HDR, toward the fog colour, and toward the sun fog
+        // colour and its own halfway distance as the view turns to the sun (between the end and begin
+        // fade angles), at most the maximum opacity. The colours are in the units the shader
+        // multiplies by MAP_LIGHT_UNIT_SCALE.
+        const auto scaled = [](const std::array<float, 3> &color, const float intensity) {
+            return "float3(" + Number(color[0] * intensity) + "," + Number(color[1] * intensity) + "," +
+                   Number(color[2] * intensity) + ")";
+        };
+        const auto &direction = nativeFog->sunDirection;
+        const float length = std::sqrt(direction[0] * direction[0] + direction[1] * direction[1] +
+                                       direction[2] * direction[2]);
+        const auto toward = [&](const std::size_t axis) {
+            return Number(length > 0 ? direction[axis] / length : axis == 0 ? 1.0f : 0.0f);
+        };
+        constexpr float radians = 3.14159265f / 180.0f;
+        const float endCosine = std::cos(std::min(nativeFog->sunEndFadeAngle, 180.0f) * radians);
+        const float beginCosine = std::cos(std::min(nativeFog->sunBeginFadeAngle, 180.0f) * radians);
+        return lighting + "#define MAP_FOG 1\n#define MAP_FOG_LINEAR 1\n#define MAP_FOG_START " +
+               Number(nativeFog->start) + "\n#define MAP_FOG_DENSITY " +
+               Number(0.69314718f / std::max(nativeFog->density, 1.0f)) + "\n#define MAP_FOG_SUN_DENSITY " +
+               Number(0.69314718f / std::max(nativeFog->sunDensity, 1.0f)) + "\n#define MAP_FOG_COLOR " +
+               scaled(nativeFog->color, nativeFog->colorIntensity) + "\n#define MAP_FOG_SUN_COLOR " +
+               scaled(nativeFog->sunColor, nativeFog->sunColorIntensity) + "\n#define MAP_FOG_SUN_DIR float3(" +
+               toward(0) + "," + toward(1) + "," + toward(2) + ")\n#define MAP_FOG_SUN_FADE float2(" +
+               Number(endCosine) + "," + Number(1.0f / std::max(beginCosine - endCosine, 1e-4f)) +
+               ")\n#define MAP_FOG_MAX_OPACITY " + Number(std::clamp(nativeFog->maxOpacity, 0.0f, 1.0f)) + "\n";
+    }
     if (!fog)
         return lighting;
     return lighting + "#define MAP_FOG 1\n#define MAP_FOG_START " + Number(fog->start) +
@@ -484,7 +514,10 @@ std::string FogShaderDefines(const std::optional<ExpFog> &fog, const MapStyle st
            Number(fog->color[1]) + "," + Number(fog->color[2]) + ")\n";
 }
 
-std::vector<std::uint8_t> BuildGradingClutPixels(const Film &film)
+namespace
+{
+// The Replay CLUT of a grade of linear BT.709 colours (1 = display white).
+template <typename Grade> std::vector<std::uint8_t> BuildClut(const Grade &grade)
 {
     constexpr unsigned size = GradingClutSize;
     std::vector<std::uint8_t> pixels(std::size_t(size) * size * size * 8);
@@ -500,7 +533,7 @@ std::vector<std::uint8_t> BuildGradingClutPixels(const Film &film)
                 Color inGamut{};
                 for (unsigned channel = 0; channel < 3; ++channel)
                     inGamut[channel] = std::max(input709[channel], 0.0);
-                const Color graded = ApplyFilm(film, inGamut);
+                const Color graded = grade(inGamut);
                 Color output709{};
                 // Grade the representable part; keep any out-of-gamut remainder.
                 for (unsigned channel = 0; channel < 3; ++channel)
@@ -519,9 +552,63 @@ std::vector<std::uint8_t> BuildGradingClutPixels(const Film &film)
     return pixels;
 }
 
+double SrgbEncode(const double value)
+{
+    return value <= 0.0031308 ? value * 12.92 : 1.055 * std::pow(value, 1.0 / 2.4) - 0.055;
+}
+
+double SrgbDecode(const double value)
+{
+    return value <= 0.04045 ? value / 12.92 : std::pow((value + 0.055) / 1.055, 2.4);
+}
+} // namespace
+
+std::vector<std::uint8_t> BuildGradingClutPixels(const Film &film)
+{
+    return BuildClut([&](const Color &linear) { return ApplyFilm(film, linear); });
+}
+
+std::vector<std::uint8_t> BuildGradingClutPixels(const std::vector<std::uint8_t> &rgba, const unsigned size)
+{
+    if (size < 2 || rgba.size() != std::size_t(size) * size * size * 4)
+        throw std::runtime_error("invalid colour grading lookup table");
+    // IW7 grades the display-encoded (sRGB) image through its lookup table (red along x, green along
+    // y, blue along z), filtered trilinearly; highlights above white keep the grade of white.
+    return BuildClut([&](const Color &linear) {
+        const double scale = std::max({1.0, linear[0], linear[1], linear[2]});
+        std::array<double, 3> position{};
+        std::array<unsigned, 3> lower{};
+        std::array<double, 3> fraction{};
+        for (unsigned channel = 0; channel < 3; ++channel)
+        {
+            position[channel] = std::clamp(SrgbEncode(linear[channel] / scale), 0.0, 1.0) * (size - 1);
+            lower[channel] = std::min(static_cast<unsigned>(position[channel]), size - 2);
+            fraction[channel] = position[channel] - lower[channel];
+        }
+        Color result{};
+        for (unsigned corner = 0; corner < 8; ++corner)
+        {
+            double weight = 1.0;
+            std::size_t index = 0;
+            for (unsigned axis = 3; axis-- > 0;)
+            {
+                const unsigned step = (corner >> axis) & 1u;
+                weight *= step ? fraction[axis] : 1.0 - fraction[axis];
+                index = index * size + lower[axis] + step;
+            }
+            for (unsigned channel = 0; channel < 3; ++channel)
+                result[channel] += weight * rgba[index * 4 + channel] / 255.0;
+        }
+        for (unsigned channel = 0; channel < 3; ++channel)
+            result[channel] = SrgbDecode(std::clamp(result[channel], 0.0, 1.0)) * scale;
+        return result;
+    });
+}
+
 std::string BuildReplayVision(const std::optional<ExpFog> &fog, const std::string &gradingClut,
                               const MapStyle style, const std::array<float, 3> &sunDirection,
-                              const Iw8LightingReference *exposure, const float lightUnitScale)
+                              const Iw8LightingReference *exposure, const float lightUnitScale,
+                              const std::optional<NativeFog> &nativeFog)
 {
     std::map<std::string_view, std::string> overrides;
     if (style == MapStyle::iw8)
@@ -607,6 +694,28 @@ std::string BuildReplayVision(const std::optional<ExpFog> &fog, const std::strin
         overrides["MRTOMMTTQM"] = Vector(fog->color);    // fogSunColor
         overrides["MKKLQTSKSO"] = "0";                   // fogAtmosphericScattering
         overrides["SNNNRLTML"] = Number(halfway);        // fogHalfPlaneDistance
+    }
+    if (nativeFog)
+    {
+        // IW7 fog: the map's own fields, the colour intensities in the converted light units. The
+        // surface shader bakes it (FogShaderDefines) and the sky cube carries its sky fog, so the
+        // native fog pass stays off (its opacity 0), as for IW3 fog: the converted sky is world
+        // geometry, which that pass would fog by its distance.
+        overrides["MSTOLQOTKN"] = Number(nativeFog->density);                            // fogDensity
+        overrides["RPNOKKL"] = Number(nativeFog->start);                                 // fogStartDist
+        overrides["NTPTLNNQQL"] = Number(nativeFog->colorIntensity * lightUnitScale);    // fogColorIntensity
+        overrides["NMLMMNQLSQ"] = Vector(nativeFog->color);                              // fogColor
+        overrides["TRPROKTLS"] = "0";                                                    // fogMaxOpacity
+        overrides["MPNPSMMTTT"] = Number(nativeFog->sunDensity);                         // fogSunDensity
+        overrides["MLORTTKOLN"] = Number(nativeFog->sunColorIntensity * lightUnitScale); // fogSunColorIntensity
+        overrides["MRTOMMTTQM"] = Vector(nativeFog->sunColor);                           // fogSunColor
+        overrides["NKLTMMOOLP"] = Number(nativeFog->sunBeginFadeAngle);                  // fogSunBeginFadeAngle
+        overrides["NONQQTPNLT"] = Number(nativeFog->sunEndFadeAngle);                    // fogSunEndFadeAngle
+        overrides["RLNQONPKS"] = Vector(nativeFog->sunDirection);                        // fogSunDir
+        overrides["NORQKLTPTR"] = "0";                                                   // fogSkyIntensity
+        overrides["LOROLOTNMP"] = Number(nativeFog->skyMinAngle);                        // fogSkyMinAngle
+        overrides["SPQNRNKQR"] = Number(nativeFog->skyMaxAngle);                         // fogSkyMaxAngle
+        overrides["MKKLQTSKSO"] = "0";                                                   // fogAtmosphericScattering
     }
     if (!gradingClut.empty())
         overrides["NONMKTKNNM"] = gradingClut; // grading CLUT (stock: <map>_clut)

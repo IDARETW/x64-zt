@@ -331,6 +331,8 @@ namespace zonetool::convert::iw7_iw8
 			// The state being converted draws through IW7's unlit effect materials (effectunlit), whose tints carry the map's
 			// light unit (export_effect_material); lit ones keep their tint.
 			bool unlit_state_{};
+			// The state being converted has an atlas module: its materials keep their atlas (extraction::atlas_materials).
+			bool atlas_state_{};
 			std::optional<std::set<std::string>> bank_aliases_;
 
 			// The aliases of the map's sound bank (<map>.all).
@@ -395,6 +397,8 @@ namespace zonetool::convert::iw7_iw8
 				{
 					const auto material_name = this->output_.add_material(this->source_, sim.material);
 					this->output_.effect_materials.insert(material_name);
+					// Baked particles keep their cells (the animation's index data).
+					this->output_.atlas_materials.insert(material_name);
 					const auto count = header.particleDataCount;
 					write_json(this->output_.extracted / "particlesimanimation" / (file_name(name) + ".json"), {
 						{"name", name},
@@ -538,14 +542,17 @@ namespace zonetool::convert::iw7_iw8
 				record.elementType = element.value_or(0);
 				const auto source_flags = replay_state_flags(state.flags);
 
-				// Whether the state's materials are IW7's unlit effect materials (the emissive graph's intensities depend on it).
+				// Whether the state's materials are IW7's unlit effect materials (the emissive graph's intensities depend on it),
+				// and whether the state has an atlas module.
 				this->unlit_state_ = false;
+				this->atlas_state_ = false;
 				for (auto g = 0; g < 3; g++)
 				{
 					const auto& group = state.moduleGroupDefs[g];
 					for (auto m = 0; !group.disabled && m < group.numModules; m++)
 					{
 						const auto& module = group.moduleDefs[m];
+						this->atlas_state_ = this->atlas_state_ || module.moduleType == iw7::PARTICLE_MODULE_INIT_ATLAS;
 						if (module.moduleType != iw7::PARTICLE_MODULE_INIT_MATERIAL)
 						{
 							continue;
@@ -669,6 +676,15 @@ namespace zonetool::convert::iw7_iw8
 					base();
 				};
 
+				// IW7 never sets a graph's firstCurve byte (after the module base) and draws its graphs as values (a size graph's
+				// curves times their scale are the size). Replay multiplies a graph without it into the particle's value: a size
+				// graph squared IW7's start size (Scorch's sun: tails of 25 million units, wedges through the view). Stock
+				// graphs set it (97%), as do Replay's own ports of IW7 effects (common_mp: every one).
+				const auto first_curve = [&]
+				{
+					result.data()[offsetof(iw7::ParticleModuleSizeGraph, firstCurve)] = 1;
+				};
+
 				switch (module.moduleType)
 				{
 				case iw7::PARTICLE_MODULE_INIT_ATLAS:
@@ -777,6 +793,7 @@ namespace zonetool::convert::iw7_iw8
 					return result;
 				case iw7::PARTICLE_MODULE_COLOR_GRAPH:
 					copy(sizeof(iw7::ParticleModuleColorGraph));
+					first_curve();
 					for (auto c = 0; c < 8; c++)
 					{
 						result.curve(offsetof(iw7::ParticleModuleColorGraph, m_curves) + c * 16, data.colorGraph.m_curves[c]);
@@ -793,6 +810,7 @@ namespace zonetool::convert::iw7_iw8
 					return result;
 				case iw7::PARTICLE_MODULE_INTENSITY_GRAPH:
 					copy(sizeof(iw7::ParticleModuleIntensityGraph));
+					first_curve();
 					for (auto c = 0; c < 2; c++)
 					{
 						result.curve(offsetof(iw7::ParticleModuleIntensityGraph, m_curves) + c * 16, data.intensityGraph.m_curves[c]);
@@ -847,6 +865,11 @@ namespace zonetool::convert::iw7_iw8
 					}
 
 					copy(size);
+					if (module.moduleType == iw7::PARTICLE_MODULE_SIZE_GRAPH)
+					{
+						first_curve();
+					}
+
 					const auto first = reinterpret_cast<const std::uint8_t*>(curves) - reinterpret_cast<const std::uint8_t*>(&data);
 					for (auto c = 0; c < 6; c++)
 					{
@@ -938,6 +961,11 @@ namespace zonetool::convert::iw7_iw8
 						{
 							const auto name = this->output_.add_material(this->source_, const_cast<iw7::Material*>(material));
 							this->output_.effect_materials.insert(name);
+							if (this->atlas_state_)
+							{
+								this->output_.atlas_materials.insert(name);
+							}
+
 							entries.push_back(linked_asset("material", name));
 						}
 					}
@@ -1208,6 +1236,7 @@ namespace zonetool::convert::iw7_iw8
 					// (export_effect_material), else the intensities (the glow of lit embers and smoke).
 					std::memcpy(result.data(), &data, offsetof(iw7::ParticleModuleEmissiveGraph, m_curves));
 					base();
+					first_curve();
 					constexpr auto curves = offsetof(iw7::ParticleModuleEmissiveGraph, m_curves);
 					for (const auto c : {0, 1, 2, 5, 6, 7})
 					{
