@@ -123,6 +123,12 @@ Output main(uint id : SV_VertexID) {
     o.position.y = dot(projected, replayView[1]);
     o.position.z = dot(projected, replayView[2]);
     o.position.w = dot(projected, replayView[3]);
+    // Sky surfaces (kind 1) lie at infinity, as Replay's own sky does (its vertex shader projects
+    // view directions only). At their place, effects beyond the sky geometry were cut where they
+    // passed behind it: IW7 Scorch's sun, 28160 units away and up to 21000 wide, behind its sky box
+    // walls. Depth is reversed, so a z/w of 1e-7 is farther than any geometry.
+    if ((uint)o.metadata.y % 4 == 1)
+        o.position.z = o.position.w * 1e-7;
 #ifdef GLASS_PANE
     uint color = vertex.color;
 #else
