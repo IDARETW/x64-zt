@@ -76,7 +76,7 @@ namespace zonetool::convert::iw7_iw8
 			std::size_t height{};
 		};
 
-		// The game file sources need not read on several threads at once.
+		// The reads of a game file source that cannot read on several threads at once, and the paks found missing.
 		std::mutex read_mutex;
 
 		// The role of a texture, by its semantic and the first character of its shader name (colorMap, normalMap,
@@ -156,9 +156,19 @@ namespace zonetool::convert::iw7_iw8
 				std::string compressed(file.offsetEnd - file.offset, '\0');
 				const auto pak = std::format("imagefile{}.pak", file.fileIndex);
 				{
-					const std::lock_guard lock(read_mutex);
+					std::unique_lock lock(read_mutex, std::defer_lock);
+					if (!game_files::get().concurrent_reads())
+					{
+						lock.lock();
+					}
+
 					if (!game_files::get().read(pak, file.offset, compressed.size(), compressed.data()))
 					{
+						if (!lock.owns_lock())
+						{
+							lock.lock();
+						}
+
 						auto& images = missing_paks[pak];
 						if (images.empty())
 						{

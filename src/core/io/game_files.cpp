@@ -79,6 +79,12 @@ namespace zonetool::game_files
 				return read_disk(this->folder_ / name, offset, size, buffer);
 			}
 
+			// Each read opens its own stream.
+			bool concurrent_reads() const override
+			{
+				return true;
+			}
+
 		private:
 			std::filesystem::path folder_;
 		};

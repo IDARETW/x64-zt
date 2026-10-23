@@ -1,5 +1,7 @@
 #include <std_include.hpp>
 #include "export.hpp"
+
+#include <execution>
 #include "images.hpp"
 
 #include <utils/compression.hpp>
@@ -609,33 +611,54 @@ namespace zonetool::convert::iw7_iw8
 			// / 2 for it), between the vision's sky fog angles and times its sky fog intensity; toward the sun (between the
 			// sun fog's end and begin angles) the colour turns to the sun fog colour (w_sky PS: cb2 rows 0-4). The colours
 			// are in the converted units, as the sky's.
-			const auto fog = export_fog(source);
+			auto fog = export_fog(source);
+			// The fog's values are read once (the sky has millions of texels).
+			struct sky_fog_values
+			{
+				float intensity, minimum, maximum, end, begin;
+				vec3 sun;
+				std::array<float, 3> plain, sunward;
+			};
+			std::optional<sky_fog_values> fog_values;
+			if (fog.is_object() && fog["sky_intensity"].get<float>() > 0.0f)
+			{
+				constexpr auto radians = std::numbers::pi_v<float> / 180.0f;
+				auto& values = fog_values.emplace();
+				values.intensity = fog["sky_intensity"].get<float>();
+				values.minimum = fog["sky_min_angle"].get<float>() * radians;
+				values.maximum = fog["sky_max_angle"].get<float>() * radians;
+				values.sun = normalized({fog["sun_dir"][0].get<float>(), fog["sun_dir"][1].get<float>(), fog["sun_dir"][2].get<float>()});
+				values.end = std::cos(std::min(fog["sun_end_fade_angle"].get<float>(), 180.0f) * radians);
+				values.begin = std::cos(std::min(fog["sun_begin_fade_angle"].get<float>(), 180.0f) * radians);
+				for (auto c = 0; c < 3; c++)
+				{
+					values.plain[c] = fog["color"][c].get<float>() * fog["color_intensity"].get<float>();
+					values.sunward[c] = fog["sun_color"][c].get<float>() * fog["sun_color_intensity"].get<float>();
+				}
+			}
+
 			const auto sky_fog = [&](const vec3& view, color& value)
 			{
-				if (!fog.is_object() || fog["sky_intensity"].get<float>() <= 0.0f)
+				if (!fog_values)
 				{
 					return;
 				}
 
-				constexpr auto radians = std::numbers::pi_v<float> / 180.0f;
+				const auto& values = *fog_values;
 				const auto direction = normalized(view);
-				const auto minimum = fog["sky_min_angle"].get<float>() * radians;
-				const auto maximum = fog["sky_max_angle"].get<float>() * radians;
-				const auto amount = std::clamp(((1.0f - direction[2]) * std::numbers::pi_v<float> * 0.5f - minimum) /
-					std::max(maximum - minimum, 1e-4f), 0.0f, 1.0f) * fog["sky_intensity"].get<float>();
-				const auto sun = normalized({fog["sun_dir"][0].get<float>(), fog["sun_dir"][1].get<float>(), fog["sun_dir"][2].get<float>()});
-				const auto end = std::cos(std::min(fog["sun_end_fade_angle"].get<float>(), 180.0f) * radians);
-				const auto begin = std::cos(std::min(fog["sun_begin_fade_angle"].get<float>(), 180.0f) * radians);
-				const auto toward = std::clamp((dot(direction, sun) - end) / std::max(begin - end, 1e-4f), 0.0f, 1.0f);
+				const auto amount = std::clamp(((1.0f - direction[2]) * std::numbers::pi_v<float> * 0.5f - values.minimum) /
+					std::max(values.maximum - values.minimum, 1e-4f), 0.0f, 1.0f) * values.intensity;
+				const auto toward = std::clamp((dot(direction, values.sun) - values.end) / std::max(values.begin - values.end, 1e-4f),
+					0.0f, 1.0f);
 				for (auto c = 0; c < 3; c++)
 				{
-					const auto plain = fog["color"][c].get<float>() * fog["color_intensity"].get<float>();
-					const auto sunward = fog["sun_color"][c].get<float>() * fog["sun_color_intensity"].get<float>();
-					value[c] += (plain + (sunward - plain) * toward - value[c]) * amount;
+					value[c] += (values.plain[c] + (values.sunward[c] - values.plain[c]) * toward - value[c]) * amount;
 				}
 			};
 			sky_faces sky{size};
-			for (auto face = 0u; face < 6; face++)
+			// The faces sample on their own threads.
+			std::array<unsigned, 6> face_indices{0, 1, 2, 3, 4, 5};
+			std::for_each(std::execution::par, face_indices.begin(), face_indices.end(), [&](const unsigned face)
 			{
 				const auto& axis = cube_faces[face];
 				sky.colors[face].resize(texels);
@@ -651,7 +674,7 @@ namespace zonetool::convert::iw7_iw8
 						sample[2] * exposure * scale[2], 1.0f};
 					sky_fog(view, sky.colors[face][t]);
 				}
-			}
+			});
 
 			draw_distant_models(source, output, sky, exposure);
 
