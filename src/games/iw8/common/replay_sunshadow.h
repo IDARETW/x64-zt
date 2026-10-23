@@ -3,6 +3,7 @@
 #include "replay_bounds.h"
 
 #include <array>
+#include <filesystem>
 #include <cstddef>
 #include <cstdint>
 #include <span>
@@ -71,6 +72,10 @@ struct Data
 // With focus, only casters whose sun projection overlaps the focus box's sun
 // projection are baked, and the shadow covers only that projection (huge IW3
 // worlds whose play space is a small part of the terrain).
+// The bakes keep their results in `directory` by their inputs (empty: no cache): a second conversion of a map
+// reads its sun shadow and sun depth image there, a bake past its budget included.
+void SetCacheDirectory(std::filesystem::path directory);
+
 // A bake whose tiles pass `budget` bytes stops early with an error that says it "exceeds" the budget.
 Data Bake(const Scene &scene, const std::array<float, 3> &sunDirection,
           const replaybounds::Bounds &receiverBounds, float sampleSize = 1.0f,
