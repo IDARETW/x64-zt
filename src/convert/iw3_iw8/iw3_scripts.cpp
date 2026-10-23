@@ -497,6 +497,9 @@ class Translator
         }
         if (auto compat = CompatBuiltin(name); !compat.empty())
             return compat;
+        // The compatibility layer compiles with every map script (CompatText): generated scripts call its functions.
+        if (name.starts_with("iw3compat_"))
+            return name;
         if (DroppedBuiltins().contains(name))
         {
             Note("IW3 builtin " + name + " dropped");

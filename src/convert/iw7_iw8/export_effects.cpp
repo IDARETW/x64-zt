@@ -335,6 +335,10 @@ namespace zonetool::convert::iw7_iw8
 			bool atlas_state_{};
 			// The state being converted draws oriented sprites (their velocity frame orients them).
 			bool oriented_state_{};
+			// The state being converted is an IW7 glare (a flare at its source, outside sun effects) drawn as a billboard, and
+			// the size of its flare at the source (the radial scales), which its size modules take.
+			bool glare_state_{};
+			float glare_scale_{1.0f};
 			std::optional<std::set<std::string>> bank_aliases_;
 
 			// The aliases of the map's sound bank (<map>.all).
@@ -452,6 +456,8 @@ namespace zonetool::convert::iw7_iw8
 
 				if (emitters.empty())
 				{
+					ZONETOOL_INFO("iw7: effect \"%s\" does not convert: none of its %d emitters does", this->current_.data(),
+						system.numEmitters);
 					return std::nullopt;
 				}
 
@@ -542,6 +548,46 @@ namespace zonetool::convert::iw7_iw8
 				focus::ParticleStateDef record{};
 				const auto element = replay_element(state.elementType);
 				record.elementType = element.value_or(0);
+
+				// IW7's glares (Frontier's fixture, warning and boost glares: flares at their source with IW7's additive glow
+				// materials, which ignore depth) flickered as Replay flares: Replay's flare occlusion (cs_flare_occlusion, a 3x3
+				// screen mask at the source) switched them on and off with the view, the source lying on its fixture. They
+				// draw as billboards of the flare's size at the source, with their own materials; the screen-space pieces of a
+				// flare away from its source (ghosts) are left out. Sun flares stay Replay flares.
+				this->glare_state_ = false;
+				this->glare_scale_ = 1.0f;
+				if (state.elementType == iw7::PARTICLE_ELEMENT_TYPE_FLARE && this->current_.find("sun") == std::string::npos)
+				{
+					const iw7::ParticleModuleInitFlare* flare_module{};
+					for (auto g = 0; g < 3 && !flare_module; g++)
+					{
+						const auto& group = state.moduleGroupDefs[g];
+						for (auto m = 0; !group.disabled && m < group.numModules; m++)
+						{
+							if (group.moduleDefs[m].moduleType == iw7::PARTICLE_MODULE_INIT_FLARE)
+							{
+								flare_module = &group.moduleDefs[m].moduleData.initFlare;
+							}
+						}
+					}
+
+					if (!flare_module || std::abs(flare_module->m_position - 1.0f) > 0.05f)
+					{
+						this->drop("flare away from its source (no Replay flare draws without its occlusion)");
+						complete = false;
+						return {{"state", hex(record)}, {"groups", json::array({json::array(), json::array(), json::array()})}};
+					}
+
+					auto scale = std::max(flare_module->m_radialScaleX.min, flare_module->m_radialScaleY.min);
+					if (flare_module->m_depthScaleRange.max > flare_module->m_depthScaleRange.min)
+					{
+						scale *= flare_module->m_depthScaleValue.max;
+					}
+
+					this->glare_state_ = true;
+					this->glare_scale_ = scale > 0.0f && std::isfinite(scale) ? scale : 1.0f;
+					record.elementType = 0;
+				}
 				const auto source_flags = replay_state_flags(state.flags);
 
 				// Whether the state's materials are IW7's unlit effect materials (the emissive graph's intensities depend on it),
@@ -580,6 +626,11 @@ namespace zonetool::convert::iw7_iw8
 					const auto& group = state.moduleGroupDefs[g];
 					for (auto m = 0; !group.disabled && m < group.numModules; m++)
 					{
+						if (this->glare_state_ && group.moduleDefs[m].moduleType == iw7::PARTICLE_MODULE_INIT_FLARE)
+						{
+							continue;
+						}
+
 						auto module = this->convert_module(group.moduleDefs[m], static_cast<std::uint16_t>(modules.size()),
 							record.elementType == flare_element);
 						if (module)
@@ -710,6 +761,21 @@ namespace zonetool::convert::iw7_iw8
 				}
 				case iw7::PARTICLE_MODULE_INIT_ATTRIBUTES:
 					copy(sizeof(iw7::ParticleModuleInitAttributes));
+					if (this->glare_state_)
+					{
+						auto sizes = std::array{data.initAttributes.m_sizeMin, data.initAttributes.m_sizeMax};
+						for (auto& extent : sizes)
+						{
+							for (auto& value : extent.v)
+							{
+								value *= this->glare_scale_;
+							}
+						}
+
+						result.set(offsetof(iw7::ParticleModuleInitAttributes, m_sizeMin), sizes[0]);
+						result.set(offsetof(iw7::ParticleModuleInitAttributes, m_sizeMax), sizes[1]);
+					}
+
 					return result;
 				case iw7::PARTICLE_MODULE_INIT_BEAM:
 				{
@@ -893,7 +959,28 @@ namespace zonetool::convert::iw7_iw8
 					const auto first = reinterpret_cast<const std::uint8_t*>(curves) - reinterpret_cast<const std::uint8_t*>(&data);
 					for (auto c = 0; c < 6; c++)
 					{
-						result.curve(first + c * 16, curves[c]);
+						auto curve = curves[c];
+						if (this->glare_state_ && module.moduleType == iw7::PARTICLE_MODULE_SIZE_GRAPH)
+						{
+							curve.scale *= this->glare_scale_;
+						}
+
+						result.curve(first + c * 16, curve);
+					}
+
+					if (this->glare_state_ && module.moduleType == iw7::PARTICLE_MODULE_SIZE_GRAPH)
+					{
+						auto sizes = std::array{data.sizeGraph.m_sizeBegin, data.sizeGraph.m_sizeEnd};
+						for (auto& extent : sizes)
+						{
+							for (auto& value : extent.v)
+							{
+								value *= this->glare_scale_;
+							}
+						}
+
+						result.set(offsetof(iw7::ParticleModuleSizeGraph, m_sizeBegin), sizes[0]);
+						result.set(offsetof(iw7::ParticleModuleSizeGraph, m_sizeEnd), sizes[1]);
 					}
 
 					// Replay's rotation graphs (stock and its own conversions of IW7 effects) have no curve scale of 1: the
@@ -920,7 +1007,9 @@ namespace zonetool::convert::iw7_iw8
 					const auto& list = data.initMaterial.m_linkedAssetList;
 					for (auto a = 0; a < list.numAssets; a++)
 					{
-						const auto* material = list.assetList[a].material;
+						// A material of another zone (the lens-flare materials of techsets_common_core_mp) reads from the zone that holds it.
+						const auto* material = list.assetList[a].material ? this->source_.resolve(iw7::ASSET_TYPE_MATERIAL,
+							const_cast<iw7::Material*>(list.assetList[a].material)) : nullptr;
 						// A flare never draws through an effect sprite material: Replay draws its screen-space vertices as screen-wide
 						// wedges through the screen centre (Scorch's lava glare, owner test of cbf4948). A flare whose own image reads
 						// takes Replay's flare material of its role; one whose image cannot be read (Frontier's fixture glares: stubs of
@@ -943,9 +1032,7 @@ namespace zonetool::convert::iw7_iw8
 							}
 							else if (!material->textureCount)
 							{
-								// Frontier's fixture glares (el/vfx_postfx_lensflare_*: techsets_common_core_mp's) flickered when
-								// they were drawn with Replay's flare materials (owner test): they stay out.
-								reason = "the map's zone holds only a reference to it (another zone's material)";
+								reason = "no loaded zone holds more than a reference to it";
 							}
 							else
 							{
@@ -2334,6 +2421,8 @@ iw7_scriptable_run( part, events )
 		}
 		else if ( e.t == "force" )
 			self thread iw7_scriptable_force( e.a );
+		else if ( e.t == "debris" )
+			self iw7_scriptable_debris( e.a, e.b, e.c, e.d );
 		else if ( e.t == "script" )
 			self notify( e.a, e.b );
 	}
@@ -2470,6 +2559,45 @@ iw7_scriptable_force( fall )
 		self rotateroll( angle, 0.2, 0.05, 0.05 );
 		wait 0.2;
 	}
+}
+
+// IW7's debris (SpawnDynent: dynamic entities that a breaking piece throws) as script models on their launch arc, as
+// the converted IW3 vehicle parts fly without a physics body (iw3compat_physics_prop keeps at most 25).
+iw7_scriptable_debris( model, tag, velocity, world )
+{
+	origin = self iw7_scriptable_origin( tag );
+	angles = self.angles;
+	if ( !world )
+		velocity = anglestoforward( angles ) * velocity[0] - anglestoright( angles ) * velocity[1] + anglestoup( angles ) * velocity[2];
+	prop = iw3compat_physics_prop( origin, angles, model );
+	prop thread iw7_scriptable_fly( origin, velocity );
+}
+
+iw7_scriptable_fly( start, velocity )
+{
+	self endon( "death" );
+	gravity = 800;
+	time = 3;
+	previous = start;
+	for ( step = 1; step <= 60; step++ )
+	{
+		t = step * 0.05;
+		next = start + velocity * t - ( 0, 0, 0.5 * gravity * t * t );
+		if ( step > 2 )
+		{
+			stop = physicstrace( previous, next );
+			if ( distancesquared( stop, next ) > 0.01 )
+			{
+				time = step * 0.05;
+				break;
+			}
+		}
+
+		previous = next;
+	}
+
+	self movegravity( velocity, time );
+	self rotatevelocity( ( randomfloatrange( 180, 540 ), randomfloatrange( -360, 360 ), randomfloatrange( 180, 540 ) ), time );
 }
 
 iw7_scriptable_damage()
@@ -3320,6 +3448,12 @@ iw7_destructible_think( model, effect, sound, health )
 						else if (t == "force")
 						{
 							args = num("fall");
+						}
+						else if (t == "debris")
+						{
+							const auto& velocity = event.at("velocity");
+							args = std::format("{}, {}, ( {}, {}, {} ), {}", str("model"), str("tag"), number(velocity.at(0)),
+								number(velocity.at(1)), number(velocity.at(2)), num("world"));
 						}
 						else if (t == "damage")
 						{
