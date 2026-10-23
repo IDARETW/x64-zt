@@ -130,6 +130,20 @@ std::string CommonFunction(const std::string &file, const std::string &name)
     }
     if (file == "maps/mp/gametypes/_shellshock" && name == "barrel_earthquake")
         return "iw3compat_barrel_earthquake";
+    // Stock Replay scripts keep these IW7 functions under the same name and arguments (checked against the decompiled
+    // Replay 1.20 scripts of common_base_mp): the converted script calls them. Their far references name the stock
+    // scripts by id, as Replay's own scripts do.
+    static constexpr std::pair<std::string_view, std::string_view> kReplayFunctions[] = {
+        {"scripts/mp/damage", "playerkilled_internal"}, // IW7 Neon's VR deaths wrap the player-killed callback
+        {"scripts/mp/weapons", "deleteexplosive"},      // IW7 Rivet's rocket blast clears the explosives under it
+    };
+    for (const auto &[script, function] : kReplayFunctions)
+        if (file == script && name == function)
+        {
+            std::string qualified(script);
+            std::replace(qualified.begin(), qualified.end(), '/', '\\');
+            return qualified + "::" + std::string(function);
+        }
     return {};
 }
 

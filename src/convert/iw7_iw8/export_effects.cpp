@@ -2213,15 +2213,34 @@ iw7_state( mode, animation, to, time )
 			// it does not know by its id, so the script is the one that defines the functions that the map script calls.
 			auto own = text;
 			std::vector<script_function> shared;
-			for (const std::string_view path : {R"(scripts\mp\animation_suite)", R"(scripts\mp\utility)"})
+			std::vector<std::string> paths{R"(scripts\mp\animation_suite)", R"(scripts\mp\utility)"};
+			// The map's other scripts convert with it too (Rivet's drone lights in mp_rivet_fx), but for their main: the
+			// pipeline's own effect script and createfx take the place of the effect script's main.
+			const auto local = std::format(R"(scripts\mp\maps\{}\)", map);
+			for (auto at = own.find(local); at != std::string::npos; at = own.find(local, at + 1))
 			{
-				const auto prefix = std::string(path) + "::";
+				const auto end = own.find("::", at);
+				const auto path = end == std::string::npos ? std::string{} : own.substr(at, end - at);
+				if (!path.empty() && path != local + map && std::ranges::find(paths, path) == paths.end())
+				{
+					paths.push_back(path);
+				}
+			}
+
+			const auto identifier = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_";
+			for (const auto& path : paths)
+			{
+				const bool map_script = path.starts_with(local);
+				const auto prefix = path + "::";
 				std::set<std::string> called;
 				for (auto at = own.find(prefix); at != std::string::npos; at = own.find(prefix, at + 1))
 				{
 					const auto start = at + prefix.size();
-					const auto end = own.find_first_not_of("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_", start);
-					called.insert(own.substr(start, end - start));
+					const auto end = own.find_first_not_of(identifier, start);
+					if (const auto name = own.substr(start, end - start); !(map_script && name == "main"))
+					{
+						called.insert(name);
+					}
 				}
 
 				if (called.empty())
@@ -2245,18 +2264,27 @@ iw7_state( mode, animation, to, time )
 
 				if (!found)
 				{
-					ZONETOOL_WARNING("iw7: the map script runs %s, whose script is not in the loaded zones", std::string(path).data());
+					ZONETOOL_WARNING("iw7: the map script runs %s, whose script is not in the loaded zones", path.data());
 					continue;
 				}
 
-				for (auto at = own.find(prefix); at != std::string::npos; at = own.find(prefix, at))
+				for (auto at = own.find(prefix); at != std::string::npos; at = own.find(prefix, at + 1))
 				{
-					own.erase(at, prefix.size());
+					const auto start = at + prefix.size();
+					if (called.contains(own.substr(start, own.find_first_not_of(identifier, start) - start)))
+					{
+						own.erase(at, prefix.size());
+					}
 				}
 
-				const auto defined = script_functions(*found);
+				auto defined = script_functions(*found);
+				if (map_script)
+				{
+					std::erase_if(defined, [](const script_function& function) { return function.name == "main"; });
+				}
+
 				shared.insert(shared.end(), defined.begin(), defined.end());
-				ZONETOOL_INFO("iw7: the map script runs %s, which converts with it (%zu functions)", std::string(path).data(), defined.size());
+				ZONETOOL_INFO("iw7: the map script runs %s, which converts with it (%zu functions)", path.data(), defined.size());
 			}
 
 			auto functions = script_functions(own);
@@ -2337,9 +2365,19 @@ iw7_state( mode, animation, to, time )
 
 				// IW7 method 0x8113, which gsc-tool does not name, returns the corpse of a player that has died (inferred from
 				// its uses: Junk's grinder and Rally's gas hide it and play a gib effect at it): Replay's getcorpseentity.
-				for (auto at = body.find("_meth_8113("); at != std::string::npos; at = body.find("_meth_8113(", at))
+				// IW7 methods 0x84A4 and 0x84A6 sit on either side of setusefov (0x84A5), as sethintdisplayrange and
+				// sethintdisplayfov do in Replay's table; Carnage's and Rally's gas buttons call them beside setuserange and
+				// setusefov with the same values (inferred).
+				for (const auto& [from, to] : std::initializer_list<std::pair<std::string_view, std::string_view>>{
+					{"_meth_8113(", "getcorpseentity("},
+					{"_meth_84A4(", "sethintdisplayrange("},
+					{"_meth_84A6(", "sethintdisplayfov("},
+				})
 				{
-					body.replace(at, std::string_view("_meth_8113(").size(), "getcorpseentity(");
+					for (auto at = body.find(from); at != std::string::npos; at = body.find(from, at))
+					{
+						body.replace(at, from.size(), to);
+					}
 				}
 
 				for (const auto& [from, to] : std::initializer_list<std::pair<std::string_view, std::string_view>>{

@@ -2728,7 +2728,8 @@ std::string HlslNumber(const float value)
 // render cache keeps them between runs (D3DCompile output is deterministic).
 std::filesystem::path g_shaderCacheRoot;
 std::mutex g_shaderCacheMutex;
-std::unordered_map<std::string, std::vector<std::uint8_t>> g_compiledShaders;
+// Each shader compiles once in a run: threads that need one being compiled wait for it.
+std::unordered_map<std::string, std::shared_future<std::vector<std::uint8_t>>> g_compiledShaders;
 
 std::vector<std::uint8_t> CompileUncached(const std::string &source, const char *target, const char *name);
 
@@ -2737,43 +2738,72 @@ std::vector<std::uint8_t> Compile(const std::string &source, const char *target,
     std::string keyed = std::string(target) + '\n' + name + '\n' + source;
     const auto digest = Sha256(std::span(reinterpret_cast<const std::uint8_t *>(keyed.data()), keyed.size()));
     const std::string key = Hex(std::span(digest).first(16)) + "_" + target;
+    std::promise<std::vector<std::uint8_t>> promise;
+    std::shared_future<std::vector<std::uint8_t>> pending;
+    bool owner = false;
     {
         std::lock_guard lock(g_shaderCacheMutex);
-        if (const auto found = g_compiledShaders.find(key); found != g_compiledShaders.end())
-            return found->second;
-    }
-    const auto file = g_shaderCacheRoot.empty() ? std::filesystem::path{} : g_shaderCacheRoot / ("shader_" + key + ".dxbc");
-    std::error_code error;
-    std::vector<std::uint8_t> program;
-    if (!file.empty() && std::filesystem::is_regular_file(file, error))
-    {
-        program = ReadBytes(file);
-        if (program.size() < 4 || std::memcmp(program.data(), "DXBC", 4) != 0)
-            program.clear();
-    }
-    if (program.empty())
-    {
-        program = CompileUncached(source, target, name);
-        if (!file.empty())
+        const auto [found, inserted] = g_compiledShaders.try_emplace(key);
+        if (inserted)
         {
-            auto partial = file;
-            partial += "." + std::to_string(GetCurrentProcessId()) + "." + std::to_string(GetCurrentThreadId()) +
-                       ".partial";
+            found->second = promise.get_future().share();
+            owner = true;
+        }
+        pending = found->second;
+    }
+    if (!owner)
+        return pending.get();
+    try
+    {
+        // The cache is an optimisation: an entry that does not read (another conversion writing it) compiles again,
+        // and an entry that exists is never replaced (a reader could fail).
+        const auto file = g_shaderCacheRoot.empty() ? std::filesystem::path{} : g_shaderCacheRoot / ("shader_" + key + ".dxbc");
+        std::error_code error;
+        std::vector<std::uint8_t> program;
+        if (!file.empty() && std::filesystem::is_regular_file(file, error))
+        {
             try
             {
-                std::filesystem::create_directories(g_shaderCacheRoot, error);
-                WriteBytes(partial, program);
-                std::filesystem::rename(partial, file, error);
+                program = ReadBytes(file);
             }
             catch (const std::exception &)
             {
+                program.clear();
             }
-            std::filesystem::remove(partial, error);
+            if (program.size() < 4 || std::memcmp(program.data(), "DXBC", 4) != 0)
+                program.clear();
         }
+        if (program.empty())
+        {
+            program = CompileUncached(source, target, name);
+            if (!file.empty() && !std::filesystem::exists(file, error))
+            {
+                auto partial = file;
+                partial += "." + std::to_string(GetCurrentProcessId()) + "." + std::to_string(GetCurrentThreadId()) +
+                           ".partial";
+                try
+                {
+                    std::filesystem::create_directories(g_shaderCacheRoot, error);
+                    WriteBytes(partial, program);
+                    if (!std::filesystem::exists(file, error))
+                        std::filesystem::rename(partial, file, error);
+                }
+                catch (const std::exception &)
+                {
+                }
+                std::filesystem::remove(partial, error);
+            }
+        }
+        promise.set_value(program);
+        return program;
     }
-    std::lock_guard lock(g_shaderCacheMutex);
-    g_compiledShaders.try_emplace(key, program);
-    return program;
+    catch (...)
+    {
+        promise.set_exception(std::current_exception());
+        std::lock_guard lock(g_shaderCacheMutex);
+        g_compiledShaders.erase(key);
+        throw;
+    }
 }
 
 std::vector<std::uint8_t> CompileUncached(const std::string &source, const char *target, const char *name)
@@ -4446,7 +4476,18 @@ class ResidentEncodeCache
         const auto path = this->file(key);
         if (!std::filesystem::is_regular_file(path, error) || std::filesystem::file_size(path, error) <= sizeof(double) || error)
             return result;
-        auto bytes = ReadBytes(path);
+        // An entry that does not read (another conversion writing it) encodes again.
+        std::vector<std::uint8_t> bytes;
+        try
+        {
+            bytes = ReadBytes(path);
+        }
+        catch (const std::exception &)
+        {
+            return result;
+        }
+        if (bytes.size() <= sizeof(double))
+            return result;
         std::memcpy(&result.error, bytes.data(), sizeof(double));
         result.bytes.assign(bytes.begin() + sizeof(double), bytes.end());
         return result;

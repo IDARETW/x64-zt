@@ -1887,18 +1887,19 @@ int writeMapPackage(const Args &args, const std::string &map, const std::string 
             }
             if (!prepared->vfxLightDef.empty())
                 iw8::vfx::RegisterLightDef(writer, prepared->vfxLightDef);
-            for (auto &shape : prepared->vfxShapes)
-                iw8::stock::RegisterPhysicsShape(writer, shape.name, std::move(shape.havokData));
-            for (auto &sim : prepared->vfxParticleSims)
-                iw8::vfx::RegisterParticleSim(writer, std::move(sim));
+            for (const auto &shape : prepared->vfxShapes)
+                iw8::stock::RegisterPhysicsShape(writer, shape.name, shape.havokData);
+            for (const auto &sim : prepared->vfxParticleSims)
+                iw8::vfx::RegisterParticleSim(writer, sim);
             for (const auto &[type, name] : prepared->vfxReferences)
             {
                 iw8::stock::RegisterNameReference(writer, type, name);
                 if (type == ASSET_TYPE_MATERIAL)
                     iw8::stock::RegisterNameReference(techsets, type, name);
             }
-            for (auto &effect : prepared->vfxEffects)
-                iw8::vfx::Register(writer, std::move(effect));
+            // Copies: the output ledger names them after the zone build.
+            for (const auto &effect : prepared->vfxEffects)
+                iw8::vfx::Register(writer, effect);
             iw8::RegisterDynamicEntityList(writer, prepared->dynamicEntities);
         }
         iw8::impact::Register(writer, map,
