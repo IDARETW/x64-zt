@@ -83,6 +83,16 @@ namespace zonetool::convert::iw7_iw8
 		// destructible cars): their instances are script models of this targetname, whose state machine (export_entities'
 		// scriptable_machine) the map script runs (iw7_scriptables).
 		std::map<std::string, json> scriptable_machines;
+		// The instances with an IW7 targetname (which the map script finds them by) whose kind has a state machine (Neon's
+		// holograms, which the map script sets the states of): the machine's name in scriptable_machines, the targetname and
+		// the instance's initial origin, which the map script finds the instance by.
+		struct scriptable_target
+		{
+			std::string machine;
+			std::string targetname;
+			std::array<float, 3> origin{};
+		};
+		std::vector<scriptable_target> scriptable_targets;
 		// The models that the map script sets by name (precachemodel, setmodel: Rivet's drones, the collision patches that
 		// the scripts spawn), which convert as script models.
 		std::set<std::string> script_models;

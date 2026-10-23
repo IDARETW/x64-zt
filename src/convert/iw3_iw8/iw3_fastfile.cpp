@@ -11805,6 +11805,18 @@ PreparedMap PrepareFastfile(const ImportOptions &options)
         }
         gsc += "}\n";
     }
+    // IW8_SCRIPTS_ONLY=1 compiles the map script with IW8_GSC_TOOL and stops the conversion: the check of a script
+    // change on every map without converting them. The minimap function, which the package stage adds, is empty.
+    if (std::getenv("IW8_SCRIPTS_ONLY"))
+    {
+        const char *tool = std::getenv("IW8_GSC_TOOL");
+        if (!tool || !*tool || result.mapScript.empty())
+            throw std::runtime_error("IW8_SCRIPTS_ONLY needs IW8_GSC_TOOL and a translated map script");
+        const auto gscbin = scripts::Compile(result.mapScript + "\niw3compat_minimap()\n{\n}\n", tool,
+                                             result.scratch / "scripts-only", options.map);
+        throw std::runtime_error("IW8_SCRIPTS_ONLY: the map script compiles (" + std::to_string(gscbin.size()) +
+                                 " bytes gscbin); the conversion stops here");
+    }
     std::set<std::string> emittedFx;
     for (const auto &entry : effectAliases)
         emittedFx.insert(entry.first);

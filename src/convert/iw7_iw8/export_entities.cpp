@@ -391,22 +391,14 @@ namespace zonetool::convert::iw7_iw8
 		}
 
 		// Whether a scriptable kind takes damage: a part (or a child part) has a health state.
-		bool takes_damage(const iw7::ScriptableDef& def)
+		bool any_part(const iw7::ScriptableDef& def, const std::function<bool(const iw7::ScriptablePartDef&)>& predicate)
 		{
 			const std::function<bool(const iw7::ScriptablePartDef*, unsigned)> any = [&](const iw7::ScriptablePartDef* parts,
 				const unsigned count)
 			{
 				for (auto p = 0u; parts && p < count; p++)
 				{
-					for (auto s = 0u; parts[p].states && s < parts[p].numStates; s++)
-					{
-						if (parts[p].states[s].type == iw7::Scriptable_StateType_Health)
-						{
-							return true;
-						}
-					}
-
-					if (any(parts[p].childParts, parts[p].numChildParts))
+					if (predicate(parts[p]) || any(parts[p].childParts, parts[p].numChildParts))
 					{
 						return true;
 					}
@@ -416,6 +408,28 @@ namespace zonetool::convert::iw7_iw8
 			};
 
 			return any(def.parts, def.numParts);
+		}
+
+		bool takes_damage(const iw7::ScriptableDef& def)
+		{
+			return any_part(def, [](const iw7::ScriptablePartDef& part)
+			{
+				for (auto s = 0u; part.states && s < part.numStates; s++)
+				{
+					if (part.states[s].type == iw7::Scriptable_StateType_Health)
+					{
+						return true;
+					}
+				}
+
+				return false;
+			});
+		}
+
+		// A kind whose parts have states to change to (by script, or by the events of their states).
+		bool changes_state(const iw7::ScriptableDef& def)
+		{
+			return any_part(def, [](const iw7::ScriptablePartDef& part) { return part.states && part.numStates > 1; });
 		}
 
 		// A scriptable kind's state machine as the map script runs it (iw7_scriptables): its parts in tree order (name, tag,
@@ -628,6 +642,28 @@ namespace zonetool::convert::iw7_iw8
 					case iw7::Scriptable_EventType_AddModel:
 						result.push_back({{"t", "addmodel"}, {"tag", data.addModel.tagName ? data.addModel.tagName : ""},
 							{"model", model_name(data.addModel.model)}});
+						break;
+					case iw7::Scriptable_EventType_Light:
+					{
+						const auto& light = data.light;
+						json entry = {{"t", "light"}, {"name", light.name ? light.name : ""}, {"scr_name", script_string(light.scrName)},
+							{"intensity", {light.intensityScaleMin, light.intensityScaleMax}}, {"radius", {light.radiusMin, light.radiusMax}}};
+						if (light.useColor)
+						{
+							entry["color"] = {light.colorLinearSrgb[0], light.colorLinearSrgb[1], light.colorLinearSrgb[2]};
+						}
+
+						if (light.useStateTransitionTime)
+						{
+							entry["transition"] = {light.transitionMin, light.transitionMax};
+						}
+
+						result.push_back(std::move(entry));
+						break;
+					}
+					case iw7::Scriptable_EventType_Collision:
+						result.push_back({{"t", "collision"}, {"collmap", data.collision.collmapName ? data.collision.collmapName : ""},
+							{"cmodel", data.collision.clipmapCModelIndex}, {"ai_obstacle", data.collision.aiObstacle}});
 						break;
 					default:
 						result.push_back({{"t", std::format("e{}", static_cast<int>(event.type))}});
@@ -1322,11 +1358,24 @@ namespace zonetool::convert::iw7_iw8
 					parts += "]";
 				}
 
-				ZONETOOL_INFO("iw7 scriptable %u: def %s flags %#x instance model %s (%s) at %s targetname %s noteworthy %s parts%s", i,
+				// The instance's index words (light indices, inferred: IW8's instances name up to 5 primary lights).
+				std::string indices;
+				for (const auto value : scriptables.instances[i].contextHeader.unk02)
+				{
+					indices += std::format(" {}", value);
+				}
+
+				indices += " |";
+				for (const auto value : scriptables.instances[i].contextHeaderLocalClient[0].unk02)
+				{
+					indices += std::format(" {}", value);
+				}
+
+				ZONETOOL_INFO("iw7 scriptable %u: def %s flags %#x instance model %s (%s) at %s targetname %s noteworthy %s indices%s parts%s", i,
 					def && def->name ? def->name : "?", def ? def->flags : 0, name.empty() ? "-" : name.data(),
 					context.modelData.model ? "instance" : "def", vector_text(context.initialOrigin).data(),
 					script_string(scriptables.instances[i].targetname).data(), script_string(scriptables.instances[i].debugNameScr).data(),
-					parts.data());
+					indices.data(), parts.data());
 			}
 
 			const auto finite = std::ranges::all_of(context.initialOrigin, [](const float v) { return std::isfinite(v); }) &&
@@ -1349,10 +1398,32 @@ namespace zonetool::convert::iw7_iw8
 			const auto first = std::ranges::find_if(states, [](const auto& state) { return state.first; });
 			const auto* animation = first != states.end() ? first->anim : nullptr;
 			std::string animated;
+			bool machine{};
+			std::string kind(def_name);
+			std::ranges::transform(kind, kind.begin(), [](const unsigned char c)
+			{
+				return std::isalnum(c) ? static_cast<char>(std::tolower(c)) : '_';
+			});
 			if (const auto targetname = script_string(scriptables.instances[i].targetname); !targetname.empty())
 			{
 				entities += std::format("\"targetname\" \"{}\"\n", targetname);
 				animated = animation ? targetname : std::string{};
+				// The map script sets the states of the instances it finds by their targetname (Neon's holograms build, a
+				// car's hologram regenerates it): the instance runs its kind's state machine, which IW7's
+				// setscriptablepartstate (iw7_setscriptablepartstate) changes the states of. Animated kinds keep the table of
+				// their animations.
+				if (!animation && def && changes_state(*def))
+				{
+					const auto machine_name = "iw7_scriptable_" + kind;
+					if (!output.scriptable_machines.contains(machine_name))
+					{
+						output.scriptable_machines.emplace(machine_name, scriptable_machine(source, *def, output, true));
+					}
+
+					output.scriptable_targets.push_back({machine_name, std::string(targetname),
+						{context.initialOrigin[0], context.initialOrigin[1], context.initialOrigin[2]}});
+					machine = true;
+				}
 			}
 			else if (const auto destructible = def ? destructible_of(source, *def, output) : std::nullopt)
 			{
@@ -1362,27 +1433,19 @@ namespace zonetool::convert::iw7_iw8
 			}
 			else if (animation)
 			{
-				std::string kind(def_name);
-				std::ranges::transform(kind, kind.begin(), [](const unsigned char c)
-				{
-					return std::isalnum(c) ? static_cast<char>(std::tolower(c)) : '_';
-				});
 				animated = "iw7_animated_" + kind;
 				entities += std::format("\"targetname\" \"{}\"\n", animated);
 			}
 			else if (def && takes_damage(*def))
 			{
-				std::string kind(def_name);
-				std::ranges::transform(kind, kind.begin(), [](const unsigned char c)
-				{
-					return std::isalnum(c) ? static_cast<char>(std::tolower(c)) : '_';
-				});
 				const auto machine_name = "iw7_scriptable_" + kind;
 				entities += std::format("\"targetname\" \"{}\"\n", machine_name);
 				if (!output.scriptable_machines.contains(machine_name))
 				{
 					output.scriptable_machines.emplace(machine_name, scriptable_machine(source, *def, output, true));
 				}
+
+				machine = true;
 			}
 
 			if (!animated.empty())
@@ -1415,7 +1478,8 @@ namespace zonetool::convert::iw7_iw8
 			entities += "}\n";
 			output.models.try_emplace(file_name(name), model);
 			placed++;
-			if (def)
+			// The state machines play the effects of their first states themselves (as effect entities, iw7_scriptable_fx).
+			if (def && !machine)
 			{
 				add_scriptable_effects(source, *def, model, context, output);
 			}
