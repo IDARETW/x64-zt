@@ -1951,6 +1951,215 @@ iw7_play_loop_sound_on_entity( alias )
 {
 	self playloopsound( alias );
 }
+
+iw7_array_combine( a, b, c, d )
+{
+	result = [];
+	result = iw7_array_append( result, a );
+	result = iw7_array_append( result, b );
+	result = iw7_array_append( result, c );
+	return iw7_array_append( result, d );
+}
+
+iw7_array_append( result, values )
+{
+	if ( isdefined( values ) )
+	{
+		foreach ( value in values )
+			result[ result.size ] = value;
+	}
+	return result;
+}
+
+iw7_trigger_on( name, key )
+{
+	if ( isdefined( name ) && isdefined( key ) )
+	{
+		triggers = getentarray( name, key );
+		foreach ( trigger in triggers )
+			trigger iw7_trigger_on_proc();
+	}
+	else
+		self iw7_trigger_on_proc();
+}
+
+iw7_trigger_on_proc()
+{
+	if ( isdefined( self.realorigin ) )
+		self.origin = self.realorigin;
+	self.trigger_off = undefined;
+}
+
+iw7_trigger_off( name, key )
+{
+	if ( isdefined( name ) && isdefined( key ) )
+	{
+		triggers = getentarray( name, key );
+		foreach ( trigger in triggers )
+			trigger iw7_trigger_off_proc();
+	}
+	else
+		self iw7_trigger_off_proc();
+}
+
+iw7_trigger_off_proc()
+{
+	if ( !isdefined( self.realorigin ) )
+		self.realorigin = self.origin;
+	if ( self.origin == self.realorigin )
+		self.origin = self.origin + ( 0, 0, -10000 );
+	self.trigger_off = 1;
+	self notify( "trigger_off" );
+}
+
+iw7_bullettrace( start, end, characters, ignore, a, b )
+{
+	trace = [];
+	trace[ "fraction" ] = 1;
+	trace[ "position" ] = end;
+	trace[ "surfacetype" ] = "none";
+	return trace;
+}
+
+iw7_exploder( name )
+{
+	name = "" + name;
+	level notify( "exploding_" + name );
+	if ( !isdefined( level.mw120r_createfx ) )
+		return;
+	foreach ( ent in level.mw120r_createfx )
+	{
+		if ( ent.v[ "type" ] == "exploder" && isdefined( ent.v[ "exploder" ] ) && ( "" + ent.v[ "exploder" ] ) == name )
+			ent thread iw7_exploder_activate();
+	}
+}
+
+iw7_exploder_activate()
+{
+	if ( isdefined( self.v[ "firefx" ] ) )
+		self thread iw7_exploder_fire();
+	if ( isdefined( self.v[ "fxid" ] ) && self.v[ "fxid" ] != "No FX" )
+		self thread iw7_exploder_cannon();
+	else if ( isdefined( self.v[ "soundalias" ] ) && self.v[ "soundalias" ] != "nil" )
+		self thread iw7_exploder_sound();
+	if ( isdefined( self.v[ "loopsound" ] ) && self.v[ "loopsound" ] != "nil" )
+		self thread iw7_exploder_loopsound();
+	if ( isdefined( self.v[ "damage" ] ) )
+		self thread iw7_exploder_damage();
+	if ( isdefined( self.v[ "earthquake" ] ) )
+		self thread iw7_exploder_earthquake();
+}
+
+iw7_exploder_delay()
+{
+	if ( !isdefined( self.v[ "delay" ] ) )
+		self.v[ "delay" ] = 0;
+	low = self.v[ "delay" ];
+	high = self.v[ "delay" ] + 0.001;
+	if ( isdefined( self.v[ "delay_min" ] ) )
+		low = self.v[ "delay_min" ];
+	if ( isdefined( self.v[ "delay_max" ] ) )
+		high = self.v[ "delay_max" ];
+	if ( low > 0 )
+		wait randomfloatrange( low, high );
+}
+
+iw7_exploder_effect( fxid )
+{
+	if ( !isdefined( fxid ) || !isdefined( level._effect ) || !isdefined( level._effect[ fxid ] ) )
+		return undefined;
+	return level._effect[ fxid ];
+}
+
+iw7_exploder_cannon()
+{
+	fx = iw7_exploder_effect( self.v[ "fxid" ] );
+	if ( !isdefined( fx ) )
+		return;
+	forward = anglestoforward( self.v[ "angles" ] );
+	up = anglestoup( self.v[ "angles" ] );
+	if ( isdefined( self.v[ "repeat" ] ) )
+	{
+		self thread iw7_exploder_playsound();
+		for ( i = 0; i < self.v[ "repeat" ]; i++ )
+		{
+			playfx( fx, self.v[ "origin" ], forward, up );
+			self iw7_exploder_delay();
+		}
+		return;
+	}
+	self iw7_exploder_delay();
+	if ( isdefined( self.looper ) )
+		self.looper delete();
+	self.looper = spawnfx( fx, self.v[ "origin" ], forward, up );
+	triggerfx( self.looper );
+	self iw7_exploder_playsound();
+}
+
+iw7_exploder_fire()
+{
+	fx = iw7_exploder_effect( self.v[ "firefx" ] );
+	if ( !isdefined( fx ) )
+		return;
+	self iw7_exploder_delay();
+	playfx( fx, self.v[ "origin" ], anglestoforward( self.v[ "angles" ] ), anglestoup( self.v[ "angles" ] ) );
+}
+
+iw7_exploder_playsound()
+{
+	if ( isdefined( self.v[ "soundalias" ] ) && self.v[ "soundalias" ] != "nil" )
+		playsoundatpos( self.v[ "origin" ], self.v[ "soundalias" ] );
+}
+
+iw7_exploder_sound()
+{
+	origin = self.v[ "origin" ];
+	alias = self.v[ "soundalias" ];
+	self iw7_exploder_delay();
+	playsoundatpos( origin, alias );
+}
+
+iw7_exploder_loopsound()
+{
+	if ( isdefined( self.loopsound_ent ) )
+	{
+		self.loopsound_ent stoploopsound();
+		self.loopsound_ent delete();
+	}
+	origin = self.v[ "origin" ];
+	alias = self.v[ "loopsound" ];
+	self iw7_exploder_delay();
+	self.loopsound_ent = spawn( "script_origin", origin );
+	self.loopsound_ent playloopsound( alias );
+}
+
+iw7_exploder_damage()
+{
+	radius = 128;
+	if ( isdefined( self.v[ "damage_radius" ] ) )
+		radius = self.v[ "damage_radius" ];
+	if ( isdefined( self.v[ "delay" ] ) && self.v[ "delay" ] > 0 )
+		wait self.v[ "delay" ];
+	radiusdamage( self.v[ "origin" ], radius, self.v[ "damage" ], self.v[ "damage" ] );
+}
+
+iw7_exploder_earthquake()
+{
+	self iw7_exploder_delay();
+	if ( !isdefined( level.earthquake ) || !isdefined( level.earthquake[ self.v[ "earthquake" ] ] ) )
+		return;
+	quake = level.earthquake[ self.v[ "earthquake" ] ];
+	earthquake( quake[ "magnitude" ], quake[ "duration" ], self.v[ "origin" ], quake[ "radius" ] );
+}
+
+iw7_getspawnpointarray( classname )
+{
+	if ( !isdefined( level.iw7_spawnpoints ) )
+		level.iw7_spawnpoints = [];
+	if ( !isdefined( level.iw7_spawnpoints[ classname ] ) )
+		level.iw7_spawnpoints[ classname ] = getspawnarray( classname );
+	return level.iw7_spawnpoints[ classname ];
+}
 )gsc";
 
 		// IW7's setscriptablepartstate on the converted scriptables (script models): the animation of the state, from the
@@ -2114,11 +2323,32 @@ iw7_state( mode, animation, to, time )
 					return "level._effect[ " + join(arguments) + " ]";
 				});
 
+				// IW7's exploder( name, players, start time ) runs the createfx exploders of the name (iw7_exploder).
+				body = rewrite_calls(body, "scripts\\engine\\utility::exploder", [](const std::vector<std::string>& arguments)
+				{
+					return "iw7_exploder( " + arguments.front() + " )";
+				});
+
+				// IW7's bullettrace has no Replay builtin: the trace hits nothing (iw7_bullettrace).
+				body = rewrite_calls(body, "bullettrace", [](const std::vector<std::string>& arguments)
+				{
+					return "iw7_bullettrace( " + join(arguments) + " )";
+				});
+
+				// IW7 method 0x8113, which gsc-tool does not name, returns the corpse of a player that has died (inferred from
+				// its uses: Junk's grinder and Rally's gas hide it and play a gib effect at it): Replay's getcorpseentity.
+				for (auto at = body.find("_meth_8113("); at != std::string::npos; at = body.find("_meth_8113(", at))
+				{
+					body.replace(at, std::string_view("_meth_8113(").size(), "getcorpseentity(");
+				}
+
 				for (const auto& [from, to] : std::initializer_list<std::pair<std::string_view, std::string_view>>{
 					{"scripts\\engine\\utility::getstructarray(", "common_scripts\\utility::getstructarray("},
 					{"scripts\\engine\\utility::waitframe(", "waitframe("},
 					{"scripts\\engine\\utility::array_thread(", "common_scripts\\utility::array_thread("},
 					{"scripts\\mp\\utility::istrue(", "iw7_istrue("},
+					{"scripts\\engine\\utility::is_true(", "iw7_istrue("},
+					{"scripts\\mp\\spawnlogic::getspawnpointarray(", "iw7_getspawnpointarray("},
 				})
 				{
 					for (auto at = body.find(from); at != std::string::npos; at = body.find(from, at + to.size()))
@@ -2130,7 +2360,8 @@ iw7_state( mode, animation, to, time )
 				// The utilities that the script's own IW3 versions replace (map_script_helpers).
 				for (const auto name : {"getstruct", "waittill_either", "waittill_any_return", "waittill_any", "cointoss",
 					"random", "array_remove", "spawn_tag_origin", "flag_init", "flag_set", "flag_clear", "flag_wait", "flag",
-					"delaythread", "string_starts_with", "array_add", "play_loop_sound_on_entity"})
+					"delaythread", "string_starts_with", "array_add", "play_loop_sound_on_entity", "array_combine", "trigger_on",
+					"trigger_off"})
 				{
 					const auto from = std::format("scripts\\engine\\utility::{}(", name);
 					const auto to = std::format("iw7_{}(", name);

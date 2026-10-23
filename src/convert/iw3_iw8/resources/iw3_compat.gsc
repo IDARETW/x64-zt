@@ -281,14 +281,54 @@ iw3compat_exploders_init()
     level.mw120r_exploders = getentarray( "mw120r_exploder", "targetname" );
     foreach ( piece in level.mw120r_exploders )
         piece hide();
+
+    // IW3 _load: a trigger with a script_exploder runs its exploder when it
+    // triggers (exploder_load).
+    foreach ( type in strtok( "trigger_multiple trigger_once trigger_use trigger_radius trigger_lookat trigger_damage", " " ) )
+    {
+        triggers = getentarray( type, "classname" );
+        foreach ( trigger in triggers )
+        {
+            if ( isdefined( trigger.script_prefab_exploder ) )
+                trigger.script_exploder = trigger.script_prefab_exploder;
+            if ( isdefined( trigger.script_exploder ) )
+                level thread iw3compat_exploder_load( trigger );
+        }
+    }
+}
+
+iw3compat_exploder_load( trigger )
+{
+    level endon( "killexplodertridgers" + trigger.script_exploder );
+    trigger waittill( "trigger" );
+    if ( isdefined( trigger.script_chance ) && randomfloat( 1 ) > trigger.script_chance )
+    {
+        if ( isdefined( trigger.script_delay ) )
+            wait trigger.script_delay;
+        else
+            wait 4;
+        level thread iw3compat_exploder_load( trigger );
+        return;
+    }
+    iw3compat_exploder( trigger.script_exploder );
+    level notify( "killexplodertridgers" + trigger.script_exploder );
 }
 
 iw3compat_exploder( number )
 {
+    number = "" + number;
+    if ( isdefined( level.mw120r_createfx ) )
+    {
+        foreach ( ent in level.mw120r_createfx )
+        {
+            if ( ent.v["type"] == "exploder" && isdefined( ent.v["exploder"] ) && ( "" + ent.v["exploder"] ) == number )
+                ent thread iw3compat_exploder_play();
+        }
+    }
+
     if ( !isdefined( level.mw120r_exploders ) )
         return;
 
-    number = "" + number;
     foreach ( piece in level.mw120r_exploders )
     {
         if ( isdefined( piece.script_exploder ) && ( "" + piece.script_exploder ) == number )
@@ -346,11 +386,91 @@ iw3compat_createloopsound()
     return iw3compat_createfx_add( "soundfx", undefined, 0 );
 }
 
-// Exploder effects only play with their exploder, which the converted
-// exploder() does not drive; they are recorded and not played.
+// Exploder effects play when the script runs their exploder (iw3compat_exploder).
 iw3compat_createexploder( fxid )
 {
     return iw3compat_createfx_add( "exploder", fxid, 0 );
+}
+
+// One createfx exploder, as IW3 MP _utility activate_exploder runs it: its
+// fire effect, its effect (after the delay; repeat times, the delay between)
+// or else its sound, its damage and its earthquake.
+iw3compat_exploder_play()
+{
+    if ( !isdefined( self.v["delay"] ) )
+        self.v["delay"] = 0;
+    if ( isdefined( self.v["firefx"] ) )
+        self thread iw3compat_exploder_firefx();
+    if ( isdefined( self.v["fxid"] ) && self.v["fxid"] != "No FX" )
+        self thread iw3compat_exploder_effect();
+    else if ( isdefined( self.v["soundalias"] ) )
+        self thread iw3compat_exploder_sound();
+    if ( isdefined( self.v["damage"] ) )
+        self thread iw3compat_exploder_damage();
+    if ( isdefined( self.v["earthquake"] ) && isdefined( level.earthquake ) && isdefined( level.earthquake[self.v["earthquake"]] ) )
+    {
+        quake = level.earthquake[self.v["earthquake"]];
+        earthquake( quake["magnitude"], quake["duration"], self.v["origin"], quake["radius"] );
+    }
+}
+
+iw3compat_exploder_effect()
+{
+    low = self.v["delay"];
+    high = self.v["delay"] + 0.001;
+    if ( isdefined( self.v["delay_min"] ) )
+        low = self.v["delay_min"];
+    if ( isdefined( self.v["delay_max"] ) )
+        high = self.v["delay_max"];
+    if ( low > 0 )
+        wait randomfloatrange( low, high );
+    if ( !isdefined( level._effect ) || !isdefined( level._effect[self.v["fxid"]] ) )
+        return;
+
+    fx = level._effect[self.v["fxid"]];
+    forward = anglestoforward( self.v["angles"] );
+    up = anglestoup( self.v["angles"] );
+    count = 1;
+    if ( isdefined( self.v["repeat"] ) )
+        count = self.v["repeat"];
+    for ( i = 0; i < count; i++ )
+    {
+        playfx( fx, self.v["origin"], forward, up );
+        if ( isdefined( self.v["soundalias"] ) && self.v["soundalias"] != "nil" )
+            iw3compat_playsoundatpos( self.v["origin"], self.v["soundalias"] );
+        if ( isdefined( self.v["repeat"] ) && low > 0 )
+            wait randomfloatrange( low, high );
+    }
+}
+
+iw3compat_exploder_firefx()
+{
+    delay = self.v["delay"];
+    if ( isdefined( self.v["delay_min"] ) && isdefined( self.v["delay_max"] ) )
+        delay = self.v["delay_min"] + randomfloat( self.v["delay_max"] - self.v["delay_min"] );
+    if ( delay > 0 )
+        wait delay;
+    if ( isdefined( level._effect ) && isdefined( level._effect[self.v["firefx"]] ) )
+        playfx( level._effect[self.v["firefx"]], self.v["origin"], anglestoforward( self.v["angles"] ), anglestoup( self.v["angles"] ) );
+}
+
+iw3compat_exploder_sound()
+{
+    origin = self.v["origin"];
+    alias = self.v["soundalias"];
+    if ( self.v["delay"] > 0 )
+        wait self.v["delay"];
+    iw3compat_playsoundatpos( origin, alias );
+}
+
+iw3compat_exploder_damage()
+{
+    radius = 128;
+    if ( isdefined( self.v["damage_radius"] ) )
+        radius = self.v["damage_radius"];
+    if ( self.v["delay"] > 0 )
+        wait self.v["delay"];
+    radiusdamage( self.v["origin"], radius, self.v["damage"], self.v["damage"] );
 }
 
 // One IW3 _global_fx placement (generated by the converter from the map's
