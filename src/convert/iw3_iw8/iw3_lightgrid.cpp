@@ -104,12 +104,15 @@ std::uint16_t FloatToHalf(const float value)
 
 Json ReadJson(const std::filesystem::path &path)
 {
-    std::ifstream input(path);
+    std::ifstream input(path, std::ios::binary);
     if (!input)
         throw std::runtime_error("cannot read IW3 light-grid metadata " + path.string());
-    Json value;
-    input >> value;
-    return value;
+    // Parsed from memory: nlohmann reads a stream one character at a time (a 200 MB world took 25 s).
+    input.seekg(0, std::ios::end);
+    std::string text(static_cast<std::size_t>(input.tellg()), '\0');
+    input.seekg(0);
+    input.read(text.data(), static_cast<std::streamsize>(text.size()));
+    return Json::parse(text);
 }
 
 constexpr std::uint64_t kArrayLimit = 64ull * 1024 * 1024;

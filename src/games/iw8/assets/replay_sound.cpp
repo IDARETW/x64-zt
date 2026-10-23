@@ -5,12 +5,16 @@
 #include <bcrypt.h>
 
 #include <algorithm>
+#include <atomic>
 #include <cmath>
 #include <cstring>
+#include <exception>
 #include <limits>
 #include <map>
 #include <memory>
+#include <optional>
 #include <stdexcept>
+#include <thread>
 
 namespace iw8::sound
 {
@@ -668,13 +672,44 @@ std::vector<uint8_t> BuildSab(const std::vector<Sample> &samples, const std::str
         std::vector<uint8_t> seek;
         uint64_t offset;
     };
-    std::vector<Item> items;
-    items.reserve(samples.size());
     for (const Sample &sample : samples)
-    {
         if (sample.name.empty() || sample.name.size() >= 128)
             throw std::runtime_error("SAB sample name must be 1..127 characters: " + sample.name);
-        Item item{&sample, HashName(sample.name), EncodeFlac(sample), {}, 0};
+    // The samples encode on every core (an IW7 map bank holds hundreds of megabytes); the first failure in sample
+    // order is rethrown.
+    std::vector<std::optional<EncodedSample>> encodings(samples.size());
+    std::vector<std::exception_ptr> failures(samples.size());
+    {
+        std::atomic<size_t> next{0};
+        const auto run = [&] {
+            for (size_t index; (index = next.fetch_add(1)) < samples.size();)
+            {
+                try
+                {
+                    encodings[index] = EncodeFlac(samples[index]);
+                }
+                catch (...)
+                {
+                    failures[index] = std::current_exception();
+                }
+            }
+        };
+        std::vector<std::thread> workers;
+        const size_t workerCount = std::min<size_t>(samples.size(), std::max(1u, std::thread::hardware_concurrency()));
+        for (size_t worker = 1; worker < workerCount; ++worker)
+            workers.emplace_back(run);
+        run();
+        for (auto &worker : workers)
+            worker.join();
+    }
+    std::vector<Item> items;
+    items.reserve(samples.size());
+    for (size_t index = 0; index < samples.size(); ++index)
+    {
+        if (failures[index])
+            std::rethrow_exception(failures[index]);
+        const Sample &sample = samples[index];
+        Item item{&sample, HashName(sample.name), std::move(*encodings[index]), {}, 0};
         const size_t frames = sample.pcm.size() / sample.channels;
         // Seek points every 16384 samples, as stock: {u64 sample, u64 byte, u16 1024}.
         for (size_t point = 0; point < frames / kSeekInterval; ++point)

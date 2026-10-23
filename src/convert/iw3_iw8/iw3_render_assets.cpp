@@ -18,13 +18,18 @@
 #include <atomic>
 #include <bit>
 #include <charconv>
+#include <chrono>
 #include <complex>
+#include <condition_variable>
 #include <cmath>
 #include <cstdint>
 #include <cstdlib>
 #include <cstring>
+#include <deque>
 #include <exception>
 #include <fstream>
+#include <functional>
+#include <future>
 #include <limits>
 #include <map>
 #include <memory>
@@ -354,7 +359,12 @@ Json ReadJson(const std::filesystem::path &path)
     std::ifstream input(path, std::ios::binary);
     if (!input)
         throw std::runtime_error("cannot read " + path.string());
-    return Json::parse(input);
+    // Parsed from memory: nlohmann reads a stream one character at a time (a 200 MB world took 25 s).
+    input.seekg(0, std::ios::end);
+    std::string text(static_cast<std::size_t>(input.tellg()), '\0');
+    input.seekg(0);
+    input.read(text.data(), static_cast<std::streamsize>(text.size()));
+    return Json::parse(text);
 }
 
 void WriteJson(const std::filesystem::path &path, const Json &value)
@@ -363,7 +373,8 @@ void WriteJson(const std::filesystem::path &path, const Json &value)
     std::ofstream output(path, std::ios::binary | std::ios::trunc);
     if (!output)
         throw std::runtime_error("cannot write " + path.string());
-    output << value;
+    const auto text = value.dump();
+    output.write(text.data(), static_cast<std::streamsize>(text.size()));
     if (!output)
         throw std::runtime_error("cannot finish " + path.string());
 }
@@ -1465,6 +1476,43 @@ Image Resize(const Image &source, const unsigned width, const unsigned height, c
 {
     Image output{width, height,
                  std::vector<std::uint8_t>(static_cast<std::size_t>(width) * height * 4)};
+    const auto store = [&](const std::size_t texel, const float (&sample)[4]) {
+        const float alpha = std::clamp(sample[3] * tint[3], 0.0f, 1.0f);
+        for (unsigned channel = 0; channel < 4; ++channel)
+        {
+            auto &target = output.rgba[texel * 4 + channel];
+            const float value = sample[channel];
+            if (color && channel < 3)
+                target = SrgbByte(std::clamp(
+                    (sample[3] > 1.0e-6f ? value / sample[3] : 0.0f) * tint[channel], 0.0f,
+                    1.0f));
+            else
+                target = static_cast<std::uint8_t>(std::clamp(
+                    std::lround((channel == 3 ? alpha : value) * 255.0f), 0l, 255l));
+        }
+    };
+    // At the same size each sample lands on its own texel when the coordinates below come out whole: the texel weighs
+    // 1 and the three others add zeros, so reading the one texel gives the same values (the colour maps of every
+    // resident image are tinted this way, base level and mips).
+    bool aligned = width == source.width && height == source.height;
+    for (unsigned y = 0; y < height && aligned; ++y)
+        aligned = (static_cast<float>(y) + 0.5f) * source.height / height - 0.5f == static_cast<float>(y);
+    for (unsigned x = 0; x < width && aligned; ++x)
+        aligned = (static_cast<float>(x) + 0.5f) * source.width / width - 0.5f == static_cast<float>(x);
+    if (aligned)
+    {
+        const std::size_t texels = static_cast<std::size_t>(width) * height;
+        for (std::size_t texel = 0; texel < texels; ++texel)
+        {
+            const std::uint8_t *bytes = source.rgba.data() + texel * 4;
+            const float alpha = bytes[3] / 255.0f;
+            float sample[4]{};
+            for (unsigned channel = 0; channel < 4; ++channel)
+                sample[channel] += (color && channel < 3 ? LinearByte(bytes[channel]) * alpha : bytes[channel] / 255.0f) * 1.0f;
+            store(texel, sample);
+        }
+        return output;
+    }
     for (unsigned y = 0; y < height; ++y)
     {
         const float sy = (static_cast<float>(y) + 0.5f) * source.height / height - 0.5f;
@@ -1499,19 +1547,7 @@ Image Resize(const Image &source, const unsigned width, const unsigned height, c
                         sample[channel] += value * weight;
                     }
                 }
-            const float alpha = std::clamp(sample[3] * tint[3], 0.0f, 1.0f);
-            for (unsigned channel = 0; channel < 4; ++channel)
-            {
-                auto &target = output.rgba[(static_cast<std::size_t>(y) * width + x) * 4 + channel];
-                const float value = sample[channel];
-                if (color && channel < 3)
-                    target = SrgbByte(std::clamp(
-                        (sample[3] > 1.0e-6f ? value / sample[3] : 0.0f) * tint[channel], 0.0f,
-                        1.0f));
-                else
-                    target = static_cast<std::uint8_t>(std::clamp(
-                        std::lround((channel == 3 ? alpha : value) * 255.0f), 0l, 255l));
-            }
+            store(static_cast<std::size_t>(y) * width + x, sample);
         }
     }
     return output;
@@ -2544,7 +2580,58 @@ std::string HlslNumber(const float value)
     return std::string(buffer.data(), result.ptr);
 }
 
+// Compiled shaders by source and target: a map compiles one source many times (each material variant), and the
+// render cache keeps them between runs (D3DCompile output is deterministic).
+std::filesystem::path g_shaderCacheRoot;
+std::mutex g_shaderCacheMutex;
+std::unordered_map<std::string, std::vector<std::uint8_t>> g_compiledShaders;
+
+std::vector<std::uint8_t> CompileUncached(const std::string &source, const char *target, const char *name);
+
 std::vector<std::uint8_t> Compile(const std::string &source, const char *target, const char *name)
+{
+    std::string keyed = std::string(target) + '\n' + name + '\n' + source;
+    const auto digest = Sha256(std::span(reinterpret_cast<const std::uint8_t *>(keyed.data()), keyed.size()));
+    const std::string key = Hex(std::span(digest).first(16)) + "_" + target;
+    {
+        std::lock_guard lock(g_shaderCacheMutex);
+        if (const auto found = g_compiledShaders.find(key); found != g_compiledShaders.end())
+            return found->second;
+    }
+    const auto file = g_shaderCacheRoot.empty() ? std::filesystem::path{} : g_shaderCacheRoot / ("shader_" + key + ".dxbc");
+    std::error_code error;
+    std::vector<std::uint8_t> program;
+    if (!file.empty() && std::filesystem::is_regular_file(file, error))
+    {
+        program = ReadBytes(file);
+        if (program.size() < 4 || std::memcmp(program.data(), "DXBC", 4) != 0)
+            program.clear();
+    }
+    if (program.empty())
+    {
+        program = CompileUncached(source, target, name);
+        if (!file.empty())
+        {
+            auto partial = file;
+            partial += "." + std::to_string(GetCurrentProcessId()) + ".partial";
+            try
+            {
+                std::filesystem::create_directories(g_shaderCacheRoot, error);
+                WriteBytes(partial, program);
+                std::filesystem::rename(partial, file, error);
+            }
+            catch (const std::exception &)
+            {
+            }
+            std::filesystem::remove(partial, error);
+        }
+    }
+    std::lock_guard lock(g_shaderCacheMutex);
+    g_compiledShaders.try_emplace(key, program);
+    return program;
+}
+
+std::vector<std::uint8_t> CompileUncached(const std::string &source, const char *target, const char *name)
 {
     ID3DBlob *program = nullptr, *errors = nullptr;
     const HRESULT result = D3DCompile(source.data(), source.size(), name, nullptr, nullptr, "main",
@@ -3582,7 +3669,8 @@ std::uint64_t Bc7DecodedError(const std::uint8_t *block, const std::uint8_t (&pi
 // smaller mip does. `error` receives the squared error over every coded channel as DirectXTex decodes the blocks, so
 // the caller's PSNR guard also holds against an encoding fault.
 std::vector<std::uint8_t> EncodeBc7Rectangle(const std::vector<std::uint8_t> &rgba, const unsigned width,
-                                             const unsigned height, const unsigned levels, double &error)
+                                             const unsigned height, const unsigned levels, double &error,
+                                             const unsigned maxWorkers = 0)
 {
     struct Level
     {
@@ -3634,8 +3722,8 @@ std::vector<std::uint8_t> EncodeBc7Rectangle(const std::vector<std::uint8_t> &rg
             rowErrors[task] = rowError;
         }
     };
-    const unsigned workerCount =
-        static_cast<unsigned>(std::clamp<std::size_t>(rows.size() / 8, 1, std::max(1u, std::thread::hardware_concurrency())));
+    const unsigned workerLimit = maxWorkers ? maxWorkers : std::max(1u, std::thread::hardware_concurrency());
+    const unsigned workerCount = static_cast<unsigned>(std::clamp<std::size_t>(rows.size() / 8, 1, workerLimit));
     std::vector<std::thread> workers;
     for (unsigned worker = 1; worker < workerCount; ++worker)
         workers.emplace_back(encode);
@@ -4007,6 +4095,241 @@ Json BuildFxMaterialDefinition(const SourceFxMaterial &source)
 namespace
 {
 int g_bc7Images = -1;
+
+constexpr const char *kBc7ResidentEncoderVersion = "bc7-m654-v1";
+
+// A resident image of a material: its name in the material and its image definition.
+struct ResidentImageResult
+{
+    std::string name;
+    Json definition;
+    bool considered{}; // a BC7 candidate (bc7_images, a size of whole blocks)
+    bool compressed{};
+    std::size_t rawBytes{}, packedBytes{};
+    double psnr{};
+    unsigned channel{};
+};
+
+// Runs the resident images of world and model materials on every core. A submit waits while the queue is full,
+// which bounds the source images held at once.
+class ResidentImagePool
+{
+  public:
+    ResidentImagePool()
+    {
+        // Sources of a sixteenth of the free memory, between 256 MB and 2 GB: a job holds about four times its source,
+        // so the jobs in flight take about a quarter.
+        MEMORYSTATUSEX memory{sizeof(memory)};
+        const std::uint64_t available = GlobalMemoryStatusEx(&memory) ? memory.ullAvailPhys : 0;
+        this->heldBytes_ = static_cast<std::size_t>(std::clamp<std::uint64_t>(available / 16, 256ull << 20, 2048ull << 20));
+        const unsigned count = std::max(1u, std::thread::hardware_concurrency());
+        for (unsigned worker = 0; worker < count; ++worker)
+            this->workers_.emplace_back([this] { this->run(); });
+    }
+
+    ~ResidentImagePool()
+    {
+        {
+            std::lock_guard lock(this->mutex_);
+            this->stopping_ = true;
+        }
+        this->work_.notify_all();
+        for (auto &worker : this->workers_)
+            worker.join();
+    }
+
+    // `bytes`: the image data that the job holds. Jobs in flight hold at most heldBytes_ unless one alone is larger.
+    std::size_t submit(std::move_only_function<ResidentImageResult()> job, const std::size_t bytes)
+    {
+        std::unique_lock lock(this->mutex_);
+        this->room_.wait(lock, [&] {
+            return this->queue_.size() < 2 * this->workers_.size() &&
+                   (this->held_ == 0 || this->held_ + bytes <= this->heldBytes_);
+        });
+        const std::size_t index = this->results_.size();
+        this->results_.emplace_back();
+        this->sizes_.push_back(bytes);
+        this->held_ += bytes;
+        this->queue_.emplace_back(index, std::move(job));
+        ++this->pending_;
+        this->work_.notify_one();
+        return index;
+    }
+
+    // Waits for every job; rethrows the first failure.
+    std::vector<ResidentImageResult> finish()
+    {
+        std::unique_lock lock(this->mutex_);
+        this->done_.wait(lock, [this] { return this->pending_ == 0; });
+        if (this->failure_)
+            std::rethrow_exception(this->failure_);
+        std::vector<ResidentImageResult> results;
+        results.reserve(this->results_.size());
+        for (auto &result : this->results_)
+            results.push_back(std::move(*result));
+        this->results_.clear();
+        this->sizes_.clear();
+        return results;
+    }
+
+  private:
+    void run()
+    {
+        for (;;)
+        {
+            std::pair<std::size_t, std::move_only_function<ResidentImageResult()>> job;
+            {
+                std::unique_lock lock(this->mutex_);
+                this->work_.wait(lock, [this] { return this->stopping_ || !this->queue_.empty(); });
+                if (this->queue_.empty())
+                    return;
+                job = std::move(this->queue_.front());
+                this->queue_.pop_front();
+            }
+            std::optional<ResidentImageResult> result;
+            std::exception_ptr failure;
+            try
+            {
+                result = job.second();
+            }
+            catch (...)
+            {
+                failure = std::current_exception();
+            }
+            {
+                std::lock_guard lock(this->mutex_);
+                if (failure && !this->failure_)
+                    this->failure_ = failure;
+                this->results_[job.first] = std::move(result);
+                this->held_ -= this->sizes_[job.first];
+                if (--this->pending_ == 0)
+                    this->done_.notify_all();
+            }
+            this->room_.notify_all();
+        }
+    }
+
+    std::mutex mutex_;
+    std::condition_variable work_, room_, done_;
+    std::deque<std::pair<std::size_t, std::move_only_function<ResidentImageResult()>>> queue_;
+    std::size_t heldBytes_{};
+    std::vector<std::optional<ResidentImageResult>> results_;
+    std::vector<std::size_t> sizes_;
+    std::size_t held_{};
+    std::size_t pending_{};
+    std::exception_ptr failure_;
+    bool stopping_{};
+    std::vector<std::thread> workers_;
+};
+
+// BC7 resident chains by their pixels: an image that several materials use (a shared normal map, one texture in
+// world and model domains) encodes once, and once per cache.
+struct EncodedResident
+{
+    std::vector<std::uint8_t> bytes;
+    double error{};
+};
+
+class ResidentEncodeCache
+{
+  public:
+    explicit ResidentEncodeCache(std::filesystem::path root) : root_(std::move(root))
+    {
+    }
+
+    EncodedResident encode(const std::vector<std::uint8_t> &pixels, const std::vector<std::uint8_t> &digest,
+                           const unsigned width, const unsigned height, const unsigned levels, const unsigned workers)
+    {
+        const std::string key = Hex(std::span(digest).first(16)) + "_" + std::to_string(width) + "x" + std::to_string(height);
+        std::shared_future<EncodedResident> pending;
+        std::promise<EncodedResident> promise;
+        bool owner = false;
+        {
+            std::lock_guard lock(this->mutex_);
+            auto found = this->encoding_.find(key);
+            if (found == this->encoding_.end())
+            {
+                found = this->encoding_.emplace(key, promise.get_future().share()).first;
+                owner = true;
+            }
+            pending = found->second;
+        }
+        if (!owner)
+            return pending.get();
+
+        try
+        {
+            EncodedResident result = this->load(key);
+            if (result.bytes.empty())
+            {
+                result.bytes = EncodeBc7Rectangle(pixels, width, height, levels, result.error, workers);
+                this->store(key, result);
+            }
+            promise.set_value(result);
+            // Later uses read the cache file (or encode again without one); the bytes are not held for the run.
+            std::lock_guard lock(this->mutex_);
+            this->encoding_.erase(key);
+            return result;
+        }
+        catch (...)
+        {
+            promise.set_exception(std::current_exception());
+            std::lock_guard lock(this->mutex_);
+            this->encoding_.erase(key);
+            throw;
+        }
+    }
+
+  private:
+    std::filesystem::path file(const std::string &key) const
+    {
+        return this->root_ / ("resident_" + key + "_" + kBc7ResidentEncoderVersion + ".bc7");
+    }
+
+    EncodedResident load(const std::string &key) const
+    {
+        EncodedResident result;
+        if (this->root_.empty())
+            return result;
+        std::error_code error;
+        const auto path = this->file(key);
+        if (!std::filesystem::is_regular_file(path, error) || std::filesystem::file_size(path, error) <= sizeof(double) || error)
+            return result;
+        auto bytes = ReadBytes(path);
+        std::memcpy(&result.error, bytes.data(), sizeof(double));
+        result.bytes.assign(bytes.begin() + sizeof(double), bytes.end());
+        return result;
+    }
+
+    // The cache is an optimisation: a full disk keeps converting.
+    void store(const std::string &key, const EncodedResident &result) const
+    {
+        if (this->root_.empty())
+            return;
+        std::vector<std::uint8_t> bytes(sizeof(double));
+        std::memcpy(bytes.data(), &result.error, sizeof(double));
+        bytes.insert(bytes.end(), result.bytes.begin(), result.bytes.end());
+        const auto path = this->file(key);
+        auto partial = path;
+        partial += "." + std::to_string(GetCurrentProcessId()) + "." +
+                   std::to_string(std::hash<std::thread::id>{}(std::this_thread::get_id())) + ".partial";
+        std::error_code error;
+        try
+        {
+            std::filesystem::create_directories(this->root_, error);
+            WriteBytes(partial, bytes);
+            std::filesystem::rename(partial, path, error);
+        }
+        catch (const std::exception &)
+        {
+        }
+        std::filesystem::remove(partial, error);
+    }
+
+    std::filesystem::path root_;
+    std::mutex mutex_;
+    std::map<std::string, std::shared_future<EncodedResident>> encoding_;
+};
 }
 
 void UseBc7Images(const int mode)
@@ -4036,6 +4359,7 @@ RenderPlan PrepareRenderAssets(const std::filesystem::path &exportRoot, const Js
                                const float lightUnitScale, const bool iw3Effects)
 {
     zt::LapTimer timing("render");
+    g_shaderCacheRoot = cacheRoot;
     std::set<std::string> unique(surfaceMaterials.begin(), surfaceMaterials.end());
     std::vector<SourceMaterial> materials;
     materials.reserve(unique.size());
@@ -4046,9 +4370,67 @@ RenderPlan PrepareRenderAssets(const std::filesystem::path &exportRoot, const Js
             found = images.emplace(name, LoadImage(exportRoot, sourcePaths, name)).first;
         return found->second;
     };
-    for (const std::string &name : unique)
+    // The materials and the images that they name are read on every core (IW7 maps name thousands); the loops
+    // below find them loaded. An image that does not load is left to the loop that uses it, which reports it.
+    const auto parallelFor = [](const std::size_t count, const auto &body) {
+        std::atomic<std::size_t> next{0};
+        std::exception_ptr failure;
+        std::mutex failureMutex;
+        const auto run = [&] {
+            for (std::size_t index; (index = next.fetch_add(1)) < count;)
+            {
+                try
+                {
+                    body(index);
+                }
+                catch (...)
+                {
+                    std::lock_guard lock(failureMutex);
+                    if (!failure)
+                        failure = std::current_exception();
+                }
+            }
+        };
+        std::vector<std::thread> workers;
+        const auto workerCount = std::min<std::size_t>(count, std::max(1u, std::thread::hardware_concurrency()));
+        for (std::size_t worker = 1; worker < workerCount; ++worker)
+            workers.emplace_back(run);
+        run();
+        for (auto &worker : workers)
+            worker.join();
+        if (failure)
+            std::rethrow_exception(failure);
+    };
+    const std::vector<std::string> uniqueNames(unique.begin(), unique.end());
+    std::vector<SourceMaterial> readMaterials(uniqueNames.size());
+    parallelFor(uniqueNames.size(),
+                [&](const std::size_t index) { readMaterials[index] = ReadMaterial(exportRoot, sourcePaths, uniqueNames[index]); });
     {
-        SourceMaterial material = ReadMaterial(exportRoot, sourcePaths, name);
+        std::set<std::string> imageNames;
+        for (const SourceMaterial &material : readMaterials)
+            if (material.kind != SurfaceKind::skipped)
+                for (const std::string *name : {&material.color, &material.normal, &material.response, &material.detail})
+                    if (!name->empty())
+                        imageNames.insert(*name);
+        const std::vector<std::string> names(imageNames.begin(), imageNames.end());
+        std::vector<std::optional<std::vector<Image>>> loaded(names.size());
+        parallelFor(names.size(), [&](const std::size_t index) {
+            try
+            {
+                loaded[index] = LoadImage(exportRoot, sourcePaths, names[index]);
+            }
+            catch (const std::exception &)
+            {
+            }
+        });
+        for (std::size_t index = 0; index < names.size(); ++index)
+            if (loaded[index])
+                images.emplace(names[index], std::move(*loaded[index]));
+    }
+    for (std::size_t materialIndex = 0; materialIndex < uniqueNames.size(); ++materialIndex)
+    {
+        const std::string &name = uniqueNames[materialIndex];
+        SourceMaterial material = std::move(readMaterials[materialIndex]);
         if (material.kind != SurfaceKind::skipped)
         {
             const auto &color = image(material.color);
@@ -4516,6 +4898,23 @@ RenderPlan PrepareRenderAssets(const std::filesystem::path &exportRoot, const Js
     // flat sheets (owner test 2026-10-16).
     std::vector<std::array<float, 6>> falloffRows{{2.128f, -0.064f, 0.5f, 0, 0, 0}};
     std::set<std::size_t> writtenTiles;
+    // The tiles resize and paste on every core after the loop (tiles never overlap). A job reads its source as the
+    // loop saw it: a colour map that bleeds later is copied for the jobs queued before the bleed.
+    struct AtlasJob
+    {
+        unsigned atlas;
+        const Image *source;
+        std::shared_ptr<const Image> snapshot;
+        unsigned size;
+        bool color;
+        std::array<float, 4> tint;
+        std::size_t tile;
+    };
+    std::vector<AtlasJob> atlasJobs;
+    const auto queuePaste = [&](const unsigned atlas, const Image &source, const unsigned size, const bool color,
+                                const std::array<float, 4> &tint, const std::size_t tile) {
+        atlasJobs.push_back({atlas, &source, nullptr, size, color, tint, tile});
+    };
     std::set<std::string> bledColors;
     for (const SourceMaterial &material : materials)
     {
@@ -4567,29 +4966,30 @@ RenderPlan PrepareRenderAssets(const std::filesystem::path &exportRoot, const Js
                 {
                     image(material.color);
                     Image &source = images.at(material.color).front();
+                    std::shared_ptr<const Image> unbled;
+                    for (auto &job : atlasJobs)
+                        if (!job.snapshot && job.source == &source)
+                        {
+                            if (!unbled)
+                                unbled = std::make_shared<const Image>(source);
+                            job.snapshot = unbled;
+                        }
                     const unsigned visibleAlpha = blendedAlpha ? 1u : 128u;
                     BleedCutoutColor(source, visibleAlpha);
                     for (Image &mip : source.mips)
                         BleedCutoutColor(mip, visibleAlpha);
                 }
                 const unsigned size = tileCell(item.tile);
-                const Image color =
-                    Resize(image(material.color).front(), size, size, true, material.tint);
-                Paste(atlases[0], color, static_cast<unsigned>(item.tile % columns) * cell,
-                      static_cast<unsigned>(item.tile / columns) * cell);
+                queuePaste(0, image(material.color).front(), size, true, material.tint, item.tile);
                 retainMips(0, material.color);
                 if (!material.normal.empty())
                 {
-                    Paste(atlases[1], Resize(image(material.normal).front(), size, size, false),
-                          static_cast<unsigned>(item.tile % columns) * cell,
-                          static_cast<unsigned>(item.tile / columns) * cell);
+                    queuePaste(1, image(material.normal).front(), size, false, {1, 1, 1, 1}, item.tile);
                     retainMips(1, material.normal);
                 }
                 if (!material.response.empty())
                 {
-                    Paste(atlases[2], Resize(image(material.response).front(), size, size, false),
-                          static_cast<unsigned>(item.tile % columns) * cell,
-                          static_cast<unsigned>(item.tile / columns) * cell);
+                    queuePaste(2, image(material.response).front(), size, false, {1, 1, 1, 1}, item.tile);
                     retainMips(2, material.response);
                 }
             }
@@ -4609,9 +5009,7 @@ RenderPlan PrepareRenderAssets(const std::filesystem::path &exportRoot, const Js
                     // decodes sRGB and the shader re-encodes, as for colour maps.
                     const Image &source = image(material.detail).front();
                     const unsigned size = tileCell(detailTile);
-                    Paste(atlases[0], Resize(source, size, size, true, {1, 1, 1, 1}),
-                          static_cast<unsigned>(detailTile % columns) * cell,
-                          static_cast<unsigned>(detailTile / columns) * cell);
+                    queuePaste(0, source, size, true, {1, 1, 1, 1}, detailTile);
                     if (source.width == size && source.height == size && !source.mips.empty())
                         atlasTileMips[0].push_back({detailTile, material.detail, {1, 1, 1, 1}});
                 }
@@ -4643,6 +5041,39 @@ RenderPlan PrepareRenderAssets(const std::filesystem::path &exportRoot, const Js
             plan.hasGlass |= item.kind == SurfaceKind::glass;
         }
         plan.materials.emplace(material.name, item);
+    }
+    {
+        std::atomic<std::size_t> next{0};
+        std::exception_ptr failure;
+        std::mutex failureMutex;
+        const auto paste = [&] {
+            for (std::size_t index; (index = next.fetch_add(1)) < atlasJobs.size();)
+            {
+                try
+                {
+                    const auto &job = atlasJobs[index];
+                    Paste(atlases[job.atlas],
+                          Resize(job.snapshot ? *job.snapshot : *job.source, job.size, job.size, job.color, job.tint),
+                          static_cast<unsigned>(job.tile % columns) * cell,
+                          static_cast<unsigned>(job.tile / columns) * cell);
+                }
+                catch (...)
+                {
+                    std::lock_guard lock(failureMutex);
+                    if (!failure)
+                        failure = std::current_exception();
+                }
+            }
+        };
+        std::vector<std::thread> workers;
+        for (unsigned worker = 1; worker < std::max(1u, std::thread::hardware_concurrency()); ++worker)
+            workers.emplace_back(paste);
+        paste();
+        for (auto &worker : workers)
+            worker.join();
+        if (failure)
+            std::rethrow_exception(failure);
+        atlasJobs.clear();
     }
     plan.modelFalloffDefines = "#define MAP_FALLOFF_TABLE {";
     for (std::size_t row = 0; row < falloffRows.size(); ++row)
@@ -4915,6 +5346,7 @@ RenderPlan PrepareRenderAssets(const std::filesystem::path &exportRoot, const Js
     plan.instanceLightingCount = staticModelInstances;
     plan.materialDefinition = stem + ".material.json";
     std::set<std::string> writtenResidentImages;
+    std::mutex writtenResidentMutex;
     // World and model images of extractions that opt in ("bc7_images") are block compressed when the encoding
     // keeps their detail: RGBA8 images fill most of a large map's zone (IW7 Frontier: 1.1 of 2.1 GB).
     const bool bc7Images = g_bc7Images >= 0 ? g_bc7Images == 1 : world.value("bc7_images", false);
@@ -4923,13 +5355,21 @@ RenderPlan PrepareRenderAssets(const std::filesystem::path &exportRoot, const Js
         std::size_t compressed{}, kept{}, rawBytes{}, packedBytes{};
         std::array<double, 3> lowest{200.0, 200.0, 200.0}; // by channel: colour, normal, response
     } bc7Stats;
-    const auto residentImage = [&](Json &definition, const unsigned channel, Image source,
-                                   const std::array<float, 4> &tint,
-                                   const std::string_view domain,
-                                   const bool alphaCoverage = false,
-                                   const Image *alphaChannel = nullptr,
-                                   const bool linearData = false) {
+    ResidentEncodeCache residentCache(cacheRoot);
+    // Thread time of the resident images by step (microseconds), for the log.
+    std::array<std::atomic<std::uint64_t>, 5> residentTime{};
+    const auto residentLap = [&](const std::size_t step, std::chrono::steady_clock::time_point &from) {
+        const auto now = std::chrono::steady_clock::now();
+        residentTime[step] += static_cast<std::uint64_t>(std::chrono::duration_cast<std::chrono::microseconds>(now - from).count());
+        from = now;
+    };
+    // The image of a material texture and its definition. Safe on any thread: it writes the image file once.
+    const auto computeResident = [&](const unsigned channel, Image source, const std::array<float, 4> tint,
+                                     const std::string domain, const bool alphaCoverage,
+                                     const std::optional<Image> alphaChannel, const bool linearData,
+                                     const unsigned encodeWorkers) {
         // Texture 0 is a colour map (sRGB format, colour mips) unless it holds data.
+        auto lapStart = std::chrono::steady_clock::now();
         const bool colour = channel == 0 && !linearData;
         if (colour)
         {
@@ -4949,6 +5389,7 @@ RenderPlan PrepareRenderAssets(const std::filesystem::path &exportRoot, const Js
             ++levels;
         }
         const unsigned sourceWidth = source.width, sourceHeight = source.height;
+        residentLap(0, lapStart);
         auto pixels = MipChain(std::move(source), levels, colour);
         if (alphaChannel)
         {
@@ -4961,57 +5402,177 @@ RenderPlan PrepareRenderAssets(const std::filesystem::path &exportRoot, const Js
             for (std::size_t offset = 3; offset < pixels.size(); offset += 4)
                 pixels[offset] = dataPixels[offset];
         }
+        residentLap(1, lapStart);
         const auto digest = Sha256(pixels);
+        residentLap(2, lapStart);
         const std::string id = Hex(std::span(digest).first(8));
-        const std::string stemName = map + "_" + std::string(domain) + "_" + std::to_string(channel) + "_" + id;
-        const std::string name = "mw120r/" + stemName;
-        definition["textures"][channel]["image"] = name;
+        const std::string stemName = map + "_" + domain + "_" + std::to_string(channel) + "_" + id;
+        ResidentImageResult result;
+        result.name = "mw120r/" + stemName;
+        result.channel = channel;
+        const auto writeOnce = [&](const std::string &filename, const std::vector<std::uint8_t> &bytes) {
+            {
+                std::lock_guard lock(writtenResidentMutex);
+                if (!writtenResidentImages.insert(filename).second)
+                    return;
+            }
+            WriteBytes(mapDirectory / filename, bytes);
+        };
         if (bc7Images && (domain == "world" || domain == "model") && sourceWidth >= 4 && sourceHeight >= 4 &&
             sourceWidth % 4 == 0 && sourceHeight % 4 == 0)
         {
             // The cut-off is the mean squared error of a channel over the whole chain: the sources were
             // BC1 or BC3 files (or 8-bit normals), so a PSNR in the high thirties adds no visible change.
-            double error = 0;
-            auto encoded = EncodeBc7Rectangle(pixels, sourceWidth, sourceHeight, levels, error);
+            const auto encoded = residentCache.encode(pixels, digest, sourceWidth, sourceHeight, levels, encodeWorkers);
+            residentLap(3, lapStart);
             double texels = 0;
             for (unsigned level = 0; level < levels; ++level)
                 texels += double(std::max(1u, sourceWidth >> level)) * std::max(1u, sourceHeight >> level);
-            const double psnr = error > 0 ? 10.0 * std::log10(255.0 * 255.0 * texels * 4.0 / error) : 200.0;
-            auto &lowest = bc7Stats.lowest[std::min(channel, 2u)];
-            if (psnr >= (channel == 0 ? 38.0 : 40.0))
+            result.considered = true;
+            result.psnr = encoded.error > 0 ? 10.0 * std::log10(255.0 * 255.0 * texels * 4.0 / encoded.error) : 200.0;
+            if (result.psnr >= (channel == 0 ? 38.0 : 40.0))
             {
-                lowest = std::min(lowest, psnr);
-                ++bc7Stats.compressed;
-                bc7Stats.rawBytes += pixels.size();
-                bc7Stats.packedBytes += encoded.size();
+                result.compressed = true;
+                result.rawBytes = pixels.size();
+                result.packedBytes = encoded.bytes.size();
                 const std::string filename = stemName + ".bc7";
-                if (writtenResidentImages.insert(filename).second)
-                    WriteBytes(mapDirectory / filename, encoded);
-                definition["imageDefinitions"].push_back({{"name", name},
-                                                          {"width", sourceWidth},
-                                                          {"height", sourceHeight},
-                                                          {"bc7", filename},
-                                                          {"format", colour ? 45 : 44},
-                                                          {"mipCount", levels}});
-                return;
+                writeOnce(filename, encoded.bytes);
+                residentLap(4, lapStart);
+                result.definition = {{"name", result.name},
+                                     {"width", sourceWidth},
+                                     {"height", sourceHeight},
+                                     {"bc7", filename},
+                                     {"format", colour ? 45 : 44},
+                                     {"mipCount", levels}};
+                return result;
             }
-            ++bc7Stats.kept;
         }
         const std::string filename = stemName + ".rgba";
-        if (writtenResidentImages.insert(filename).second)
-            WriteBytes(mapDirectory / filename, pixels);
-        definition["imageDefinitions"].push_back({{"name", name},
-                                                  {"width", sourceWidth},
-                                                  {"height", sourceHeight},
-                                                  {"rgba8", filename},
-                                                  {"format", colour ? 7 : 6},
-                                                  {"mipCount", levels}});
+        writeOnce(filename, pixels);
+        residentLap(4, lapStart);
+        result.definition = {{"name", result.name},
+                             {"width", sourceWidth},
+                             {"height", sourceHeight},
+                             {"rgba8", filename},
+                             {"format", colour ? 7 : 6},
+                             {"mipCount", levels}};
+        return result;
     };
-    // Replay's decal volumes are drawn from four 4096 atlases in Replay formats
-    // 45 (BC7 sRGB), 44 (BC7), 39 (BC4) and 34 (see sub_1418829D0). Channel
-    // images are copied into them block for block (sub_14187E490); only 1x1
-    // RGBA8 constant colours are re-encoded on the GPU. An RGBA8 channel image
-    // therefore fills its atlas region with garbage, which rendered pink.
+    const auto countResident = [&](const ResidentImageResult &result) {
+        if (!result.considered)
+            return;
+        if (!result.compressed)
+        {
+            ++bc7Stats.kept;
+            return;
+        }
+        auto &lowest = bc7Stats.lowest[std::min(result.channel, 2u)];
+        lowest = std::min(lowest, result.psnr);
+        ++bc7Stats.compressed;
+        bc7Stats.rawBytes += result.rawBytes;
+        bc7Stats.packedBytes += result.packedBytes;
+    };
+    const auto residentImage = [&](Json &definition, const unsigned channel, Image source,
+                                   const std::array<float, 4> &tint,
+                                   const std::string_view domain,
+                                   const bool alphaCoverage = false,
+                                   const Image *alphaChannel = nullptr,
+                                   const bool linearData = false) {
+        const auto result = computeResident(channel, std::move(source), tint, std::string(domain), alphaCoverage,
+                                            alphaChannel ? std::optional<Image>(*alphaChannel) : std::nullopt,
+                                            linearData, 0);
+        definition["textures"][channel]["image"] = result.name;
+        definition["imageDefinitions"].push_back(result.definition);
+        countResident(result);
+    };
+    // The world and model materials (thousands of images on IW7 maps) encode their images on every core; their
+    // material files are written once the images are done (finishResidentImages).
+    std::optional<ResidentImagePool> residentPool;
+    struct DeferredMaterial
+    {
+        std::filesystem::path path;
+        Json definition;
+        std::vector<std::pair<unsigned, std::size_t>> images; // texture channel, job
+    };
+    std::vector<DeferredMaterial> deferredMaterials;
+    std::vector<std::pair<unsigned, std::size_t>> pendingImages;
+    // The images of a material texture, made on the worker: the image and an optional alpha data channel. The
+    // sources of the cached images stay where the image cache holds them.
+    using ResidentRecipe = std::move_only_function<std::pair<Image, std::optional<Image>>()>;
+    const auto imageBytes = [](const Image &image) {
+        std::size_t bytes = image.rgba.size();
+        for (const auto &mip : image.mips)
+            bytes += mip.rgba.size();
+        return bytes;
+    };
+    const auto residentImageRecipe = [&](Json &definition, const unsigned channel, ResidentRecipe recipe,
+                                         const std::size_t bytes, const std::array<float, 4> &tint,
+                                         const std::string_view domain, const bool alphaCoverage = false) {
+        if (!residentPool)
+            residentPool.emplace();
+        const auto job = residentPool->submit(
+            [&computeResident, channel, recipe = std::move(recipe), tint, domain = std::string(domain),
+             alphaCoverage]() mutable {
+                auto [source, alpha] = recipe();
+                return computeResident(channel, std::move(source), tint, domain, alphaCoverage, std::move(alpha), false, 1);
+            },
+            bytes);
+        definition["textures"][channel]["image"] = "";
+        definition["imageDefinitions"].push_back({{"pendingResidentImage", job}});
+        pendingImages.emplace_back(channel, job);
+    };
+    // A cached image (copied on the worker) or an image of its own.
+    const auto residentImageAsync = [&](Json &definition, const unsigned channel, const Image &cached,
+                                        const std::array<float, 4> &tint, const std::string_view domain,
+                                        const bool alphaCoverage = false) {
+        residentImageRecipe(
+            definition, channel,
+            [source = &cached]() { return std::pair{*source, std::optional<Image>{}}; },
+            imageBytes(cached), tint, domain, alphaCoverage);
+    };
+    const auto residentImageOwned = [&](Json &definition, const unsigned channel, Image owned,
+                                        const std::array<float, 4> &tint, const std::string_view domain) {
+        const auto bytes = imageBytes(owned);
+        residentImageRecipe(
+            definition, channel,
+            [source = std::move(owned)]() mutable { return std::pair{std::move(source), std::optional<Image>{}}; },
+            bytes, tint, domain);
+    };
+    const auto writeMaterial = [&](const std::filesystem::path &path, Json definition) {
+        if (pendingImages.empty())
+        {
+            WriteJson(path, definition);
+            return;
+        }
+        deferredMaterials.push_back({path, std::move(definition), std::exchange(pendingImages, {})});
+    };
+    const auto finishResidentImages = [&] {
+        if (!residentPool)
+            return;
+        if (!pendingImages.empty())
+            throw std::runtime_error("IW3 resident images have no material");
+        const auto results = residentPool->finish();
+        residentPool.reset();
+        for (auto &material : deferredMaterials)
+        {
+            auto &definitions = material.definition["imageDefinitions"];
+            for (const auto &[channel, job] : material.images)
+            {
+                const auto &result = results.at(job);
+                material.definition["textures"][channel]["image"] = result.name;
+                auto slot = std::ranges::find_if(definitions, [job](const Json &definition) {
+                    return definition.is_object() && definition.contains("pendingResidentImage") &&
+                           definition.at("pendingResidentImage").get<std::size_t>() == job;
+                });
+                if (slot == definitions.end())
+                    throw std::runtime_error("IW3 resident image lost its definition");
+                *slot = result.definition;
+                countResident(result);
+            }
+            WriteJson(material.path, material.definition);
+        }
+        deferredMaterials.clear();
+    };
     const auto decalImage = [&](Json &definition, const unsigned channel, Image source,
                                 const std::string_view domain, const unsigned format,
                                 const Image *alphaChannel = nullptr) {
@@ -5462,56 +6023,66 @@ RenderPlan PrepareRenderAssets(const std::filesystem::path &exportRoot, const Js
         // channel ("<n>&<g>"). IW3 specular maps carry intensity in RGB and
         // gloss (cosine power) in alpha. Color alpha gets its own mip chain:
         // the color chain weights texels by alpha as coverage.
-        Image worldColor = image(source.color).front();
-        // Runtime probe: MW120R_DEBUG_MIP_COLORS=<IW3 material> (e.g. wc/zz_grass)
-        // paints each mip of that native colour image one flat colour (red,
-        // orange, yellow, green, cyan, blue, magenta, white, grey, black), so a
-        // screenshot shows which level Replay samples and that the image binds.
-        if (const char *probe = std::getenv("MW120R_DEBUG_MIP_COLORS");
-            probe && source.name == probe)
-        {
-            static constexpr std::array<std::array<std::uint8_t, 3>, 10> colors{
-                {{255, 0, 0}, {255, 128, 0}, {255, 255, 0}, {0, 255, 0}, {0, 255, 255},
-                 {0, 0, 255}, {255, 0, 255}, {255, 255, 255}, {128, 128, 128}, {0, 0, 0}}};
-            const auto paint = [&](Image &level, const unsigned index) {
-                const auto &color = colors[std::min<std::size_t>(index, colors.size() - 1)];
-                for (std::size_t offset = 0; offset < level.rgba.size(); offset += 4)
-                    std::copy(color.begin(), color.end(), level.rgba.begin() + offset);
-            };
-            paint(worldColor, 0);
-            worldColor.mips.clear();
-            for (unsigned level = 1, width = worldColor.width, height = worldColor.height;
-                 width > 1 || height > 1; ++level)
-            {
-                width = std::max(1u, width / 2);
-                height = std::max(1u, height / 2);
-                Image mip{width, height,
-                          std::vector<std::uint8_t>(std::size_t{width} * height * 4, 255)};
-                paint(mip, level);
-                worldColor.mips.push_back(std::move(mip));
-            }
-            zt::warn("iw3: debug mip colours on native world material %s", source.name.c_str());
-        }
-        for (std::size_t offset = 3; offset < worldColor.rgba.size(); offset += 4)
-            worldColor.rgba[offset] = 255;
-        for (auto &mip : worldColor.mips)
-            for (std::size_t offset = 3; offset < mip.rgba.size(); offset += 4)
-                mip.rgba[offset] = 255;
-        // Raw IW3 specular bytes left typical surfaces at a quarter of the
-        // Replay default and removed their gloss; see ReplaySpecularIntensity.
-        const Image specular = source.response.empty()
-                                   ? Image{1, 1, std::vector<std::uint8_t>{255, 255, 255, 255}}
-                                   : ReplaySpecularIntensity(image(source.response).front());
-        residentImage(direct, 0, std::move(worldColor), source.tint, "world", false, &specular);
+        const Image *colorImage = &image(source.color).front();
+        const Image *responseImage = source.response.empty() ? nullptr : &image(source.response).front();
         const bool hasNormal = !source.normal.empty() && source.normal != "$identitynormalmap";
-        Image worldNormal = ReplayNormalGloss(
-            hasNormal ? &image(source.normal).front() : nullptr,
-            source.response.empty() ? nullptr : &image(source.response).front());
-        residentImage(direct, 1, std::move(worldNormal), {1, 1, 1, 1}, "world");
-        residentImage(direct, 2,
-                      source.response.empty() ? Image{1, 1, std::vector<std::uint8_t>{0, 0, 0, 0}}
-                                              : image(source.response).front(),
-                      {1, 1, 1, 1}, "world");
+        const Image *normalImage = hasNormal ? &image(source.normal).front() : nullptr;
+        const std::size_t colorBytes = imageBytes(*colorImage) + (responseImage ? imageBytes(*responseImage) : 0);
+        residentImageRecipe(
+            direct, 0,
+            [colorImage, responseImage, name = source.name]() {
+                Image worldColor = *colorImage;
+                // Runtime probe: MW120R_DEBUG_MIP_COLORS=<IW3 material> (e.g. wc/zz_grass)
+                // paints each mip of that native colour image one flat colour (red,
+                // orange, yellow, green, cyan, blue, magenta, white, grey, black), so a
+                // screenshot shows which level Replay samples and that the image binds.
+                if (const char *probe = std::getenv("MW120R_DEBUG_MIP_COLORS"); probe && name == probe)
+                {
+                    static constexpr std::array<std::array<std::uint8_t, 3>, 10> colors{
+                        {{255, 0, 0}, {255, 128, 0}, {255, 255, 0}, {0, 255, 0}, {0, 255, 255},
+                         {0, 0, 255}, {255, 0, 255}, {255, 255, 255}, {128, 128, 128}, {0, 0, 0}}};
+                    const auto paint = [&](Image &level, const unsigned index) {
+                        const auto &color = colors[std::min<std::size_t>(index, colors.size() - 1)];
+                        for (std::size_t offset = 0; offset < level.rgba.size(); offset += 4)
+                            std::copy(color.begin(), color.end(), level.rgba.begin() + offset);
+                    };
+                    paint(worldColor, 0);
+                    worldColor.mips.clear();
+                    for (unsigned level = 1, width = worldColor.width, height = worldColor.height;
+                         width > 1 || height > 1; ++level)
+                    {
+                        width = std::max(1u, width / 2);
+                        height = std::max(1u, height / 2);
+                        Image mip{width, height,
+                                  std::vector<std::uint8_t>(std::size_t{width} * height * 4, 255)};
+                        paint(mip, level);
+                        worldColor.mips.push_back(std::move(mip));
+                    }
+                    zt::warn("iw3: debug mip colours on native world material %s", name.c_str());
+                }
+                for (std::size_t offset = 3; offset < worldColor.rgba.size(); offset += 4)
+                    worldColor.rgba[offset] = 255;
+                for (auto &mip : worldColor.mips)
+                    for (std::size_t offset = 3; offset < mip.rgba.size(); offset += 4)
+                        mip.rgba[offset] = 255;
+                // Raw IW3 specular bytes left typical surfaces at a quarter of the
+                // Replay default and removed their gloss; see ReplaySpecularIntensity.
+                Image specular = responseImage ? ReplaySpecularIntensity(*responseImage)
+                                               : Image{1, 1, std::vector<std::uint8_t>{255, 255, 255, 255}};
+                return std::pair{std::move(worldColor), std::optional<Image>(std::move(specular))};
+            },
+            colorBytes, source.tint, "world");
+        residentImageRecipe(
+            direct, 1,
+            [normalImage, responseImage]() {
+                return std::pair{ReplayNormalGloss(normalImage, responseImage), std::optional<Image>{}};
+            },
+            (normalImage ? imageBytes(*normalImage) : 0) + (responseImage ? imageBytes(*responseImage) : 0),
+            {1, 1, 1, 1}, "world");
+        if (responseImage)
+            residentImageAsync(direct, 2, *responseImage, {1, 1, 1, 1}, "world");
+        else
+            residentImageOwned(direct, 2, Image{1, 1, std::vector<std::uint8_t>{0, 0, 0, 0}}, {1, 1, 1, 1}, "world");
         // Replay resolves a technique's material textures by a linear search
         // of the slot byte with no end check (sub_1419824A0). These materials
         // are drawn with techniques binding the world material's extra slots
@@ -5533,7 +6104,7 @@ RenderPlan PrepareRenderAssets(const std::filesystem::path &exportRoot, const Js
             info[0x14] = static_cast<std::uint8_t>(direct.at("textures").size());
             direct["info"] = Hex(info);
         }
-        WriteJson(mapDirectory / materialFile, direct);
+        writeMaterial(mapDirectory / materialFile, std::move(direct));
         const unsigned index = static_cast<unsigned>(plan.additionalMaterials.size() + 1);
         plan.additionalMaterials.push_back(
             {{"schema", 1}, {"material", materialName}, {"materialDefinition", materialFile}});
@@ -5832,18 +6403,17 @@ RenderPlan PrepareRenderAssets(const std::filesystem::path &exportRoot, const Js
             // IW3 "ge128" cutouts (flags 8/16 select gt0/lt128) clip at alpha 0.5.
             const bool alphaCoverage =
                 source.kind == SurfaceKind::cutout && !(source.flags & 24u);
-            residentImage(direct, 0, image(source.color).front(), source.tint, "model",
+            residentImageAsync(direct, 0, image(source.color).front(), source.tint, "model",
                           alphaCoverage);
-            residentImage(direct, 1,
-                          source.normal.empty()
-                              ? Image{1, 1, std::vector<std::uint8_t>{128, 128, 128, 128}}
-                              : image(source.normal).front(),
-                          {1, 1, 1, 1}, "model");
-            residentImage(direct, 2,
-                          source.response.empty()
-                              ? Image{1, 1, std::vector<std::uint8_t>{0, 0, 0, 0}}
-                              : image(source.response).front(),
-                          {1, 1, 1, 1}, "model");
+            if (source.normal.empty())
+                residentImageOwned(direct, 1, Image{1, 1, std::vector<std::uint8_t>{128, 128, 128, 128}}, {1, 1, 1, 1},
+                                   "model");
+            else
+                residentImageAsync(direct, 1, image(source.normal).front(), {1, 1, 1, 1}, "model");
+            if (source.response.empty())
+                residentImageOwned(direct, 2, Image{1, 1, std::vector<std::uint8_t>{0, 0, 0, 0}}, {1, 1, 1, 1}, "model");
+            else
+                residentImageAsync(direct, 2, image(source.response).front(), {1, 1, 1, 1}, "model");
             direct["imageDefinitions"].push_back(sunDepthDefinition);
             if (instanceLighting)
                 direct["imageDefinitions"].push_back(
@@ -5867,13 +6437,13 @@ RenderPlan PrepareRenderAssets(const std::filesystem::path &exportRoot, const Js
                 // technique's ascending texture arguments require.
                 direct["textures"].push_back({{"header", "3e00000000000000"}, {"image", "$gray"}});
                 const unsigned channel = static_cast<unsigned>(direct["textures"].size() - 1);
-                residentImage(direct, channel, image(source.detail).front(), {1, 1, 1, 1},
+                residentImageAsync(direct, channel, image(source.detail).front(), {1, 1, 1, 1},
                               "model_detail");
                 auto info = Unhex(direct.at("info").get<std::string>());
                 info[0x14] = static_cast<std::uint8_t>(direct["textures"].size());
                 direct["info"] = Hex(info);
             }
-            WriteJson(mapDirectory / materialFile, direct);
+            writeMaterial(mapDirectory / materialFile, std::move(direct));
             plan.assetMaterials.push_back(
                 {{"schema", 1}, {"material", materialName}, {"materialDefinition", materialFile}});
             plan.materials.at(source.name).*target = materialName;
@@ -6077,6 +6647,10 @@ RenderPlan PrepareRenderAssets(const std::filesystem::path &exportRoot, const Js
         if (const auto data = FxParticleMaterialData(source))
             plan.fxParticleMaterialData.emplace(name, *data);
     }
+    finishResidentImages();
+    timing.lap("resident images");
+    zt::info("iw3: resident images: thread time %.1fs resize, %.1fs mips, %.1fs digests, %.1fs encode or cache, %.1fs writes",
+             residentTime[0] / 1e6, residentTime[1] / 1e6, residentTime[2] / 1e6, residentTime[3] / 1e6, residentTime[4] / 1e6);
     if (bc7Images)
     {
         zt::info("iw3: %zu resident image(s) block compressed (%.0f MB to %.0f MB; lowest PSNR %.1f colour, %.1f normal, "

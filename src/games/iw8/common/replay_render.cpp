@@ -1,8 +1,10 @@
 #include <std_include.hpp>
 #include "replay_render.h"
 #include <algorithm>
+#include <atomic>
 #include <cmath>
 #include <cstring>
+#include <exception>
 #include <d3dcompiler.h>
 #include <filesystem>
 #include <fstream>
@@ -14,6 +16,7 @@
 #include <optional>
 #include <set>
 #include <stdexcept>
+#include <thread>
 namespace replayrender
 {
 using namespace iw8;
@@ -48,6 +51,58 @@ std::vector<uint8_t> unhex(const std::string &s)
 
 namespace
 {
+// The materials of a map, loaded on every core (thousands of material, techset and image files); results keep the
+// definition order, and the first failure in that order is rethrown.
+template <class Result, class Load>
+std::vector<Result> loadInParallel(const nlohmann::json &definitions, const Load &load)
+{
+    const std::size_t count = definitions.size();
+    std::vector<std::optional<Result>> results(count);
+    std::vector<std::exception_ptr> failures(count);
+    std::atomic<std::size_t> next{0};
+    const auto run = [&] {
+        for (std::size_t index; (index = next.fetch_add(1)) < count;)
+        {
+            try
+            {
+                results[index] = load(definitions[index]);
+            }
+            catch (...)
+            {
+                failures[index] = std::current_exception();
+            }
+        }
+    };
+    std::vector<std::thread> workers;
+    const auto workerCount = std::min<std::size_t>(count, std::max(1u, std::thread::hardware_concurrency()));
+    for (std::size_t worker = 1; worker < workerCount; ++worker)
+        workers.emplace_back(run);
+    run();
+    for (auto &worker : workers)
+        worker.join();
+    std::vector<Result> loaded;
+    loaded.reserve(count);
+    for (std::size_t index = 0; index < count; ++index)
+    {
+        if (failures[index])
+            std::rethrow_exception(failures[index]);
+        loaded.push_back(std::move(*results[index]));
+    }
+    return loaded;
+}
+
+// Parsed from memory: nlohmann reads a stream one character at a time.
+nlohmann::json parseFile(std::ifstream &input)
+{
+    if (!input)
+        throw std::runtime_error("cannot read a Replay render definition");
+    input.seekg(0, std::ios::end);
+    std::string text(static_cast<std::size_t>(input.tellg()), ' ');
+    input.seekg(0);
+    input.read(text.data(), static_cast<std::streamsize>(text.size()));
+    return nlohmann::json::parse(text);
+}
+
 // Stock vfx_postfx_bokeh_sharp_sheet_1_lit's lit alpha atlas technique (techsets_common).
 bool nativeLitEffectTechset(const std::string_view name)
 {
@@ -395,8 +450,8 @@ Material LoadMaterial(const std::string &path, const nlohmann::json &j,
         const auto file = j.at("materialDefinition").get<std::string>();
         if (std::filesystem::path(file).filename() != file || file.find("..") != std::string::npos)
             throw std::runtime_error("Material definition must be adjacent to mesh");
-        std::ifstream mf(std::filesystem::path(path).parent_path() / file);
-        const auto d = nlohmann::json::parse(mf);
+        std::ifstream mf(std::filesystem::path(path).parent_path() / file, std::ios::binary);
+        const auto d = parseFile(mf);
         if (d.at("schema") != 1)
             throw std::runtime_error("Unknown material schema");
         m.materialInfo = unhex(d.at("info"));
@@ -452,8 +507,8 @@ Material LoadMaterial(const std::string &path, const nlohmann::json &j,
             const auto tf = d.at("techsetDefinition").get<std::string>();
             if (std::filesystem::path(tf).filename() != tf || tf.find("..") != std::string::npos)
                 throw std::runtime_error("Techset definition must be adjacent");
-            std::ifstream fts(std::filesystem::path(path).parent_path() / tf);
-            const auto ts = nlohmann::json::parse(fts);
+            std::ifstream fts(std::filesystem::path(path).parent_path() / tf, std::ios::binary);
+            const auto ts = parseFile(fts);
             nativeReplayFixture = ts.value("nativeReplayFixture", false);
             m.techsetHeader = unhex(ts.at("header"));
             if (ts.at("schema") != 1 || ts.at("name") != m.techset || m.techsetHeader.size() != 64)
@@ -1095,26 +1150,26 @@ Mesh Load(const std::string &path)
     Mesh m;
     if (path.empty())
         return m;
-    std::ifstream f(path);
+    std::ifstream f(path, std::ios::binary);
     if (!f)
         throw std::runtime_error("Cannot read Replay render mesh: " + path);
-    const auto j = nlohmann::json::parse(f);
+    const auto j = parseFile(f);
     static_cast<Material &>(m) = LoadMaterial(path, j);
     if (j.contains("additionalMaterials"))
     {
         if (!j.at("additionalMaterials").is_array() ||
             j.at("additionalMaterials").size() > kMaxWorldSurfaces)
             throw std::runtime_error("Invalid surface material table");
-        for (const auto &definition : j.at("additionalMaterials"))
-            m.additionalMaterials.push_back(LoadMaterial(path, definition));
+        m.additionalMaterials = loadInParallel<Material>(
+            j.at("additionalMaterials"), [&](const nlohmann::json &definition) { return LoadMaterial(path, definition); });
     }
     if (j.contains("assetMaterials"))
     {
         const auto &definitions = j.at("assetMaterials");
         if (!definitions.is_array() || definitions.size() > kMaxWorldSurfaces)
             throw std::runtime_error("Invalid auxiliary material table");
-        for (const auto &definition : definitions)
-            m.assetMaterials.push_back(LoadMaterial(path, definition, true));
+        m.assetMaterials = loadInParallel<Material>(
+            definitions, [&](const nlohmann::json &definition) { return LoadMaterial(path, definition, true); });
     }
     if (j.contains("sunFlare"))
     {

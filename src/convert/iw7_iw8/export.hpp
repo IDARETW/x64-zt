@@ -368,4 +368,9 @@ namespace zonetool::convert::iw7_iw8
 
 	// Writes a json file of the extraction.
 	void write_json(const std::filesystem::path& path, const json& value);
+
+	// Writes a json file of the extraction on another thread (a few at a time); finish_json_writes waits for them
+	// and rethrows the first failure.
+	void write_json_async(std::filesystem::path path, json value);
+	void finish_json_writes();
 }

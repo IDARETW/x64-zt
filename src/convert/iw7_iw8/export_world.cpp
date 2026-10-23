@@ -1,5 +1,6 @@
 #include <std_include.hpp>
 #include "export.hpp"
+#include <future>
 
 namespace zonetool::convert::iw7_iw8
 {
@@ -1315,6 +1316,68 @@ namespace zonetool::convert::iw7_iw8
 		}
 	}
 
+	namespace
+	{
+		std::mutex json_writes_mutex;
+		std::deque<std::future<void>> json_writes;
+	}
+
+	void write_json_async(std::filesystem::path path, json value)
+	{
+		std::future<void> oldest;
+		{
+			std::lock_guard lock(json_writes_mutex);
+			// The values wait in memory (a large model's is gigabytes as a json value): four at a time.
+			if (json_writes.size() >= 4)
+			{
+				oldest = std::move(json_writes.front());
+				json_writes.pop_front();
+			}
+		}
+
+		if (oldest.valid())
+		{
+			oldest.get();
+		}
+
+		auto write = std::async(std::launch::async, [path = std::move(path), value = std::move(value)]
+		{
+			write_json(path, value);
+		});
+		std::lock_guard lock(json_writes_mutex);
+		json_writes.push_back(std::move(write));
+	}
+
+	void finish_json_writes()
+	{
+		std::deque<std::future<void>> pending;
+		{
+			std::lock_guard lock(json_writes_mutex);
+			pending.swap(json_writes);
+		}
+
+		std::exception_ptr failure;
+		for (auto& write : pending)
+		{
+			try
+			{
+				write.get();
+			}
+			catch (...)
+			{
+				if (!failure)
+				{
+					failure = std::current_exception();
+				}
+			}
+		}
+
+		if (failure)
+		{
+			std::rethrow_exception(failure);
+		}
+	}
+
 	void export_world(const source_map& source, extraction& output)
 	{
 		const auto& world = *source.world();
@@ -1544,7 +1607,7 @@ namespace zonetool::convert::iw7_iw8
 			{"reflection_probes", std::move(probes.entries)},
 		};
 
-		write_json(output.extracted / (bsp_name(source) + ".replay-world.json"), value);
+		write_json_async(output.extracted / (bsp_name(source) + ".replay-world.json"), std::move(value));
 		export_sun(source, output);
 		ZONETOOL_INFO("iw7: exported %zu of %u world surfaces and %zu of %u static models (%zu lit by the floor under them)",
 			surface_indices.size(), world.surfaceCount, model_indices.size(), dpvs.smodelCount, ground_lit);
