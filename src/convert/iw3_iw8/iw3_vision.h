@@ -117,10 +117,11 @@ std::string FogShaderDefines(const std::optional<ExpFog> &fog, MapStyle style,
 // the ST2084-encoded BT.2020 output for the ST2084-encoded BT.2020 input at its grid
 // point, as consumed by cs_universal_clut_generate.
 inline constexpr unsigned GradingClutSize = 32;
-std::vector<std::uint8_t> BuildGradingClutPixels(const Film &film);
+std::vector<std::uint8_t> BuildGradingClutPixels(const Film &film, float exposureAdjust = 0.0f);
 // The same from an IW7 colour grading lookup table: size^3 RGBA8 texels (red fastest), indexed and
 // valued in sRGB.
-std::vector<std::uint8_t> BuildGradingClutPixels(const std::vector<std::uint8_t> &rgba, unsigned size);
+std::vector<std::uint8_t> BuildGradingClutPixels(const std::vector<std::uint8_t> &rgba, unsigned size,
+                                              float exposureAdjust = 0.0f);
 
 // Replay-format vision file (all 218 fields, engine defaults unless converted).
 // sunDirection points toward the sun (iw8 atmospheric scattering).

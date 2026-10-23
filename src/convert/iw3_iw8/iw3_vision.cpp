@@ -517,8 +517,12 @@ std::string FogShaderDefines(const std::optional<ExpFog> &fog, const MapStyle st
 namespace
 {
 // The Replay CLUT of a grade of linear BT.709 colours (1 = display white).
-template <typename Grade> std::vector<std::uint8_t> BuildClut(const Grade &grade)
+template <typename Grade> std::vector<std::uint8_t> BuildClut(const Grade &grade, const float exposureAdjust)
 {
+    if (!std::isfinite(exposureAdjust) || std::abs(exposureAdjust) > 8.0f)
+        throw std::runtime_error("grading exposure must be from -8 to 8 EV");
+    // cs_tonemap applies 2^universalBaseExposure before the CLUT. Resample its input to keep this adjustment map-local.
+    const double exposure = std::exp2(static_cast<double>(exposureAdjust));
     constexpr unsigned size = GradingClutSize;
     std::vector<std::uint8_t> pixels(std::size_t(size) * size * size * 8);
     std::size_t at = 0;
@@ -529,7 +533,9 @@ template <typename Grade> std::vector<std::uint8_t> BuildClut(const Grade &grade
                 const Color input2020{PqDecode(red / double(size - 1)) * kPqScale,
                                       PqDecode(green / double(size - 1)) * kPqScale,
                                       PqDecode(blue / double(size - 1)) * kPqScale};
-                const Color input709 = Multiply(kBt2020ToBt709, input2020);
+                Color input709 = Multiply(kBt2020ToBt709, input2020);
+                for (double &channel : input709)
+                    channel *= exposure;
                 Color inGamut{};
                 for (unsigned channel = 0; channel < 3; ++channel)
                     inGamut[channel] = std::max(input709[channel], 0.0);
@@ -563,12 +569,13 @@ double SrgbDecode(const double value)
 }
 } // namespace
 
-std::vector<std::uint8_t> BuildGradingClutPixels(const Film &film)
+std::vector<std::uint8_t> BuildGradingClutPixels(const Film &film, const float exposureAdjust)
 {
-    return BuildClut([&](const Color &linear) { return ApplyFilm(film, linear); });
+    return BuildClut([&](const Color &linear) { return ApplyFilm(film, linear); }, exposureAdjust);
 }
 
-std::vector<std::uint8_t> BuildGradingClutPixels(const std::vector<std::uint8_t> &rgba, const unsigned size)
+std::vector<std::uint8_t> BuildGradingClutPixels(const std::vector<std::uint8_t> &rgba, const unsigned size,
+                                              const float exposureAdjust)
 {
     if (size < 2 || rgba.size() != std::size_t(size) * size * size * 4)
         throw std::runtime_error("invalid colour grading lookup table");
@@ -602,7 +609,7 @@ std::vector<std::uint8_t> BuildGradingClutPixels(const std::vector<std::uint8_t>
         for (unsigned channel = 0; channel < 3; ++channel)
             result[channel] = SrgbDecode(std::clamp(result[channel], 0.0, 1.0)) * scale;
         return result;
-    });
+    }, exposureAdjust);
 }
 
 std::string BuildReplayVision(const std::optional<ExpFog> &fog, const std::string &gradingClut,

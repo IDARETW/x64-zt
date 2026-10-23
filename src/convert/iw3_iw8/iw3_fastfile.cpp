@@ -9700,7 +9700,7 @@ PreparedMap PrepareFastfile(const ImportOptions &options)
     if (const auto film = ReadMapFilm(exportRoot, sourceMap))
     {
         result.gradingClutName = "mw120r_" + options.map + "_clut";
-        result.gradingClutPixels = BuildGradingClutPixels(*film);
+        result.gradingClutPixels = BuildGradingClutPixels(*film, options.exposureAdjust);
     }
     // An IW7 extraction carries its vision's colour grading lookup table.
     else if (const auto clut = world.find("grading_clut"); clut != world.end() && clut->is_object())
@@ -9710,9 +9710,18 @@ PreparedMap PrepareFastfile(const ImportOptions &options)
         if (!zt::read_file(SafeChild(exportRoot, clut->at("file").get<std::string>()).string(), rgba))
             throw std::runtime_error("cannot read the extraction's colour grading lookup table");
         result.gradingClutName = "mw120r_" + options.map + "_clut";
-        result.gradingClutPixels = BuildGradingClutPixels(rgba, size);
+        result.gradingClutPixels = BuildGradingClutPixels(rgba, size, options.exposureAdjust);
         zt::info("iw3: colour grading from the extraction's %u^3 lookup table %s", size,
                  clut->at("file").get<std::string>().c_str());
+    }
+    if (options.exposureAdjust != 0.0f)
+    {
+        if (result.gradingClutName.empty())
+        {
+            result.gradingClutName = "mw120r_" + options.map + "_clut";
+            result.gradingClutPixels = BuildGradingClutPixels(Film{}, options.exposureAdjust);
+        }
+        zt::info("iw3: native grading exposure adjustment %g EV", options.exposureAdjust);
     }
     // An IW7 extraction carries its map's vision fog (IW7's fields, as Replay names them).
     std::optional<NativeFog> nativeFog;
