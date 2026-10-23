@@ -42,6 +42,7 @@
 #include <cstring>
 #include <filesystem>
 #include <fstream>
+#include <future>
 #include <limits>
 #include <map>
 #include <memory>
@@ -1636,6 +1637,15 @@ int writeMapPackage(const Args &args, const std::string &map, const std::string 
     }
 
     LapTimer timing("package");
+    const std::string assetName = "maps/mp/" + map + ".d3dbsp";
+    // Bot navigation and the native world collision need only the prepared map: they build beside the render load,
+    // the lights and the sun shadow (the Replay executable's collision baker stays on this thread).
+    std::future<iw8::navigation::Result> pendingNavigation;
+    if (prepared && args.navigation)
+        pendingNavigation = std::async(std::launch::async, [prepared] { return iw8::navigation::Build(prepared->navigation); });
+    std::future<iw8::havok::BakeResult> pendingCollision;
+    if (iw8::havok::UsesNativeHavok())
+        pendingCollision = std::async(std::launch::async, [&] { return loadCollision(args, dumpDirectory, assetName); });
     std::vector<OutputLedgerRow> ledgerRows;
     // Stock assets every shipped map carries and IW3 has no source for (section
     // 19): surface-fx `void` with its effects, and the CODCaster images.
@@ -1661,7 +1671,6 @@ int writeMapPackage(const Args &args, const std::string &map, const std::string 
             timing.lap("stock exports");
         }
     }
-    const std::string assetName = "maps/mp/" + map + ".d3dbsp";
     iw8::MapSun lighting = loadLighting(args, dumpDirectory, assetName);
     const std::string renderPath = path_join(dumpDirectory, assetName + ".render.json");
     const bool renderInMemory = prepared && !prepared->render.is_null();
@@ -1671,8 +1680,10 @@ int writeMapPackage(const Args &args, const std::string &map, const std::string 
     }
     const auto renderMesh =
         renderInMemory ? replayrender::Load(renderPath, prepared->render) : replayrender::Load(renderPath);
+    // The definition's tree (millions of nodes) is freed beside the package work; the thread joins on return.
+    std::jthread releaseRender;
     if (renderInMemory)
-        prepared->render = nullptr;
+        releaseRender = std::jthread([render = std::move(prepared->render)]() mutable { render = nullptr; });
     timing.lap("render load");
     calibrateLocalLights(args, lighting, renderMesh.solidTriangles);
     dropEnclosedShadowedSpots(lighting, renderMesh.solidTriangles, prepared ? &prepared->shadowScene : nullptr);
@@ -1770,9 +1781,9 @@ int writeMapPackage(const Args &args, const std::string &map, const std::string 
     }
     const auto glassPieceLimit = glassInitCount ? glassInitCount + 512u : 0u;
     iw8::navigation::Result navigation;
-    if (prepared && args.navigation)
+    if (pendingNavigation.valid())
     {
-        navigation = iw8::navigation::Build(prepared->navigation);
+        navigation = pendingNavigation.get();
         timing.lap("bot navigation");
     }
     // Replay spawns each fixed pathnode from a node_* MapEnts record, in order.
@@ -1795,7 +1806,7 @@ int writeMapPackage(const Args &args, const std::string &map, const std::string 
         info("navigation: appended %zu node_pathnode MapEnts records", origins.size());
     }
     int result = 0;
-    auto collision = loadCollision(args, dumpDirectory, assetName);
+    auto collision = pendingCollision.valid() ? pendingCollision.get() : loadCollision(args, dumpDirectory, assetName);
     timing.lap("collision bake");
     {
         if (collision.models.empty())

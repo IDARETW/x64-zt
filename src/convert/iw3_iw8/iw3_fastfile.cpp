@@ -2309,8 +2309,14 @@ template <std::size_t Size> std::array<float, Size> FloatVector(const std::array
 
 void WriteJson(const std::filesystem::path &path, const Json &value)
 {
-    std::filesystem::create_directories(path.parent_path());
+    // The folder is made only when the file does not open.
     std::ofstream output(path, std::ios::binary | std::ios::trunc);
+    if (!output)
+    {
+        std::filesystem::create_directories(path.parent_path());
+        output.clear();
+        output.open(path, std::ios::binary | std::ios::trunc);
+    }
     if (!output)
     {
         throw std::runtime_error("cannot write " + path.string());

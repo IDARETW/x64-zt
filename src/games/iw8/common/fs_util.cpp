@@ -47,12 +47,14 @@ bool read_file_str(const std::string &path, std::string &out)
 
 bool write_file(const std::string &path, const void *data, size_t n)
 {
-    std::string dir = path_dir(path);
-    if (!dir.empty())
-        mkdirs(dir);
+    // The folder is made only when the file does not open (converters write thousands of files into a few).
     FILE *f = std::fopen(path.c_str(), "wb");
     if (!f)
-        return false;
+    {
+        const std::string dir = path_dir(path);
+        if (dir.empty() || !mkdirs(dir) || !(f = std::fopen(path.c_str(), "wb")))
+            return false;
+    }
     size_t w = (n > 0) ? std::fwrite(data, 1, n, f) : 0;
     std::fclose(f);
     return w == n;
