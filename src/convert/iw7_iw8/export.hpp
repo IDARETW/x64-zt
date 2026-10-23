@@ -79,6 +79,9 @@ namespace zonetool::convert::iw7_iw8
 			int health{};
 		};
 		std::map<std::string, scriptable_destructible> scriptable_destructibles;
+		// The models that the map script sets by name (precachemodel, setmodel: Rivet's drones, the collision patches that
+		// the scripts spawn), which convert as script models.
+		std::set<std::string> script_models;
 
 		// The placed scriptables whose first state plays an animation (the ops table's solar system, the floor panels'
 		// closed pose): their instances are script models of a targetname that the map script animates. The animations
@@ -305,6 +308,9 @@ namespace zonetool::convert::iw7_iw8
 	// skeletons of their models (skeleton/: an XMODEL_EXPORT of each LOD), which the pipeline reads for entity models.
 	// A scriptable whose model or animation does not convert keeps its bind pose and its tag effects their bind pose.
 	void export_animations(const source_map& source, extraction& output);
+	// Writes an animation that the map script plays by name (an IW3 XAnim dump, extracted/xanim/<name>.iw3.json) and
+	// returns its length in seconds, or nothing when the zones lack it or it does not convert.
+	std::optional<float> export_script_animation(const source_map& source, const std::string& name, extraction& output);
 	void export_skeletons(const source_map& source, extraction& output);
 	// Removes the model of each entity whose model did not export (it is in a zone that the map does not load).
 	void remove_missing_entity_models(const source_map& source, const extraction& output);

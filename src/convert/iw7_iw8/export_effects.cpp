@@ -2192,11 +2192,13 @@ iw7_state( mode, animation, to, time )
 
 		// The map's own script (scripts\mp\maps\<map>\<map>) as the IW3 map script that the pipeline translates: the
 		// functions that its main runs, with IW7's utilities replaced by the IW3 ones or their IW3 versions. Calls
-		// of other IW7 scripts drop out in the pipeline. The converted models have one bone (tag_origin), which the
-		// effects on their tags take; animations and cinematics do not convert, and scriptable states set the states of
-		// the animated scriptables (iw7_setscriptablepartstate). Adds the effects that it loads.
+		// of other IW7 scripts drop out in the pipeline. The animations that the script names (add_animation: their
+		// lengths) play on its script models by name, as Replay's script models play theirs; cinematics do not convert, and
+		// scriptable states set the states of the animated scriptables (iw7_setscriptablepartstate). Adds the effects that
+		// it loads.
 		std::string translate_map_script(const std::string& map, const std::string& text, const std::map<std::string, std::string>& scripts,
-			std::set<std::string>& effects, const std::function<bool(const std::string&)>& add_model)
+			std::set<std::string>& effects, const std::function<bool(const std::string&)>& add_model,
+			const std::function<std::optional<float>(const std::string&)>& add_animation)
 		{
 			// The shared IW7 scripts that convert with the map script (their functions join it; only those that the map
 			// script reaches are written): the animation suite, which rotates and moves the map's animObj entities, and the
@@ -2321,6 +2323,20 @@ iw7_state( mode, animation, to, time )
 				R"re(\s*scripts\\mp\\(?:maps\\\w+\\[\w\\]+|load|compass)::\w+\([^;]*\);)re");
 			static const std::regex loaded(R"re(loadfx\(\s*"([^"]+?)(?:\.vfx)?"\s*\))re");
 			std::string result = std::format("// The map script (IW7 scripts\\mp\\maps\\{0}\\{0}).\n\n", map);
+			// The lengths of the animations that the script names, for iw7_getanimlength (written when the script calls it).
+			std::map<std::string, float> animation_lengths;
+			bool takes_lengths{};
+			const auto animation = [&](const std::string& name)
+			{
+				const auto length = add_animation(name);
+				if (length)
+				{
+					animation_lengths.emplace(name, *length);
+				}
+
+				return length.has_value();
+			};
+
 			for (const auto& function : functions)
 			{
 				if (!reached.contains(function.name))
@@ -2329,6 +2345,21 @@ iw7_state( mode, animation, to, time )
 				}
 
 				auto body = function.body;
+				// IW7's animation references (%name: Rivet's drone paths) as names, which Replay's script models play
+				// (scriptmodelplayanim and scriptmodelplayanimdeltamotion take the name of the XAnimParts). A reference
+				// whose animation does not convert stays one, which the pipeline drops (undefined).
+				static const std::regex animation_reference(R"re(%([A-Za-z_]\w*))re");
+				std::string named;
+				auto last = body.cbegin();
+				for (auto it = std::sregex_iterator(body.begin(), body.end(), animation_reference); it != std::sregex_iterator(); ++it)
+				{
+					named.append(last, (*it)[0].first);
+					named += animation((*it)[1].str()) ? std::format("\"{}\"", (*it)[1].str()) : (*it)[0].str();
+					last = (*it)[0].second;
+				}
+
+				named.append(last, body.cend());
+				body = std::move(named);
 				if (function.name == "main")
 				{
 					body = std::regex_replace(body, dropped_main, "");
@@ -2447,13 +2478,35 @@ iw7_state( mode, animation, to, time )
 					body.replace(at, std::string_view("getscriptablearray(").size(), "getentarray(");
 				}
 
-				for (const auto name : {"playcinematicforalllooping", "scriptmodelplayanim", "precachempanim"})
+				for (const auto name : {"playcinematicforalllooping", "precachempanim"})
 				{
 					body = rewrite_calls(body, name, [](const std::vector<std::string>& arguments)
 					{
 						return "iw7_unsupported( " + join(arguments) + " )";
 					});
 				}
+
+				// An animation that a script model plays by its name converts (add_animation); one that does not would stop
+				// the script, as would one that scriptmodelplayanim takes from a variable (IW7's names IW7 animations).
+				for (const auto name : {"scriptmodelplayanim", "scriptmodelplayanimdeltamotion"})
+				{
+					const bool by_variable = std::string_view(name) == "scriptmodelplayanimdeltamotion";
+					body = rewrite_calls(body, name, [&](const std::vector<std::string>& arguments)
+					{
+						const auto& anim = arguments.front();
+						const auto literal = anim.size() > 2 && anim.starts_with('"') && anim.ends_with('"');
+						return std::format("{}( {} )", (literal ? animation(anim.substr(1, anim.size() - 2)) : by_variable) ? name :
+							"iw7_unsupported", join(arguments));
+					});
+				}
+
+				// Replay's getanimlength takes an animation, which the converted scripts name: the lengths of the animations
+				// that they name (iw7_getanimlength).
+				body = rewrite_calls(body, "getanimlength", [&](const std::vector<std::string>& arguments)
+				{
+					takes_lengths = true;
+					return "iw7_getanimlength( " + join(arguments) + " )";
+				});
 
 				for (auto it = std::sregex_iterator(body.begin(), body.end(), loaded); it != std::sregex_iterator(); ++it)
 				{
@@ -2468,8 +2521,20 @@ iw7_state( mode, animation, to, time )
 			// gsc-tool writes the names that it has no text for as their IW7 token ids (_id_XXXX), which compile to the
 			// unrelated IW8 tokens of those ids: the script's own functions and fields take names of their own.
 			static const std::regex token_name(R"re(\b_id_([0-9A-Fa-f]+)\b)re");
+			std::string lengths;
+			if (takes_lengths)
+			{
+				lengths = "\niw7_getanimlength( animation )\n{\n";
+				for (const auto& [name, length] : animation_lengths)
+				{
+					lengths += std::format("\tif ( animation == \"{}\" )\n\t\treturn {:.4f};\n", name, length);
+				}
+
+				lengths += "\treturn undefined;\n}\n";
+			}
+
 			return std::regex_replace(result, token_name, "iw7_$1") + std::string(map_script_helpers) +
-				std::string(scriptable_state_helpers);
+				std::string(scriptable_state_helpers) + lengths;
 		}
 	}
 
@@ -2625,10 +2690,15 @@ iw7_state( mode, animation, to, time )
 				if (model)
 				{
 					output.models.try_emplace(file_name(name), model);
+					// Replay's common zones hold tag_origin, which its own scripts set.
+					if (name != "tag_origin")
+					{
+						output.script_models.insert(file_name(name));
+					}
 				}
 
 				return model != nullptr;
-			});
+			}, [&](const std::string& name) { return export_script_animation(source, name, output); });
 			static const std::regex volumetrics_dvar(R"re([ \t]*setdvar\(\s*"r_volumetrics"\s*,[^;]*\);[ \t]*\r?\n?)re", std::regex::icase);
 			map_script = std::regex_replace(map_script, volumetrics_dvar, "");
 			ZONETOOL_INFO("iw7: translated the map script (%zu bytes) with %zu effects of its own", map_script.size(), loaded.size());
