@@ -11832,13 +11832,14 @@ PreparedMap PrepareFastfile(const ImportOptions &options)
     result.ladderRungDistance =
         AlignLadderEdgesToModels(nativeCollision, sourceStaticModels, renderPlan);
     AddStairRamps(nativeCollision);
+    timing.lap("collision read");
     std::set<std::uint32_t> nativeGlassModels;
     std::set<std::string> nativeGlassTargets;
     Json render = BuildRender(world, visibility, brushModels, renderPlan, entities,
                                     sourceStaticModels,
                                     result.staticModels, nativeCollision, triangles,
                                     nativeGlassModels, nativeGlassTargets, sourceEntityModels);
-    timing.lap("collision read and render json");
+    timing.lap("render json");
     for (const auto &brush : sourceDynamicEntities.brushes)
         if (nativeGlassModels.contains(brush.model))
             throw std::runtime_error("IW3 scripted glass model is also a dynamic brush");
@@ -11919,6 +11920,20 @@ PreparedMap PrepareFastfile(const ImportOptions &options)
             if (hull.model == 0 && hull.points.size() >= 4)
                 if (const auto flags = navigationFlags(hull.contents))
                     navigation.hulls.push_back({hull.points, flags});
+        // Millions of triangles: room for all of them is made once.
+        {
+            std::size_t room = 0;
+            for (const auto &mesh : nativeCollision.meshes)
+                room += mesh.model == 0 ? mesh.triangles.size() : 0;
+            for (const auto &instance : sourceStaticModels.instances)
+            {
+                const SourceStaticModel &model = sourceStaticModels.models.at(instance.model);
+                if (model.collisionLod != SIZE_MAX)
+                    for (const Surface &surface : model.lods.at(model.collisionLod).surfaces)
+                        room += surface.indices.size() / 3;
+            }
+            navigation.triangles.reserve(room);
+        }
         for (const auto &mesh : nativeCollision.meshes)
         {
             if (mesh.model != 0)
@@ -11987,7 +12002,7 @@ PreparedMap PrepareFastfile(const ImportOptions &options)
         lighting["intensity"] = lightingMatch.sunIntensity;
     lighting["light_unit_scale"] = lightUnitScale;
     WriteJson(mapDirectory / (targetAsset + ".lighting.json"), lighting);
-    timing.lap("render json write");
+    timing.lap("navigation source, footsteps and lighting");
     PrepareNativeLightGrid(exportRoot, sourceAsset,
                            mapDirectory / (targetAsset + ".gpulightgrid.native"), lightUnitScale);
     timing.lap("light grid");
