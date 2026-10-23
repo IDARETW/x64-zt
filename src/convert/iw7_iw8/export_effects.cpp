@@ -2839,6 +2839,7 @@ iw7_scriptable_hurt( part, amount )
 			// The lengths of the animations that the script names, for iw7_getanimlength (written when the script calls it).
 			std::map<std::string, float> animation_lengths;
 			bool takes_lengths{};
+			bool variable_models{};
 			const auto animation = [&](const std::string& name)
 			{
 				const auto length = add_animation(name);
@@ -2960,15 +2961,24 @@ iw7_scriptable_hurt( part, amount )
 				}
 
 				// A model that the script names by a string converts with the map's models; one that the zones do not
-				// hold, or that a variable names, would stop the script.
+				// hold would stop the script. A model that a variable names (Rivet's drone panels: setmodel( random(
+				// level.panels ) )) sets through iw7_setmodel, which sets only the converted models that the script's
+				// strings name; precaching one is not needed.
 				for (const auto name : {"precachemodel", "setmodel"})
 				{
 					body = rewrite_calls(body, name, [&](const std::vector<std::string>& arguments)
 					{
 						const auto& model = arguments.front();
 						const auto literal = arguments.size() == 1 && model.size() > 2 && model.starts_with('"') && model.ends_with('"');
-						return std::format("{}( {} )", literal && add_model(model.substr(1, model.size() - 2)) ? name : "iw7_unsupported",
-							join(arguments));
+						if (literal)
+						{
+							return std::format("{}( {} )", add_model(model.substr(1, model.size() - 2)) ? name : "iw7_unsupported",
+								join(arguments));
+						}
+
+						const auto sets = std::string_view(name) == "setmodel" && arguments.size() == 1;
+						variable_models |= sets;
+						return std::format("{}( {} )", sets ? "iw7_setmodel" : "iw7_unsupported", join(arguments));
 					});
 				}
 
@@ -3046,8 +3056,47 @@ iw7_scriptable_hurt( part, amount )
 				lengths += "\treturn undefined;\n}\n";
 			}
 
+			// The converted models that the script's strings name, which iw7_setmodel sets.
+			std::string models;
+			if (variable_models)
+			{
+				static const std::regex string_literal(R"re("([A-Za-z0-9_]+)")re");
+				std::set<std::string> checked;
+				std::set<std::string> converted;
+				for (const auto& function : functions)
+				{
+					if (!reached.contains(function.name))
+					{
+						continue;
+					}
+
+					for (auto it = std::sregex_iterator(function.body.begin(), function.body.end(), string_literal);
+						it != std::sregex_iterator(); ++it)
+					{
+						if (const auto name = (*it)[1].str(); checked.insert(name).second && add_model(name))
+						{
+							converted.insert(name);
+						}
+					}
+				}
+
+				models = "\niw7_setmodel( model )\n{\n";
+				if (!converted.empty())
+				{
+					models += "\tswitch ( model )\n\t{\n";
+					for (const auto& name : converted)
+					{
+						models += std::format("\tcase \"{}\":\n", name);
+					}
+
+					models += "\t\tself setmodel( model );\n\t\tbreak;\n\t}\n";
+				}
+
+				models += "}\n";
+			}
+
 			return std::regex_replace(result, token_name, "iw7_$1") + std::string(map_script_helpers) +
-				std::string(scriptable_state_helpers) + lengths;
+				std::string(scriptable_state_helpers) + lengths + models;
 		}
 	}
 
