@@ -3323,38 +3323,43 @@ Image Downsample(const Image &source, const bool color)
     const unsigned width = std::max(1u, source.width / 2), height = std::max(1u, source.height / 2);
     Image output{width, height,
                  std::vector<std::uint8_t>(static_cast<std::size_t>(width) * height * 4)};
-    for (unsigned y = 0; y < height; ++y)
-        for (unsigned x = 0; x < width; ++x)
-        {
-            float sum[4]{};
-            for (unsigned iy = 0; iy < 2; ++iy)
-                for (unsigned ix = 0; ix < 2; ++ix)
-                {
-                    const unsigned sx = std::min(source.width - 1, x * 2 + ix);
-                    const unsigned sy = std::min(source.height - 1, y * 2 + iy);
-                    const std::size_t offset =
-                        (static_cast<std::size_t>(sy) * source.width + sx) * 4;
-                    const float alpha = source.rgba[offset + 3] / 255.0f;
-                    for (unsigned channel = 0; channel < 4; ++channel)
-                    {
-                        const float value = color && channel < 3
-                                                ? LinearByte(source.rgba[offset + channel]) * alpha
-                                                : source.rgba[offset + channel] / 255.0f;
-                        sum[channel] += value * 0.25f;
-                    }
-                }
-            for (unsigned channel = 0; channel < 4; ++channel)
+    // An atlas-sized level's rows go to every core (each output texel reads only its own four).
+    const auto rows = [&](const std::size_t, const std::size_t firstRow, const std::size_t endRow) {
+        for (auto y = static_cast<unsigned>(firstRow); y < endRow; ++y)
+            for (unsigned x = 0; x < width; ++x)
             {
-                auto &target = output.rgba[(static_cast<std::size_t>(y) * width + x) * 4 + channel];
-                const float value = sum[channel];
-                if (color && channel < 3)
-                    target = SrgbByte(
-                        std::clamp(sum[3] > 1.0e-6f ? value / sum[3] : 0.0f, 0.0f, 1.0f));
-                else
-                    target = static_cast<std::uint8_t>(
-                        std::clamp(std::lround(value * 255.0f), 0l, 255l));
+                float sum[4]{};
+                for (unsigned iy = 0; iy < 2; ++iy)
+                    for (unsigned ix = 0; ix < 2; ++ix)
+                    {
+                        const unsigned sx = std::min(source.width - 1, x * 2 + ix);
+                        const unsigned sy = std::min(source.height - 1, y * 2 + iy);
+                        const std::size_t offset =
+                            (static_cast<std::size_t>(sy) * source.width + sx) * 4;
+                        const float alpha = source.rgba[offset + 3] / 255.0f;
+                        for (unsigned channel = 0; channel < 4; ++channel)
+                        {
+                            const float value = color && channel < 3
+                                                    ? LinearByte(source.rgba[offset + channel]) * alpha
+                                                    : source.rgba[offset + channel] / 255.0f;
+                            sum[channel] += value * 0.25f;
+                        }
+                    }
+                for (unsigned channel = 0; channel < 4; ++channel)
+                {
+                    auto &target = output.rgba[(static_cast<std::size_t>(y) * width + x) * 4 + channel];
+                    const float value = sum[channel];
+                    if (color && channel < 3)
+                        target = SrgbByte(
+                            std::clamp(sum[3] > 1.0e-6f ? value / sum[3] : 0.0f, 0.0f, 1.0f));
+                    else
+                        target = static_cast<std::uint8_t>(
+                            std::clamp(std::lround(value * 255.0f), 0l, 255l));
+                }
             }
-        }
+    };
+    const std::size_t texels = static_cast<std::size_t>(width) * height;
+    ForChunks(height, texels >= 1u << 22 ? std::min<std::size_t>(ChunkCount(texels), height) : 1, rows);
     return output;
 }
 
