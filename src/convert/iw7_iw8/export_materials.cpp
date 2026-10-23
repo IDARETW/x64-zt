@@ -788,6 +788,10 @@ namespace zonetool::convert::iw7_iw8
 			// Without a particle that picks its cells (extraction::atlas_materials), the whole texture draws.
 			const auto rows = material && atlas ? std::max<unsigned>(material->info.textureAtlasRowCount, 1) : 1u;
 			const auto columns = material && atlas ? std::max<unsigned>(material->info.textureAtlasColumnCount, 1) : 1u;
+			// IW7 blends between the atlas frames of these (textureAtlasFrameBlend; their technique sets carry "tab":
+			// Frontier's fireballs, smoke billows and dust bursts), as Replay's frame-blend effect techniques do.
+			const auto frame_blend = material && material->info.textureAtlasFrameBlend && std::has_single_bit(columns) &&
+				rows * columns > 1;
 			return
 			{
 				{"$schema", "http://openassettools.dev/schema/material.v1.json"},
@@ -799,6 +803,7 @@ namespace zonetool::convert::iw7_iw8
 				// IW7 lights the particles of its lit effect materials (not effectunlit) by the scene: the pipeline can
 				// draw the alpha-blended ones through Replay's lit effect technique (--lit_effects 1).
 				{"lit", !has("effectunlit") && !additive && !has("distortion") && !has("cloud")},
+				{"frame_blend", frame_blend},
 				{"gameFlags", json::array()},
 				{"sortKey", material ? std::min(material->info.sortKey + 2u, 63u) : 26u},
 				{"stateBits", json::array({state})},

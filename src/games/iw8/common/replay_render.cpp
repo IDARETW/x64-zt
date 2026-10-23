@@ -116,10 +116,12 @@ nlohmann::json parseFile(std::ifstream &input)
     return nlohmann::json::parse(text);
 }
 
-// Stock vfx_postfx_bokeh_sharp_sheet_1_lit's lit alpha atlas technique (techsets_common).
+// Stock vfx_postfx_bokeh_sharp_sheet_1_lit's lit alpha atlas technique (techsets_common) and its frame-blend twin
+// (techsets_common_core_mp).
 bool nativeLitEffectTechset(const std::string_view name)
 {
-    return name == "elcq/unlit_6_effect_bad_ta0_802_1004_0_1_0_0_0_10000020b_0_0_2_0_0";
+    return name == "elcq/unlit_6_effect_bad_ta0_802_1004_0_1_0_0_0_10000020b_0_0_2_0_0" ||
+           name == "elcq/unlit_6_effect_bad_ta0_802_3004_0_1_0_0_0_10000020b_0_0_2_0_0";
 }
 
 bool nativeEffectTechset(const std::string_view name)
@@ -130,6 +132,8 @@ bool nativeEffectTechset(const std::string_view name)
                "elcq/unlit_6_effect_bad_ta0_802_1004_0_1_0_0_0_100000023_0_0_2_0_0" ||
            name ==
                "elcq/unlit_6_effect_bad_tca_802_10a4_0_1_0_0_0_100060023_0_0_3_0_0" ||
+           name ==
+               "elcq/unlit_6_effect_bad_tca_802_3004_0_1_0_0_0_100060023_0_0_3_0_0" ||
            name ==
                "elcq/unlit_6_effect_bad_tca_802_4_0_1_0_0_0_100060023_0_0_3_0_0" ||
            name ==
