@@ -167,7 +167,6 @@ std::vector<std::uint8_t> ReadBytes(const std::filesystem::path &path)
 
 void WriteBytes(const std::filesystem::path &path, const std::vector<std::uint8_t> &data)
 {
-    std::filesystem::create_directories(path.parent_path());
     if (!zt::write_file(path.string(), data))
         throw std::runtime_error("cannot write " + path.string());
 }
@@ -369,8 +368,14 @@ Json ReadJson(const std::filesystem::path &path)
 
 void WriteJson(const std::filesystem::path &path, const Json &value)
 {
-    std::filesystem::create_directories(path.parent_path());
+    // The folder is made only when the file does not open (thousands of materials go into one).
     std::ofstream output(path, std::ios::binary | std::ios::trunc);
+    if (!output)
+    {
+        std::filesystem::create_directories(path.parent_path());
+        output.clear();
+        output.open(path, std::ios::binary | std::ios::trunc);
+    }
     if (!output)
         throw std::runtime_error("cannot write " + path.string());
     const auto text = value.dump();
@@ -1145,14 +1150,38 @@ float LinearByte(const std::uint8_t value)
 
 std::uint8_t SrgbByte(const float linear)
 {
-    static const auto thresholds = [] {
-        std::array<float, 255> result{};
-        for (unsigned index = 0; index < result.size(); ++index)
-            result[index] = Linear((static_cast<float>(index) + 0.5f) / 255.0f);
+    // The byte is the count of thresholds at or below the value. Each of 4096 buckets of [0, 1) knows the count at
+    // its start, so a value moves past the few thresholds inside its bucket; the rest (1 and above, NaN) search.
+    static constexpr unsigned kBuckets = 4096;
+    struct Tables
+    {
+        std::array<float, 255> thresholds{};
+        std::array<std::uint8_t, kBuckets> start{};
+    };
+    static const Tables tables = [] {
+        Tables result;
+        for (unsigned index = 0; index < result.thresholds.size(); ++index)
+            result.thresholds[index] = Linear((static_cast<float>(index) + 0.5f) / 255.0f);
+        for (unsigned bucket = 0; bucket < kBuckets; ++bucket)
+            result.start[bucket] = static_cast<std::uint8_t>(
+                std::upper_bound(result.thresholds.begin(), result.thresholds.end(),
+                                 static_cast<float>(bucket) / kBuckets) -
+                result.thresholds.begin());
         return result;
     }();
+    if (linear < 0.0f)
+        return 0;
+    if (linear < 1.0f)
+    {
+        // The bucket index rounds down, so the bucket's start is at or below the value.
+        const auto bucket = std::min(static_cast<unsigned>(linear * kBuckets), kBuckets - 1);
+        unsigned count = tables.start[bucket];
+        while (count < tables.thresholds.size() && tables.thresholds[count] <= linear)
+            ++count;
+        return static_cast<std::uint8_t>(count);
+    }
     return static_cast<std::uint8_t>(
-        std::upper_bound(thresholds.begin(), thresholds.end(), linear) - thresholds.begin());
+        std::upper_bound(tables.thresholds.begin(), tables.thresholds.end(), linear) - tables.thresholds.begin());
 }
 
 std::array<std::array<float, 9>, 4> ProjectReflectionSh(const Cubemap &cubemap)
@@ -1494,6 +1523,52 @@ void BleedCutoutColor(Image &level, const unsigned visibleAlpha = 128)
     }
 }
 
+// A same-size colour sample's bytes depend only on the texel's channel byte, its alpha byte and the tint: the
+// channel's linear value premultiplied by alpha and divided back, then re-encoded (Resize's store below).
+std::uint8_t AlignedColorByte(const std::uint8_t value, const std::uint8_t alphaByte, const float tint)
+{
+    const float alpha = alphaByte / 255.0f;
+    const float sample = LinearByte(value) * alpha;
+    return SrgbByte(std::clamp((alpha > 1.0e-6f ? sample / alpha : 0.0f) * tint, 0.0f, 1.0f));
+}
+
+std::uint8_t AlignedAlphaByte(const std::uint8_t alphaByte, const float tint)
+{
+    const float alpha = std::clamp(alphaByte / 255.0f * tint, 0.0f, 1.0f);
+    return static_cast<std::uint8_t>(std::clamp(std::lround(alpha * 255.0f), 0l, 255l));
+}
+
+// Those bytes for every channel and alpha byte of one tint, kept per thread for the last tints it used (the
+// resident images tint each base level and mip the same way).
+struct AlignedColorTable
+{
+    std::array<float, 4> tint{};
+    std::array<std::array<std::uint8_t, 65536>, 3> color{}; // [channel][alpha << 8 | value]
+    std::array<std::uint8_t, 256> alpha{};
+};
+
+const AlignedColorTable &AlignedColorTableFor(const std::array<float, 4> &tint)
+{
+    thread_local std::vector<std::unique_ptr<AlignedColorTable>> tables;
+    for (const auto &table : tables)
+        if (std::memcmp(table->tint.data(), tint.data(), sizeof(tint)) == 0)
+            return *table;
+    if (tables.size() == 4)
+        tables.erase(tables.begin());
+    auto table = std::make_unique<AlignedColorTable>();
+    table->tint = tint;
+    for (unsigned alpha = 0; alpha < 256; ++alpha)
+    {
+        table->alpha[alpha] = AlignedAlphaByte(static_cast<std::uint8_t>(alpha), tint[3]);
+        for (unsigned channel = 0; channel < 3; ++channel)
+            for (unsigned value = 0; value < 256; ++value)
+                table->color[channel][alpha << 8 | value] =
+                    AlignedColorByte(static_cast<std::uint8_t>(value), static_cast<std::uint8_t>(alpha), tint[channel]);
+    }
+    tables.push_back(std::move(table));
+    return *tables.back();
+}
+
 Image Resize(const Image &source, const unsigned width, const unsigned height, const bool color,
              const std::array<float, 4> &tint = {1, 1, 1, 1})
 {
@@ -1525,6 +1600,20 @@ Image Resize(const Image &source, const unsigned width, const unsigned height, c
     if (aligned)
     {
         const std::size_t texels = static_cast<std::size_t>(width) * height;
+        if (color && texels >= 16384)
+        {
+            const auto &table = AlignedColorTableFor(tint);
+            for (std::size_t texel = 0; texel < texels; ++texel)
+            {
+                const std::uint8_t *bytes = source.rgba.data() + texel * 4;
+                std::uint8_t *target = output.rgba.data() + texel * 4;
+                const unsigned alpha = bytes[3] << 8;
+                for (unsigned channel = 0; channel < 3; ++channel)
+                    target[channel] = table.color[channel][alpha | bytes[channel]];
+                target[3] = table.alpha[bytes[3]];
+            }
+            return output;
+        }
         for (std::size_t texel = 0; texel < texels; ++texel)
         {
             const std::uint8_t *bytes = source.rgba.data() + texel * 4;
