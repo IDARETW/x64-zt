@@ -13,6 +13,11 @@ namespace zonetool::game_files
 		virtual std::filesystem::path path(const std::string& name) const = 0;
 		virtual bool read(const std::string& name, std::string& data) const = 0;
 		virtual bool read(const std::string& name, std::uint64_t offset, std::size_t size, void* buffer) const = 0;
+		// Whether reads may run on several threads at once.
+		virtual bool concurrent_reads() const
+		{
+			return false;
+		}
 	};
 
 	using opener = std::unique_ptr<source>(*)(const std::filesystem::path& game_path);
