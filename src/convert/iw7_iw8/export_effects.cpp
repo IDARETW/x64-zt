@@ -2246,6 +2246,8 @@ iw7_getspawnpointarray( classname )
 		constexpr std::string_view scriptable_state_helpers = R"gsc(
 iw7_setscriptablepartstate( part, state, instant )
 {
+	if ( isdefined( self.iw7_parts ) && self iw7_scriptable_set( part, state ) )
+		return;
 	if ( !isdefined( level.iw7_states ) || !isdefined( self.model ) || !isdefined( level.iw7_states[self.model] ) )
 		return;
 	entry = level.iw7_states[self.model][part + ":" + state];
@@ -2294,9 +2296,10 @@ iw7_mev( t, a, b, c, d )
 	return e;
 }
 
-iw7_mstate( kind, health, mindamage, toparent, events )
+iw7_mstate( name, kind, health, mindamage, toparent, events )
 {
 	s = spawnstruct();
+	s.name = name;
 	s.kind = kind;
 	s.health = health;
 	s.mindamage = mindamage;
@@ -2305,9 +2308,10 @@ iw7_mstate( kind, health, mindamage, toparent, events )
 	return s;
 }
 
-iw7_mpart( tag, parent, states )
+iw7_mpart( name, tag, parent, states )
 {
 	p = spawnstruct();
+	p.name = name;
 	p.tag = tag;
 	p.parent = parent;
 	p.states = states;
@@ -2319,6 +2323,42 @@ iw7_scriptable( name, parts )
 	pieces = getentarray( name, "targetname" );
 	foreach ( piece in pieces )
 		piece thread iw7_scriptable_think( parts );
+}
+
+// An instance that keeps its IW7 targetname (the map script finds it by it): the one at its initial origin.
+iw7_scriptable_at( name, origin, parts )
+{
+	pieces = getentarray( name, "targetname" );
+	foreach ( piece in pieces )
+	{
+		if ( !isdefined( piece.iw7_parts ) && distancesquared( piece.origin, origin ) < 4 )
+		{
+			piece thread iw7_scriptable_think( parts );
+			return;
+		}
+	}
+}
+
+// IW7's setscriptablepartstate on a piece that runs a state machine: the part of that name enters the state of that name.
+iw7_scriptable_set( part, state )
+{
+	part = tolower( part );
+	state = tolower( state );
+	for ( p = 0; p < self.iw7_parts.size; p++ )
+	{
+		if ( tolower( self.iw7_parts[p].name ) != part )
+			continue;
+		for ( s = 0; s < self.iw7_parts[p].states.size; s++ )
+		{
+			if ( tolower( self.iw7_parts[p].states[s].name ) == state )
+			{
+				self thread iw7_scriptable_enter( p, s );
+				return 1;
+			}
+		}
+	}
+
+	return 0;
 }
 
 iw7_scriptable_think( parts )
@@ -2473,34 +2513,42 @@ iw7_scriptable_attach( tag, model )
 	self.iw7_attached[tag] = model;
 }
 
+// The effects play as effect entities at their tags, which every client receives (also one that connects later, as the
+// host's own client does after the first states at the start): playfxontag is an entity event that reaches only the
+// clients in the game at the time. An effect that IW7 kills on exit is deleted when its part leaves the state.
 iw7_scriptable_fx( part, effect, tag, loop, kill )
 {
 	self endon( "iw7_part_" + part );
 	self endon( "death" );
 	if ( !isdefined( level._effect[effect] ) )
 		return;
-	ontag = tag != "" && isdefined( self gettagorigin( tag, 1 ) );
-	if ( ontag && kill )
-		self thread iw7_scriptable_fx_stop( part, effect, tag );
+	origin = self.origin;
+	angles = self.angles;
+	if ( tag != "" && isdefined( self gettagorigin( tag, 1 ) ) )
+	{
+		origin = self gettagorigin( tag );
+		angles = self gettagangles( tag );
+	}
+
+	fx = spawnfx( level._effect[effect], origin, anglestoforward( angles ), anglestoup( angles ) );
+	triggerfx( fx );
+	if ( kill )
+		self thread iw7_scriptable_fx_stop( part, fx );
+	if ( loop <= 0 )
+		return;
+	if ( loop < 0.05 )
+		loop = 0.05;
 	for ( ;; )
 	{
-		if ( ontag )
-			playfxontag( level._effect[effect], self, tag );
-		else
-			playfx( level._effect[effect], self.origin );
-		if ( loop <= 0 )
-			return;
-		if ( loop < 0.05 )
-			loop = 0.05;
 		wait( loop );
+		triggerfx( fx );
 	}
 }
 
-iw7_scriptable_fx_stop( part, effect, tag )
+iw7_scriptable_fx_stop( part, fx )
 {
-	self endon( "death" );
 	self waittill( "iw7_part_" + part );
-	stopfxontag( level._effect[effect], self, tag );
+	fx delete();
 }
 
 // The compatibility layer plays each alias as its kind (playsound a one-shot, playloopsound a loop): one of the two plays.
@@ -3354,12 +3402,25 @@ iw7_destructible_think( model, effect, sound, health )
 				}
 
 				const auto f = value.is_number() ? value.get<double>() : 0.0;
-				return std::isfinite(f) ? std::format("{}", f) : std::string("0");
+				if (!std::isfinite(f) || std::abs(f) < 1e-6)
+				{
+					return std::string("0");
+				}
+
+				auto text = std::format("{:.6f}", f);
+				text.erase(text.find_last_not_of('0') + 1);
+				if (text.back() == '.')
+				{
+					text.pop_back();
+				}
+
+				return text;
 			};
 
 			std::string tables;
 			std::string calls;
 			std::size_t machine_index{};
+			std::map<std::string, std::size_t> machine_indices;
 			for (const auto& [targetname, machine] : output.scriptable_machines)
 			{
 				std::string body;
@@ -3499,24 +3560,38 @@ iw7_destructible_think( model, effect, sound, health )
 					for (const auto& state : part.at("states"))
 					{
 						const auto events = event_list(state.at("events"));
-						body += std::format("\tstates[states.size] = iw7_mstate( {}, {}, {}, {}, {} );\n", quote(state.value("kind", std::string{})),
-							number(state.at("health")), number(state.at("mindamage")), number(state.at("to_parent")), events);
+						body += std::format("\tstates[states.size] = iw7_mstate( {}, {}, {}, {}, {}, {} );\n", quote(state.value("name", std::string{})),
+							quote(state.value("kind", std::string{})), number(state.at("health")), number(state.at("mindamage")),
+							number(state.at("to_parent")), events);
 					}
 
-					body += std::format("\tparts[parts.size] = iw7_mpart( {}, {}, states );\n", quote(part.value("tag", std::string{})),
-						number(part.at("parent")));
+					body += std::format("\tparts[parts.size] = iw7_mpart( {}, {}, {}, states );\n", quote(part.value("name", std::string{})),
+						quote(part.value("tag", std::string{})), number(part.at("parent")));
 				}
 
 				tables += std::format("\n// {}\niw7_machine_{}()\n{{\n{}\treturn parts;\n}}\n", machine.value("def", std::string{}),
 					machine_index, body);
-				calls += std::format("\tiw7_scriptable( \"{}\", iw7_machine_{}() );\n", targetname, machine_index);
+				calls += std::format("\tm{0} = iw7_machine_{0}();\n\tiw7_scriptable( \"{1}\", m{0} );\n", machine_index, targetname);
+				machine_indices[targetname] = machine_index;
 				machine_index++;
+			}
+
+			for (const auto& target : output.scriptable_targets)
+			{
+				calls += std::format("\tiw7_scriptable_at( {}, ( {}, {}, {} ), m{} );\n", quote(target.targetname), number(target.origin[0]),
+					number(target.origin[1]), number(target.origin[2]), machine_indices.at(target.machine));
 			}
 
 			start_thread("iw7_scriptables");
 			map_script += "\n// The scriptables of other kinds: IW7's state machines of their parts.\niw7_scriptables()\n{\n" + calls + "}\n" +
 				tables + std::string(scriptable_machine_runtime);
-			ZONETOOL_INFO("iw7: the map script runs the state machines of %zu kinds of scriptables", output.scriptable_machines.size());
+			ZONETOOL_INFO("iw7: the map script runs the state machines of %zu kinds of scriptables (%zu instances by their own targetname)",
+				output.scriptable_machines.size(), output.scriptable_targets.size());
+		}
+		else if (map_script.find("iw7_setscriptablepartstate( part, state, instant )") != std::string::npos)
+		{
+			// The setscriptablepartstate of the map script asks the machines first.
+			map_script += "\niw7_scriptable_set( part, state )\n{\n\treturn 0;\n}\n";
 		}
 
 		// The strings that can name sound aliases: the aliases of the loop sounds and the map script's strings.

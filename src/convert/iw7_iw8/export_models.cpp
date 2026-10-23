@@ -476,6 +476,13 @@ namespace zonetool::convert::iw7_iw8
 		// "quat" of 2 components as IW3 names it, "quat4" of 4).
 		bool write_xanim(const iw7::XAnimParts& anim, const std::filesystem::path& path)
 		{
+			// A header without its data (Breakneck's mp_breakneck_bridge_spawn: no frames, no bones) holds no animation.
+			if (!anim.numframes || !anim.names || !anim.boneCount[9])
+			{
+				ZONETOOL_WARNING("iw7: animation %s has no frames or bones in this zone; it does not convert", asset_name(anim.name).data());
+				return false;
+			}
+
 			const auto indices = [&](const iw7::XAnimDynamicIndices& data, const std::size_t count)
 			{
 				return anim.numframes < 256 ? values(data._1, count) : values(data._2, count);
