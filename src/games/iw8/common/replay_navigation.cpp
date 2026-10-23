@@ -17,6 +17,7 @@
 #include <numeric>
 #include <stdexcept>
 #include <thread>
+#include <unordered_map>
 
 // Replay 1.20 MP bot navigation (all layouts verified against the shipped
 // mp_shipment aipaths/navmesh/tacgraph and the Replay zone loaders; see
@@ -246,6 +247,7 @@ class Scene
             prim.flags = hull.flags;
             hulls_.push_back(std::move(prim));
         }
+        triangles_.reserve(source.triangles.size());
         for (const Triangle &triangle : source.triangles)
         {
             if (!triangle.flags)
@@ -434,14 +436,32 @@ class Scene
         nodes_.clear();
         if (items_.empty())
             return;
-        nodes_.reserve(items_.size() * 2);
-        Build(0, static_cast<std::uint32_t>(items_.size()));
+        // The tree's shape follows the item count alone (halves down to four items), so every subtree knows its
+        // node range before it is built and the top halves build on their own threads.
+        std::unordered_map<std::uint32_t, std::uint32_t> subtreeNodes;
+        const auto count = static_cast<std::uint32_t>(items_.size());
+        nodes_.resize(SubtreeNodes(count, subtreeNodes));
+        unsigned spawnLevels = 0;
+        while ((1u << spawnLevels) < std::max(1u, std::thread::hardware_concurrency()))
+            ++spawnLevels;
+        Build(0, 0, count, spawnLevels, subtreeNodes);
     }
 
-    std::uint32_t Build(const std::uint32_t first, const std::uint32_t count)
+    static std::uint32_t SubtreeNodes(const std::uint32_t count,
+                                      std::unordered_map<std::uint32_t, std::uint32_t> &known)
     {
-        const auto index = static_cast<std::uint32_t>(nodes_.size());
-        nodes_.emplace_back();
+        if (count <= 4)
+            return 1;
+        if (const auto found = known.find(count); found != known.end())
+            return found->second;
+        const std::uint32_t nodes = 1 + SubtreeNodes(count / 2, known) + SubtreeNodes(count - count / 2, known);
+        known.emplace(count, nodes);
+        return nodes;
+    }
+
+    void Build(const std::uint32_t index, const std::uint32_t first, const std::uint32_t count,
+               const unsigned spawnLevels, const std::unordered_map<std::uint32_t, std::uint32_t> &subtreeNodes)
+    {
         Box box;
         Box centers;
         for (std::uint32_t item = first; item < first + count; ++item)
@@ -455,7 +475,7 @@ class Scene
         {
             nodes_[index].first = first;
             nodes_[index].count = count;
-            return index;
+            return;
         }
         std::size_t axis = 0;
         for (std::size_t a = 1; a < 3; ++a)
@@ -469,11 +489,20 @@ class Scene
                              const Box &b = ItemBox(right);
                              return a.lo[axis] + a.hi[axis] < b.lo[axis] + b.hi[axis];
                          });
-        Build(first, half);
-        const std::uint32_t right = Build(first + half, count - half);
+        const std::uint32_t right = index + 1 + (half <= 4 ? 1 : subtreeNodes.at(half));
+        if (spawnLevels && count >= 65536)
+        {
+            std::thread left([&] { Build(index + 1, first, half, spawnLevels - 1, subtreeNodes); });
+            Build(right, first + half, count - half, spawnLevels - 1, subtreeNodes);
+            left.join();
+        }
+        else
+        {
+            Build(index + 1, first, half, 0, subtreeNodes);
+            Build(right, first + half, count - half, 0, subtreeNodes);
+        }
         nodes_[index].right = right;
         nodes_[index].count = 0;
-        return index;
     }
 
     static bool RayBox(const Box &box, const Vec3 &origin, const Vec3 &inverse, const float limit)
@@ -1599,7 +1628,9 @@ Result Build(const Source &source)
         return result;
     }
     const auto started = std::chrono::steady_clock::now();
+    zt::LapTimer timing("navigation");
     const Scene scene(source);
+    timing.lap("collision scene");
     if (!scene.Bounds().Valid())
     {
         zt::warn("navigation: no blocking collision; bot navigation is not generated");
@@ -1620,6 +1651,7 @@ Result Build(const Source &source)
         zt::warn("navigation: empty walkable region");
         return result;
     }
+    timing.lap("grid");
     const std::size_t rawCells = grid.layers.size();
     Erode(grid);
 
@@ -1676,7 +1708,9 @@ Result Build(const Source &source)
     // Area usage flags stay 0: bfx::AreaHandle::IsUsable (0x1FC9660) accepts
     // a zero mask for every agent filter, and bit 31 marks stairs
     // (AINavigator2D::IsOnStairs).
+    timing.lap("erosion and reachability");
     Mesh mesh = BuildMesh(grid);
+    timing.lap("navmesh");
     const float skyTop = scene.Bounds().hi[2] + 64.0f;
     auto data = std::make_shared<Data>();
     Box graphBox;
@@ -1703,6 +1737,7 @@ Result Build(const Source &source)
              "%zu-byte bfx resource",
              mesh.areas.size(), edges, portals, mesh.corners.size(), data->navGraph.size());
 
+    timing.lap("nav graph");
     // ---- pathnodes
     std::vector<PathNode> nodes;
     const auto addNode = [&](const std::uint32_t cell, const Vec3 &hint) {
@@ -2083,6 +2118,7 @@ Result Build(const Source &source)
             data->exposure[nodeCount * 33 + skyBytes + node / 8] |= bit;
     }
 
+    timing.lap("pathnodes");
     // ---- tactical graph: one point per fixed pathnode (m_PointID = node
     // index), then a coarse ground grid; eye height for mp_ maps.
     std::vector<Data::TacPoint> &points = data->tacPoints;
@@ -2141,6 +2177,7 @@ Result Build(const Source &source)
 
     const double seconds =
         std::chrono::duration<double>(std::chrono::steady_clock::now() - started).count();
+    timing.lap("tactical graph");
     zt::info("navigation: %zu fixed pathnodes (%zu IW3 markers placed, %zu off-mesh; %zu spawn "
              "and %zu coverage nodes; %zu unlinked dropped), %zu links, %zu unlinked spawn "
              "nodes, %zu zones",
