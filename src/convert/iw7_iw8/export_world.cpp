@@ -1,9 +1,23 @@
 #include <std_include.hpp>
 #include "export.hpp"
+
+#pragma warning(push, 0)
+#include <glaze/json.hpp>
+#pragma warning(pop)
 #include <future>
 
 namespace zonetool::convert::iw7_iw8
 {
+	// A world surface of the world file, written by glaze (the members are its keys).
+	struct world_geometry_surface
+	{
+		std::string material;
+		int lightmap{};
+		int reflection_probe{};
+		std::vector<geometry_vertex> vertices;
+		std::vector<std::uint32_t> indices;
+	};
+
 	namespace
 	{
 		json vector_json(const float* values, const std::size_t count)
@@ -42,21 +56,23 @@ namespace zonetool::convert::iw7_iw8
 			return result;
 		}
 
-		json export_vertex(const iw7::GfxWorldVertex& vertex)
+		geometry_vertex export_vertex(const iw7::GfxWorldVertex& vertex)
 		{
 			const auto normal = unpack_unit_vec(vertex.normal);
 			const auto tangent = unpack_unit_vec(vertex.tangent);
-			return
+			geometry_vertex result;
+			for (auto i = 0; i < 3; i++)
 			{
-				{"position", vector_json(vertex.xyz, 3)},
-				{"normal", vector_json(normal.data(), 3)},
-				{"tangent", vector_json(tangent.data(), 3)},
-				{"binormal_sign", vertex.binormalSign < 0.0f ? -1.0f : 1.0f},
-				{"uv", vector_json(vertex.texCoord, 2)},
-				{"lightmap_uv", vector_json(vertex.lmapCoord, 2)},
-				{"color", json::array({vertex.color.array[0], vertex.color.array[1], vertex.color.array[2],
-					vertex.color.array[3]})},
-			};
+				result.position[i] = vertex.xyz[i];
+				result.normal[i] = normal[i];
+				result.tangent[i] = tangent[i];
+			}
+
+			result.binormal_sign = vertex.binormalSign < 0.0f ? -1.0f : 1.0f;
+			result.uv = {vertex.texCoord[0], vertex.texCoord[1]};
+			result.lightmap_uv = {vertex.lmapCoord[0], vertex.lmapCoord[1]};
+			result.color = {vertex.color.array[0], vertex.color.array[1], vertex.color.array[2], vertex.color.array[3]};
+			return result;
 		}
 
 		// The pipeline rejects triangles with no area (IW7 keeps some between strips).
@@ -78,7 +94,7 @@ namespace zonetool::convert::iw7_iw8
 		// layered material that its vertices reveal, the same triangles in the material of the layer, blended over it by
 		// the weight of the layer in vertex alpha. The vertex colours of a layered material hold the weights of its
 		// layers, not colours.
-		std::vector<json> export_surface(const source_map& source, const iw7::GfxWorld& world, const iw7::GfxSurface& surface,
+		std::vector<world_geometry_surface> export_surface(const source_map& source, const iw7::GfxWorld& world, const iw7::GfxSurface& surface,
 			const std::size_t lightmap_count, const reflection_probes& probes, extraction& output)
 		{
 			const auto& tris = surface.tris;
@@ -131,8 +147,8 @@ namespace zonetool::convert::iw7_iw8
 				throw std::runtime_error("surface indices are out of range");
 			}
 
-			auto vertices = json::array();
-			auto indices = json::array();
+			std::vector<geometry_vertex> vertices;
+			std::vector<std::uint32_t> indices;
 			std::unordered_map<std::uint16_t, std::size_t> remap;
 			std::vector<std::uint16_t> order;
 			const auto vertex = [&](const std::uint16_t index) -> const iw7::GfxWorldVertex&
@@ -165,7 +181,7 @@ namespace zonetool::convert::iw7_iw8
 						order.push_back(triangle[corner]);
 						if (layers > 1)
 						{
-							vertices.back()["color"] = {255, 255, 255, 255};
+							vertices.back().color = {255, 255, 255, 255};
 						}
 
 						for (auto axis = 0; axis < 3; axis++)
@@ -174,7 +190,7 @@ namespace zonetool::convert::iw7_iw8
 						}
 					}
 
-					indices.push_back(found->second);
+					indices.push_back(static_cast<std::uint32_t>(found->second));
 				}
 			}
 
@@ -206,8 +222,8 @@ namespace zonetool::convert::iw7_iw8
 
 				for (std::size_t t = 0; t + 2 < indices.size(); t += 3)
 				{
-					distant.triangles.push_back({indices[t].get<std::uint16_t>(), indices[t + 1].get<std::uint16_t>(),
-						indices[t + 2].get<std::uint16_t>()});
+					distant.triangles.push_back({static_cast<std::uint16_t>(indices[t]), static_cast<std::uint16_t>(indices[t + 1]),
+						static_cast<std::uint16_t>(indices[t + 2])});
 				}
 
 				ZONETOOL_WARNING("iw7: a world surface of \"%s\" (%zu triangles) reaches beyond %.0f units: the sky draws it",
@@ -224,15 +240,8 @@ namespace zonetool::convert::iw7_iw8
 
 			const auto lightmap = surface.lightmapIndex < lightmap_count ? static_cast<int>(surface.lightmapIndex) : -1;
 			const auto probe = probes.find(center);
-			std::vector<json> result;
-			result.push_back(
-			{
-				{"material", material_name},
-				{"lightmap", lightmap},
-				{"reflection_probe", probe},
-				{"vertices", vertices},
-				{"indices", indices},
-			});
+			std::vector<world_geometry_surface> result;
+			result.push_back({material_name, lightmap, static_cast<int>(probe), vertices, indices});
 
 			for (auto layer = 1; layer < layers; layer++)
 			{
@@ -274,21 +283,15 @@ namespace zonetool::convert::iw7_iw8
 				auto overlay = vertices;
 				for (std::size_t v = 0; v < overlay.size(); v++)
 				{
-					overlay[v]["color"] = {255, 255, 255, weight(order[v])};
+					overlay[v].color = {255, 255, 255, weight(order[v])};
 					if (const auto uv = layer_uv(order[v]))
 					{
-						overlay[v]["uv"] = {(*uv)[0], (*uv)[1]};
+						overlay[v].uv = {(*uv)[0], (*uv)[1]};
 					}
 				}
 
-				result.push_back(
-				{
-					{"material", output.add_material_layer(source, surface.material, layer)},
-					{"lightmap", lightmap},
-					{"reflection_probe", probe},
-					{"vertices", std::move(overlay)},
-					{"indices", indices},
-				});
+				result.push_back({output.add_material_layer(source, surface.material, layer), lightmap, static_cast<int>(probe),
+					std::move(overlay), indices});
 			}
 
 			return result;
@@ -1305,7 +1308,7 @@ namespace zonetool::convert::iw7_iw8
 		}
 	}
 
-	void write_json(const std::filesystem::path& path, const json& value)
+	void write_text(const std::filesystem::path& path, const std::string_view text)
 	{
 		// The folder is made only when the file does not open (thousands of materials and models go into a few).
 		std::ofstream stream(path, std::ios::binary | std::ios::trunc);
@@ -1315,11 +1318,16 @@ namespace zonetool::convert::iw7_iw8
 			stream.clear();
 			stream.open(path, std::ios::binary | std::ios::trunc);
 		}
-		stream << value.dump();
+		stream.write(text.data(), static_cast<std::streamsize>(text.size()));
 		if (!stream)
 		{
 			throw std::runtime_error(std::format("cannot write {}", path.string()));
 		}
+	}
+
+	void write_json(const std::filesystem::path& path, const json& value)
+	{
+		write_text(path, value.dump());
 	}
 
 	namespace
@@ -1329,6 +1337,11 @@ namespace zonetool::convert::iw7_iw8
 	}
 
 	void write_json_async(std::filesystem::path path, json value, const std::size_t limit)
+	{
+		write_async([path = std::move(path), value = std::move(value)] { write_json(path, value); }, limit);
+	}
+
+	void write_async(std::move_only_function<void()> write, const std::size_t limit)
 	{
 		std::future<void> oldest;
 		{
@@ -1346,12 +1359,12 @@ namespace zonetool::convert::iw7_iw8
 			oldest.get();
 		}
 
-		auto write = std::async(std::launch::async, [path = std::move(path), value = std::move(value)]
+		auto pending = std::async(std::launch::async, [write = std::move(write)]() mutable
 		{
-			write_json(path, value);
+			write();
 		});
 		std::lock_guard lock(json_writes_mutex);
-		json_writes.push_back(std::move(write));
+		json_writes.push_back(std::move(pending));
 	}
 
 	void finish_json_writes()
@@ -1438,7 +1451,7 @@ namespace zonetool::convert::iw7_iw8
 		}
 
 		// The index of each surface among the surfaces with an area.
-		auto surfaces = json::array();
+		std::vector<world_geometry_surface> surfaces;
 		auto surface_indices = json::array();
 		std::vector<std::size_t> first_surface(world.surfaceCount + 1);
 		for (auto i = 0u; i < world.surfaceCount; i++)
@@ -1500,20 +1513,21 @@ namespace zonetool::convert::iw7_iw8
 		// A glass pane draws its rectangle, which Replay's breakable glass replaces.
 		for (const auto& pane : glass_panes(source))
 		{
-			auto vertices = json::array();
+			std::vector<geometry_vertex> vertices;
 			float center[3]{};
 			for (auto k = 0; k < 4; k++)
 			{
-				vertices.push_back(
+				geometry_vertex& vertex = vertices.emplace_back();
+				for (auto axis = 0; axis < 3; axis++)
 				{
-					{"position", pane.corners[k]},
-					{"normal", pane.normal},
-					{"tangent", pane.tangent},
-					{"binormal_sign", 1.0f},
-					{"uv", pane.uvs[k]},
-					{"lightmap_uv", {0.0f, 0.0f}},
-					{"color", {255, 255, 255, 255}},
-				});
+					vertex.position[axis] = pane.corners[k][axis];
+					vertex.normal[axis] = pane.normal[axis];
+					vertex.tangent[axis] = pane.tangent[axis];
+				}
+
+				vertex.binormal_sign = 1.0f;
+				vertex.uv = {pane.uvs[k][0], pane.uvs[k][1]};
+				vertex.color = {255, 255, 255, 255};
 
 				for (auto axis = 0; axis < 3; axis++)
 				{
@@ -1525,14 +1539,7 @@ namespace zonetool::convert::iw7_iw8
 			output.glass_materials.insert(material);
 			brush_models.push_back({{"bounds", {pane.mins, pane.maxs}}, {"start", surfaces.size()}, {"count", 1}});
 			surface_indices.push_back(surfaces.size());
-			surfaces.push_back(
-			{
-				{"material", material},
-				{"lightmap", -1},
-				{"reflection_probe", probes.find(center)},
-				{"vertices", std::move(vertices)},
-				{"indices", {0, 1, 2, 0, 2, 3}},
-			});
+			surfaces.push_back({material, -1, static_cast<int>(probes.find(center)), std::move(vertices), {0, 1, 2, 0, 2, 3}});
 		}
 
 		// Replay draws one DPVS cell and leaves occlusion to Umbra: one cell with one tree that holds every surface
@@ -1602,7 +1609,6 @@ namespace zonetool::convert::iw7_iw8
 			{"spatial_surfaces", true},
 			{"script_models", script_models},
 			{"xanims", std::move(xanims)},
-			{"surfaces", std::move(surfaces)},
 			{"models", std::move(models)},
 			{"brush_models", std::move(brush_models)},
 			{"dpvs", {{"planes", json::array()}, {"nodes", json::array({1})},
@@ -1613,7 +1619,32 @@ namespace zonetool::convert::iw7_iw8
 			{"reflection_probes", std::move(probes.entries)},
 		};
 
-		write_json_async(output.extracted / (bsp_name(source) + ".replay-world.json"), std::move(value));
+		// The surfaces (nearly all of the file) are written by glaze, ahead of the tree's keys.
+		write_async([path = output.extracted / (bsp_name(source) + ".replay-world.json"), value = std::move(value),
+			surfaces = std::move(surfaces)]
+		{
+			std::string surfaces_text;
+			if (glz::write_json(surfaces, surfaces_text))
+			{
+				throw std::runtime_error("cannot write the world surfaces");
+			}
+
+			std::string text = "{\"surfaces\":" + surfaces_text;
+			surfaces_text.clear();
+			surfaces_text.shrink_to_fit();
+			const auto rest = value.dump();
+			if (rest.size() > 2)
+			{
+				text += ',';
+				text.append(rest, 1);
+			}
+			else
+			{
+				text += '}';
+			}
+
+			write_text(path, text);
+		});
 		export_sun(source, output);
 		ZONETOOL_INFO("iw7: exported %zu of %u world surfaces and %zu of %u static models (%zu lit by the floor under them)",
 			surface_indices.size(), world.surfaceCount, model_indices.size(), dpvs.smodelCount, ground_lit);

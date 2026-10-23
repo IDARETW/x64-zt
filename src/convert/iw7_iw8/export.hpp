@@ -186,6 +186,16 @@ namespace zonetool::convert::iw7_iw8
 	// A piece of IW7's breakable glass: a rectangle in the world, which the extraction gives a brush model after the
 	// trigger models and an IW3 glass entity (a script_brushmodel of intact glass), which the pipeline turns into
 	// Replay's breakable glass.
+	// A vertex of the geometry files (models' .replay.json, the world's surfaces), written by glaze: the members are
+	// their keys and the values the doubles that json values held.
+	struct geometry_vertex
+	{
+		std::array<double, 3> position{}, normal{}, tangent{};
+		double binormal_sign{};
+		std::array<double, 2> uv{}, lightmap_uv{};
+		std::array<int, 4> color{};
+	};
+
 	struct glass_pane
 	{
 		std::array<std::array<float, 3>, 4> corners{};
@@ -368,9 +378,13 @@ namespace zonetool::convert::iw7_iw8
 
 	// Writes a json file of the extraction.
 	void write_json(const std::filesystem::path& path, const json& value);
+	// Writes a text file of the extraction.
+	void write_text(const std::filesystem::path& path, std::string_view text);
 
 	// Writes a json file of the extraction on another thread (at most `limit` wait in memory); finish_json_writes
 	// waits for them and rethrows the first failure.
 	void write_json_async(std::filesystem::path path, json value, std::size_t limit = 4);
+	// Runs a write of the extraction on another thread, as write_json_async does.
+	void write_async(std::move_only_function<void()> write, std::size_t limit = 4);
 	void finish_json_writes();
 }
