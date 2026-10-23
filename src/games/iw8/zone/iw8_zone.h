@@ -115,6 +115,10 @@ class ZoneWriter
     {
         return zb_.data();
     }
+    std::vector<uint8_t> takeBody()
+    {
+        return zb_.takeData();
+    }
     uint64_t blockSize(int i) const
     {
         return zb_.streamSize(i);

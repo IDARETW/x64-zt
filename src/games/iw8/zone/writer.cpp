@@ -72,6 +72,7 @@ namespace zonetool::iw8
 				, options_(options)
 				, collect_(collect)
 			{
+				this->writer_.reserve_data(options.expected_size);
 				for (const auto& asset : assets)
 				{
 					if (!asset.referenced)
@@ -151,7 +152,7 @@ namespace zonetool::iw8
 				this->writer_.pop_stream();
 
 				written_zone zone{};
-				zone.data = this->writer_.data();
+				zone.data = this->writer_.take_data();
 				zone.block_sizes = this->writer_.block_sizes();
 				// Stock zones declare 0x20 more for block 1 (the size of the asset list header) and 0x40 more for
 				// block 2 than the peaks of the loader and the map preload.
@@ -359,7 +360,7 @@ namespace zonetool::iw8
 		return writer.write(list);
 	}
 
-	written_zone write_zone(const loaded_zone& zone)
+	written_zone write_zone(const loaded_zone& zone, const write_options& options)
 	{
 		std::vector<zone_asset> list;
 		list.reserve(zone.list.size());
@@ -375,7 +376,7 @@ namespace zonetool::iw8
 			assets.emplace_back(asset.type, asset.header, asset.referenced);
 		}
 
-		return write_zone(list, assets, zone.script_strings);
+		return write_zone(list, assets, zone.script_strings, options);
 	}
 
 	xfile::fastfile rewrite_fastfile(const std::string& name, xfile::fastfile file)
@@ -384,9 +385,11 @@ namespace zonetool::iw8
 		result.xfile_version = file.xfile_version;
 		result.transient = file.transient;
 		const auto preload_walk_size = file.preload_walk_size;
+		// The zone is written again at about its size: reserved, a 2 GB zone does not peak at twice that.
+		const auto expected_size = file.payload.size() + file.payload.size() / 16;
 
 		auto zone = load_zone(name, std::move(file), {.keep_temp_data = true});
-		auto written = write_zone(*zone);
+		auto written = write_zone(*zone, {.expected_size = expected_size});
 		zone.reset();
 
 		result.payload = std::move(written.data);

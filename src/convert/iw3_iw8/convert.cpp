@@ -781,7 +781,7 @@ template <> Iw8WriteParams writeParams(const iw8::ZoneBuffer &buffer)
 }
 
 // Writes a zone that the converter built: the x64-zt zone writer lays it out again and the core container stores it.
-bool writeZone(const std::string &outputPath, const std::vector<uint8_t> &body, const Iw8WriteParams &params)
+bool writeZone(const std::string &outputPath, std::vector<uint8_t> body, const Iw8WriteParams &params)
 {
     if (g_converterLayout)
         return iw8_write(outputPath, body, params);
@@ -790,6 +790,8 @@ bool writeZone(const std::string &outputPath, const std::vector<uint8_t> &body, 
     {
         zonetool::xfile::fastfile file{};
         file.payload.assign(body.begin(), body.end());
+        // A 2 GB map zone is loaded and written again: it is not held a third time.
+        std::vector<uint8_t>().swap(body);
         file.block_sizes.assign(std::begin(params.blockSize), std::end(params.blockSize));
         file.xfile_version = params.xfileVersion;
         file.transient = params.transientFileType != 0;
@@ -2064,13 +2066,14 @@ int writeMapPackage(const Args &args, const std::string &map, const std::string 
         writer.build();
         timing.lap("zone build");
 
-        if (!writeZone(path_join(outputDirectory, "techsets_" + map + ".ff"),
-                       techsets.body(), writeParams(techsets)))
+        const auto techsetParams = writeParams(techsets);
+        if (!writeZone(path_join(outputDirectory, "techsets_" + map + ".ff"), techsets.takeBody(), techsetParams))
         {
             result = 1;
         }
 
-        if (!writeZone(path_join(outputDirectory, map + ".ff"), writer.body(), writeParams(writer)))
+        const auto mapParams = writeParams(writer);
+        if (!writeZone(path_join(outputDirectory, map + ".ff"), writer.takeBody(), mapParams))
         {
             result = 1;
         }

@@ -237,6 +237,19 @@ namespace zonetool
 		return this->data_;
 	}
 
+	std::string zone_writer::take_data()
+	{
+		return std::move(this->data_);
+	}
+
+	void zone_writer::reserve_data(const std::size_t size)
+	{
+		if (this->keep_data_)
+		{
+			this->data_.reserve(size);
+		}
+	}
+
 	std::size_t zone_writer::data_size() const
 	{
 		return this->data_size_;
