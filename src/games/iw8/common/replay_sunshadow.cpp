@@ -19,6 +19,7 @@
 #include <filesystem>
 #include <fstream>
 #include <functional>
+#include <initializer_list>
 #include <iterator>
 #include <limits>
 #include <mutex>
@@ -1270,6 +1271,22 @@ std::array<std::uint8_t, 32> Digest(const void *data, const std::size_t size)
     return digest;
 }
 
+// The digest of the parts' bytes one after another, without joining them.
+std::array<std::uint8_t, 32> Digest(const std::initializer_list<std::pair<const void *, std::size_t>> parts)
+{
+    std::array<std::uint8_t, 32> digest{};
+    BCRYPT_HASH_HANDLE hash{};
+    bool ok = BCryptCreateHash(BCRYPT_SHA256_ALG_HANDLE, &hash, nullptr, 0, nullptr, 0, 0) >= 0;
+    for (const auto &[data, size] : parts)
+        ok = ok && BCryptHashData(hash, static_cast<PUCHAR>(const_cast<void *>(data)), static_cast<ULONG>(size), 0) >= 0;
+    ok = ok && BCryptFinishHash(hash, digest.data(), static_cast<ULONG>(digest.size()), 0) >= 0;
+    if (hash)
+        BCryptDestroyHash(hash);
+    if (!ok)
+        throw std::runtime_error("cannot digest the sun-shadow scene");
+    return digest;
+}
+
 std::string CacheKey(const Scene &scene, const std::vector<std::uint8_t> &values)
 {
     std::vector<std::array<std::uint8_t, 32>> parts(scene.materials.size() + scene.surfaces.size());
@@ -1277,19 +1294,18 @@ std::string CacheKey(const Scene &scene, const std::vector<std::uint8_t> &values
         if (index < scene.materials.size())
         {
             const auto &material = scene.materials[index];
-            std::vector<std::uint8_t> bytes(material.alpha);
+            std::vector<std::uint8_t> bytes;
             for (const std::uint32_t value : {material.cullMode, material.alphaTest, material.width, material.height,
                                               material.atlasTile ? 1u : 0u})
                 for (unsigned byte = 0; byte < 4; ++byte)
                     bytes.push_back(static_cast<std::uint8_t>(value >> (8 * byte)));
-            parts[index] = Digest(bytes.data(), bytes.size());
+            parts[index] = Digest({{material.alpha.data(), material.alpha.size()}, {bytes.data(), bytes.size()}});
             return;
         }
         const auto &surface = scene.surfaces[index - scene.materials.size()];
-        std::vector<std::uint8_t> bytes(surface.vertices.size() * sizeof(Vertex) + 4);
-        std::memcpy(bytes.data(), surface.vertices.data(), surface.vertices.size() * sizeof(Vertex));
-        std::memcpy(bytes.data() + surface.vertices.size() * sizeof(Vertex), &surface.material, 4);
-        parts[index] = Digest(bytes.data(), bytes.size());
+        static_assert(sizeof(surface.material) == 4);
+        parts[index] = Digest({{surface.vertices.data(), surface.vertices.size() * sizeof(Vertex)},
+                               {&surface.material, sizeof(surface.material)}});
     });
     std::vector<std::uint8_t> all(kCacheVersion, kCacheVersion + sizeof(kCacheVersion));
     const auto counts = std::array<std::uint64_t, 2>{scene.materials.size(), scene.surfaces.size()};

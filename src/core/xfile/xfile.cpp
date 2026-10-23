@@ -1114,7 +1114,8 @@ namespace zonetool::xfile
 			return patched;
 		}
 
-		void read_iw8(byte_reader& reader, const std::filesystem::path& path, const format& format, fastfile& file)
+		void read_iw8(byte_reader& reader, std::string& data, const std::filesystem::path& path, const format& format,
+			fastfile& file)
 		{
 			if (format.block_count != iw8_block_count)
 			{
@@ -1126,7 +1127,23 @@ namespace zonetool::xfile
 			std::string payload;
 			if (!file.is_signed)
 			{
-				payload = decompress_iw8_frame(path, reader.rest(), header.size);
+				const auto rest = reader.rest();
+				if (rest.size() >= 4 && rest[0] == 1 && rest.substr(1, 3) == "IWC")
+				{
+					// A stored payload is the rest of the file: it moves out of the data instead of being copied.
+					const auto offset = static_cast<std::size_t>(rest.data() - data.data()) + 4;
+					if (data.size() - offset != header.size)
+					{
+						throw std::runtime_error(std::format("stored zone holds 0x{:X} bytes, not 0x{:X}", data.size() - offset, header.size));
+					}
+
+					data.erase(0, offset);
+					payload = std::move(data);
+				}
+				else
+				{
+					payload = decompress_iw8_frame(path, rest, header.size);
+				}
 			}
 			else
 			{
@@ -1234,6 +1251,11 @@ namespace zonetool::xfile
 			throw std::runtime_error("cannot read file");
 		}
 
+		return read(path, std::move(data), format);
+	}
+
+	fastfile read(const std::filesystem::path& path, std::string data, const format& format)
+	{
 		struct
 		{
 			char magic[8];
@@ -1273,7 +1295,7 @@ namespace zonetool::xfile
 			read_s2(reader, format, file);
 			break;
 		case container::iw8:
-			read_iw8(reader, path, format, file);
+			read_iw8(reader, data, path, format, file);
 			break;
 		case container::unsupported:
 			throw std::runtime_error(std::format("the {} container has no v2 reader", format.unsigned_magic));

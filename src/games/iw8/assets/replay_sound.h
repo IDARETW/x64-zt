@@ -4,6 +4,7 @@
 
 #include <array>
 #include <cstdint>
+#include <filesystem>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -95,6 +96,9 @@ struct Curve
 // Replay SAB v10 container (magic 2UX#, build 16, 44-byte entries) with every
 // sample as fixed 1024-sample FLAC frames behind its 18-byte seek table.
 std::vector<uint8_t> BuildSab(const std::vector<Sample> &samples, const std::string &zone);
+// The FLAC encodings of BuildSab are kept in `directory` by their PCM (empty: no cache), so a second conversion
+// of a map reads them there.
+void SetCacheDirectory(std::filesystem::path directory);
 
 // Index of a Replay SndGlobals ("singleton", code_post_gfx) volmod / entity channel by
 // name, or -1.
