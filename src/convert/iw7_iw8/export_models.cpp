@@ -88,8 +88,10 @@ namespace zonetool::convert::iw7_iw8
 			return largest;
 		}
 
+		// The vertices of a flag surface keep their alpha, the weight of IW7's flag wave (flag_wave).
 		template <typename Vertices, typename Faces>
-		model_geometry_surface export_surface(const Vertices& source_vertices, const Faces& faces, const std::string& material)
+		model_geometry_surface export_surface(const Vertices& source_vertices, const Faces& faces, const std::string& material,
+			const bool wave_weight)
 		{
 			model_geometry_surface surface;
 			surface.material = material;
@@ -97,6 +99,13 @@ namespace zonetool::convert::iw7_iw8
 			for (const auto& vertex : source_vertices)
 			{
 				surface.vertices.push_back(export_vertex(vertex));
+				if constexpr (requires { vertex.color.array[3]; })
+				{
+					if (wave_weight)
+					{
+						surface.vertices.back().color[3] = vertex.color.array[3];
+					}
+				}
 			}
 
 			surface.indices.reserve(std::size(faces) * 3);
@@ -233,21 +242,23 @@ namespace zonetool::convert::iw7_iw8
 				for (std::size_t i = 0; i < info.numsurfs; i++)
 				{
 					const auto& material_name = plan.lods[lod].materials[i];
+					const auto material = output.materials.find(material_name);
+					const auto weight = material != output.materials.end() && flag_wave(material->second).has_value();
 					if (surfaces && surfaces->surfs && i < surfaces->numsurfs)
 					{
 						const auto& surface = surfaces->surfs[i];
 						const std::span faces(surface.triIndices, surface.triCount);
 						const std::span motion(surface.verts0.packedMotionVerts0, surface.vertCount);
 						const std::span packed(surface.verts0.packedVerts0, surface.vertCount);
-						lod_surfaces.push_back((surface.flags & 8) != 0 ? export_surface(motion, faces, material_name)
-							: export_surface(packed, faces, material_name));
+						lod_surfaces.push_back((surface.flags & 8) != 0 ? export_surface(motion, faces, material_name, weight)
+							: export_surface(packed, faces, material_name, weight));
 					}
 					else if (streamed && i < streamed->size())
 					{
 						const auto& surface = (*streamed)[i];
 						lod_surfaces.push_back(surface.motion
-							? export_surface(std::span(surface.motion_vertices), std::span(surface.faces), material_name)
-							: export_surface(std::span(surface.vertices), std::span(surface.faces), material_name));
+							? export_surface(std::span(surface.motion_vertices), std::span(surface.faces), material_name, weight)
+							: export_surface(std::span(surface.vertices), std::span(surface.faces), material_name, weight));
 					}
 				}
 
