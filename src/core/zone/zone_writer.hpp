@@ -49,6 +49,10 @@ namespace zonetool
 		bool is_offset(std::uint64_t value) const;
 
 		const std::string& data() const;
+		// Moves the written data out (a large zone is not held twice).
+		std::string take_data();
+		// Reserves the data for a zone of about `size` bytes (it grows by doubling otherwise).
+		void reserve_data(std::size_t size);
 		std::size_t data_size() const;
 		std::vector<std::uint64_t> block_sizes() const;
 

@@ -121,6 +121,11 @@ class ZoneBuffer
     {
         return buf_;
     }
+    // Moves the body out (the zone writer then holds no copy of a large zone).
+    std::vector<uint8_t> takeData()
+    {
+        return std::move(buf_);
+    }
     size_t size() const
     {
         return buf_.size();
