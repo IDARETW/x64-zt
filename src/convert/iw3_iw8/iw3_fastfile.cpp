@@ -2793,6 +2793,15 @@ std::vector<SourceSkeletonLod> ReadSourceSkeleton(const std::filesystem::path &s
             SafeChild(skeletonRoot, std::filesystem::path(lod.at("file").get<std::string>()))));
     if (lods.front().bones.size() < 2)
         return {};
+    // Replay's model vertex shaders hold 128 bone matrices per draw (stock CB0[514], as replay_model_vertex.hlsl
+    // declares), which the rigid runs index by bone: how the engine draws stock skeletons above that (bodies of 154
+    // bones) is not traced.
+    if (lods.front().bones.size() > 128)
+    {
+        zt::warn("iw3: entity model %s has %zu bones, more than a draw holds (128); it keeps one bone",
+                 modelName.c_str(), lods.front().bones.size());
+        return {};
+    }
     for (const auto &bone : lods.front().bones)
         if (bone.name.empty())
             throw std::runtime_error("IW3 skeleton export has an unnamed bone: " + modelName);
@@ -4208,8 +4217,8 @@ void SetSourceSkeleton(const std::vector<SourceBone> &bones,
     std::size_t roots = 0;
     while (roots < bones.size() && bones[roots].parent < 0)
         ++roots;
-    // Replay counts bones in a byte (stock bodies carry 154); bone 255 marks an unassigned vertex.
-    if (!roots || bones.size() > 255)
+    // A draw holds 128 bones (ReadSourceSkeleton).
+    if (!roots || bones.size() > 128)
         throw std::runtime_error("IW3 skeleton has an unsupported bone layout");
     for (std::size_t index = roots; index < bones.size(); ++index)
         if (bones[index].parent < 0 || bones[index].parent >= static_cast<int>(index))
