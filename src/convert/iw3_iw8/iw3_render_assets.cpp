@@ -1471,6 +1471,22 @@ std::vector<std::uint8_t> BuildReflectionProbeArray(const std::vector<Cubemap> &
 // edge texels: dark, speckled outlines on IW3 cut-out decals (owner test
 // 2026-10-14, zz_trailer_decal "INDEPENDENT MOVING & DELIVERY"). Grow the visible
 // colour outward through the cut-away texels; alpha is unchanged.
+// Runs body(chunk, begin, end) over `count` items in `chunks` contiguous chunks, each on its own thread.
+template <class Body> void ForChunks(const std::size_t count, const std::size_t chunks, const Body &body)
+{
+    std::vector<std::thread> threads;
+    for (std::size_t chunk = 1; chunk < chunks; ++chunk)
+        threads.emplace_back(body, chunk, count * chunk / chunks, count * (chunk + 1) / chunks);
+    body(std::size_t{0}, std::size_t{0}, count / chunks);
+    for (auto &thread : threads)
+        thread.join();
+}
+
+std::size_t ChunkCount(const std::size_t count)
+{
+    return std::clamp<std::size_t>(count / 65536, 1, std::max(1u, std::thread::hardware_concurrency()));
+}
+
 void BleedCutoutColor(Image &level, const unsigned visibleAlpha = 128)
 {
     const std::size_t width = level.width, height = level.height;
@@ -1488,15 +1504,24 @@ void BleedCutoutColor(Image &level, const unsigned visibleAlpha = 128)
             for (int dx = -1; dx <= 1; ++dx)
                 visit(((y + height + dy) % height) * width + (x + width + dx) % width);
     };
+    // Large levels find their candidates and their passes' colours on every core (each reads the pass before).
     std::vector<std::uint32_t> candidates;
-    for (std::size_t index = 0; index < known.size(); ++index)
-        if (!known[index])
-        {
-            bool touches = false;
-            neighbours(index, [&](const std::size_t neighbour) { touches = touches || known[neighbour]; });
-            if (touches)
-                candidates.push_back(static_cast<std::uint32_t>(index));
-        }
+    {
+        const auto chunks = ChunkCount(known.size());
+        std::vector<std::vector<std::uint32_t>> found(chunks);
+        ForChunks(known.size(), chunks, [&](const std::size_t chunk, const std::size_t begin, const std::size_t end) {
+            for (std::size_t index = begin; index < end; ++index)
+                if (!known[index])
+                {
+                    bool touches = false;
+                    neighbours(index, [&](const std::size_t neighbour) { touches = touches || known[neighbour]; });
+                    if (touches)
+                        found[chunk].push_back(static_cast<std::uint32_t>(index));
+                }
+        });
+        for (const auto &part : found)
+            candidates.insert(candidates.end(), part.begin(), part.end());
+    }
     std::vector<std::uint32_t> queued(known.size(), 0); // the pass (plus one) a texel is a candidate in
     struct Update
     {
@@ -1507,23 +1532,30 @@ void BleedCutoutColor(Image &level, const unsigned visibleAlpha = 128)
     for (unsigned pass = 0; pass < 32 && !candidates.empty(); ++pass)
     {
         updates.clear();
-        for (const std::uint32_t index : candidates)
-        {
-            unsigned sum[3]{}, count = 0;
-            neighbours(index, [&](const std::size_t neighbour) {
-                if (!known[neighbour])
-                    return;
+        const auto chunks = ChunkCount(candidates.size());
+        std::vector<std::vector<Update>> found(chunks);
+        ForChunks(candidates.size(), chunks, [&](const std::size_t chunk, const std::size_t begin, const std::size_t end) {
+            for (std::size_t at = begin; at < end; ++at)
+            {
+                const std::uint32_t index = candidates[at];
+                unsigned sum[3]{}, count = 0;
+                neighbours(index, [&](const std::size_t neighbour) {
+                    if (!known[neighbour])
+                        return;
+                    for (unsigned channel = 0; channel < 3; ++channel)
+                        sum[channel] += level.rgba[neighbour * 4 + channel];
+                    ++count;
+                });
+                if (!count)
+                    continue;
+                Update update{index, {}};
                 for (unsigned channel = 0; channel < 3; ++channel)
-                    sum[channel] += level.rgba[neighbour * 4 + channel];
-                ++count;
-            });
-            if (!count)
-                continue;
-            Update update{index, {}};
-            for (unsigned channel = 0; channel < 3; ++channel)
-                update.rgb[channel] = static_cast<std::uint8_t>(sum[channel] / count);
-            updates.push_back(update);
-        }
+                    update.rgb[channel] = static_cast<std::uint8_t>(sum[channel] / count);
+                found[chunk].push_back(update);
+            }
+        });
+        for (const auto &part : found)
+            updates.insert(updates.end(), part.begin(), part.end());
         for (const Update &update : updates)
         {
             std::copy(update.rgb.begin(), update.rgb.end(), level.rgba.begin() + std::size_t{update.index} * 4);
