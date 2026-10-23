@@ -9,6 +9,7 @@
 #include <limits>
 #include <stdexcept>
 #include <string>
+#include <thread>
 
 namespace iw8::heightfield
 {
@@ -103,55 +104,73 @@ Data Build(const std::vector<float> &triangles, const replaybounds::Bounds &boun
     std::vector<float> height(size_t(n) * n, -std::numeric_limits<float>::infinity());
     const auto toU = [&](const double x) { return (x - minX) / sizeX * n; };
     const auto toV = [&](const double y) { return (maxY - y) / sizeY * n; };
-    const auto raise = [&](const double u, const double v, const double z) {
-        const int c = int(std::floor(u)), r = int(std::floor(v));
-        if (c < 0 || r < 0 || c >= int(n) || r >= int(n))
-            return;
-        auto &cell = height[size_t(r) * n + c];
-        cell = std::max(cell, float(z));
+    // Each thread raises the texels of its own band of rows from every triangle that reaches it (a texel keeps the
+    // highest sample, whatever the order).
+    const unsigned bands = std::clamp(std::thread::hardware_concurrency(), 1u, std::max(1u, n));
+    const auto raiseBand = [&](const int rowBegin, const int rowEnd) {
+        const auto raise = [&](const double u, const double v, const double z) {
+            const int c = int(std::floor(u)), r = int(std::floor(v));
+            if (c < 0 || r < rowBegin || c >= int(n) || r >= rowEnd)
+                return;
+            auto &cell = height[size_t(r) * n + c];
+            cell = std::max(cell, float(z));
+        };
+        for (size_t t = 0; t < triangles.size(); t += 9)
+        {
+            double u[3], v[3], z[3];
+            for (unsigned k = 0; k < 3; ++k)
+            {
+                u[k] = toU(triangles[t + 3 * k]);
+                v[k] = toV(triangles[t + 3 * k + 1]);
+                z[k] = triangles[t + 3 * k + 2];
+            }
+            // Every sample of the triangle lies between its corners' rows (a row of margin for the rounding of an
+            // edge's steps); raise keeps the band's own rows.
+            if (std::floor(std::max({v[0], v[1], v[2]})) + 1 < rowBegin ||
+                std::floor(std::min({v[0], v[1], v[2]})) - 1 >= rowEnd)
+                continue;
+            // Edges: walls and other near-vertical triangles project to lines, so
+            // every edge is sampled at half-texel steps at its own height.
+            for (unsigned k = 0; k < 3; ++k)
+            {
+                const unsigned j = (k + 1) % 3;
+                const double length = std::max(std::abs(u[j] - u[k]), std::abs(v[j] - v[k]));
+                const unsigned steps = unsigned(std::ceil(length * 2)) + 1;
+                for (unsigned s = 0; s <= steps; ++s)
+                {
+                    const double f = double(s) / steps;
+                    raise(u[k] + (u[j] - u[k]) * f, v[k] + (v[j] - v[k]) * f,
+                          z[k] + (z[j] - z[k]) * f);
+                }
+            }
+            // Interior: the triangle's plane height at each covered texel centre.
+            const double area = (u[1] - u[0]) * (v[2] - v[0]) - (u[2] - u[0]) * (v[1] - v[0]);
+            if (std::abs(area) < 1e-9)
+                continue;
+            const int c0 = std::max(0, int(std::floor(std::min({u[0], u[1], u[2]})))),
+                      c1 = std::min(int(n) - 1, int(std::floor(std::max({u[0], u[1], u[2]})))),
+                      r0 = std::max(rowBegin, int(std::floor(std::min({v[0], v[1], v[2]})))),
+                      r1 = std::min(rowEnd - 1, int(std::floor(std::max({v[0], v[1], v[2]}))));
+            for (int r = r0; r <= r1; ++r)
+                for (int c = c0; c <= c1; ++c)
+                {
+                    const double pu = c + .5, pv = r + .5;
+                    const double w1 = ((pu - u[0]) * (v[2] - v[0]) - (u[2] - u[0]) * (pv - v[0])) / area;
+                    const double w2 = ((u[1] - u[0]) * (pv - v[0]) - (pu - u[0]) * (v[1] - v[0])) / area;
+                    const double w0 = 1 - w1 - w2;
+                    if (w0 < 0 || w1 < 0 || w2 < 0)
+                        continue;
+                    raise(pu, pv, w0 * z[0] + w1 * z[1] + w2 * z[2]);
+                }
+        }
     };
-    for (size_t t = 0; t < triangles.size(); t += 9)
     {
-        double u[3], v[3], z[3];
-        for (unsigned k = 0; k < 3; ++k)
-        {
-            u[k] = toU(triangles[t + 3 * k]);
-            v[k] = toV(triangles[t + 3 * k + 1]);
-            z[k] = triangles[t + 3 * k + 2];
-        }
-        // Edges: walls and other near-vertical triangles project to lines, so
-        // every edge is sampled at half-texel steps at its own height.
-        for (unsigned k = 0; k < 3; ++k)
-        {
-            const unsigned j = (k + 1) % 3;
-            const double length = std::max(std::abs(u[j] - u[k]), std::abs(v[j] - v[k]));
-            const unsigned steps = unsigned(std::ceil(length * 2)) + 1;
-            for (unsigned s = 0; s <= steps; ++s)
-            {
-                const double f = double(s) / steps;
-                raise(u[k] + (u[j] - u[k]) * f, v[k] + (v[j] - v[k]) * f,
-                      z[k] + (z[j] - z[k]) * f);
-            }
-        }
-        // Interior: the triangle's plane height at each covered texel centre.
-        const double area = (u[1] - u[0]) * (v[2] - v[0]) - (u[2] - u[0]) * (v[1] - v[0]);
-        if (std::abs(area) < 1e-9)
-            continue;
-        const int c0 = std::max(0, int(std::floor(std::min({u[0], u[1], u[2]})))),
-                  c1 = std::min(int(n) - 1, int(std::floor(std::max({u[0], u[1], u[2]})))),
-                  r0 = std::max(0, int(std::floor(std::min({v[0], v[1], v[2]})))),
-                  r1 = std::min(int(n) - 1, int(std::floor(std::max({v[0], v[1], v[2]}))));
-        for (int r = r0; r <= r1; ++r)
-            for (int c = c0; c <= c1; ++c)
-            {
-                const double pu = c + .5, pv = r + .5;
-                const double w1 = ((pu - u[0]) * (v[2] - v[0]) - (u[2] - u[0]) * (pv - v[0])) / area;
-                const double w2 = ((u[1] - u[0]) * (pv - v[0]) - (pu - u[0]) * (v[1] - v[0])) / area;
-                const double w0 = 1 - w1 - w2;
-                if (w0 < 0 || w1 < 0 || w2 < 0)
-                    continue;
-                raise(pu, pv, w0 * z[0] + w1 * z[1] + w2 * z[2]);
-            }
+        std::vector<std::thread> threads;
+        for (unsigned band = 1; band < bands; ++band)
+            threads.emplace_back(raiseBand, int(size_t(n) * band / bands), int(size_t(n) * (band + 1) / bands));
+        raiseBand(0, int(n / bands));
+        for (auto &thread : threads)
+            thread.join();
     }
     // Uncovered texels hold the bottom of the bounds.
     data.pixels.resize(height.size());
