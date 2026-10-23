@@ -81,7 +81,7 @@ An IW7 map reads the game folder's `zone` files: the map's zones, the common zon
 | `--unlinker <exe>` | OpenAssetTools' Unlinker, which reads IW3 zones (IW3 maps only) |
 | `--gsc_tool <exe>` | gsc-tool, which decompiles and compiles the map scripts |
 | `--acts <exe>` | Validates the built zones with Atian tools (loads them through Replay's own readers) |
-| `--metadata <json>` | The map's id, title and description in the map list |
+| `--metadata <json>` | The map's id, title and description in the map list, and an optional `exposureAdjust` (EV, -8 to 8) that the map's colour grading applies |
 | `--stock_cache <dir>` | Keeps the stock assets the maps reference between runs |
 | `--style iw3\|iw8` | `iw3` (default) keeps the source's look; `iw8` shows the map in Replay's lighting units with its probes and sun specular (used for IW7 maps) |
 | `--havok native\|native-check\|exe` | Builds the collision natively (default), checks it with the executable, or bakes it with the executable |

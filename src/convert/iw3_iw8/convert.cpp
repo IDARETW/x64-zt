@@ -107,6 +107,7 @@ struct MapMetadata
     // left the marker drifting (owner test 2026-10-14). In game the console dvar
     // mw120r_minimap_scale overrides it (see iw3compat_minimap).
     float minimapScale{1.0f};
+    float exposureAdjust{};
 };
 
 bool isMapId(const std::string &map)
@@ -215,6 +216,13 @@ bool readMetadata(const std::string &path, MapMetadata &metadata)
                 throw std::runtime_error("minimapScale must be a number from 0.5 to 1.5");
             metadata.minimapScale = scale->get<float>();
         }
+        if (const auto exposure = data.find("exposureAdjust"); exposure != data.end())
+        {
+            if (!exposure->is_number() || !std::isfinite(exposure->get<double>()) ||
+                std::abs(exposure->get<double>()) > 8.0)
+                throw std::runtime_error("exposureAdjust must be a finite number from -8 to 8 EV");
+            metadata.exposureAdjust = exposure->get<float>();
+        }
         metadata.present = true;
     }
     catch (const std::exception &exception)
@@ -271,6 +279,8 @@ bool writeMetadata(const std::string &directory, const MapMetadata &metadata)
     {
         data["ladderRungDistance"] = metadata.ladderRungDistance;
     }
+    if (metadata.exposureAdjust != 0.0f)
+        data["exposureAdjust"] = metadata.exposureAdjust;
     std::ofstream output(std::filesystem::path(directory) / "map.json", std::ios::binary);
     if (!output)
     {
@@ -2514,6 +2524,7 @@ int buildIw3(const Args &args)
     options.map = map;
     options.unlinker = args.unlinkerExecutable;
     options.extraction = args.extraction;
+    options.exposureAdjust = metadata.exposureAdjust;
     options.iw3ModeAssets = args.iw3ModeAssets;
     options.style =
         args.style == "iw8" ? iw3::MapStyle::iw8 : iw3::MapStyle::iw3;
