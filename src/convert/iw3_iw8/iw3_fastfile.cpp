@@ -13,6 +13,7 @@
 
 #include <iw8/common/fs_util.h>
 #include <iw8/common/log.h>
+#include <iw8/common/scratch_files.h>
 
 #include <Windows.h>
 
@@ -10649,6 +10650,8 @@ PreparedMap PrepareFastfile(const ImportOptions &options)
     timing.lap("read models");
     const auto mapDirectory = result.root / "maps" / "mp";
     std::filesystem::create_directories(mapDirectory);
+    // The render assets' material, technique and image files stay in memory until the package reads them.
+    zt::scratch::Hold(mapDirectory);
     const std::vector<std::string> fxMaterials(fxMaterialNames.begin(), fxMaterialNames.end());
     // IW3's light-grid lookups (static models, entity presets below) run its
     // grid-corner sight traces (CM_BoxSightTrace, contents 0x2001), here against

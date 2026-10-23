@@ -6,6 +6,7 @@
 
 #include <iw8/common/fs_util.h>
 #include <iw8/common/log.h>
+#include <iw8/common/scratch_files.h>
 #include <iw8/dump/xsurface_convert.h>
 #include <BC.h>
 
@@ -165,8 +166,18 @@ std::vector<std::uint8_t> ReadBytes(const std::filesystem::path &path)
     return data;
 }
 
+// The package's files stay in memory (zt::scratch); IW8_ZONETOOL_KEEP_SCRATCH writes them to the disk too.
+bool KeepScratchFiles()
+{
+    static const bool keep = GetEnvironmentVariableW(L"IW8_ZONETOOL_KEEP_SCRATCH", nullptr, 0) != 0;
+    return keep;
+}
+
 void WriteBytes(const std::filesystem::path &path, const std::vector<std::uint8_t> &data)
 {
+    if (zt::scratch::Holds(path) && zt::scratch::Put(path, std::make_shared<std::vector<std::uint8_t>>(data)) &&
+        !KeepScratchFiles())
+        return;
     if (!zt::write_file(path.string(), data))
         throw std::runtime_error("cannot write " + path.string());
 }
@@ -368,6 +379,13 @@ Json ReadJson(const std::filesystem::path &path)
 
 void WriteJson(const std::filesystem::path &path, const Json &value)
 {
+    if (zt::scratch::Holds(path))
+    {
+        const auto text = value.dump();
+        zt::scratch::Put(path, std::make_shared<std::vector<std::uint8_t>>(text.begin(), text.end()));
+        if (!KeepScratchFiles())
+            return;
+    }
     // The folder is made only when the file does not open (thousands of materials go into one).
     std::ofstream output(path, std::ios::binary | std::ios::trunc);
     if (!output)

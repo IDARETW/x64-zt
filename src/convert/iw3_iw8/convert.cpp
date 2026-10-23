@@ -3,6 +3,7 @@
 #include <iw8/zone/ff_io.h>
 #include <iw8/common/fs_util.h>
 #include <iw8/common/log.h>
+#include <iw8/common/scratch_files.h>
 #include <iw8/dump/maps_convert.h>
 #include <iw8/dump/dump_source.h>
 #include <iw8/dump/image_dump.h>
@@ -1680,6 +1681,8 @@ int writeMapPackage(const Args &args, const std::string &map, const std::string 
     }
     const auto renderMesh =
         renderInMemory ? replayrender::Load(renderPath, prepared->render) : replayrender::Load(renderPath);
+    // The materials share the held images' bytes; the held definitions are no longer needed.
+    zt::scratch::Release();
     // The definition's tree (millions of nodes) is freed beside the package work; the thread joins on return.
     std::jthread releaseRender;
     if (renderInMemory)

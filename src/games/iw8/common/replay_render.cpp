@@ -1,6 +1,7 @@
 #include <std_include.hpp>
 #include "replay_render.h"
 #include "log.h"
+#include "scratch_files.h"
 #include <algorithm>
 #include <atomic>
 #include <cmath>
@@ -91,6 +92,16 @@ std::vector<Result> loadInParallel(const nlohmann::json &definitions, const Load
         loaded.push_back(std::move(*results[index]));
     }
     return loaded;
+}
+
+// A definition the conversion holds in memory (zt::scratch), or the file.
+nlohmann::json parseFile(std::ifstream &input);
+nlohmann::json readDefinition(const std::filesystem::path &path)
+{
+    if (const auto held = zt::scratch::Get(path))
+        return nlohmann::json::parse(held->begin(), held->end());
+    std::ifstream input(path, std::ios::binary);
+    return parseFile(input);
 }
 
 // Parsed from memory: nlohmann reads a stream one character at a time.
@@ -391,9 +402,11 @@ Image LoadImageDefinition(const std::string &path, const nlohmann::json &source,
         mipHeight = std::max(1u, mipHeight / 2);
     }
     const auto pixelPath = std::filesystem::path(path).parent_path() / pixels;
+    const auto held = zt::scratch::Get(pixelPath);
     std::error_code error;
-    if (length > UINT32_MAX || !std::filesystem::is_regular_file(pixelPath, error) ||
-        std::filesystem::file_size(pixelPath) != length)
+    if (length > UINT32_MAX ||
+        (held ? held->size() != length
+              : !std::filesystem::is_regular_file(pixelPath, error) || std::filesystem::file_size(pixelPath) != length))
         throw std::runtime_error(std::string(blocks ? "block-compressed" : "RGBA8") +
                                  " image length does not match dimensions: " + image.name);
     image.width = static_cast<uint16_t>(width);
@@ -402,6 +415,11 @@ Image LoadImageDefinition(const std::string &path, const nlohmann::json &source,
     image.numElements = static_cast<uint16_t>(numElements);
     image.semantic = static_cast<uint8_t>(semantic);
     image.category = static_cast<uint8_t>(category);
+    if (held)
+    {
+        image.pixels.share(held);
+        return image;
+    }
     // Materials repeat image definitions (world atlas per glass pane, light volume per
     // entity material): read each file once and share the bytes.
     // Each file has its own lock: the materials load on every core, and other files read meanwhile.
@@ -463,8 +481,7 @@ class TechsetFiles
         {
             try
             {
-                std::ifstream input(file, std::ios::binary);
-                promise.set_value(std::make_shared<const nlohmann::json>(parseFile(input)));
+                promise.set_value(std::make_shared<const nlohmann::json>(readDefinition(file)));
             }
             catch (...)
             {
@@ -506,8 +523,7 @@ Material LoadMaterial(const std::string &path, const nlohmann::json &j, TechsetF
         const auto file = j.at("materialDefinition").get<std::string>();
         if (std::filesystem::path(file).filename() != file || file.find("..") != std::string::npos)
             throw std::runtime_error("Material definition must be adjacent to mesh");
-        std::ifstream mf(std::filesystem::path(path).parent_path() / file, std::ios::binary);
-        const auto d = parseFile(mf);
+        const auto d = readDefinition(std::filesystem::path(path).parent_path() / file);
         if (d.at("schema") != 1)
             throw std::runtime_error("Unknown material schema");
         m.materialInfo = unhex(d.at("info"));
@@ -1456,19 +1472,26 @@ Mesh Load(const std::string &path, const nlohmann::json &j)
                                  : channel == 1 ? static_cast<std::size_t>(width) * height * 4
                                                 : blocks * 16;
                 const auto pixelPath = std::filesystem::path(path).parent_path() / file;
+                const auto held = zt::scratch::Get(pixelPath);
                 std::error_code error;
                 if (expectedSize > UINT32_MAX ||
-                    !std::filesystem::is_regular_file(pixelPath, error) ||
-                    std::filesystem::file_size(pixelPath, error) != expectedSize)
+                    (held ? held->size() != expectedSize
+                          : !std::filesystem::is_regular_file(pixelPath, error) ||
+                                std::filesystem::file_size(pixelPath, error) != expectedSize))
                     throw std::runtime_error("Native Replay lightmap image length mismatch");
                 auto &image = lightmap.images[channel];
                 image.format = format;
                 image.width = static_cast<uint16_t>(width);
                 image.height = static_cast<uint16_t>(height);
-                image.pixels.resize(expectedSize);
-                std::ifstream input(pixelPath, std::ios::binary);
-                if (!input.read(reinterpret_cast<char *>(image.pixels.data()), expectedSize))
-                    throw std::runtime_error("Cannot read native Replay lightmap pixels");
+                if (held)
+                    image.pixels.assign(held->begin(), held->end());
+                else
+                {
+                    image.pixels.resize(expectedSize);
+                    std::ifstream input(pixelPath, std::ios::binary);
+                    if (!input.read(reinterpret_cast<char *>(image.pixels.data()), expectedSize))
+                        throw std::runtime_error("Cannot read native Replay lightmap pixels");
+                }
             }
             m.nativeLightmaps.push_back(std::move(lightmap));
         }
