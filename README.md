@@ -87,7 +87,6 @@ An IW7 map reads the game folder's `zone` files: the map's zones, the common zon
 | `--havok native\|native-check\|exe` | Builds the collision natively (default), checks it with the executable, or bakes it with the executable |
 | `--detail_collision 0\|1` | Static models' detail collision (default 1) |
 | `--bc7_images 0\|1` | Block-compresses world and model images (default: IW7 maps do) |
-| `--lit_effects 1` | Draws IW7's lit alpha-blended effects (smoke, dust) through Replay's lit effect technique, lit by the scene (experimental; default 0: they add their colour) |
 | `--navigation 0` | Leaves out the bot navigation |
 | `--search_path <dir>` | Another IW3 folder to read map files from |
 | `--dump 1` | Also dumps the built zones (`dump/<zone>/`), which `buildzone` builds again |

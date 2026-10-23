@@ -190,10 +190,6 @@ struct RenderPlan
 // ("bc7_images", set by IW7 maps) when negative.
 void UseBc7Images(int mode);
 
-// Draws the alpha-blended effect materials that the extraction marks lit (IW7's lit effects) through Replay's lit
-// effect technique, which lights each particle by the scene (--lit_effects 1). Off: they add their colour.
-void UseLitEffects(bool lit);
-
 RenderPlan PrepareRenderAssets(const std::filesystem::path &exportRoot,
                                const nlohmann::json &world,
                                const std::vector<std::string> &surfaceMaterials,
