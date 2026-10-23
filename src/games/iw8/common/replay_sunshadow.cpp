@@ -1091,7 +1091,7 @@ float LowerBound(const float first, const float behind, const float inverseSpan)
 
 Data Bake(const Scene &scene, const std::array<float, 3> &sunDirection,
           const replaybounds::Bounds &receiverBounds, const float sampleSize,
-          const replaybounds::Bounds *focus)
+          const replaybounds::Bounds *focus, const std::size_t budget)
 {
     if (!(sampleSize == 1.0f || sampleSize == 2.0f))
         throw std::runtime_error("compressed sun-shadow sample size must be 1 or 2 (shipped values)");
@@ -1100,6 +1100,7 @@ Data Bake(const Scene &scene, const std::array<float, 3> &sunDirection,
     std::vector<std::vector<std::uint8_t>> tiles;
     std::vector<float> uniformCells;
     std::vector<std::uint8_t> visitedCells;
+    std::atomic<std::size_t> encodedTiles{0};
     // Two-sided: IW3 light baking blocks the sun with every opaque surface.
     // With material culling a ceiling (back-facing the sun) let sunlight into
     // rooms whose roof top IW3 never drew.
@@ -1130,6 +1131,8 @@ Data Bake(const Scene &scene, const std::array<float, 3> &sunDirection,
                 EncodeIntervalTile(pixels, lowerBounds, grid.origin, grid.inverseSpan, uniform);
             uniformCells[cell] = uniform;
             visitedCells[cell] = 1;
+            if (encodedTiles.fetch_add(tiles[cell].size()) + tiles[cell].size() > budget)
+                throw std::runtime_error("compressed sun-shadow bake exceeds the " + std::to_string(budget) + "-byte budget");
         });
     if (!baked)
         return {};

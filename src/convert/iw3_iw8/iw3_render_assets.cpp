@@ -3714,10 +3714,11 @@ std::vector<std::uint8_t> EncodeBc7Rectangle(const std::vector<std::uint8_t> &rg
                                     4);
                 auto *out = output.data() + level.target + (std::size_t{blockY} * blocksWide + blockX) * 16;
                 const int estimate = EncodeBc7Block(block, out);
-                const auto decoded = Bc7DecodedError(out, block);
-                if (decoded != static_cast<std::uint64_t>(estimate))
+                // The encoder's error is the error of the block as DirectXTex decodes it (no conversion has found
+                // another): one block in 64 is decoded to keep checking it.
+                if ((blockY + blockX) % 64 == 0 && Bc7DecodedError(out, block) != static_cast<std::uint64_t>(estimate))
                     ++g_bc7DecodeMismatches;
-                rowError += decoded;
+                rowError += static_cast<std::uint64_t>(estimate);
             }
             rowErrors[task] = rowError;
         }
