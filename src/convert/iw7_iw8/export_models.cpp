@@ -596,13 +596,12 @@ namespace zonetool::convert::iw7_iw8
 				return false;
 			}
 
-			// The pipeline reads at most 128 bones (as IW3 models have). The parent list holds the bones after the roots: a
-			// model of root bones only has none.
-			if (!model.boneNames || !model.baseMat || (model.numBones > model.numRootBones && !model.parentList) || model.numBones > 128)
+			// Replay counts bones in a byte, as IW7 does. The parent list holds the bones after the roots: a model of root
+			// bones only has none.
+			if (!model.boneNames || !model.baseMat || (model.numBones > model.numRootBones && !model.parentList))
 			{
-				return fail(model.numBones > 128 ? std::format("{} bones", model.numBones).data() :
-					std::format("{} bones, {} roots, names {}, base poses {}, parents {}", model.numBones, model.numRootBones,
-						model.boneNames != nullptr, model.baseMat != nullptr, model.parentList != nullptr).data());
+				return fail(std::format("{} bones, {} roots, names {}, base poses {}, parents {}", model.numBones, model.numRootBones,
+					model.boneNames != nullptr, model.baseMat != nullptr, model.parentList != nullptr).data());
 			}
 
 			std::string bones = std::format("NUMBONES {}\n", model.numBones);

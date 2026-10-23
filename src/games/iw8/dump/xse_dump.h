@@ -41,7 +41,7 @@ struct XseSurface
     int32_t deformed = 0; // 0/1 (1 = skinned; vertexInfo/vertsBlend populated)
     int32_t baseTriIndex = 0;
     int32_t baseVertIndex = 0;
-    int32_t partBits[6] = {0, 0, 0, 0, 0, 0};
+    int32_t partBits[8] = {0, 0, 0, 0, 0, 0, 0, 0}; // IW5 files carry 6; Replay's 8 hold 255 bones
 
     // XSurfaceVertexInfo.vertCount[4] (blend tiers). vertsBlend word count =
     //   vc[0] + vc[1]*3 + vc[2]*5 + vc[3]*7   (verified vs real bytes).
@@ -64,8 +64,8 @@ struct XseFile
 {
     bool loaded = false; // true only after a clean, fully-consumed parse
     std::string name;    // ModelSurface.name == "zonetool_<model>_<lod>"
-    int32_t modelSurfPartBits[6] = {0, 0, 0, 0,
-                                    0, 0}; // ModelSurface.partBits[6] (the XModelSurfs-level bits)
+    int32_t modelSurfPartBits[8] = {0, 0, 0, 0,
+                                    0, 0, 0, 0}; // ModelSurface.partBits (the XModelSurfs-level bits; IW5 files carry 6)
     std::vector<XseSurface> surfaces;      // [xSurficiesCount]
     std::string parseError;                // set when loaded==false (for the caller's log)
 };

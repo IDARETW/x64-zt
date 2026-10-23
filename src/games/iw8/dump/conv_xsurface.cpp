@@ -128,10 +128,8 @@ Iw8Surfs convert(const dumpsrc::XseFile &xse)
         throw std::runtime_error("Too many model surfaces for Replay: " + xse.name);
     out.name = xse.name;
 
-    // XModelSurfs.partBits[32] = the ModelSurface-level partBits (IW5 6 ints) widened into the
-    // 8-u32 (32-byte) IW8 field. IW5 carries 6 ints; we copy the first 8 slots' worth (the trailing
-    // 2 are 0).
-    for (int k = 0; k < 6; ++k)
+    // XModelSurfs.partBits[32] = the ModelSurface-level partBits (8 u32; IW5 sources fill 6).
+    for (int k = 0; k < 8; ++k)
         out.partBits[k] = (uint32_t)xse.modelSurfPartBits[k];
 
     out.surfaces.resize(xse.surfaces.size());
@@ -226,7 +224,7 @@ Iw8Surfs convert(const dumpsrc::XseFile &xse)
                 // Replay consumes 2, 4, 6, or 8 words per vertex (RVA 1958750).
                 d.blendVerts.push_back(0);
             }
-        for (int k = 0; k < 6; ++k)
+        for (int k = 0; k < 8; ++k)
             d.partBits[k] = (uint32_t)s.partBits[k];
 
         // per-surface bounds (also the position-pack center/extent).
