@@ -2770,6 +2770,87 @@ iw7_scriptable_hurt( part, amount )
 }
 )gsc";
 
+		constexpr std::string_view out_of_bounds_runtime = R"gsc(
+// IW7's out-of-bounds volumes (the map's OutOfBounds triggers, which its script may name, minus the patches that its
+// script spawns): a living player inside one sees Replay's out-of-bounds countdown and dies when it ends. As in IW7
+// (scripts\mp\spawnlogic), the limit is 3 s, and the time left after leaving a volume holds for the next one until a
+// 3 s cooldown ends. Replay runs its own watcher only in Ground War and Battle Royale.
+iw7_out_of_bounds()
+{
+	level endon( "game_ended" );
+	if ( !isdefined( level.iw7_c7b3 ) )
+		level.iw7_c7b3 = getentarray( "OutOfBounds", "targetname" );
+	for ( ;; )
+	{
+		wait 0.05;
+		if ( !isdefined( level.players ) )
+			continue;
+		foreach ( player in level.players )
+		{
+			if ( isdefined( player ) )
+				player iw7_out_of_bounds_check();
+		}
+	}
+}
+
+iw7_out_of_bounds_check()
+{
+	inside = 0;
+	if ( isdefined( self.health ) && self.health > 0 && self.sessionstate == "playing" )
+	{
+		foreach ( trigger in level.iw7_c7b3 )
+		{
+			if ( isdefined( trigger ) && self istouching( trigger ) )
+			{
+				inside = 1;
+				break;
+			}
+		}
+
+		if ( inside && isdefined( level.outofboundstriggerpatches ) )
+		{
+			foreach ( patch in level.outofboundstriggerpatches )
+			{
+				if ( isdefined( patch ) && self istouching( patch ) )
+				{
+					inside = 0;
+					break;
+				}
+			}
+		}
+	}
+
+	if ( inside && !isdefined( self.iw7_oob_end ) )
+	{
+		left = 3;
+		if ( isdefined( self.iw7_oob_left ) && gettime() < self.iw7_oob_cooldown )
+			left = self.iw7_oob_left;
+		self.iw7_oob_end = gettime() + int( left * 1000 );
+		self setclientomnvar( "ui_out_of_bounds_type", 1 );
+		self setclientomnvar( "ui_out_of_bounds_countdown", self.iw7_oob_end );
+	}
+	else if ( inside && gettime() >= self.iw7_oob_end )
+	{
+		self iw7_out_of_bounds_clear();
+		self.iw7_oob_left = undefined;
+		self dodamage( 100000, self.origin );
+	}
+	else if ( !inside && isdefined( self.iw7_oob_end ) )
+	{
+		self.iw7_oob_left = ( self.iw7_oob_end - gettime() ) / 1000;
+		self.iw7_oob_cooldown = gettime() + 3000;
+		self iw7_out_of_bounds_clear();
+	}
+}
+
+iw7_out_of_bounds_clear()
+{
+	self.iw7_oob_end = undefined;
+	self setclientomnvar( "ui_out_of_bounds_type", 0 );
+	self setclientomnvar( "ui_out_of_bounds_countdown", 0 );
+}
+)gsc";
+
 		// The map's own script (scripts\mp\maps\<map>\<map>) as the IW3 map script that the pipeline translates: the
 		// functions that its main runs, with IW7's utilities replaced by the IW3 ones or their IW3 versions. Calls
 		// of other IW7 scripts drop out in the pipeline. The animations that the script names (add_animation: their
@@ -3756,6 +3837,13 @@ iw7_destructible_think( model, effect, sound, health )
 		{
 			// The setscriptablepartstate of the map script asks the machines first.
 			map_script += "\niw7_scriptable_set( part, state )\n{\n\treturn 0;\n}\n";
+		}
+
+		if (output.out_of_bounds)
+		{
+			start_thread("iw7_out_of_bounds");
+			map_script += std::string(out_of_bounds_runtime);
+			ZONETOOL_INFO("iw7: the map script watches the map's out-of-bounds volumes (OutOfBounds triggers)");
 		}
 
 		// The strings that can name sound aliases: the aliases of the loop sounds and the map script's strings.

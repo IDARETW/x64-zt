@@ -1709,6 +1709,8 @@ namespace zonetool::convert::iw7_iw8
 			output.entity_models.insert(file_name((*match)[1].str()));
 		}
 
+		output.out_of_bounds = entities.find("\"targetname\" \"OutOfBounds\"") != std::string::npos;
+
 		const auto path = output.extracted / (bsp_name(source) + ".ents");
 		std::filesystem::create_directories(path.parent_path());
 		std::ofstream(path, std::ios::binary | std::ios::trunc).write(entities.data(), static_cast<std::streamsize>(entities.size()));
