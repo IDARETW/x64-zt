@@ -351,21 +351,20 @@ namespace zonetool::convert::iw7_iw8
 		return clamped <= 0.0031308f ? clamped * 12.92f : 1.055f * std::pow(clamped, 1.0f / 2.4f) - 0.055f;
 	}
 
-	namespace
+	std::string raw_file(const source_map& source, const std::string& name)
 	{
-		// The text of a raw file that the loaded zones hold, or nothing.
-		std::string raw_file(const source_map& source, const std::string& name)
+		const auto* raw = static_cast<const iw7::RawFile*>(source.find(iw7::ASSET_TYPE_RAWFILE, name));
+		if (!raw || !raw->buffer || raw->len <= 0)
 		{
-			const auto* raw = static_cast<const iw7::RawFile*>(source.find(iw7::ASSET_TYPE_RAWFILE, name));
-			if (!raw || !raw->buffer || raw->len <= 0)
-			{
-				return {};
-			}
-
-			return raw->compressedLen > 0 ? utils::compression::zlib::decompress(std::string(raw->buffer, raw->compressedLen))
-				: std::string(raw->buffer, raw->len);
+			return {};
 		}
 
+		return raw->compressedLen > 0 ? utils::compression::zlib::decompress(std::string(raw->buffer, raw->compressedLen))
+			: std::string(raw->buffer, raw->len);
+	}
+
+	namespace
+	{
 		// The sky's colour scale: IW7's sky shader multiplies the cube map by r_hdrSkyIntensity times r_hdrSkyColorTint
 		// (w_sky PS: cb2[11]), which the map's vision file sets (10 on Scorch, 2.3 on Frontier).
 		vec3 sky_color_scale(const source_map& source)

@@ -340,6 +340,8 @@ namespace zonetool::convert::iw7_iw8
 	void export_sounds(const source_map& source, extraction& output);
 
 	std::string bsp_name(const source_map& source);
+	// The text of a raw file that the loaded zones hold, or nothing.
+	std::string raw_file(const source_map& source, const std::string& name);
 
 	// The primary light that is the sun (light 0 is empty), in IW7 and IW3 worlds.
 	constexpr unsigned int sun_light = 1;
@@ -355,6 +357,7 @@ namespace zonetool::convert::iw7_iw8
 	void export_entities(const source_map& source, extraction& output);
 	void export_collision(const source_map& source, extraction& output);
 	void export_materials(const source_map& source, extraction& output);
+	void export_loadscreen(const source_map& source, const extraction& output);
 	void export_models(const source_map& source, extraction& output);
 	// Writes the animations of the animated scriptables (IW3 XAnim dumps, extracted/xanim/<name>.iw3.json) and the
 	// skeletons of their models (skeleton/: an XMODEL_EXPORT of each LOD), which the pipeline reads for entity models.
