@@ -359,6 +359,16 @@ namespace zonetool::convert::iw7_iw8
 	void export_entities(const source_map& source, extraction& output);
 	void export_collision(const source_map& source, extraction& output);
 	void export_materials(const source_map& source, extraction& output);
+	// IW7's flag vertex wave of a material, which the pipeline's static models apply: the flag techsets' three fixed waves
+	// on a time of the material's phase (classic, MAP_IW7_FLAG_CLASSIC), or the flagext techsets' two waves of the material
+	// (MAP_IW7_FLAG_WAVE); values are flagParms, flagWave0Parms and flagWave1Parms.
+	struct flag_wave_parameters
+	{
+		bool classic{};
+		std::array<float, 12> values{};
+	};
+
+	std::optional<flag_wave_parameters> flag_wave(const iw7::Material* material);
 	void export_loadscreen(const source_map& source, const extraction& output);
 	void export_models(const source_map& source, extraction& output);
 	// Writes the animations of the animated scriptables (IW3 XAnim dumps, extracted/xanim/<name>.iw3.json) and the

@@ -86,6 +86,10 @@ struct SourceMaterial
     std::array<float, 2> detailScale{1, 1};
     // IW3 mc_*_flag_* techsets: the cloth wave vertex shader (MAP_FLAG_WAVE).
     bool flagWave{};
+    // An extraction's IW7 flag cloth and foliage (iw7FlagWave: flagParms and the two waves of IW7's flagext vertex
+    // shader, MAP_IW7_FLAG_WAVE; iw7FlagClassic: the flag shader's three fixed waves, MAP_IW7_FLAG_CLASSIC).
+    std::optional<std::array<float, 12>> iw7FlagWave;
+    bool iw7FlagClassic{};
     // IW3 wc_water (waterMap water_t, exported by OAT): the M x N wave spectrum
     // H0 (re, im pairs) with each wave vector's wTerm, and the water_l_sun
     // constants envMapParms and waterColor.
@@ -2310,6 +2314,18 @@ SourceMaterial ReadMaterial(const std::filesystem::path &root,
     }
     const std::string techset = source.at("techniqueSet").get<std::string>();
     material.flagWave = techset.starts_with("mc_") && techset.find("_flag_") != std::string::npos;
+    if (source.contains("iw7FlagWave"))
+    {
+        const auto &wave = source.at("iw7FlagWave");
+        if (!wave.is_array() || wave.size() != 12)
+            throw std::runtime_error("Invalid IW7 flag wave of material " + name);
+        std::array<float, 12> parameters{};
+        for (std::size_t index = 0; index < parameters.size(); ++index)
+            parameters[index] = wave.at(index).get<float>();
+        material.iw7FlagWave = parameters;
+        material.iw7FlagClassic = source.value("iw7FlagClassic", false);
+        material.flagWave = true;
+    }
     // caulk_shadow (Greenband's gnbr_caulk_shadow, an mc_unlit material) is
     // invisible geometry that only casts sun shadow, as shadowcaster is.
     const bool caulkShadow = name.find("caulk_shadow") != std::string::npos;
@@ -6513,29 +6529,63 @@ RenderPlan PrepareRenderAssets(const std::filesystem::path &exportRoot, const Js
             }
             return found->second;
         };
-        // IW3 flag cloth (mc_*_flag_*): one variant per surface kind whose vertex
-        // shader applies IW3's wave. Static models only: the time is view row 4 .w
-        // of the static-model layout; DObj views use another layout.
-        std::array<Json, 5> flagTechsets{};
-        const auto flagVariant = [&](const unsigned kind) -> const Json & {
-            if (flagTechsets[kind].empty())
+        // Flag cloth: IW3's (mc_*_flag_*: IW3's wave, wave 0) and an extraction's
+        // IW7 flags (IW7's two waves with each material's parameters, waves 1 on):
+        // one variant per surface kind and wave whose vertex shader moves the
+        // surface. Static models only: the time is view row 4 .w of the
+        // static-model layout; DObj views use another layout.
+        std::map<std::string, unsigned> flagWaves{{"#define MAP_FLAG_WAVE 1\n", 0u}};
+        std::map<std::pair<unsigned, unsigned>, Json> flagTechsets;
+        const auto waveOf = [&](const SourceMaterial &source)
+            -> std::pair<unsigned, std::string> {
+            std::string defines = "#define MAP_FLAG_WAVE 1\n";
+            if (source.iw7FlagWave)
+            {
+                const auto &wave = *source.iw7FlagWave;
+                char text[512];
+                if (source.iw7FlagClassic)
+                    std::snprintf(text, sizeof(text),
+                                  "#define MAP_IW7_FLAG_CLASSIC 1\n"
+                                  "#define MAP_IW7_FLAG_PHASE float4(%.9g, %.9g, %.9g, %.9g)\n",
+                                  wave[0], wave[1], wave[2], wave[3]);
+                else
+                    std::snprintf(text, sizeof(text),
+                                  "#define MAP_IW7_FLAG_WAVE 1\n"
+                                  "#define MAP_IW7_FLAG_PHASE float4(%.9g, %.9g, %.9g, %.9g)\n"
+                                  "#define MAP_IW7_FLAG_WAVE0 float4(%.9g, %.9g, %.9g, %.9g)\n"
+                                  "#define MAP_IW7_FLAG_WAVE1 float4(%.9g, %.9g, %.9g, %.9g)\n",
+                                  wave[0], wave[1], wave[2], wave[3], wave[4], wave[5], wave[6],
+                                  wave[7], wave[8], wave[9], wave[10], wave[11]);
+                defines = text;
+            }
+            const auto index =
+                flagWaves.try_emplace(defines, static_cast<unsigned>(flagWaves.size())).first->second;
+            return {index, defines};
+        };
+        const auto flagSuffix = [](const unsigned wave) {
+            return wave ? "_iw7flag" + std::to_string(wave) : std::string("_flag");
+        };
+        const auto flagVariant = [&](const SourceMaterial &source,
+                                     const unsigned kind) -> const Json & {
+            const auto [wave, defines] = waveOf(source);
+            auto &techset = flagTechsets[{kind, wave}];
+            if (techset.empty())
             {
                 Json opaque = BuildTechset(
                     map, columns, plan.atlasSize, geometry, plan.glassEnvironment,
-                    instanceLighting, std::string{}, {}, true,
-                    plan.modelFalloffDefines + "#define MAP_FLAG_WAVE 1\n");
+                    instanceLighting, std::string{}, {}, true, plan.modelFalloffDefines + defines);
                 if (kind == static_cast<unsigned>(SurfaceKind::opaque))
-                    flagTechsets[kind] = std::move(opaque);
+                    techset = std::move(opaque);
                 else
-                    flagTechsets[kind] = std::move(
+                    techset = std::move(
                         CreateVariant(opaque, modelMaterialTemplate, stem, map,
-                                      usage + "_flag" +
+                                      usage + flagSuffix(wave) +
                                           (kind == static_cast<unsigned>(SurfaceKind::cutout)
                                                ? "_foliage"
                                                : "_glass"))
                             .at("techset"));
             }
-            return flagTechsets[kind];
+            return techset;
         };
         // Unlit model materials that emit above 1 (kEmissionFlag; model vertices carry no flag
         // bit 20): one variant per gain and surface kind, whose pixel shader applies the gain.
@@ -6567,7 +6617,7 @@ RenderPlan PrepareRenderAssets(const std::filesystem::path &exportRoot, const Js
             }
             return found->second;
         };
-        std::map<std::tuple<unsigned, unsigned, int, bool, int>, std::pair<std::string, std::string>>
+        std::map<std::tuple<unsigned, unsigned, int, int, int>, std::pair<std::string, std::string>>
             techsetFiles;
         for (const SourceMaterial &source : materials)
         {
@@ -6583,22 +6633,24 @@ RenderPlan PrepareRenderAssets(const std::filesystem::path &exportRoot, const Js
                               source.kind != SurfaceKind::glass;
             if (source.flagWave && !flag && geometry == TechniqueGeometry::staticModel)
                 zt::warn("iw3: flag material %s keeps a static surface", source.name.c_str());
+            const int wave = flag ? static_cast<int>(waveOf(source).first) : -1;
             const bool emissive = (source.flags & kEmissionFlag) != 0 && !detailed && !flag;
             const int emissionIndex =
                 emissive ? static_cast<int>(emissionVariant(source, kind).first) : -1;
             auto [techsetEntry, inserted] = techsetFiles.try_emplace(
                 {kind, source.cullMode | (source.depthBias ? 4u : 0u) | (blend << 3), detailIndex,
-                 flag, emissionIndex});
+                 wave, emissionIndex});
             if (inserted)
             {
                 Json variant = detailed   ? detailVariant(source).second
-                               : flag     ? flagVariant(kind)
+                               : flag     ? flagVariant(source, kind)
                                : emissive ? emissionVariant(source, kind).second
                                           : modelTechsets[kind];
                 const std::string suffix =
                     "_cull" + std::to_string(source.cullMode) + (source.depthBias ? "_bias" : "") +
                     (blend ? "_b" + std::to_string(blend) : "") +
-                    (detailed ? "_d" + std::to_string(detailIndex) : "") + (flag ? "_flag" : "") +
+                    (detailed ? "_d" + std::to_string(detailIndex) : "") +
+                    (flag ? flagSuffix(static_cast<unsigned>(wave)) : "") +
                     (emissive ? "_e" + std::to_string(emissionIndex) : "");
                 variant["name"] = variant.at("name").get<std::string>() + suffix;
                 for (auto &technique : variant.at("techniques"))

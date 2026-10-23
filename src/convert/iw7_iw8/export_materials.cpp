@@ -673,7 +673,7 @@ namespace zonetool::convert::iw7_iw8
 			// biased; an opaque surface of the region keeps none (IW3 maps: Discovery's buried sign).
 			const auto decal_offset = !layer && material && material->cameraRegion == 2 && kind.kind != surface_kind::opaque &&
 				!kind.unlit;
-			return
+			json result =
 			{
 				{"$schema", "http://openassettools.dev/schema/material.v1.json"},
 				{"_game", "iw3"},
@@ -692,6 +692,15 @@ namespace zonetool::convert::iw7_iw8
 				{"textureAtlas", {{"columns", 1}, {"rows", 1}}},
 				{"textures", std::move(textures)},
 			};
+
+			// Flag cloth and foliage move by IW7's flag wave (the pipeline's MAP_IW7_FLAG_* variants of static models).
+			if (const auto wave = layer ? std::nullopt : flag_wave(material))
+			{
+				result["iw7FlagWave"] = wave->values;
+				result["iw7FlagClassic"] = wave->classic;
+			}
+
+			return result;
 		}
 	}
 
@@ -1251,6 +1260,7 @@ namespace zonetool::convert::iw7_iw8
 
 		std::size_t missing{};
 		std::array<std::size_t, 7> kinds{};
+		std::size_t flags{};
 		std::size_t missing_color_maps{};
 		for (const auto& [name, material] : output.materials)
 		{
@@ -1399,6 +1409,7 @@ namespace zonetool::convert::iw7_iw8
 			}
 
 			kinds[static_cast<std::size_t>(kind.kind)]++;
+			flags += flag_wave(material).has_value();
 			missing += material == nullptr;
 			write_json_async(output.extracted / "materials" / (name + ".json"), export_material(material, images, kind, layer,
 				light_unit_scale(source)), 16);
@@ -1458,6 +1469,44 @@ namespace zonetool::convert::iw7_iw8
 
 		ZONETOOL_INFO("iw7: %zu opaque, %zu alpha tested, %zu blended, %zu additive, %zu multiply, %zu sky and %zu distortion materials",
 			kinds[0], kinds[1], kinds[2], kinds[3], kinds[4], kinds[5], kinds[6]);
+		if (flags)
+		{
+			ZONETOOL_INFO("iw7: %zu flag and foliage materials move by IW7's flag wave", flags);
+		}
+	}
+
+	// The flag techsets (*_flag_*: the disassembled vertex shader runs three fixed waves on (time + flagParms.y) *
+	// flagParms.x) and the flagext ones (*_flagext_wv0[wv1]_*: two waves of flagWave0Parms and flagWave1Parms on a phase
+	// of flagParms), both weighted by the vertex alpha.
+	std::optional<flag_wave_parameters> flag_wave(const iw7::Material* material)
+	{
+		if (!material || !material->techniqueSet)
+		{
+			return std::nullopt;
+		}
+
+		std::optional<bool> classic;
+		for (const auto token : std::views::split(asset_name(material->techniqueSet->name), '_'))
+		{
+			const std::string_view name(token.begin(), token.end());
+			classic = name == "flag" ? std::optional(true) : name == "flagext" ? std::optional(false) : classic;
+		}
+
+		const auto phase = material_constant(material, "flagParms");
+		if (!classic || !phase)
+		{
+			return std::nullopt;
+		}
+
+		flag_wave_parameters result{*classic};
+		const std::array<std::optional<std::array<float, 4>>, 3> parts{phase, material_constant(material, "flagWave0Parms"),
+			material_constant(material, "flagWave1Parms")};
+		for (std::size_t part = 0; part < parts.size(); part++)
+		{
+			std::ranges::copy(parts[part].value_or(std::array<float, 4>{}), result.values.begin() + part * 4);
+		}
+
+		return result;
 	}
 
 	// IW7's map art of the map select (in the ui zone; IW7's own loading screen draws the minimap with the spawns): the

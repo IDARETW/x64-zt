@@ -207,6 +207,64 @@ Output main(uint id : SV_VertexID) {
         modelNormal = normalize(modelNormal + 0.025 * (dx * modelTangent + dy * binormal));
     }
 #endif
+#if defined(MAP_IW7_FLAG_CLASSIC) && !defined(MAP_ENTITY)
+    // IW7 flag cloth (techsets *_flag_*: the disassembled IW7 vertex shader, material
+    // constant flagParms): with u = 1 - texcoord, t = (time + phase.y) * phase.x and
+    // the vertex alpha as its weight w, the vertex moves along its normal by w times
+    // three fixed waves (the constants of IW3's flag), and the normal tilts by
+    // 0.025 * w * their slopes along the tangent and binormal.
+    {
+        float2 u = 1 - float2(f16tof32(attributes.z & 0xffff), f16tof32(attributes.z >> 16));
+        uint weightPageStart = drawSurfaces.Load(0x00240000 + drawSurface * 4);
+        uint weightByte = (id & 0xffff) * 4;
+        uint weightPage = colorPages.Load((weightPageStart + (weightByte >> 10)) * 4);
+        float w = (vertexColors.Load((weightPage << 10) | (weightByte & 1023)) >> 24) / 255.0;
+        float t = (replayView[4].w + MAP_IW7_FLAG_PHASE.y) * MAP_IW7_FLAG_PHASE.x;
+        float3 phase = float3(19.577713 * u.x + 5.245832 * u.y + 7.539823 * t,
+                              3.623052 * u.x + 0.253348 * u.y + 5.654867 * t,
+                              8.250306 * u.x - 1.454752 * u.y + 9.424778 * t);
+        float3 s, c;
+        sincos(phase, s, c);
+        float d = (1.7 * s.x + 7.5 * s.y + 3 * s.z) * w;
+        float2 slope = float2(33.282112 * c.x + 27.17289 * c.y + 24.750919 * c.z,
+                              8.917915 * c.x + 1.900113 * c.y - 4.364254 * c.z) * (0.025 * w);
+        float3 binormal = cross(modelNormal, modelTangent) * binormalSign;
+        local += d * modelNormal / modelPlacements[surface.x].scale;
+        modelNormal = normalize(modelNormal + slope.x * modelTangent + slope.y * binormal);
+    }
+#endif
+#if defined(MAP_IW7_FLAG_WAVE) && !defined(MAP_ENTITY)
+    // IW7 flag cloth and foliage (techsets *_flagext_wv0wv1_*, *_flagext_wv0_*: the
+    // disassembled IW7 vertex shader, material constants phase, wave0, wave1): with
+    // u = 1 - texcoord and the vertex alpha as its weight w, the vertex moves along
+    // its normal by (sin(a) * wave0.w + sin(b) * wave1.w) * w game units, where
+    // a = dot(u, wave0.xy) + p * wave0.z and b = dot(u, wave1.xy) + p * wave1.z.
+    // p = (phase.x + phase.w * a triangle wave of the placement origin's coordinate
+    // sum times phase.z) * (time + phase.y). The normal tilts by 0.025 * w * the
+    // waves' slopes along the tangent and binormal.
+    {
+        float2 u = 1 - float2(f16tof32(attributes.z & 0xffff), f16tof32(attributes.z >> 16));
+        uint weightPageStart = drawSurfaces.Load(0x00240000 + drawSurface * 4);
+        uint weightByte = (id & 0xffff) * 4;
+        uint weightPage = colorPages.Load((weightPageStart + (weightByte >> 10)) * 4);
+        float w = (vertexColors.Load((weightPage << 10) | (weightByte & 1023)) >> 24) / 255.0;
+        ModelPlacement wavePlacement = modelPlacements[surface.x];
+        float3 origin = (float3)wavePlacement.origin / 4096.0;
+        float sway = abs(1 - 2 * frac((origin.x + origin.y + origin.z) * MAP_IW7_FLAG_PHASE.z)) * 2 - 1;
+        float p = (sway * MAP_IW7_FLAG_PHASE.w + MAP_IW7_FLAG_PHASE.x) * (replayView[4].w + MAP_IW7_FLAG_PHASE.y);
+        float a = dot(u, MAP_IW7_FLAG_WAVE0.xy) + p * MAP_IW7_FLAG_WAVE0.z;
+        float b = dot(u, MAP_IW7_FLAG_WAVE1.xy) + p * MAP_IW7_FLAG_WAVE1.z;
+        float sa, ca, sb, cb;
+        sincos(a, sa, ca);
+        sincos(b, sb, cb);
+        float d = (sa * MAP_IW7_FLAG_WAVE0.w + sb * MAP_IW7_FLAG_WAVE1.w) * w;
+        float2 slope = (MAP_IW7_FLAG_WAVE0.xy * (MAP_IW7_FLAG_WAVE0.w * ca) +
+                        MAP_IW7_FLAG_WAVE1.xy * (MAP_IW7_FLAG_WAVE1.w * cb)) * (0.025 * w);
+        float3 binormal = cross(modelNormal, modelTangent) * binormalSign;
+        local += d * modelNormal / wavePlacement.scale;
+        modelNormal = normalize(modelNormal + slope.x * modelTangent + slope.y * binormal);
+    }
+#endif
 #ifdef MAP_ENTITY
     uint row = 2 + surface.x * MAP_BONE_ROWS;
     precise float4 relative =
@@ -287,6 +345,10 @@ Output main(uint id : SV_VertexID) {
     // Replay decodes authored model RGB from sRGB; alpha remains linear.
     o.color = float4(lerp(color.rgb / 12.92, pow((color.rgb + .055) / 1.055, 2.4),
                           step(.04045, color.rgb)), color.a);
+#if defined(MAP_IW7_FLAG_WAVE) || defined(MAP_IW7_FLAG_CLASSIC)
+    // An IW7 flag's vertex alpha is its wave weight, not its opacity.
+    o.color.a = 1;
+#endif
     // IW3 zfeather near fade: alpha *= saturate(view depth * featherParms.x);
     // its additive pixel shader scales the colour by that alpha.
     float nearFade = falloff ? falloffTable[falloffRow + 4] : 0;
