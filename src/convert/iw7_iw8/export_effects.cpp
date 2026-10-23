@@ -2190,6 +2190,343 @@ iw7_state( mode, animation, to, time )
 }
 )gsc";
 
+		constexpr std::string_view scriptable_machine_runtime = R"gsc(
+// The runtime of the converted IW7 scriptables (iw7_scriptables), after IW7's scriptable system: each part of a piece
+// runs the events of its state in turn, and a state change stops the events of the part's state before (effects that
+// IW7 kills on exit stop, loop sounds stop). Damage goes to the part of the tag that it hit, else to the first part in a
+// health state; a part that took its state's health moves to its next state, and passes its share of the damage to its
+// parent.
+iw7_mev( t, a, b, c, d )
+{
+	e = spawnstruct();
+	e.t = t;
+	e.a = a;
+	e.b = b;
+	e.c = c;
+	e.d = d;
+	return e;
+}
+
+iw7_mstate( kind, health, mindamage, toparent, events )
+{
+	s = spawnstruct();
+	s.kind = kind;
+	s.health = health;
+	s.mindamage = mindamage;
+	s.toparent = toparent;
+	s.events = events;
+	return s;
+}
+
+iw7_mpart( tag, parent, states )
+{
+	p = spawnstruct();
+	p.tag = tag;
+	p.parent = parent;
+	p.states = states;
+	return p;
+}
+
+iw7_scriptable( name, parts )
+{
+	pieces = getentarray( name, "targetname" );
+	foreach ( piece in pieces )
+		piece thread iw7_scriptable_think( parts );
+}
+
+iw7_scriptable_think( parts )
+{
+	self endon( "death" );
+	self.iw7_parts = parts;
+	self.iw7_states = [];
+	self.iw7_taken = [];
+	self.iw7_attached = [];
+	health = 0;
+	for ( p = 0; p < parts.size; p++ )
+	{
+		self.iw7_states[p] = -1;
+		self.iw7_taken[p] = 0;
+		foreach ( s in parts[p].states )
+		{
+			if ( s.kind == "health" )
+				health = 1;
+		}
+	}
+
+	for ( p = 0; p < parts.size; p++ )
+		self thread iw7_scriptable_enter( p, 0 );
+	if ( health )
+		self thread iw7_scriptable_damage();
+}
+
+iw7_scriptable_enter( part, state )
+{
+	self notify( "iw7_part_" + part );
+	self endon( "iw7_part_" + part );
+	self endon( "death" );
+	if ( part < 0 || part >= self.iw7_parts.size || state < 0 || state >= self.iw7_parts[part].states.size )
+		return;
+	self.iw7_states[part] = state;
+	self.iw7_taken[part] = 0;
+	self iw7_scriptable_run( part, self.iw7_parts[part].states[state].events );
+}
+
+iw7_scriptable_run( part, events )
+{
+	foreach ( e in events )
+	{
+		if ( e.t == "wait" )
+		{
+			if ( e.b > e.a )
+				wait( randomfloatrange( e.a, e.b ) );
+			else if ( e.a > 0 )
+				wait( e.a );
+		}
+		else if ( e.t == "random" )
+		{
+			if ( randomfloat( 1 ) < e.a )
+				self iw7_scriptable_run( part, e.b );
+			else
+				self iw7_scriptable_run( part, e.c );
+		}
+		else if ( e.t == "state" )
+		{
+			self thread iw7_scriptable_enter( e.a, e.b );
+			if ( e.a == part )
+				return;
+		}
+		else if ( e.t == "model" )
+			self iw7_scriptable_model( part, e.a );
+		else if ( e.t == "addmodel" )
+			self iw7_scriptable_attach( e.a, e.b );
+		else if ( e.t == "fx" )
+			self thread iw7_scriptable_fx( part, e.a, e.b, e.c, e.d );
+		else if ( e.t == "sound" )
+			self iw7_scriptable_sound( part, e.a );
+		else if ( e.t == "anim" )
+			self scriptmodelplayanim( e.a );
+		else if ( e.t == "hide" )
+		{
+			if ( isdefined( self gettagorigin( e.a, 1 ) ) )
+			{
+				if ( e.b )
+					self hidepart( e.a );
+				else
+					self showpart( e.a );
+			}
+		}
+		else if ( e.t == "explosion" )
+		{
+			origin = self iw7_scriptable_origin( e.a );
+			if ( isdefined( self.iw7_attacker ) )
+				radiusdamage( origin, e.b, e.c, e.d, self.iw7_attacker, "MOD_EXPLOSIVE" );
+			else
+				radiusdamage( origin, e.b, e.c, e.d );
+		}
+		else if ( e.t == "shake" )
+			earthquake( e.a, e.b, self.origin, e.c );
+		else if ( e.t == "damage" )
+		{
+			if ( e.b > 0 )
+				self iw7_scriptable_hurt( e.a, e.b );
+			if ( e.c > 0 && e.d > 0 )
+				self thread iw7_scriptable_burn( part, e.a, e.c, e.d );
+		}
+		else if ( e.t == "force" )
+			self thread iw7_scriptable_force( e.a );
+		else if ( e.t == "script" )
+			self notify( e.a, e.b );
+	}
+}
+
+iw7_scriptable_origin( tag )
+{
+	if ( tag != "" )
+	{
+		origin = self gettagorigin( tag, 1 );
+		if ( isdefined( origin ) )
+			return origin;
+	}
+
+	return self.origin;
+}
+
+iw7_scriptable_model( part, model )
+{
+	if ( self.iw7_parts[part].parent >= 0 )
+	{
+		self iw7_scriptable_attach( self.iw7_parts[part].tag, model );
+		return;
+	}
+
+	if ( model == "" )
+	{
+		self hide();
+		self notsolid();
+		return;
+	}
+
+	self show();
+	self solid();
+	self setmodel( model );
+}
+
+iw7_scriptable_attach( tag, model )
+{
+	if ( tag == "" || !isdefined( self gettagorigin( tag, 1 ) ) )
+		return;
+	if ( isdefined( self.iw7_attached[tag] ) )
+		self detach( self.iw7_attached[tag], tag );
+	self.iw7_attached[tag] = undefined;
+	if ( model == "" )
+		return;
+	self attach( model, tag );
+	self.iw7_attached[tag] = model;
+}
+
+iw7_scriptable_fx( part, effect, tag, loop, kill )
+{
+	self endon( "iw7_part_" + part );
+	self endon( "death" );
+	if ( !isdefined( level._effect[effect] ) )
+		return;
+	ontag = tag != "" && isdefined( self gettagorigin( tag, 1 ) );
+	if ( ontag && kill )
+		self thread iw7_scriptable_fx_stop( part, effect, tag );
+	for ( ;; )
+	{
+		if ( ontag )
+			playfxontag( level._effect[effect], self, tag );
+		else
+			playfx( level._effect[effect], self.origin );
+		if ( loop <= 0 )
+			return;
+		if ( loop < 0.05 )
+			loop = 0.05;
+		wait( loop );
+	}
+}
+
+iw7_scriptable_fx_stop( part, effect, tag )
+{
+	self endon( "death" );
+	self waittill( "iw7_part_" + part );
+	stopfxontag( level._effect[effect], self, tag );
+}
+
+// The compatibility layer plays each alias as its kind (playsound a one-shot, playloopsound a loop): one of the two plays.
+iw7_scriptable_sound( part, alias )
+{
+	if ( alias == "" )
+		return;
+	self playsound( alias );
+	self playloopsound( alias );
+	self thread iw7_scriptable_sound_stop( part );
+}
+
+iw7_scriptable_sound_stop( part )
+{
+	self endon( "death" );
+	self waittill( "iw7_part_" + part );
+	self stoploopsound();
+}
+
+// Damage over time (IW7's burning barrels and cars) while the part that started it keeps its state.
+iw7_scriptable_burn( part, target, amount, interval )
+{
+	self endon( "iw7_part_" + part );
+	self endon( "death" );
+	if ( interval < 0.05 )
+		interval = 0.05;
+	for ( ;; )
+	{
+		wait( interval );
+		self iw7_scriptable_hurt( target, amount );
+	}
+}
+
+// IW7 pushes its pieces by physics; without a Replay physics body the converted piece falls to the ground under it
+// (a fall), or rocks on its origin (a push).
+iw7_scriptable_force( fall )
+{
+	self endon( "death" );
+	if ( fall )
+	{
+		trace = scripts\engine\trace::_bullet_trace( self.origin + ( 0, 0, 4 ), self.origin - ( 0, 0, 4096 ), 0, self );
+		if ( isdefined( trace ) && isdefined( trace["position"] ) && self.origin[2] - trace["position"][2] > 1 )
+		{
+			time = sqrt( 2 * ( self.origin[2] - trace["position"][2] ) / 800 );
+			self moveto( trace["position"], time, time, 0 );
+		}
+
+		return;
+	}
+
+	for ( i = 0; i < 4; i++ )
+	{
+		angle = 8 - i * 2;
+		if ( i % 2 )
+			angle = 0 - angle;
+		self rotateroll( angle, 0.2, 0.05, 0.05 );
+		wait 0.2;
+	}
+}
+
+iw7_scriptable_damage()
+{
+	self endon( "death" );
+	self setcandamage( 1 );
+	for ( ;; )
+	{
+		self.maxhealth = 1000000;
+		self.health = 1000000;
+		self waittill( "damage", amount, attacker, direction, point, type, modelname, tagname );
+		if ( isdefined( attacker ) )
+			self.iw7_attacker = attacker;
+		part = -1;
+		if ( isdefined( tagname ) && tagname != "" )
+		{
+			for ( p = 0; p < self.iw7_parts.size && part < 0; p++ )
+			{
+				if ( tolower( self.iw7_parts[p].tag ) == tolower( tagname ) && self iw7_scriptable_takes( p ) )
+					part = p;
+			}
+		}
+
+		for ( p = 0; p < self.iw7_parts.size && part < 0; p++ )
+		{
+			if ( self iw7_scriptable_takes( p ) )
+				part = p;
+		}
+
+		if ( part >= 0 )
+			self iw7_scriptable_hurt( part, amount );
+	}
+}
+
+iw7_scriptable_takes( part )
+{
+	if ( part < 0 || part >= self.iw7_parts.size )
+		return 0;
+	state = self.iw7_states[part];
+	return state >= 0 && self.iw7_parts[part].states[state].kind == "health";
+}
+
+iw7_scriptable_hurt( part, amount )
+{
+	if ( !self iw7_scriptable_takes( part ) )
+		return;
+	s = self.iw7_parts[part].states[self.iw7_states[part]];
+	if ( amount < s.mindamage )
+		return;
+	if ( s.toparent > 0 )
+		self iw7_scriptable_hurt( self.iw7_parts[part].parent, amount * s.toparent );
+	self.iw7_taken[part] = self.iw7_taken[part] + amount;
+	if ( self.iw7_taken[part] >= s.health )
+		self thread iw7_scriptable_enter( part, self.iw7_states[part] + 1 );
+}
+)gsc";
+
 		// The map's own script (scripts\mp\maps\<map>\<map>) as the IW3 map script that the pipeline translates: the
 		// functions that its main runs, with IW7's utilities replaced by the IW3 ones or their IW3 versions. Calls
 		// of other IW7 scripts drop out in the pipeline. The animations that the script names (add_animation: their
@@ -2853,6 +3190,199 @@ iw7_destructible_think( model, effect, sound, health )
 }
 )gsc");
 			ZONETOOL_INFO("iw7: the map script breaks %zu kinds of scriptables", output.scriptable_destructibles.size());
+		}
+
+		// The scriptables of the other kinds that take damage (export_entities: several parts, stages, reactions,
+		// explosions, IW7's destructible cars): the map script runs their state machines (iw7_scriptables). Their effects
+		// load by their own names.
+		if (!output.scriptable_machines.empty())
+		{
+			const auto quote = [](const std::string& text)
+			{
+				std::string result = "\"";
+				for (const auto c : text)
+				{
+					if (c == '"' || c == '\\')
+					{
+						result += '\\';
+					}
+
+					result += c;
+				}
+
+				return result + "\"";
+			};
+
+			const auto number = [](const json& value)
+			{
+				if (value.is_boolean())
+				{
+					return std::string(value.get<bool>() ? "1" : "0");
+				}
+
+				if (value.is_number_integer())
+				{
+					return std::to_string(value.get<std::int64_t>());
+				}
+
+				const auto f = value.is_number() ? value.get<double>() : 0.0;
+				return std::isfinite(f) ? std::format("{}", f) : std::string("0");
+			};
+
+			std::string tables;
+			std::string calls;
+			std::size_t machine_index{};
+			for (const auto& [targetname, machine] : output.scriptable_machines)
+			{
+				std::string body;
+				std::size_t temporary{};
+				const std::function<std::string(const json&)> event_list = [&](const json& events) -> std::string
+				{
+					std::string text;
+					std::vector<std::string> added;
+					for (const auto& event : events)
+					{
+						const auto t = event.value("t", std::string{});
+						const auto str = [&](const char* key) { return quote(event.value(key, std::string{})); };
+						const auto num = [&](const char* key) { return number(event.contains(key) ? event.at(key) : json(0)); };
+						std::string args;
+						if (t == "wait")
+						{
+							args = std::format("{}, {}", num("min"), num("max"));
+						}
+						else if (t == "random")
+						{
+							const auto a = event_list(event.at("a"));
+							const auto b = event_list(event.at("b"));
+							args = std::format("{}, {}, {}", num("threshold"), a, b);
+						}
+						else if (t == "state")
+						{
+							if (event.value("part", -1) < 0 || event.value("index", -1) < 0)
+							{
+								continue;
+							}
+
+							args = std::format("{}, {}", num("part"), num("index"));
+						}
+						else if (t == "model")
+						{
+							args = str("model");
+						}
+						else if (t == "addmodel")
+						{
+							args = std::format("{}, {}", str("tag"), str("model"));
+						}
+						else if (t == "fx")
+						{
+							const auto effect = event.value("effect", std::string{});
+							if (effect.empty())
+							{
+								continue;
+							}
+
+							effects.try_emplace(effect, effect);
+							placed.insert(effect);
+							const auto& tags = event.at("tags");
+							args = std::format("{}, {}, {}, {}", quote(effect),
+								quote(tags.empty() ? std::string{} : tags.front().get<std::string>()), num("loop"), num("kill"));
+						}
+						else if (t == "sound")
+						{
+							if (event.value("alias", std::string{}).empty())
+							{
+								continue;
+							}
+
+							args = str("alias");
+						}
+						else if (t == "anim")
+						{
+							if (event.value("anim", std::string{}).empty())
+							{
+								continue;
+							}
+
+							args = str("anim");
+						}
+						else if (t == "hide")
+						{
+							args = std::format("{}, {}", str("tag"), num("hide"));
+						}
+						else if (t == "explosion")
+						{
+							args = std::format("{}, {}, {}, {}", str("tag"), num("radius"), num("inner"), num("outer"));
+						}
+						else if (t == "shake")
+						{
+							args = std::format("{}, {}, {}", num("scale"), num("duration"), num("radius"));
+						}
+						else if (t == "force")
+						{
+							args = num("fall");
+						}
+						else if (t == "damage")
+						{
+							if (event.value("part", -1) < 0)
+							{
+								continue;
+							}
+
+							args = std::format("{}, {}, {}, {}", num("part"), num("amount"), num("dot"), num("interval"));
+						}
+						else if (t == "script")
+						{
+							if (event.value("notify", std::string{}).empty())
+							{
+								continue;
+							}
+
+							args = std::format("{}, {}", str("notify"), num("param"));
+						}
+						else
+						{
+							continue;
+						}
+
+						added.push_back(std::format("iw7_mev( \"{}\", {} )", t, args));
+					}
+
+					const auto name = std::format("e{}", temporary++);
+					text = std::format("\t{} = [];\n", name);
+					for (const auto& event : added)
+					{
+						text += std::format("\t{0}[{0}.size] = {1};\n", name, event);
+					}
+
+					body += text;
+					return name;
+				};
+
+				body += "\tparts = [];\n";
+				for (const auto& part : machine.at("parts"))
+				{
+					body += "\tstates = [];\n";
+					for (const auto& state : part.at("states"))
+					{
+						const auto events = event_list(state.at("events"));
+						body += std::format("\tstates[states.size] = iw7_mstate( {}, {}, {}, {}, {} );\n", quote(state.value("kind", std::string{})),
+							number(state.at("health")), number(state.at("mindamage")), number(state.at("to_parent")), events);
+					}
+
+					body += std::format("\tparts[parts.size] = iw7_mpart( {}, {}, states );\n", quote(part.value("tag", std::string{})),
+						number(part.at("parent")));
+				}
+
+				tables += std::format("\n// {}\niw7_machine_{}()\n{{\n{}\treturn parts;\n}}\n", machine.value("def", std::string{}),
+					machine_index, body);
+				calls += std::format("\tiw7_scriptable( \"{}\", iw7_machine_{}() );\n", targetname, machine_index);
+				machine_index++;
+			}
+
+			start_thread("iw7_scriptables");
+			map_script += "\n// The scriptables of other kinds: IW7's state machines of their parts.\niw7_scriptables()\n{\n" + calls + "}\n" +
+				tables + std::string(scriptable_machine_runtime);
+			ZONETOOL_INFO("iw7: the map script runs the state machines of %zu kinds of scriptables", output.scriptable_machines.size());
 		}
 
 		// The strings that can name sound aliases: the aliases of the loop sounds and the map script's strings.
