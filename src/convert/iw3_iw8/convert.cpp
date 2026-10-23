@@ -1019,6 +1019,19 @@ iw8::MapSun loadLighting(const Args &args, const std::string &dumpDirectory,
     if (lighting.primaryLights.empty())
         lighting.primaryLights.resize(2);
 
+    // Replay allocates min(primaryLightCount, 256) proxy slots (0x186D2E0), but indexes them
+    // by the combined static/dynamic sorted rank (0x186CA43). Null suffix slots keep that
+    // rank in bounds without changing authored light IDs or adding visible lights.
+    constexpr size_t sortedLightLimit = 256;
+    if (lighting.primaryLights.size() < sortedLightLimit &&
+        std::any_of(lighting.primaryLights.begin(), lighting.primaryLights.end(),
+                    [](const auto &light) { return light.type == 2 || light.type == 3; }))
+    {
+        info("local lights: reserve %zu null primary slots for Replay's %zu sorted lights",
+             sortedLightLimit - lighting.primaryLights.size(), sortedLightLimit);
+        lighting.primaryLights.resize(sortedLightLimit);
+    }
+
     lighting.intensity *= args.sunIntensityScale;
     if (!std::isfinite(lighting.intensity))
     {
