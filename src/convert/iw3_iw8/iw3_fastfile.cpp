@@ -10328,8 +10328,10 @@ PreparedMap PrepareFastfile(const ImportOptions &options)
     // entities, and so destroyed-state models can be converted and precached.
     std::set<std::string> scriptStrings;
     std::vector<std::string> scriptModels;
-    // Vehicle parts the compatibility layer launches as physics props.
+    // Vehicle parts the compatibility layer launches as physics props, and the
+    // debris of an extraction's map script with the preset of each.
     std::set<std::string> physicsPartModels;
+    std::map<std::string, std::string> physicsPartPresets;
     {
         std::vector<scripts::Source> scriptSources;
         // The map scripts, and the createfx (effect placement) and createart
@@ -10515,6 +10517,25 @@ PreparedMap PrepareFastfile(const ImportOptions &options)
             generated += "    precachemodel( \"" + model + "\" );\n    level.mw120r_models[\"" +
                          model + "\"] = 1;\n";
         }
+        // The debris that an extraction's map script launches as physics props
+        // (IW7 scriptables), with its preset. A model that an entity or a
+        // script model also uses keeps its keyframed body (one PhysicsAsset).
+        {
+            const auto entityModels = convert::iw3ReplayEntityModels(entities);
+            for (const auto &entry : world.value("physics_models", Json::array()))
+            {
+                const auto model = entry.value("model", std::string{});
+                if (!exportedModel(model) || extraModels.contains(model) ||
+                    std::find(entityModels.begin(), entityModels.end(), model) != entityModels.end())
+                    continue;
+                physicsPartModels.insert(model);
+                physicsPartPresets.emplace(model, entry.value("physics_preset", std::string{}));
+                generated += "    precachemodel( \"" + model + "\" );\n    level.mw120r_models[\"" +
+                             model + "\"] = 1;\n";
+            }
+            if (!physicsPartPresets.empty())
+                zt::info("iw3: %zu debris model(s) launch as physics props", physicsPartPresets.size());
+        }
         {
             // The play space for iw3compat_out_of_bounds: the minimap region
             // (or the world without its sky) plus a margin, from below the
@@ -10599,8 +10620,9 @@ PreparedMap PrepareFastfile(const ImportOptions &options)
         fxModelNames.insert(fx.models.begin(), fx.models.end());
     for (const auto &model : sourceEntityModels.models)
         fxModelNames.erase(model.name);
-    // Launched vehicle parts: rigid models simulated with their IW3 physics
-    // preset (the xmodel's physPreset), under their source names for setmodel.
+    // Launched vehicle parts and debris: rigid models simulated with their
+    // physics preset (an extraction's own, or the xmodel's IW3 physPreset),
+    // under their source names for setmodel.
     SourceStaticModels sourcePartModels;
     for (const auto &name : physicsPartModels)
     {
@@ -10608,10 +10630,13 @@ PreparedMap PrepareFastfile(const ImportOptions &options)
         SourceStaticModel model = ReadSourceModel(exportRoot, name);
         const Json source =
             ReadJson(SafeChild(exportRoot, std::filesystem::path("xmodel") / (name + ".json")));
-        if (const auto preset = source.value("physPreset", std::string{}); !preset.empty())
+        const auto own = physicsPartPresets.find(name);
+        const auto preset = own != physicsPartPresets.end() ? own->second
+                                                            : source.value("physPreset", std::string{});
+        if (!preset.empty())
             model.clutter = ReadPhysicsPreset(exportRoot, preset);
         if (!model.clutter)
-            zt::warn("iw3: vehicle part %s has no readable physics preset; it launches as a static "
+            zt::warn("iw3: physics part %s has no readable physics preset; it launches as a static "
                      "model",
                      name.c_str());
         sourcePartModels.models.push_back(std::move(model));

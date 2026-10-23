@@ -1604,6 +1604,16 @@ namespace zonetool::convert::iw7_iw8
 			}
 		}
 
+		// The debris that flies as physics props (export_effects), with its physics presets.
+		auto physics_models = json::array();
+		for (const auto& [model, body] : output.physics_models)
+		{
+			if (output.exported_models.contains(model))
+			{
+				physics_models.push_back({{"model", model}, {"physics_preset", write_physics_preset(output, model, body)}});
+			}
+		}
+
 		// The animations of the animated scriptables (export_animations), which the map script plays.
 		auto xanims = json::array();
 		for (const auto& [name, anim] : output.xanims)
@@ -1630,6 +1640,7 @@ namespace zonetool::convert::iw7_iw8
 			// Merge world surfaces only within 512-unit cells, so that GPU culling and the light shadow maps can skip them.
 			{"spatial_surfaces", true},
 			{"script_models", script_models},
+			{"physics_models", std::move(physics_models)},
 			{"xanims", std::move(xanims)},
 			{"models", std::move(models)},
 			{"brush_models", std::move(brush_models)},
