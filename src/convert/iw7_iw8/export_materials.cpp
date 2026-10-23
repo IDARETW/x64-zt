@@ -3,6 +3,7 @@
 #include "images.hpp"
 
 #include <execution>
+#include <utils/compression.hpp>
 
 namespace zonetool::convert::iw7_iw8
 {
@@ -453,8 +454,11 @@ namespace zonetool::convert::iw7_iw8
 				top = smaller.GetImage(0, 0, 0);
 			}
 
+			// The box filter takes only sizes of powers of two (the map art of the map select is 16:9): other sizes filter
+			// linearly.
 			DirectX::ScratchImage mips;
-			if (FAILED(DirectX::GenerateMipMaps(*top, DirectX::TEX_FILTER_BOX | DirectX::TEX_FILTER_FORCE_NON_WIC, 0, mips)))
+			if (FAILED(DirectX::GenerateMipMaps(*top, DirectX::TEX_FILTER_BOX | DirectX::TEX_FILTER_FORCE_NON_WIC, 0, mips)) &&
+				FAILED(DirectX::GenerateMipMaps(*top, DirectX::TEX_FILTER_LINEAR | DirectX::TEX_FILTER_FORCE_NON_WIC, 0, mips)))
 			{
 				ZONETOOL_WARNING("iw7: image \"%s\" has no mip chain", image.name);
 				return false;
@@ -1454,5 +1458,50 @@ namespace zonetool::convert::iw7_iw8
 
 		ZONETOOL_INFO("iw7: %zu opaque, %zu alpha tested, %zu blended, %zu additive, %zu multiply, %zu sky and %zu distortion materials",
 			kinds[0], kinds[1], kinds[2], kinds[3], kinds[4], kinds[5], kinds[6]);
+	}
+
+	// IW7's map art of the map select (in the ui zone; IW7's own loading screen draws the minimap with the spawns): the
+	// importer takes images/loadscreen_<map>.dds as the package's preview, which the game shows while the map loads. IW7's
+	// arena file (mp/basemaps.arena, in code_post_gfx) names each map's art: Divide shows Scorch's, Turista2 Mars Oasis'.
+	void export_loadscreen(const source_map& source, const extraction& output)
+	{
+		std::string name;
+		std::string long_name;
+		const auto arena = raw_file(source, "mp/basemaps.arena");
+		static const std::regex block(R"re(\{([^{}]*)\})re");
+		static const std::regex field(R"re((\w+)\s+"([^"]*)")re");
+		for (auto match = std::sregex_iterator(arena.begin(), arena.end(), block); match != std::sregex_iterator() && name.empty(); ++match)
+		{
+			const auto text = (*match)[1].str();
+			std::map<std::string, std::string> values;
+			for (auto entry = std::sregex_iterator(text.begin(), text.end(), field); entry != std::sregex_iterator(); ++entry)
+			{
+				values.emplace((*entry)[1].str(), (*entry)[2].str());
+			}
+
+			if (values["map"] == source.name())
+			{
+				name = values["mapimage"];
+				long_name = values["longname"];
+			}
+		}
+
+		if (name.empty())
+		{
+			name = "image_mp_map_" + source.name().substr(source.name().starts_with("mp_") ? 3 : 0);
+		}
+
+		const auto* image = static_cast<const iw7::GfxImage*>(source.find(iw7::ASSET_TYPE_IMAGE, name));
+		image_file entry{image, image_role::color};
+		entry.opaque = true;
+		if (!image)
+		{
+			ZONETOOL_WARNING("iw7: the ui zone holds no map art %s; the map loads with the default loading screen", name.data());
+		}
+		else if (write_image(entry, output.extracted / "images" / ("loadscreen_" + source.name() + ".dds")))
+		{
+			ZONETOOL_INFO("iw7: exported the map art %s as the loading screen (the arena names the map %s)", image->name,
+				long_name.empty() ? "nothing" : long_name.data());
+		}
 	}
 }
