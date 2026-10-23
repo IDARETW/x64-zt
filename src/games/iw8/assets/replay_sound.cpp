@@ -9,6 +9,8 @@
 #include <cmath>
 #include <cstring>
 #include <exception>
+#include <filesystem>
+#include <fstream>
 #include <limits>
 #include <map>
 #include <memory>
@@ -662,6 +664,89 @@ int EntChannelIndex(const std::string_view name)
     return found != kEntChannels.end() ? static_cast<int>(found - kEntChannels.begin()) : -1;
 }
 
+namespace
+{
+std::filesystem::path g_cacheDirectory;
+constexpr char kCacheVersion[] = "flac-v1";
+
+// The encoding of a sample by its rate, channels and PCM (the name and looping flag do not change its bytes).
+std::string CacheKey(const Sample &sample)
+{
+    std::array<uint8_t, 32> digest{};
+    BCRYPT_HASH_HANDLE hash{};
+    const uint32_t format[2] = {sample.rate, sample.channels};
+    bool ok = BCryptCreateHash(BCRYPT_SHA256_ALG_HANDLE, &hash, nullptr, 0, nullptr, 0, 0) >= 0 &&
+              BCryptHashData(hash, reinterpret_cast<PUCHAR>(const_cast<char *>(kCacheVersion)), sizeof(kCacheVersion),
+                             0) >= 0 &&
+              BCryptHashData(hash, reinterpret_cast<PUCHAR>(const_cast<uint32_t *>(format)), sizeof(format), 0) >= 0 &&
+              BCryptHashData(hash, reinterpret_cast<PUCHAR>(const_cast<int16_t *>(sample.pcm.data())),
+                             static_cast<ULONG>(sample.pcm.size() * sizeof(int16_t)), 0) >= 0 &&
+              BCryptFinishHash(hash, digest.data(), static_cast<ULONG>(digest.size()), 0) >= 0;
+    if (hash)
+        BCryptDestroyHash(hash);
+    if (!ok)
+        throw std::runtime_error("cannot digest sound " + sample.name);
+    static constexpr char hex[] = "0123456789abcdef";
+    std::string key;
+    for (size_t index = 0; index < 16; ++index)
+        key += {hex[digest[index] >> 4], hex[digest[index] & 15]};
+    return key;
+}
+
+// A cache entry: u64 frame count, the u32 frame offsets, then the frame bytes. The cache is an optimisation: an
+// entry that does not read encodes again, and a full disk keeps converting.
+EncodedSample EncodeCached(const Sample &sample)
+{
+    if (g_cacheDirectory.empty() || sample.pcm.size() * sizeof(int16_t) > std::numeric_limits<ULONG>::max())
+        return EncodeFlac(sample);
+    const auto path = g_cacheDirectory / ("flac_" + CacheKey(sample) + ".bin");
+    if (std::ifstream input{path, std::ios::binary})
+    {
+        const std::vector<uint8_t> bytes((std::istreambuf_iterator<char>(input)), {});
+        uint64_t count = 0;
+        if (bytes.size() >= sizeof(count))
+            std::memcpy(&count, bytes.data(), sizeof(count));
+        if (bytes.size() >= sizeof(count) && count <= (bytes.size() - sizeof(count)) / sizeof(uint32_t))
+        {
+            EncodedSample encoded;
+            encoded.frameOffsets.resize(static_cast<size_t>(count));
+            std::memcpy(encoded.frameOffsets.data(), bytes.data() + sizeof(count), count * sizeof(uint32_t));
+            encoded.frames.assign(bytes.begin() + sizeof(count) + count * sizeof(uint32_t), bytes.end());
+            return encoded;
+        }
+    }
+    EncodedSample encoded = EncodeFlac(sample);
+    std::error_code error;
+    std::filesystem::create_directories(g_cacheDirectory, error);
+    auto partial = path;
+    partial += "." + std::to_string(GetCurrentProcessId()) + "." + std::to_string(GetCurrentThreadId()) + ".partial";
+    {
+        std::ofstream output(partial, std::ios::binary | std::ios::trunc);
+        const uint64_t count = encoded.frameOffsets.size();
+        output.write(reinterpret_cast<const char *>(&count), sizeof(count));
+        output.write(reinterpret_cast<const char *>(encoded.frameOffsets.data()),
+                     static_cast<std::streamsize>(count * sizeof(uint32_t)));
+        output.write(reinterpret_cast<const char *>(encoded.frames.data()),
+                     static_cast<std::streamsize>(encoded.frames.size()));
+        if (!output)
+        {
+            output.close();
+            std::filesystem::remove(partial, error);
+            return encoded;
+        }
+    }
+    std::filesystem::rename(partial, path, error);
+    if (error)
+        std::filesystem::remove(partial, error);
+    return encoded;
+}
+} // namespace
+
+void SetCacheDirectory(std::filesystem::path directory)
+{
+    g_cacheDirectory = std::move(directory);
+}
+
 std::vector<uint8_t> BuildSab(const std::vector<Sample> &samples, const std::string &zone)
 {
     struct Item
@@ -686,7 +771,7 @@ std::vector<uint8_t> BuildSab(const std::vector<Sample> &samples, const std::str
             {
                 try
                 {
-                    encodings[index] = EncodeFlac(samples[index]);
+                    encodings[index] = EncodeCached(samples[index]);
                 }
                 catch (...)
                 {

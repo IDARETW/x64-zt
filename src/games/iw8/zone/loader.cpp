@@ -238,16 +238,28 @@ namespace zonetool::iw8
 		return zone;
 	}
 
+	namespace
+	{
+		std::vector<std::int32_t> list_types(const loaded_zone& zone)
+		{
+			std::vector<std::int32_t> types;
+			types.reserve(zone.list.size());
+			for (const auto& entry : zone.list)
+			{
+				types.push_back(entry.type);
+			}
+
+			return types;
+		}
+	}
+
 	std::vector<std::int32_t> zone_list_types(const std::filesystem::path& path)
 	{
-		const auto zone = load_zone(path);
-		std::vector<std::int32_t> types;
-		types.reserve(zone->list.size());
-		for (const auto& entry : zone->list)
-		{
-			types.push_back(entry.type);
-		}
+		return list_types(*load_zone(path));
+	}
 
-		return types;
+	std::vector<std::int32_t> zone_list_types(const std::filesystem::path& path, std::string data)
+	{
+		return list_types(*load_zone(path.stem().string(), xfile::read(path, std::move(data), definition().format)));
 	}
 }

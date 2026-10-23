@@ -65,4 +65,6 @@ namespace zonetool::iw8
 	std::unique_ptr<loaded_zone> load_zone(const std::string& name, xfile::fastfile file, const load_options& options = {});
 	// Loads a zone file and reads each asset. Returns the type of each entry of the asset list.
 	std::vector<std::int32_t> zone_list_types(const std::filesystem::path& path);
+	// The same from the zone file's data, already read.
+	std::vector<std::int32_t> zone_list_types(const std::filesystem::path& path, std::string data);
 }

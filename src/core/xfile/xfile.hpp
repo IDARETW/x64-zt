@@ -49,6 +49,8 @@ namespace zonetool::xfile
 	};
 
 	fastfile read(const std::filesystem::path& path, const format& format);
+	// The same from the file's data, already read.
+	fastfile read(const std::filesystem::path& path, std::string data, const format& format);
 	// Writes an unsigned zone with the payload stored (not compressed).
 	void write(const std::filesystem::path& path, const format& format, const fastfile& file);
 

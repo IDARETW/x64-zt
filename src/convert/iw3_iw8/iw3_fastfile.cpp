@@ -4264,6 +4264,20 @@ void BuildPreparedStaticModels(const SourceStaticModels &source, const RenderPla
     staticModels.models.reserve(source.models.size());
     std::vector<std::optional<std::size_t>> collisionModelIndices(source.models.size());
     std::size_t visualCollisionModels = 0;
+    // The Havok bakes (most of the time here) run after the models, on every core with native Havok (the Replay
+    // executable's baker belongs to this thread).
+    struct PhysicsBake
+    {
+        std::size_t xmodel;
+        std::string name;
+        iw8::havok::PhysicsMesh mesh;
+        std::uint32_t useCategory, simulationCategory;
+        bool keyframed;
+        const iw8::havok::ClutterBody *clutter;
+        bool detail;
+        std::optional<std::size_t> collisionModel;
+    };
+    std::vector<PhysicsBake> bakes;
     for (std::size_t modelIndex = 0; modelIndex < source.models.size(); ++modelIndex)
     {
         const SourceStaticModel &sourceModel = source.models[modelIndex];
@@ -4776,18 +4790,17 @@ void BuildPreparedStaticModels(const SourceStaticModels &source, const RenderPla
             }
             else
             {
-                prepared.physicsAsset =
-                    collisionModels ? iw8::havok::BakePhysicsAsset(assetName, physics, 0, 0)
-                    : clutter       ? iw8::havok::BakePhysicsAsset(assetName, physics, 3,
-                                                                   sourceModel.clutter->debris ? 5 : 4,
-                                                                   false, &*sourceModel.clutter)
-                              : iw8::havok::BakePhysicsAsset(assetName, physics, 3, 1, scriptModelPhysics);
-                prepared.model.physicsAssetName = assetName;
                 // Shipped static models carry a detail collision beside their PhysicsAsset: bullets and melee trace
                 // the detail world, which holds only models that have one (a converted model without it was hit
                 // from far away and passed from near).
-                if (collisionModels && iw8::havok::UsesDetailCollision())
-                    prepared.detailCollision = iw8::havok::BakeXModelDetailCollision(assetName, physics);
+                bakes.push_back({xmodels.size(), assetName, std::move(physics), collisionModels ? 0u : 3u,
+                                 collisionModels ? 0u
+                                 : clutter       ? (sourceModel.clutter->debris ? 5u : 4u)
+                                                 : 1u,
+                                 !collisionModels && !clutter && scriptModelPhysics,
+                                 clutter ? &*sourceModel.clutter : nullptr,
+                                 collisionModels && iw8::havok::UsesDetailCollision(), std::nullopt});
+                prepared.model.physicsAssetName = assetName;
             }
         }
         if (collisionModels && !prepared.model.physicsAssetName.empty())
@@ -4795,13 +4808,37 @@ void BuildPreparedStaticModels(const SourceStaticModels &source, const RenderPla
             iw8::staticmodelcollision::Model collisionModel;
             collisionModel.name = assetName;
             collisionModel.physicsAssetName = prepared.model.physicsAssetName;
-            collisionModel.detailCollisionName = prepared.detailCollision.name;
             collisionModelIndices[modelIndex] = collisionModels->size();
+            bakes.back().collisionModel = collisionModels->size();
             collisionModels->push_back(std::move(collisionModel));
         }
         staticModel.bounds = bounds;
         xmodels.push_back(std::move(prepared));
         staticModels.models.push_back(std::move(staticModel));
+    }
+    using Baked = std::pair<iw8::havok::PhysicsAsset, iw8::havok::XModelDetailCollision>;
+    const auto bake = [&](const std::size_t index) {
+        const PhysicsBake &job = bakes[index];
+        Baked baked{iw8::havok::BakePhysicsAsset(job.name, job.mesh, job.useCategory, job.simulationCategory,
+                                                 job.keyframed, job.clutter),
+                    {}};
+        if (job.detail)
+            baked.second = iw8::havok::BakeXModelDetailCollision(job.name, job.mesh);
+        return baked;
+    };
+    std::vector<Baked> baked;
+    if (iw8::havok::UsesNativeHavok())
+        baked = ParallelMap<Baked>(bakes.size(), bake);
+    else
+        for (std::size_t index = 0; index < bakes.size(); ++index)
+            baked.push_back(bake(index));
+    for (std::size_t index = 0; index < bakes.size(); ++index)
+    {
+        auto &prepared = xmodels[bakes[index].xmodel];
+        prepared.physicsAsset = std::move(baked[index].first);
+        prepared.detailCollision = std::move(baked[index].second);
+        if (bakes[index].collisionModel)
+            collisionModels->at(*bakes[index].collisionModel).detailCollisionName = prepared.detailCollision.name;
     }
 
     staticModels.instances.reserve(source.instances.size());
@@ -9254,7 +9291,17 @@ PreparedMap::~PreparedMap()
     }
     if (!scratch.empty())
     {
+        // Thousands of files (each material and technique set): they go on every core, then the folders.
         std::error_code error;
+        std::vector<std::filesystem::path> files;
+        for (std::filesystem::recursive_directory_iterator entry(scratch, error), end; !error && entry != end;
+             entry.increment(error))
+            if (entry->is_regular_file(error))
+                files.push_back(entry->path());
+        ParallelMap<bool>(files.size(), [&](const std::size_t index) {
+            std::error_code removeError;
+            return std::filesystem::remove(files[index], removeError);
+        });
         std::filesystem::remove_all(scratch, error);
     }
 }
@@ -9871,20 +9918,22 @@ PreparedMap PrepareFastfile(const ImportOptions &options)
             RunUnlinker(unlinker, options, exportRoot, commonFastfile, true);
         }
     }
-    if (const auto presets = MissingPhysicsPresets(exportRoot); !cached && !presets.empty())
+    auto missingPresets = MissingPhysicsPresets(exportRoot);
+    if (!cached && !missingPresets.empty())
     {
         const auto commonFastfile = FindIw3CommonFastfile(options);
         if (!commonFastfile.empty())
         {
-            zt::info("iw3: resolving %zu shared physics preset(s) from %s", presets.size(),
+            zt::info("iw3: resolving %zu shared physics preset(s) from %s", missingPresets.size(),
                      commonFastfile.string().c_str());
             RunUnlinker(unlinker, options, exportRoot, commonFastfile, true);
+            missingPresets = MissingPhysicsPresets(exportRoot);
         }
     }
-    if (const auto presets = MissingPhysicsPresets(exportRoot); !presets.empty())
+    if (!missingPresets.empty())
         zt::warn("iw3: %zu physics preset(s) have no exported payload; their models stay "
                  "static: %s",
-                 presets.size(), JoinNames(presets).c_str());
+                 missingPresets.size(), JoinNames(missingPresets).c_str());
     const auto unresolvedFx = MissingDeclaredFx(exportRoot);
     if (!unresolvedFx.empty())
         zt::warn("iw3: %zu declared source FX graph(s) have no exported payload; first: %s",

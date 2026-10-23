@@ -61,6 +61,7 @@ namespace zonetool::iw8
 	const game& definition();
 	xfile::fastfile rewrite_fastfile(const std::string& name, xfile::fastfile file);
 	std::vector<std::int32_t> zone_list_types(const std::filesystem::path& path);
+	std::vector<std::int32_t> zone_list_types(const std::filesystem::path& path, std::string data);
 }
 
 namespace
@@ -349,8 +350,8 @@ struct ZoneValidation
 
 bool validateZoneFile(const std::string &path, ZoneValidation *details = nullptr)
 {
-    std::vector<uint8_t> bytes;
-    if (!read_file(path, bytes) || bytes.size() < 0x8C + sizeof(IW8_XAssetList))
+    std::string bytes;
+    if (!read_file_str(path, bytes) || bytes.size() < 0x8C + sizeof(IW8_XAssetList))
     {
         err("validate: cannot read a complete IW8 header from %s", path.c_str());
         return false;
@@ -415,7 +416,7 @@ bool validateZoneFile(const std::string &path, ZoneValidation *details = nullptr
         std::vector<std::int32_t> types;
         try
         {
-            types = zonetool::iw8::zone_list_types(path);
+            types = zonetool::iw8::zone_list_types(path, std::move(bytes));
         }
         catch (const std::exception &e)
         {
@@ -2577,6 +2578,7 @@ int buildIw3(const Args &args)
                                      : std::filesystem::path(args.outputDirectory);
     options.scratchRoot = std::filesystem::absolute(requestedOutput).parent_path();
     replaysunshadow::SetCacheDirectory(options.scratchRoot / ".iw3-render-cache");
+    iw8::sound::SetCacheDirectory(options.scratchRoot / ".iw3-render-cache");
     for (const std::string &path : args.searchPaths)
     {
         options.searchPaths.emplace_back(path);

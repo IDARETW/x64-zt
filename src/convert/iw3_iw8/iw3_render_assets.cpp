@@ -1433,41 +1433,64 @@ void BleedCutoutColor(Image &level, const unsigned visibleAlpha = 128)
         knownCount += known[index] = level.rgba[index * 4 + 3] >= visibleAlpha;
     if (knownCount == 0 || knownCount == known.size())
         return;
-    for (unsigned pass = 0; pass < 32; ++pass)
+    // Up to 32 passes: each unknown texel next to a known one (wrapping) takes their mean colour, read from the
+    // pass before. Only texels next to the previous pass's new ones can join, so a pass visits those alone.
+    const auto neighbours = [&](const std::size_t index, const auto &visit) {
+        const std::size_t x = index % width, y = index / width;
+        for (int dy = -1; dy <= 1; ++dy)
+            for (int dx = -1; dx <= 1; ++dx)
+                visit(((y + height + dy) % height) * width + (x + width + dx) % width);
+    };
+    std::vector<std::uint32_t> candidates;
+    for (std::size_t index = 0; index < known.size(); ++index)
+        if (!known[index])
+        {
+            bool touches = false;
+            neighbours(index, [&](const std::size_t neighbour) { touches = touches || known[neighbour]; });
+            if (touches)
+                candidates.push_back(static_cast<std::uint32_t>(index));
+        }
+    std::vector<std::uint32_t> queued(known.size(), 0); // the pass (plus one) a texel is a candidate in
+    struct Update
     {
-        std::vector<std::uint8_t> next = known;
-        std::vector<std::uint8_t> rgba = level.rgba;
-        bool grew = false;
-        for (std::size_t y = 0; y < height; ++y)
-            for (std::size_t x = 0; x < width; ++x)
-            {
-                const std::size_t index = y * width + x;
-                if (known[index])
-                    continue;
-                unsigned sum[3]{}, count = 0;
-                for (int dy = -1; dy <= 1; ++dy)
-                    for (int dx = -1; dx <= 1; ++dx)
-                    {
-                        const std::size_t nx = (x + width + dx) % width;
-                        const std::size_t ny = (y + height + dy) % height;
-                        const std::size_t neighbour = ny * width + nx;
-                        if (!known[neighbour])
-                            continue;
-                        for (unsigned channel = 0; channel < 3; ++channel)
-                            sum[channel] += level.rgba[neighbour * 4 + channel];
-                        ++count;
-                    }
-                if (!count)
-                    continue;
+        std::uint32_t index;
+        std::array<std::uint8_t, 3> rgb;
+    };
+    std::vector<Update> updates;
+    for (unsigned pass = 0; pass < 32 && !candidates.empty(); ++pass)
+    {
+        updates.clear();
+        for (const std::uint32_t index : candidates)
+        {
+            unsigned sum[3]{}, count = 0;
+            neighbours(index, [&](const std::size_t neighbour) {
+                if (!known[neighbour])
+                    return;
                 for (unsigned channel = 0; channel < 3; ++channel)
-                    rgba[index * 4 + channel] = static_cast<std::uint8_t>(sum[channel] / count);
-                next[index] = 1;
-                grew = true;
-            }
-        level.rgba = std::move(rgba);
-        known = std::move(next);
-        if (!grew)
-            break;
+                    sum[channel] += level.rgba[neighbour * 4 + channel];
+                ++count;
+            });
+            if (!count)
+                continue;
+            Update update{index, {}};
+            for (unsigned channel = 0; channel < 3; ++channel)
+                update.rgb[channel] = static_cast<std::uint8_t>(sum[channel] / count);
+            updates.push_back(update);
+        }
+        for (const Update &update : updates)
+        {
+            std::copy(update.rgb.begin(), update.rgb.end(), level.rgba.begin() + std::size_t{update.index} * 4);
+            known[update.index] = 1;
+        }
+        candidates.clear();
+        for (const Update &update : updates)
+            neighbours(update.index, [&](const std::size_t neighbour) {
+                if (!known[neighbour] && queued[neighbour] != pass + 1)
+                {
+                    queued[neighbour] = pass + 1;
+                    candidates.push_back(static_cast<std::uint32_t>(neighbour));
+                }
+            });
     }
 }
 
