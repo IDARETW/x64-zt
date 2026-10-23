@@ -1473,11 +1473,23 @@ namespace zonetool::convert::iw7_iw8
 		std::size_t grid_lit{};
 		// IW7's own lighting of its static models (STATIC_MODEL_FLAG_*_LIGHTING), for the log.
 		std::array<std::size_t, 4> iw7_lighting{};
+		// The others by their flags (without the scale): how many, with lightmap or vertex lighting data, and one model.
+		std::map<unsigned, std::tuple<std::size_t, std::size_t, std::size_t, std::string>> other_lighting;
 		for (auto i = 0u; i < dpvs.smodelCount; i++)
 		{
-			const auto flags = dpvs.smodelDrawInsts[i].flags;
-			iw7_lighting[(flags & iw7::STATIC_MODEL_FLAG_LIGHTGRID_LIGHTING) ? 0 : (flags & iw7::STATIC_MODEL_FLAG_VERTEXLIT_LIGHTING) ? 1
-				: (flags & iw7::STATIC_MODEL_FLAG_LIGHTMAP_LIGHTING) ? 2 : 3]++;
+			const auto& draw = dpvs.smodelDrawInsts[i];
+			const auto flags = draw.flags;
+			const auto lighting = (flags & iw7::STATIC_MODEL_FLAG_LIGHTGRID_LIGHTING) ? 0 : (flags & iw7::STATIC_MODEL_FLAG_VERTEXLIT_LIGHTING) ? 1
+				: (flags & iw7::STATIC_MODEL_FLAG_LIGHTMAP_LIGHTING) ? 2 : 3;
+			iw7_lighting[lighting]++;
+			if (lighting == 3)
+			{
+				auto& [count, lightmapped, vertex_lit, example] = other_lighting[flags & ~iw7::STATIC_MODEL_FLAG_SCALE_MODIFIER_MASK];
+				count++;
+				lightmapped += draw.modelLightmapInfo.lightmapIndex >= 0 && draw.modelLightmapInfo.scale[0] != 0.0f;
+				vertex_lit += draw.vertexLightingInfo.numLightingValues != 0;
+				example = example.empty() && draw.model ? std::string(asset_name(draw.model->name)) : example;
+			}
 			auto model = export_static_model(source, world, i, probes, floors, grid, output);
 			grid_lit += model.contains("lighting_colors");
 			if (output.exported_models.contains(model.at("model").get<std::string>()))
@@ -1572,13 +1584,23 @@ namespace zonetool::convert::iw7_iw8
 		const auto sun_index = 1u;
 		const auto light_count = com_world ? com_world->primaryLightCount : 0u;
 
-		// The broken models of the scriptables that break, which only the map script sets.
+		// The broken models of the scriptables that break, which only the map script sets, and the models that the map
+		// script sets by name.
 		auto script_models = json::array();
+		std::set<std::string> listed;
 		for (const auto& [targetname, kind] : output.scriptable_destructibles)
 		{
-			if (!kind.dead_model.empty())
+			if (!kind.dead_model.empty() && listed.insert(file_name(kind.dead_model)).second)
 			{
 				script_models.push_back(file_name(kind.dead_model));
+			}
+		}
+
+		for (const auto& model : output.script_models)
+		{
+			if (listed.insert(model).second)
+			{
+				script_models.push_back(model);
 			}
 		}
 
@@ -1651,5 +1673,11 @@ namespace zonetool::convert::iw7_iw8
 		ZONETOOL_INFO("iw7: %zu of %u static models take IW7's light grid at their centre", grid_lit, dpvs.smodelCount);
 		ZONETOOL_INFO("iw7: IW7 lights its static models by the light grid %zu, vertex lighting %zu, lightmaps %zu, other %zu",
 			iw7_lighting[0], iw7_lighting[1], iw7_lighting[2], iw7_lighting[3]);
+		for (const auto& [flags, entry] : other_lighting)
+		{
+			const auto& [count, lightmapped, vertex_lit, example] = entry;
+			ZONETOOL_INFO("iw7: other static model lighting: flags %#x x%zu (lightmap data %zu, vertex data %zu), e.g. %s", flags, count,
+				lightmapped, vertex_lit, example.data());
+		}
 	}
 }

@@ -1098,6 +1098,19 @@ namespace zonetool::convert::iw7_iw8
 			output.scriptable_animations.size(), output.moving_models.size(), skeletons.size(), output.xanims.size());
 	}
 
+	std::optional<float> export_script_animation(const source_map& source, const std::string& name, extraction& output)
+	{
+		const auto* anim = static_cast<const iw7::XAnimParts*>(source.find(iw7::ASSET_TYPE_XANIMPARTS, name));
+		if (!anim || (!output.xanims.contains(name) && !write_xanim(*anim, output.extracted / "xanim" / (name + ".iw3.json"))))
+		{
+			return std::nullopt;
+		}
+
+		output.xanims.emplace(name, anim);
+		// The length as the scriptable states take it: the frames over the frame rate.
+		return anim->framerate > 0.0f ? anim->numframes / anim->framerate : 0.0f;
+	}
+
 	// The skeletons of the other exported models with bones: entity models keep their tags (effects on tags, destructible
 	// parts, gettagorigin) as IW7 has them.
 	void export_skeletons(const source_map& source, extraction& output)
