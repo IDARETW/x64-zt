@@ -35,13 +35,23 @@ bool read_file(const std::string &path, std::vector<uint8_t> &out)
 
 bool read_file_str(const std::string &path, std::string &out)
 {
-    std::vector<uint8_t> b;
-    if (!read_file(path, b))
+    // Read straight into the string: a zone of gigabytes is not zeroed first, nor copied from a byte vector.
+    out.clear();
+    FILE *f = std::fopen(path.c_str(), "rb");
+    if (!f)
+        return false;
+    _fseeki64(f, 0, SEEK_END);
+    const auto n = _ftelli64(f);
+    _fseeki64(f, 0, SEEK_SET);
+    if (n < 0)
     {
-        out.clear();
+        std::fclose(f);
         return false;
     }
-    out.assign(reinterpret_cast<const char *>(b.data()), b.size());
+    out.resize_and_overwrite(static_cast<size_t>(n), [f](char *data, const size_t size) {
+        return size ? std::fread(data, 1, size, f) : size_t{0};
+    });
+    std::fclose(f);
     return true;
 }
 
