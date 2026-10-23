@@ -136,6 +136,7 @@ std::string CommonFunction(const std::string &file, const std::string &name)
     static constexpr std::pair<std::string_view, std::string_view> kReplayFunctions[] = {
         {"scripts/mp/damage", "playerkilled_internal"}, // IW7 Neon's VR deaths wrap the player-killed callback
         {"scripts/mp/weapons", "deleteexplosive"},      // IW7 Rivet's rocket blast clears the explosives under it
+        {"scripts/engine/trace", "_bullet_trace"},      // IW7 bullettrace (Fallen, Geneva, Renaissance and Riot kegs)
     };
     for (const auto &[script, function] : kReplayFunctions)
         if (file == script && name == function)

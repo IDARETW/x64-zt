@@ -2012,15 +2012,6 @@ iw7_trigger_off_proc()
 	self notify( "trigger_off" );
 }
 
-iw7_bullettrace( start, end, characters, ignore, a, b )
-{
-	trace = [];
-	trace[ "fraction" ] = 1;
-	trace[ "position" ] = end;
-	trace[ "surfacetype" ] = "none";
-	return trace;
-}
-
 iw7_exploder( name )
 {
 	name = "" + name;
@@ -2357,10 +2348,12 @@ iw7_state( mode, animation, to, time )
 					return "iw7_exploder( " + arguments.front() + " )";
 				});
 
-				// IW7's bullettrace has no Replay builtin: the trace hits nothing (iw7_bullettrace).
+				// Replay has no bullettrace builtin; its scripts trace bullets with scripts\engine\trace::_bullet_trace( start,
+				// end, characters, ignore ), whose further arguments add contents that IW7's do not name.
 				body = rewrite_calls(body, "bullettrace", [](const std::vector<std::string>& arguments)
 				{
-					return "iw7_bullettrace( " + join(arguments) + " )";
+					return R"(scripts\engine\trace::_bullet_trace( )" +
+						join(std::vector<std::string>(arguments.begin(), arguments.begin() + std::min<std::size_t>(arguments.size(), 4))) + " )";
 				});
 
 				// IW7 method 0x8113, which gsc-tool does not name, returns the corpse of a player that has died (inferred from
