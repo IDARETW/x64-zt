@@ -17,6 +17,14 @@ namespace zonetool::convert::iw7_iw8
 	// The extraction that the IW3 map pipeline reads (the layout of its OAT Unlinker export): extracted/maps/mp/ holds
 	// the world, collision and common world exports with the entities, the other folders hold materials, images and
 	// models. Every writer adds to `extracted`.
+	// The physics body of IW7 clutter: its mass in kg and the IW7 surface type that covers most of it, which names its
+	// physics material.
+	struct clutter_body
+	{
+		float mass{};
+		std::string surface;
+	};
+
 	struct extraction
 	{
 		std::filesystem::path root;
@@ -96,6 +104,24 @@ namespace zonetool::convert::iw7_iw8
 		// The models that the map script sets by name (precachemodel, setmodel: Rivet's drones, the collision patches that
 		// the scripts spawn), which convert as script models.
 		std::set<std::string> script_models;
+		// The models that the entity string places (script models), which keep the keyframed body of script models.
+		std::set<std::string> entity_models;
+		// IW7's clutter (the dynamic entities that its physics simulates: Frontier's fire extinguishers, Depot's buckets,
+		// cups and tools): Replay clutter of the model at its initial pose (a quaternion x, y, z, w), which the collision
+		// export writes as the map's dynamic models with their physics presets.
+		struct dynamic_model
+		{
+			std::string model;
+			std::array<float, 4> quaternion{};
+			std::array<float, 3> origin{};
+			clutter_body body;
+		};
+		std::vector<dynamic_model> dynamic_models;
+		// The models that the state machines throw as debris (SpawnDynent), with their bodies (none for a model whose hull
+		// spans no volume), and those of them that fly as physics props: thrown only, never set, attached or placed (a
+		// model has one physics asset, and the others keep the keyframed body of script models).
+		std::map<std::string, std::optional<clutter_body>> debris_models;
+		std::map<std::string, clutter_body> physics_models;
 
 		// The placed scriptables whose first state plays an animation (the ops table's solar system, the floor panels'
 		// closed pose): their instances are script models of a targetname that the map script animates. The animations
@@ -243,6 +269,11 @@ namespace zonetool::convert::iw7_iw8
 
 	// The surfaces of the first level of detail of a model.
 	std::vector<mesh_surface> model_mesh(const source_map& source, const iw7::XModel& model);
+	// The physics body of a model as IW7 clutter, which IW7 keeps nowhere; nothing for a model whose hull spans no volume.
+	std::optional<clutter_body> clutter_physics(const source_map& source, const iw7::XModel& model);
+	// Writes the physics preset of a clutter model (extracted/physic/iw7_<model>, IW3's "PHYSIC\mass\...\sndAliasPrefix\..."
+	// text, which the pipeline reads) and returns its name.
+	std::string write_physics_preset(const extraction& output, const std::string& model, const clutter_body& body);
 	// Whether the loaded zones or the stream files hold the surfaces of every LOD of a model, as export_models needs.
 	bool model_has_surfaces(const source_map& source, const iw7::XModel* model);
 

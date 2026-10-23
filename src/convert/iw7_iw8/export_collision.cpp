@@ -761,6 +761,32 @@ namespace zonetool::convert::iw7_iw8
 			"and %zu of %zu glass panes; %zu glass pieces outside the panes, %zu flat pieces and %zu pieces without a tag left out",
 			solid_models, model_triangles, triggers.count, glass_hulls, panes.size(), glass_pieces, writer.flat, untagged);
 
+		// IW7's clutter as the pipeline's dynamic models, each model with its physics preset.
+		auto dynamic_models = json::array();
+		std::map<std::string, std::string> presets;
+		for (const auto& clutter : output.dynamic_models)
+		{
+			if (!output.exported_models.contains(clutter.model))
+			{
+				continue;
+			}
+
+			auto preset = presets.find(clutter.model);
+			if (preset == presets.end())
+			{
+				preset = presets.emplace(clutter.model, write_physics_preset(output, clutter.model, clutter.body)).first;
+			}
+
+			dynamic_models.push_back({{"type", 1}, {"model", clutter.model}, {"physics_preset", preset->second},
+				{"quaternion", vector_json(clutter.quaternion.data(), 4)}, {"origin", vector_json(clutter.origin.data(), 3)}});
+		}
+
+		if (!output.dynamic_models.empty())
+		{
+			ZONETOOL_INFO("iw7: %zu of %zu clutter props (%zu models) simulate as Replay clutter", dynamic_models.size(),
+				output.dynamic_models.size(), presets.size());
+		}
+
 		write_json(output.extracted / (bsp_name(source) + ".replay-collision.json"),
 		{
 			{"schema", 1},
@@ -771,8 +797,8 @@ namespace zonetool::convert::iw7_iw8
 			{"submodel_count", submodels.size()},
 			{"submodels", std::move(submodels)},
 			{"static_models", std::move(static_models)},
-			{"dynamic_model_count", 0},
-			{"dynamic_models", json::array()},
+			{"dynamic_model_count", dynamic_models.size()},
+			{"dynamic_models", std::move(dynamic_models)},
 			{"dynamic_brush_count", 0},
 			{"dynamic_brushes", json::array()},
 			{"vertices", std::move(writer.vertices)},

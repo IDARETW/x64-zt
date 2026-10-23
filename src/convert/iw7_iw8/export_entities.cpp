@@ -1,7 +1,10 @@
 #include <std_include.hpp>
 #include "export.hpp"
 
+#include <bit>
+
 #include <iw8/dump/maps_convert.h>
+#include <iw8/havok/objects.hpp>
 #include <xsk/gsc/engine/iw7.hpp>
 
 namespace xsk::gsc::iw7
@@ -74,6 +77,14 @@ namespace zonetool::convert::iw7_iw8
 
 			return result;
 		}
+
+		// The surface types of IW7 materials by their bit in surfaceTypeBits (up to metal_thin; the robot types and the user
+		// terrains do not make clutter).
+		constexpr std::array<std::string_view, 43> surface_names{"bark", "brick", "carpet_solid", "cloth", "concrete_dry", "dirt",
+			"flesh", "foliage_dry", "glass_pane", "grass_short", "gravel", "ice_solid", "metal_thick", "metal_grate", "mud", "paper",
+			"plaster", "rock", "sand", "snow", "water", "wood_solid", "asphalt_dry", "ceramic", "plastic", "rubber", "fruit",
+			"metal_painted", "riotshield", "slush", "asphalt_wet", "carpet_wood", "carpet_metal", "concrete_wet", "cushion", "default",
+			"foliage_wet", "glass_broken", "glass_solid", "glass_vehicle", "grass_tall", "ice_thin", "metal_thin"};
 
 		// IW7 light types with their shadow-map variants, as the IW3 types (1 directional, 2 spot, 3 omni).
 		int light_type(const iw7::GfxLightType type)
@@ -512,7 +523,8 @@ namespace zonetool::convert::iw7_iw8
 				}
 			};
 
-			const auto model_name = [&](iw7::XModel* header) -> std::string
+			// A model that a state sets or attaches is a script model; one that it throws is debris.
+			const auto model_name = [&](iw7::XModel* header, const bool debris = false) -> std::string
 			{
 				const auto* model = header ? source.resolve(iw7::ASSET_TYPE_XMODEL, header) : nullptr;
 				if (!model)
@@ -520,14 +532,21 @@ namespace zonetool::convert::iw7_iw8
 					return {};
 				}
 
-				const std::string name(asset_name(iw7::get_asset_name(iw7::ASSET_TYPE_XMODEL, model)));
+				const auto name = file_name(asset_name(iw7::get_asset_name(iw7::ASSET_TYPE_XMODEL, model)));
 				if (convert)
 				{
-					output.models.try_emplace(file_name(name), model);
-					output.script_models.insert(file_name(name));
+					output.models.try_emplace(name, model);
+					if (!debris)
+					{
+						output.script_models.insert(name);
+					}
+					else if (!output.debris_models.contains(name))
+					{
+						output.debris_models.emplace(name, clutter_physics(source, *model));
+					}
 				}
 
-				return file_name(name);
+				return name;
 			};
 
 			const std::function<json(const iw7::ScriptableEventDef*, unsigned, int)> events = [&](const iw7::ScriptableEventDef* list,
@@ -629,7 +648,7 @@ namespace zonetool::convert::iw7_iw8
 					case iw7::Scriptable_EventType_SpawnDynent:
 					{
 						const auto& dynent = data.spawnDynent;
-						const auto model = model_name(dynent.model);
+						const auto model = model_name(dynent.model, true);
 						if (!model.empty())
 						{
 							result.push_back({{"t", "debris"}, {"model", model}, {"tag", dynent.tagName ? dynent.tagName : ""},
@@ -1239,6 +1258,62 @@ namespace zonetool::convert::iw7_iw8
 		}
 	}
 
+	// IW7 keeps no mass for its clutter (a model's physics LOD holds only its collision mesh): the mass of the convex hull of
+	// its first LOD at the density that gives Replay's own clutter its mass (stock buckets: 1.5 kg in 0.054 cubic Havok
+	// units, 28 kg per cubic Havok unit, a Havok unit being 32 game units), within Replay's clutter range.
+	std::optional<clutter_body> clutter_physics(const source_map& source, const iw7::XModel& model)
+	{
+		std::vector<std::array<float, 3>> points;
+		std::map<std::string_view, double> areas;
+		for (const auto& surface : model_mesh(source, model))
+		{
+			for (const auto& vertex : surface.vertices)
+			{
+				points.push_back(vertex.position);
+			}
+
+			const auto bits = surface.material ? static_cast<std::uint64_t>(surface.material->info.surfaceTypeBits) : 0;
+			const auto type = bits ? static_cast<std::size_t>(std::countr_zero(bits)) : surface_names.size();
+			for (const auto& triangle : surface.triangles)
+			{
+				if (type >= surface_names.size() || std::ranges::any_of(triangle, [&](const auto i) { return i >= surface.vertices.size(); }))
+				{
+					continue;
+				}
+
+				const auto& a = surface.vertices[triangle[0]].position;
+				const auto& b = surface.vertices[triangle[1]].position;
+				const auto& c = surface.vertices[triangle[2]].position;
+				const std::array<double, 3> u{b[0] - a[0], b[1] - a[1], b[2] - a[2]};
+				const std::array<double, 3> v{c[0] - a[0], c[1] - a[1], c[2] - a[2]};
+				areas[surface_names[type]] += std::hypot(u[1] * v[2] - u[2] * v[1], u[2] * v[0] - u[0] * v[2], u[0] * v[1] - u[1] * v[0]);
+			}
+		}
+
+		float volume{};
+		try
+		{
+			volume = iw8::havok::convex_mass_properties(iw8::havok::convex_hull(points, 0.0f), 1.0f).volume;
+		}
+		catch (const std::exception&)
+		{
+			return std::nullopt;
+		}
+
+		constexpr auto density = 28.0f / (32.0f * 32.0f * 32.0f);
+		const auto surface = std::ranges::max_element(areas, {}, [](const auto& entry) { return entry.second; });
+		return clutter_body{std::clamp(volume * density, 0.1f, 200.0f), surface != areas.end() ? std::string(surface->first) : "default"};
+	}
+
+	std::string write_physics_preset(const extraction& output, const std::string& model, const clutter_body& body)
+	{
+		const auto name = "iw7_" + model;
+		std::filesystem::create_directories(output.extracted / "physic");
+		std::ofstream(output.extracted / "physic" / name, std::ios::binary | std::ios::trunc)
+			<< std::format("PHYSIC\\mass\\{:.3f}\\sndAliasPrefix\\{}", body.mass, body.surface);
+		return name;
+	}
+
 	void export_entities(const source_map& source, extraction& output)
 	{
 		const auto map_ents = source.map_ents();
@@ -1494,10 +1569,13 @@ namespace zonetool::convert::iw7_iw8
 			output.scriptable_placements.size());
 
 		// IW7's dynamic entities (MapEnts dynEntDefList: clutter props with physics, hinged doors, linked props) drew
-		// nothing (Frontier: 77 fire extinguishers, serving trays, bottles and other props of its rooms and tables). Each one
-		// that spawns with a model places an IW3 script model at its initial pose (quaternion and origin). Those of
-		// scriptable instances (DYNENT_TYPE_SCRIPTABLEINST) are the scriptables placed above; brush ones keep their brush
-		// model's static collision.
+		// nothing (Frontier: 77 fire extinguishers, serving trays, bottles and other props of its rooms and tables). The
+		// clutter that IW7 simulates becomes Replay clutter (dynamic_models), which bullets and explosions push as in IW7;
+		// each other one that spawns with a model places an IW3 script model at its initial pose (quaternion and origin).
+		// Those of scriptable instances (DYNENT_TYPE_SCRIPTABLEINST) are the scriptables placed above; brush ones keep
+		// their brush model's static collision. The hinge entries without a model or pose are empty slots.
+		std::map<const iw7::XModel*, std::optional<clutter_body>> physics;
+		std::size_t dynents_clutter{};
 		std::size_t dynents_placed{};
 		std::size_t dynents_brushes{};
 		std::size_t dynents_scriptable{};
@@ -1550,17 +1628,32 @@ namespace zonetool::convert::iw7_iw8
 				}
 
 				const auto x = pose.quat[0] / length, y = pose.quat[1] / length, z = pose.quat[2] / length, w = pose.quat[3] / length;
+				const auto name = asset_name(iw7::get_asset_name(iw7::ASSET_TYPE_XMODEL, model));
+				output.models.try_emplace(file_name(name), model);
+				const auto clutter = (dynent.type == iw7::DYNENT_TYPE_CLUTTER || dynent.type == iw7::DYNENT_TYPE_CLUTTER_NOSHADOW) &&
+					!dynent.noPhysics;
+				if (clutter && !physics.contains(model))
+				{
+					physics.emplace(model, clutter_physics(source, *model));
+				}
+
+				if (const auto& body = clutter ? physics.at(model) : std::nullopt)
+				{
+					output.dynamic_models.push_back({file_name(name), {static_cast<float>(x), static_cast<float>(y), static_cast<float>(z),
+						static_cast<float>(w)}, {pose.origin[0], pose.origin[1], pose.origin[2]}, *body});
+					dynents_clutter++;
+					continue;
+				}
+
 				const axes rotation{{{1 - 2 * (y * y + z * z), 2 * (x * y + w * z), 2 * (x * z - w * y)},
 					{2 * (x * y - w * z), 1 - 2 * (x * x + z * z), 2 * (y * z + w * x)},
 					{2 * (x * z + w * y), 2 * (y * z - w * x), 1 - 2 * (x * x + y * y)}}};
 				const auto angles = axes_to_angles(rotation);
-				const auto name = asset_name(iw7::get_asset_name(iw7::ASSET_TYPE_XMODEL, model));
 				entities += "{\n\"classname\" \"script_model\"\n";
 				entities += std::format("\"model\" \"{}\"\n", name);
 				entities += std::format("\"origin\" \"{}\"\n", vector_text(pose.origin));
 				entities += std::format("\"angles\" \"{}\"\n", vector_text(angles.data()));
 				entities += "}\n";
-				output.models.try_emplace(file_name(name), model);
 				dynents_placed++;
 			}
 		}
@@ -1571,10 +1664,10 @@ namespace zonetool::convert::iw7_iw8
 			dynent_kinds += std::format("{}type {}: {}", dynent_kinds.empty() ? "" : ", ", type, count);
 		}
 
-		ZONETOOL_INFO("iw7: placed %zu of %u dynamic entities (%u and %u in the lists; %s) as script models; %zu of scriptables placed above, "
-			"%zu brush ones keep their static collision, %zu without a model or pose left out (%zu read as not spawning)",
-			dynents_placed, map_ents->dynEntCountTotal, map_ents->dynEntCount[0], map_ents->dynEntCount[1], dynent_kinds.data(), dynents_scriptable,
-			dynents_brushes, dynents_left, dynents_unflagged);
+		ZONETOOL_INFO("iw7: of %u dynamic entities (%u and %u in the lists; %s), %zu are clutter and %zu script models; %zu of scriptables "
+			"placed above, %zu brush ones keep their static collision, %zu without a model or pose left out (%zu read as not spawning)",
+			map_ents->dynEntCountTotal, map_ents->dynEntCount[0], map_ents->dynEntCount[1], dynent_kinds.data(), dynents_clutter, dynents_placed,
+			dynents_scriptable, dynents_brushes, dynents_left, dynents_unflagged);
 
 		// IW7's breakable glass: an IW3 glass entity for each pane.
 		const auto panes = glass_panes(source);
@@ -1584,6 +1677,11 @@ namespace zonetool::convert::iw7_iw8
 		}
 
 		entities = with_converting_classes(entities);
+		for (auto match = std::sregex_iterator(entities.begin(), entities.end(), model_key); match != std::sregex_iterator(); ++match)
+		{
+			output.entity_models.insert(file_name((*match)[1].str()));
+		}
+
 		const auto path = output.extracted / (bsp_name(source) + ".ents");
 		std::filesystem::create_directories(path.parent_path());
 		std::ofstream(path, std::ios::binary | std::ios::trunc).write(entities.data(), static_cast<std::streamsize>(entities.size()));

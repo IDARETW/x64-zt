@@ -2114,8 +2114,12 @@ PhysicsAsset BakePhysicsAssetNative(std::string name, const Mesh &mesh, const Ph
     std::uint32_t shape = 0;
     if (clutter)
     {
-        // Simulated bodies are convex hulls with mass properties, as shipped clutter.
-        const auto polytope = hk::convex_hull(vertices, 0.0f);
+        // Simulated bodies are convex hulls with mass properties, as shipped clutter. A hull of more vertices than a
+        // convex shape keeps (the first LOD of an IW7 model) welds its own vertices, from a quarter of a game unit up,
+        // until it fits.
+        auto polytope = hk::convex_hull(vertices, 0.0f);
+        for (float weld = 0.25f / 32.0f; polytope.vertices.size() > 256; weld *= 2.0f)
+            polytope = hk::convex_hull(polytope.vertices, weld);
         shape = hk::add_convex_polytope_shape(builder, polytope, {.user_data = shapeUserData});
         hk::add_mass_properties(builder, shape, hk::convex_mass_properties(polytope, clutter->mass));
     }

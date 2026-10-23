@@ -2609,8 +2609,10 @@ iw7_scriptable_force( fall )
 	}
 }
 
-// IW7's debris (SpawnDynent: dynamic entities that a breaking piece throws) as script models on their launch arc, as
-// the converted IW3 vehicle parts fly without a physics body (iw3compat_physics_prop keeps at most 25).
+// IW7's debris (SpawnDynent: dynamic entities that a breaking piece throws): a physics prop of the model, launched at the
+// velocity times its mass (Replay's physicslaunchserver gives an impulse a speed of impulse / mass). Debris without a
+// physics body (a model that a state also sets), or a launch that creates none, flies its launch arc as a script model.
+// iw3compat_physics_prop keeps at most 25 props.
 iw7_scriptable_debris( model, tag, velocity, world )
 {
 	origin = self iw7_scriptable_origin( tag );
@@ -2618,7 +2620,32 @@ iw7_scriptable_debris( model, tag, velocity, world )
 	if ( !world )
 		velocity = anglestoforward( angles ) * velocity[0] - anglestoright( angles ) * velocity[1] + anglestoup( angles ) * velocity[2];
 	prop = iw3compat_physics_prop( origin, angles, model );
-	prop thread iw7_scriptable_fly( origin, velocity );
+	if ( isdefined( level.iw7_debris_mass[model] ) )
+	{
+		prop thread iw7_scriptable_launch( origin, velocity * level.iw7_debris_mass[model] );
+		prop thread iw7_scriptable_unlaunched( origin, velocity );
+	}
+	else
+		prop thread iw7_scriptable_fly( origin, velocity );
+}
+
+// Its own thread: a launch that cannot create the body raises a script error, which ends only this thread.
+iw7_scriptable_launch( point, impulse )
+{
+	self endon( "death" );
+	self physicslaunchserver( point, impulse );
+}
+
+// A prop that has not moved a quarter second after its launch got no body: a fresh script model flies the arc instead.
+iw7_scriptable_unlaunched( start, velocity )
+{
+	self endon( "death" );
+	wait 0.25;
+	if ( distancesquared( self.origin, start ) > 1 )
+		return;
+	prop = iw3compat_physics_prop( start, self.angles, self.model );
+	self delete();
+	prop thread iw7_scriptable_fly( start, velocity );
 }
 
 iw7_scriptable_fly( start, velocity )
@@ -3470,6 +3497,30 @@ iw7_destructible_think( model, effect, sound, health )
 			std::string calls;
 			std::size_t machine_index{};
 			std::map<std::string, std::size_t> machine_indices;
+			// The debris that flies as physics props (thrown only, never set, attached or placed), with its mass, which turns
+			// its launch velocity into the impulse of physicslaunchserver. The other debris flies as script models.
+			calls += "\tlevel.iw7_debris_mass = [];\n";
+			for (const auto& [model, body] : output.debris_models)
+			{
+				const auto broken = std::ranges::any_of(output.scriptable_destructibles, [&](const auto& entry)
+				{
+					return !entry.second.dead_model.empty() && file_name(entry.second.dead_model) == model;
+				});
+				if (body && !broken && !output.script_models.contains(model) && !output.entity_models.contains(model))
+				{
+					output.physics_models.emplace(model, *body);
+					calls += std::format("\tlevel.iw7_debris_mass[{}] = {};\n", quote(model), number(body->mass));
+				}
+			}
+
+			for (const auto& [model, body] : output.debris_models)
+			{
+				if (!output.physics_models.contains(model))
+				{
+					output.script_models.insert(model);
+				}
+			}
+
 			for (const auto& [targetname, machine] : output.scriptable_machines)
 			{
 				std::string body;
