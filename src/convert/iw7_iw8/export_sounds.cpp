@@ -3,6 +3,8 @@
 
 #include <io/game_files.hpp>
 
+#include <execution>
+
 namespace zonetool::convert::iw7_iw8
 {
 	namespace
@@ -793,6 +795,104 @@ namespace zonetool::convert::iw7_iw8
 			global_banks.emplace_back(zone + ".sabl");
 			global_banks.emplace_back(zone + ".sabs");
 		}
+
+		// The bank entry of an alias's sound: its own zone's banks, then the other loaded zones' and the global ones.
+		const auto sound_entry = [&](const iw7::SndAlias& alias, const std::pair<asset_bank, asset_bank>& files)
+			-> std::pair<const asset_bank*, const iw7::SndAssetBankEntry*>
+		{
+			const auto& [loaded, streamed] = files;
+			const auto* source_bank = loaded.find(alias.assetId) ? &loaded : streamed.find(alias.assetId) ? &streamed : nullptr;
+			for (auto global = global_banks.begin(); !source_bank && global != global_banks.end(); ++global)
+			{
+				if (global->find(alias.assetId))
+				{
+					source_bank = &*global;
+				}
+			}
+
+			return {source_bank, source_bank ? source_bank->find(alias.assetId) : nullptr};
+		};
+
+		// The sounds the aliases can reach (as if every one converts, each variation adds its secondary alias) decode
+		// and write on every core first; the walk below takes their results and reports a sound that does not convert.
+		struct decoded_sound
+		{
+			bool written{};
+			std::string error;
+		};
+		std::unordered_map<std::uint32_t, decoded_sound> decoded;
+		{
+			struct sound_job
+			{
+				std::uint32_t id;
+				const iw7::SndAssetBankEntry* entry;
+				std::optional<std::vector<std::uint8_t>> bytes;
+				decoded_sound result;
+			};
+			std::vector<sound_job> jobs;
+			std::vector<std::string> reach(pending);
+			std::set<std::string> reached;
+			std::set<std::uint32_t> queued;
+			while (!reach.empty())
+			{
+				const auto name = reach.back();
+				reach.pop_back();
+				const auto found = lists.find(name);
+				if (found == lists.end() || !reached.insert(name).second)
+				{
+					continue;
+				}
+
+				const auto& files = files_of(*found->second.second);
+				for (auto v = 0; v < found->second.first->count; v++)
+				{
+					const auto& alias = found->second.first->head[v];
+					const auto [source_bank, entry] = sound_entry(alias, files);
+					if (!entry || entry->channelCount < 1 || entry->channelCount > 2)
+					{
+						continue;
+					}
+
+					if (queued.insert(alias.assetId).second)
+					{
+						jobs.push_back({alias.assetId, entry, source_bank->read(*entry), {}});
+					}
+
+					if (alias.secondaryAliasName && *alias.secondaryAliasName)
+					{
+						reach.push_back(std::string(asset_name(alias.secondaryAliasName)));
+					}
+				}
+			}
+
+			std::filesystem::create_directories(output.extracted / "sound" / "iw7");
+			std::for_each(std::execution::par, jobs.begin(), jobs.end(), [&](sound_job& job)
+			{
+				// An exception that leaves a parallel algorithm terminates the tool.
+				try
+				{
+					if (!job.bytes)
+					{
+						throw std::runtime_error("cannot be read");
+					}
+
+					const auto pcm = decode_flac(job.bytes->data(), job.bytes->size(), job.entry->channelCount, job.entry->frameCount);
+					job.bytes.reset();
+					write_wav(output.extracted / "sound" / std::format("iw7/{:08x}.wav", job.id), pcm,
+						static_cast<unsigned>(job.entry->frameRate), job.entry->channelCount);
+					job.result.written = true;
+				}
+				catch (const std::exception& e)
+				{
+					job.result.error = e.what();
+				}
+			});
+			for (auto& job : jobs)
+			{
+				decoded.emplace(job.id, std::move(job.result));
+			}
+		}
+
 		while (!pending.empty())
 		{
 			const auto name = pending.back();
@@ -828,16 +928,25 @@ namespace zonetool::convert::iw7_iw8
 				const auto file = std::format("iw7/{:08x}.wav", alias.assetId);
 				if (written.insert(alias.assetId).second)
 				{
-					const auto bytes = source_bank->read(*entry);
 					try
 					{
-						if (!bytes)
+						if (const auto done = decoded.find(alias.assetId); done == decoded.end())
 						{
-							throw std::runtime_error("cannot be read");
+							// Every reachable sound decoded above; this keeps the walk whole regardless.
+							const auto bytes = source_bank->read(*entry);
+							if (!bytes)
+							{
+								throw std::runtime_error("cannot be read");
+							}
+
+							const auto pcm = decode_flac(bytes->data(), bytes->size(), entry->channelCount, entry->frameCount);
+							write_wav(output.extracted / "sound" / file, pcm, static_cast<unsigned>(entry->frameRate), entry->channelCount);
+						}
+						else if (!done->second.written)
+						{
+							throw std::runtime_error(done->second.error);
 						}
 
-						const auto pcm = decode_flac(bytes->data(), bytes->size(), entry->channelCount, entry->frameCount);
-						write_wav(output.extracted / "sound" / file, pcm, static_cast<unsigned>(entry->frameRate), entry->channelCount);
 						samples++;
 						if (source_bank != &loaded && source_bank != &streamed)
 						{

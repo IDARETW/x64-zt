@@ -1307,8 +1307,14 @@ namespace zonetool::convert::iw7_iw8
 
 	void write_json(const std::filesystem::path& path, const json& value)
 	{
-		std::filesystem::create_directories(path.parent_path());
+		// The folder is made only when the file does not open (thousands of materials and models go into a few).
 		std::ofstream stream(path, std::ios::binary | std::ios::trunc);
+		if (!stream)
+		{
+			std::filesystem::create_directories(path.parent_path());
+			stream.clear();
+			stream.open(path, std::ios::binary | std::ios::trunc);
+		}
 		stream << value.dump();
 		if (!stream)
 		{
@@ -1322,13 +1328,13 @@ namespace zonetool::convert::iw7_iw8
 		std::deque<std::future<void>> json_writes;
 	}
 
-	void write_json_async(std::filesystem::path path, json value)
+	void write_json_async(std::filesystem::path path, json value, const std::size_t limit)
 	{
 		std::future<void> oldest;
 		{
 			std::lock_guard lock(json_writes_mutex);
-			// The values wait in memory (a large model's is gigabytes as a json value): four at a time.
-			if (json_writes.size() >= 4)
+			// The values wait in memory (a large model's is gigabytes as a json value): `limit` at a time.
+			if (json_writes.size() >= limit)
 			{
 				oldest = std::move(json_writes.front());
 				json_writes.pop_front();
