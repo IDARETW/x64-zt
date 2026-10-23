@@ -1626,7 +1626,7 @@ int writeMapPackage(const Args &args, const std::string &map, const std::string 
                     const std::string &entities, const iw8::MapBounds &bounds,
                     const std::string &dumpDirectory, const MapMetadata &metadata,
                     const std::vector<convert::TriggerModelSource> &triggers,
-                    const iw3::PreparedMap *prepared,
+                    iw3::PreparedMap *prepared,
                     const convert::CompassBounds *compassBounds)
 {
     if (!prepareOutputDirectory(outputDirectory, map))
@@ -1663,11 +1663,15 @@ int writeMapPackage(const Args &args, const std::string &map, const std::string 
     const std::string assetName = "maps/mp/" + map + ".d3dbsp";
     iw8::MapSun lighting = loadLighting(args, dumpDirectory, assetName);
     const std::string renderPath = path_join(dumpDirectory, assetName + ".render.json");
-    if (!file_exists(renderPath))
+    const bool renderInMemory = prepared && !prepared->render.is_null();
+    if (!renderInMemory && !file_exists(renderPath))
     {
         throw std::runtime_error("native render data is missing: " + renderPath);
     }
-    const auto renderMesh = replayrender::Load(renderPath);
+    const auto renderMesh =
+        renderInMemory ? replayrender::Load(renderPath, prepared->render) : replayrender::Load(renderPath);
+    if (renderInMemory)
+        prepared->render = nullptr;
     timing.lap("render load");
     calibrateLocalLights(args, lighting, renderMesh.solidTriangles);
     dropEnclosedShadowedSpots(lighting, renderMesh.solidTriangles, prepared ? &prepared->shadowScene : nullptr);
@@ -2211,7 +2215,7 @@ int writeMapPackage(const Args &args, const std::string &map, const std::string 
     return result;
 }
 
-int buildMap(const Args &args, const iw3::PreparedMap *prepared = nullptr)
+int buildMap(const Args &args, iw3::PreparedMap *prepared = nullptr)
 {
     if (args.positional.size() < 2)
     {
