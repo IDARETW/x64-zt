@@ -1841,31 +1841,43 @@ void AuditSourceAssetDeclarations(const std::filesystem::path &root,
     std::map<std::string, std::vector<std::pair<std::string, std::string>>> materialImages;
     std::map<std::string, std::set<std::string>> imageMaterials;
     std::map<std::string, std::set<std::string>> materialModels;
+    // The material and model files (thousands) are read on every core and taken in directory order.
     const auto materialsRoot = root / "materials";
+    std::vector<std::filesystem::path> materialFiles;
     for (std::filesystem::recursive_directory_iterator iterator(materialsRoot, error), end;
          !error && iterator != end; iterator.increment(error))
-    {
-        if (!iterator->is_regular_file(error) || iterator->path().extension() != ".json")
-            continue;
-        auto relative = iterator->path().lexically_relative(materialsRoot);
-        relative.replace_extension();
-        const std::string material = relative.generic_string();
+        if (iterator->is_regular_file(error) && iterator->path().extension() == ".json")
+            materialFiles.push_back(iterator->path());
+    using MaterialTextures = std::vector<std::pair<std::string, std::string>>; // image, semantic
+    // A file that does not read keeps the textures read before the failure.
+    const auto materialTextures = ParallelMap<MaterialTextures>(materialFiles.size(), [&](const std::size_t index) {
+        MaterialTextures textures;
         try
         {
-            const Json source = ReadJson(iterator->path());
+            const Json source = ReadJson(materialFiles[index]);
             if (source.contains("textures") && source.at("textures").is_array())
                 for (const auto &texture : source.at("textures"))
                 {
-                    const std::string image = texture.value("image", std::string{});
-                    const std::string semantic = texture.value("semantic", std::string{});
-                    if (image.empty())
-                        continue;
-                    materialImages[material].emplace_back(image, semantic);
-                    imageMaterials[image].insert(material);
+                    std::string image = texture.value("image", std::string{});
+                    textures.emplace_back(std::move(image), texture.value("semantic", std::string{}));
                 }
         }
         catch (const std::exception &)
         {
+        }
+        return textures;
+    });
+    for (std::size_t index = 0; index < materialFiles.size(); ++index)
+    {
+        auto relative = materialFiles[index].lexically_relative(materialsRoot);
+        relative.replace_extension();
+        const std::string material = relative.generic_string();
+        for (const auto &[image, semantic] : materialTextures[index])
+        {
+            if (image.empty())
+                continue;
+            materialImages[material].emplace_back(image, semantic);
+            imageMaterials[image].insert(material);
         }
     }
     error.clear();
@@ -1884,22 +1896,24 @@ void AuditSourceAssetDeclarations(const std::filesystem::path &root,
 
     std::map<std::string, std::set<std::string>> presetModels;
     error.clear();
+    std::vector<std::filesystem::path> modelFiles;
     for (std::filesystem::directory_iterator iterator(root / "xmodel", error), end;
          !error && iterator != end; iterator.increment(error))
-    {
-        const auto path = iterator->path();
-        if (path.extension() != ".json" || path.stem().extension() == ".replay")
-            continue;
+        if (iterator->path().extension() == ".json" && iterator->path().stem().extension() != ".replay")
+            modelFiles.push_back(iterator->path());
+    const auto modelPresets = ParallelMap<std::string>(modelFiles.size(), [&](const std::size_t index) {
         try
         {
-            const Json model = ReadJson(path);
-            if (const auto preset = model.value("physPreset", std::string{}); !preset.empty())
-                presetModels[preset].insert(path.stem().string());
+            return ReadJson(modelFiles[index]).value("physPreset", std::string{});
         }
         catch (const std::exception &)
         {
+            return std::string{};
         }
-    }
+    });
+    for (std::size_t index = 0; index < modelFiles.size(); ++index)
+        if (!modelPresets[index].empty())
+            presetModels[modelPresets[index]].insert(modelFiles[index].stem().string());
     // IW3 player characters (mptype bodies, heads, view hands): Replay players
     // are its own operators.
     const auto isCharacter = [](const std::string &model) {
@@ -9312,6 +9326,34 @@ PreparedMap::~PreparedMap()
     }
 }
 
+// Copies the extraction tree `from` into `to` (thousands of files) on every core with plain reads and writes:
+// CopyFile's link-tracking notice for each file cost more than the bytes.
+void CopyTree(const std::filesystem::path &from, const std::filesystem::path &to)
+{
+    std::vector<std::filesystem::path> files;
+    std::error_code error;
+    std::filesystem::create_directories(to);
+    for (std::filesystem::recursive_directory_iterator entry(from, error), end; !error && entry != end;
+         entry.increment(error))
+    {
+        const auto relative = entry->path().lexically_relative(from);
+        if (entry->is_directory(error))
+            std::filesystem::create_directories(to / relative);
+        else if (entry->is_regular_file(error))
+            files.push_back(relative);
+    }
+    if (error)
+        throw std::runtime_error("cannot list the extraction " + from.string());
+    ParallelMap<bool>(files.size(), [&](const std::size_t index) {
+        const std::string bytes = ReadText(from / files[index]);
+        std::ofstream output(to / files[index], std::ios::binary | std::ios::trunc);
+        output.write(bytes.data(), static_cast<std::streamsize>(bytes.size()));
+        if (!output)
+            throw std::runtime_error("cannot copy " + (from / files[index]).string());
+        return true;
+    });
+}
+
 // Unlinker extraction depends only on the Unlinker build, the source zones and
 // the search paths, yet costs over a minute per build. Key a reusable copy of
 // the finished extraction on those inputs (path, size, modification time).
@@ -9791,9 +9833,7 @@ PreparedMap PrepareFastfile(const ImportOptions &options)
     else if (cached)
     {
         zt::info("iw3: reusing cached extraction %s", cacheDirectory.string().c_str());
-        std::filesystem::copy(cacheDirectory / "extracted", extracted,
-                              std::filesystem::copy_options::recursive |
-                                  std::filesystem::copy_options::overwrite_existing);
+        CopyTree(cacheDirectory / "extracted", extracted);
     }
     else
     {
@@ -9950,8 +9990,16 @@ PreparedMap PrepareFastfile(const ImportOptions &options)
         std::filesystem::remove_all(cacheDirectory, cacheError);
         std::filesystem::create_directories(cacheDirectory, cacheError);
         if (!cacheError)
-            std::filesystem::copy(extracted, cacheDirectory / "extracted",
-                                  std::filesystem::copy_options::recursive, cacheError);
+        {
+            try
+            {
+                CopyTree(extracted, cacheDirectory / "extracted");
+            }
+            catch (const std::exception &)
+            {
+                cacheError = std::make_error_code(std::errc::io_error);
+            }
+        }
         if (!cacheError && zt::write_file_str((cacheDirectory / "complete").string(), "1"))
             zt::info("iw3: cached extraction at %s", cacheDirectory.string().c_str());
         else
