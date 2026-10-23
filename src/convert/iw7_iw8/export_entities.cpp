@@ -280,7 +280,7 @@ namespace zonetool::convert::iw7_iw8
 		}
 
 		// A scriptable that breaks: one part whose first state takes damage (a health state) and whose second and last state
-		// swaps the model, plays effects or a sound. Other kinds (swinging frames, multi-stage carts) do not convert.
+		// swaps the model, plays effects or a sound. Other kinds (multi-stage, several parts, debris) run as state machines.
 		std::optional<extraction::scriptable_destructible> destructible_of(const source_map& source, const iw7::ScriptableDef& def,
 			extraction& output)
 		{
@@ -303,6 +303,24 @@ namespace zonetool::convert::iw7_iw8
 			for (auto e = 0u; broken.base.events && e < broken.base.numEvents; e++)
 			{
 				const auto& event = broken.base.events[e];
+				// A break that does more (throws debris, explodes, shakes, damages or changes parts, waits, hides bones)
+				// runs as a state machine (scriptable_machine).
+				switch (event.type)
+				{
+				case iw7::Scriptable_EventType_SpawnDynent:
+				case iw7::Scriptable_EventType_Explosion:
+				case iw7::Scriptable_EventType_Screenshake:
+				case iw7::Scriptable_EventType_PartDamage:
+				case iw7::Scriptable_EventType_StateChange:
+				case iw7::Scriptable_EventType_Wait:
+				case iw7::Scriptable_EventType_Random:
+				case iw7::Scriptable_EventType_HideShowBone:
+				case iw7::Scriptable_EventType_AddModel:
+					return std::nullopt;
+				default:
+					break;
+				}
+
 				if (event.type == iw7::Scriptable_EventType_Model)
 				{
 					changes = true;
@@ -592,6 +610,19 @@ namespace zonetool::convert::iw7_iw8
 						const bool destroy = bytes[60] != 0;
 						result.push_back({{"t", "damage"}, {"part", reference_part(data.partDamage.partReference, self)},
 							{"amount", destroy ? 1.0e9f : amount}, {"dot", dot}, {"interval", interval}});
+						break;
+					}
+					case iw7::Scriptable_EventType_SpawnDynent:
+					{
+						const auto& dynent = data.spawnDynent;
+						const auto model = model_name(dynent.model);
+						if (!model.empty())
+						{
+							result.push_back({{"t", "debris"}, {"model", model}, {"tag", dynent.tagName ? dynent.tagName : ""},
+								{"velocity", {dynent.launchLinVel[0], dynent.launchLinVel[1], dynent.launchLinVel[2]}},
+								{"world", dynent.worldSpaceLinVel}});
+						}
+
 						break;
 					}
 					case iw7::Scriptable_EventType_AddModel:
