@@ -246,8 +246,20 @@ bool isReplayEntity(const std::string &classname)
         "script_struct_heli",
         "triggermodeldummydefault",
     }};
+    // The spawns that Replay's own Uplink and Frontline scripts read (decompiled
+    // 1.20 scripts\mp\gametypes\ball.gsc: mp_ball_spawn, its _secondary set and
+    // team starts; front.gsc: mp_front_spawn_allies/axis), which IW7 maps carry.
+    static constexpr std::array<const char *, 6> modes{{
+        "mp_ball_spawn",
+        "mp_ball_spawn_allies_start",
+        "mp_ball_spawn_axis_start",
+        "mp_ball_spawn_secondary",
+        "mp_front_spawn_allies",
+        "mp_front_spawn_axis",
+    }};
     return std::find(classes.begin(), classes.end(), classname) != classes.end() ||
            std::find(shipped.begin(), shipped.end(), classname) != shipped.end() ||
+           std::find(modes.begin(), modes.end(), classname) != modes.end() ||
            classname.starts_with("trigger_multiple_bcs_");
 }
 

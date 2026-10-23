@@ -107,7 +107,7 @@ namespace zonetool::convert::iw7_iw8
 		}
 
 		// Keeps the entities of the classes that the IW3 entity conversion takes: the others are IW7 features without a
-		// Replay counterpart (Uplink ball spawns, client triggers).
+		// Replay counterpart (Blitz spawns, 3D path nodes, client triggers).
 		std::string with_converting_classes(const std::string& entities)
 		{
 			std::string result;
