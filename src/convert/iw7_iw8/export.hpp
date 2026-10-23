@@ -121,6 +121,13 @@ namespace zonetool::convert::iw7_iw8
 		// spans no volume), and those of them that fly as physics props: thrown only, never set, attached or placed (a
 		// model has one physics asset, and the others keep the keyframed body of script models).
 		std::map<std::string, std::optional<clutter_body>> debris_models;
+		// The models that the last states of the machines swap in before they push the piece (picture frames that fall,
+		// broken cash registers that a push kicks away), by the number of those swaps, and the number of times that the
+		// machines set or attach each model: a model that only such swaps set flies as a physics prop too.
+		std::map<std::string, std::size_t> swap_models;
+		std::map<std::string, std::size_t> machine_models;
+		// The models that the map script sets by name (in script_models too).
+		std::set<std::string> map_script_models;
 		std::map<std::string, clutter_body> physics_models;
 
 		// The placed scriptables whose first state plays an animation (the ops table's solar system, the floor panels'

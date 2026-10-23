@@ -2460,7 +2460,7 @@ iw7_scriptable_run( part, events )
 				self thread iw7_scriptable_burn( part, e.a, e.c, e.d );
 		}
 		else if ( e.t == "force" )
-			self thread iw7_scriptable_force( e.a );
+			self thread iw7_scriptable_force( part, e.a, e.b, e.c );
 		else if ( e.t == "debris" )
 			self iw7_scriptable_debris( e.a, e.b, e.c, e.d );
 		else if ( e.t == "script" )
@@ -2488,8 +2488,22 @@ iw7_scriptable_model( part, model )
 		return;
 	}
 
+	if ( isdefined( self.iw7_prop ) )
+		self.iw7_prop delete();
 	if ( model == "" )
 	{
+		self hide();
+		self notsolid();
+		return;
+	}
+
+	// A model that only the push of a last state swaps in (a picture frame that falls, a broken cash register) is a
+	// physics prop in the piece's place, which the push launches.
+	if ( isdefined( level.iw7_physics_mass[model] ) )
+	{
+		self.iw7_prop = spawn( "script_model", self.origin );
+		self.iw7_prop.angles = self.angles;
+		self.iw7_prop setmodel( model );
 		self hide();
 		self notsolid();
 		return;
@@ -2582,11 +2596,23 @@ iw7_scriptable_burn( part, target, amount, interval )
 	}
 }
 
-// IW7 pushes its pieces by physics; without a Replay physics body the converted piece falls to the ground under it
-// (a fall), or rocks on its origin (a push).
-iw7_scriptable_force( fall )
+// IW7 pushes its pieces by physics. A physics prop (iw7_scriptable_model) takes the push as an impulse at its point, both
+// in the piece's space; without a Replay physics body the converted piece falls to the ground under it (a fall), or rocks
+// on its origin (a push).
+iw7_scriptable_force( part, fall, point, vector )
 {
 	self endon( "death" );
+	if ( isdefined( self.iw7_prop ) && self.iw7_parts[part].parent < 0 )
+	{
+		prop = self.iw7_prop;
+		angles = prop.angles;
+		origin = prop.origin + anglestoforward( angles ) * point[0] - anglestoright( angles ) * point[1] + anglestoup( angles ) * point[2];
+		impulse = anglestoforward( angles ) * vector[0] - anglestoright( angles ) * vector[1] + anglestoup( angles ) * vector[2];
+		prop thread iw7_scriptable_launch( origin, impulse );
+		prop thread iw7_scriptable_unpushed( prop.origin );
+		return;
+	}
+
 	if ( fall )
 	{
 		trace = scripts\engine\trace::_bullet_trace( self.origin + ( 0, 0, 4 ), self.origin - ( 0, 0, 4096 ), 0, self );
@@ -2620,9 +2646,9 @@ iw7_scriptable_debris( model, tag, velocity, world )
 	if ( !world )
 		velocity = anglestoforward( angles ) * velocity[0] - anglestoright( angles ) * velocity[1] + anglestoup( angles ) * velocity[2];
 	prop = iw3compat_physics_prop( origin, angles, model );
-	if ( isdefined( level.iw7_debris_mass[model] ) )
+	if ( isdefined( level.iw7_physics_mass[model] ) )
 	{
-		prop thread iw7_scriptable_launch( origin, velocity * level.iw7_debris_mass[model] );
+		prop thread iw7_scriptable_launch( origin, velocity * level.iw7_physics_mass[model] );
 		prop thread iw7_scriptable_unlaunched( origin, velocity );
 	}
 	else
@@ -2634,6 +2660,20 @@ iw7_scriptable_launch( point, impulse )
 {
 	self endon( "death" );
 	self physicslaunchserver( point, impulse );
+}
+
+// A pushed prop that has not moved a quarter second later got no body: it falls to the ground under it instead.
+iw7_scriptable_unpushed( start )
+{
+	self endon( "death" );
+	wait 0.25;
+	if ( distancesquared( self.origin, start ) > 1 )
+		return;
+	prop = spawn( "script_model", start );
+	prop.angles = self.angles;
+	prop setmodel( self.model );
+	self delete();
+	prop iw7_scriptable_force( 0, 1, ( 0, 0, 0 ), ( 0, 0, 0 ) );
 }
 
 // A prop that has not moved a quarter second after its launch got no body: a fresh script model flies the arc instead.
@@ -3283,6 +3323,7 @@ iw7_scriptable_hurt( part, amount )
 					if (name != "tag_origin")
 					{
 						output.script_models.insert(file_name(name));
+						output.map_script_models.insert(file_name(name));
 					}
 				}
 
@@ -3497,28 +3538,48 @@ iw7_destructible_think( model, effect, sound, health )
 			std::string calls;
 			std::size_t machine_index{};
 			std::map<std::string, std::size_t> machine_indices;
-			// The debris that flies as physics props (thrown only, never set, attached or placed), with its mass, which turns
-			// its launch velocity into the impulse of physicslaunchserver. The other debris flies as script models.
-			calls += "\tlevel.iw7_debris_mass = [];\n";
-			for (const auto& [model, body] : output.debris_models)
+			// The models that fly as physics props, with their masses (physicslaunchserver turns an impulse into a speed of
+			// impulse / mass): the debris that the machines only throw, and the models that only the pushes of their last
+			// states swap in. A model has one physics asset: one that a state also sets or attaches, that the map script sets
+			// or that the map places keeps the keyframed body of script models (the debris flies its arc as a script model).
+			const auto keyframed = [&](const std::string& model)
 			{
-				const auto broken = std::ranges::any_of(output.scriptable_destructibles, [&](const auto& entry)
-				{
-					return !entry.second.dead_model.empty() && file_name(entry.second.dead_model) == model;
-				});
-				if (body && !broken && !output.script_models.contains(model) && !output.entity_models.contains(model))
-				{
-					output.physics_models.emplace(model, *body);
-					calls += std::format("\tlevel.iw7_debris_mass[{}] = {};\n", quote(model), number(body->mass));
-				}
-			}
+				return output.entity_models.contains(model) || output.map_script_models.contains(model) ||
+					std::ranges::any_of(output.scriptable_destructibles, [&](const auto& entry)
+					{
+						return !entry.second.dead_model.empty() && file_name(entry.second.dead_model) == model;
+					});
+			};
 
 			for (const auto& [model, body] : output.debris_models)
 			{
-				if (!output.physics_models.contains(model))
+				if (body && !keyframed(model) && !output.script_models.contains(model))
+				{
+					output.physics_models.emplace(model, *body);
+				}
+				else
 				{
 					output.script_models.insert(model);
 				}
+			}
+
+			for (const auto& [model, swaps] : output.swap_models)
+			{
+				const auto* asset = output.models.contains(model) ? output.models.at(model) : nullptr;
+				if (asset && swaps == output.machine_models[model] && !keyframed(model) && !output.debris_models.contains(model))
+				{
+					if (const auto body = clutter_physics(source, *asset))
+					{
+						output.physics_models.emplace(model, *body);
+						output.script_models.erase(model);
+					}
+				}
+			}
+
+			calls += "\tlevel.iw7_physics_mass = [];\n";
+			for (const auto& [model, body] : output.physics_models)
+			{
+				calls += std::format("\tlevel.iw7_physics_mass[{}] = {};\n", quote(model), number(body.mass));
 			}
 
 			for (const auto& [targetname, machine] : output.scriptable_machines)
@@ -3608,7 +3669,10 @@ iw7_destructible_think( model, effect, sound, health )
 						}
 						else if (t == "force")
 						{
-							args = num("fall");
+							const auto& pos = event.at("pos");
+							const auto& vector = event.at("vector");
+							args = std::format("{}, ( {}, {}, {} ), ( {}, {}, {} )", num("fall"), number(pos.at(0)), number(pos.at(1)),
+								number(pos.at(2)), number(vector.at(0)), number(vector.at(1)), number(vector.at(2)));
 						}
 						else if (t == "debris")
 						{
