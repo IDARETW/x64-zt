@@ -2675,7 +2675,7 @@ SourceSkeletonLod ReadXModelExport(const std::filesystem::path &path)
     };
 
     SourceSkeletonLod result;
-    const std::size_t boneCount = readCount(seek("NUMBONES"), 128);
+    const std::size_t boneCount = readCount(seek("NUMBONES"), 255);
     if (!boneCount)
         throw fail("no bones");
     result.bones.resize(boneCount);
@@ -4208,7 +4208,8 @@ void SetSourceSkeleton(const std::vector<SourceBone> &bones,
     std::size_t roots = 0;
     while (roots < bones.size() && bones[roots].parent < 0)
         ++roots;
-    if (!roots || bones.size() > 128)
+    // Replay counts bones in a byte (stock bodies carry 154); bone 255 marks an unassigned vertex.
+    if (!roots || bones.size() > 255)
         throw std::runtime_error("IW3 skeleton has an unsupported bone layout");
     for (std::size_t index = roots; index < bones.size(); ++index)
         if (bones[index].parent < 0 || bones[index].parent >= static_cast<int>(index))
@@ -4622,7 +4623,7 @@ void BuildPreparedStaticModels(const SourceStaticModels &source, const RenderPla
             lod.dist = sourceLod.distance;
             lod.numsurfs = static_cast<std::uint16_t>(converted.surfaces.size());
             lod.surfIndex = static_cast<std::uint16_t>(surfaceOffset);
-            for (std::size_t word = 0; word < 6; ++word)
+            for (std::size_t word = 0; word < 8; ++word)
                 lod.partBits[word] = static_cast<std::uint32_t>(xse.modelSurfPartBits[word]);
             lod.surfsName = converted.name;
             prepared.model.lods.push_back(std::move(lod));

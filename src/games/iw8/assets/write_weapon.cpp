@@ -1235,7 +1235,7 @@ void addModel(ZoneWriter &w, const fs::path &obj, const Json &j, const std::stri
                 index = indices[index];
             surface.verticies = std::move(sorted);
         }
-        for (unsigned k = 0; k < 6; ++k)
+        for (unsigned k = 0; k < 8; ++k)
             xse.modelSurfPartBits[k] |= surface.partBits[k];
         surfaceMaterialKeys.push_back(part.material);
         xse.surfaces.push_back(std::move(surface));
