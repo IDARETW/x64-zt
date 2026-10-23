@@ -2708,15 +2708,6 @@ namespace zonetool::convert::iw3_iw8
 
 		iw3::UseBc7Images(bc7.empty() ? -1 : bc7 == "1" ? 1 : 0);
 
-		// --lit_effects 1 draws IW7's lit alpha-blended effects through Replay's lit effect technique (experimental).
-		const auto lit = option("lit_effects");
-		if (!lit.empty() && lit != "0" && lit != "1")
-		{
-			throw std::runtime_error(std::format("--lit_effects must be 0 or 1, not \"{}\"", lit));
-		}
-
-		iw3::UseLitEffects(lit == "1");
-
 		// The x64-zt zone writer lays out the zones. --writer iw8-zonetool keeps the stream layout of the converter.
 		const auto writer = option("writer");
 		if (!writer.empty() && writer != "x64-zt" && writer != "iw8-zonetool")

@@ -147,7 +147,7 @@ struct SourceFxMaterial
     // colour map premultiplied by its alpha (the same result).
     bool premultiplied{};
     // An alpha-blended material that the extraction marks lit (IW7's lit effects), drawn through Replay's lit
-    // effect technique when UseLitEffects is on.
+    // effect technique, which lights each particle by the scene.
     bool lit{};
     // An atlas material whose frames the extraction marks blended (IW7's textureAtlasFrameBlend; IW3 has none), drawn
     // through the stock frame-blend twin of its technique set where Replay has one.
@@ -1790,8 +1790,6 @@ std::array<float, 4> FxLiteral(const Json &value, const char *field)
     return result;
 }
 
-bool g_litEffects = false;
-
 SourceFxMaterial ReadFxMaterial(const std::filesystem::path &root,
                                 const std::vector<std::filesystem::path> &sourcePaths,
                                 const std::string &name)
@@ -1867,7 +1865,7 @@ SourceFxMaterial ReadFxMaterial(const std::filesystem::path &root,
     const auto &atlas = source.at("textureAtlas");
     material.rows = atlas.at("rows").get<unsigned>();
     material.columns = atlas.at("columns").get<unsigned>();
-    material.lit = g_litEffects && source.value("lit", false) &&
+    material.lit = source.value("lit", false) &&
                    (material.family == FxMaterialFamily::alpha || material.family == FxMaterialFamily::alphaFeather);
     material.frameBlend = source.value("frame_blend", false);
     if (!material.rows || !material.columns || material.rows > 255 || material.columns > 255 ||
@@ -4541,11 +4539,6 @@ class ResidentEncodeCache
 void UseBc7Images(const int mode)
 {
     g_bc7Images = mode;
-}
-
-void UseLitEffects(const bool lit)
-{
-    g_litEffects = lit;
 }
 
 RenderPlan PrepareRenderAssets(const std::filesystem::path &exportRoot, const Json &world,

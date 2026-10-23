@@ -2794,11 +2794,11 @@ std::vector<SourceSkeletonLod> ReadSourceSkeleton(const std::filesystem::path &s
     if (lods.front().bones.size() < 2)
         return {};
     // Replay's model vertex shaders hold 128 bone matrices per draw (stock CB0[514], as replay_model_vertex.hlsl
-    // declares), which the rigid runs index by bone: how the engine draws stock skeletons above that (bodies of 154
-    // bones) is not traced.
-    if (lods.front().bones.size() > 128)
+    // declares), which the rigid runs index by bone; the surfaces that bind a bone past them are deformed
+    // (AssignSourceBones), and bone 255 marks an unassigned vertex.
+    if (lods.front().bones.size() > 255)
     {
-        zt::warn("iw3: entity model %s has %zu bones, more than a draw holds (128); it keeps one bone",
+        zt::warn("iw3: entity model %s has %zu bones, more than a model holds (255); it keeps one bone",
                  modelName.c_str(), lods.front().bones.size());
         return {};
     }
@@ -2861,9 +2861,13 @@ bool AssignSourceBones(const SourceSkeletonLod &skeleton, const std::size_t obje
             surface.vertexBones[vertex] = fallback;
             weights[vertex] = {{fallback, 1.0f}};
         }
-    // A surface keeps its blend weights when a vertex blends bones.
+    // A surface keeps its blend weights when a vertex blends bones, or binds a bone past the 128 matrices that a draw
+    // holds (rigid runs index them; ReadSourceSkeleton): Replay skins those bones on the GPU, as stock skeletons above
+    // 128 bones do (mp_bd_body_mp_western_domino_3_1: rigid runs on bones 48 and 85, blended vertices up to 162).
     surface.vertexWeights.clear();
-    if (std::ranges::any_of(weights, [](const auto &influences) { return influences.size() > 1; }))
+    if (std::ranges::any_of(weights, [](const auto &influences) {
+            return influences.size() > 1 || (!influences.empty() && influences.front().first >= 128);
+        }))
         surface.vertexWeights = std::move(weights);
     return true;
 }
@@ -4217,8 +4221,8 @@ void SetSourceSkeleton(const std::vector<SourceBone> &bones,
     std::size_t roots = 0;
     while (roots < bones.size() && bones[roots].parent < 0)
         ++roots;
-    // A draw holds 128 bones (ReadSourceSkeleton).
-    if (!roots || bones.size() > 128)
+    // Bone 255 marks an unassigned vertex (ReadSourceSkeleton).
+    if (!roots || bones.size() > 255)
         throw std::runtime_error("IW3 skeleton has an unsupported bone layout");
     for (std::size_t index = roots; index < bones.size(); ++index)
         if (bones[index].parent < 0 || bones[index].parent >= static_cast<int>(index))

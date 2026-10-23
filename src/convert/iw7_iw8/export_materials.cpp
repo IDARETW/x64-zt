@@ -184,7 +184,21 @@ namespace zonetool::convert::iw7_iw8
 					compressed.size() - sizeof(iw7::XFileCompressorHeader));
 				if (!pixels.empty())
 				{
-					return image_pixels{std::move(pixels), image.streams[i].width, image.streams[i].height};
+					// Some images' stream tables leave the top stream's size zero, and their own size 1x1 (Prime's
+					// cosmetic_golden_gloves: 1024x1024 BC7 in stream 3 of 4, 512x512 in stream 2): each stream doubles the
+					// size of the one below it.
+					std::size_t width = image.streams[i].width;
+					std::size_t height = image.streams[i].height;
+					for (auto below = i - 1; (!width || !height) && below >= 0; below--)
+					{
+						if (image.streams[below].width && image.streams[below].height)
+						{
+							width = static_cast<std::size_t>(image.streams[below].width) << (i - below);
+							height = static_cast<std::size_t>(image.streams[below].height) << (i - below);
+						}
+					}
+
+					return image_pixels{std::move(pixels), width, height};
 				}
 			}
 
@@ -800,8 +814,8 @@ namespace zonetool::convert::iw7_iw8
 				{"_version", 1},
 				{"cameraRegion", "emissive"},
 				{"constants", std::move(constants)},
-				// IW7 lights the particles of its lit effect materials (not effectunlit) by the scene: the pipeline can
-				// draw the alpha-blended ones through Replay's lit effect technique (--lit_effects 1).
+				// IW7 lights the particles of its lit effect materials (not effectunlit) by the scene: the pipeline
+				// draws the alpha-blended ones through Replay's lit effect technique.
 				{"lit", !has("effectunlit") && !additive && !has("distortion") && !has("cloud")},
 				{"frame_blend", frame_blend},
 				{"gameFlags", json::array()},
