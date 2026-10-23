@@ -188,7 +188,7 @@ namespace zonetool::convert::iw7_iw8
 				geometry_lods.push_back({{"distance", distance}, {"surfaces", std::move(lod_surfaces)}});
 			}
 
-			write_json(output.extracted / "xmodel" / (name + ".json"),
+			write_json_async(output.extracted / "xmodel" / (name + ".json"),
 			{
 				{"$schema", "http://openassettools.dev/schema/xmodel.v1.json"},
 				{"_game", "iw3"},
@@ -204,7 +204,7 @@ namespace zonetool::convert::iw7_iw8
 				{"type", "rigid"},
 			});
 
-			write_json(output.extracted / "xmodel" / (name + ".replay.json"),
+			write_json_async(output.extracted / "xmodel" / (name + ".replay.json"),
 			{
 				{"schema", 1},
 				{"name", name},
@@ -322,6 +322,7 @@ namespace zonetool::convert::iw7_iw8
 			}
 		}
 
+		finish_json_writes();
 		std::string kinds;
 		for (const auto& [value, count] : contents)
 		{

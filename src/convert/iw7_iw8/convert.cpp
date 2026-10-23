@@ -39,7 +39,16 @@ namespace zonetool::convert::iw7_iw8
 			return;
 		}
 
+		auto lap_start = std::chrono::steady_clock::now();
+		const auto lap = [&](const char* phase)
+		{
+			const auto now = std::chrono::steady_clock::now();
+			ZONETOOL_INFO("iw7: timing: %s %.1fs", phase, std::chrono::duration<double>(now - lap_start).count());
+			lap_start = now;
+		};
+
 		source_map source(zone_path);
+		lap("zone load");
 		{
 			const auto& world = *source.world();
 			// The surfaces share the vertices of the transient zones.
@@ -68,9 +77,13 @@ namespace zonetool::convert::iw7_iw8
 		std::filesystem::create_directories(output.extracted);
 
 		collect_static_models(source, output);
+		lap("static models");
 		export_entities(source, output);
+		lap("entities");
 		export_animations(source, output);
+		lap("animations");
 		export_effects(source, output, conversion);
+		lap("effects and scripts");
 		// The sound globals (SndGlobals "singleton": the falloff, filter and reverb send curves that aliases name) are in
 		// code_post_gfx, which the game loads before every map; as a common zone it only fills in what the others lack.
 		source.load("patch_code_post_gfx");
@@ -80,6 +93,7 @@ namespace zonetool::convert::iw7_iw8
 		}
 
 		export_sounds(source, output);
+		lap("sounds");
 		// A model that the loaded zones lack may have a zone of its own.
 		for (auto& [name, model] : output.models)
 		{
@@ -90,18 +104,25 @@ namespace zonetool::convert::iw7_iw8
 		}
 
 		export_models(source, output);
+		lap("models");
 		export_skeletons(source, output);
+		lap("skeletons");
 		remove_missing_entity_models(source, output);
 		export_world(source, output);
+		lap("world");
 		export_collision(source, output);
+		lap("collision");
 		export_com_world(source, output);
+		lap("lights");
 		export_materials(source, output);
+		lap("materials and images");
 
 		// The zone declarations of the IW3 export name the map's raw files and effects, which do not convert yet.
 		std::filesystem::create_directories(output.extracted / "zone_source");
 		std::ofstream(output.extracted / "zone_source" / (source.name() + ".zone"), std::ios::binary | std::ios::trunc)
 			<< "// " << source.name() << " (IW7)\n";
 
+		finish_json_writes();
 		// The skeletons of the models with bones (export_animations, export_skeletons) are the whole skeleton export.
 		write_marker(output.root / "skeleton" / "complete");
 		write_marker(output.root / "complete");

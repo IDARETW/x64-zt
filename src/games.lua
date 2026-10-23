@@ -51,6 +51,12 @@ games = {
 		iw7_iw8 = {"iw3"},
 	},
 	converter_dependencies = {
+		iw3_iw8 = function()
+			-- Map conversion is compute bound (image encoding, light, shadow and collision baking).
+			filter "configurations:Release"
+				optimize "Speed"
+			filter {}
+		end,
 		s1_s2 = function()
 			games.dependencies.h1()
 		end,
@@ -67,6 +73,9 @@ games = {
 			links {"convert-iw3-iw8"}
 			-- IW7 entity keys are script string tokens.
 			gsc_tool.import_engine("iw7")
+			filter "configurations:Release"
+				optimize "Speed"
+			filter {}
 		end,
 	},
 }
@@ -163,6 +172,13 @@ local function game_project(name)
 
 		core.includes()
 		games.dependencies[name]()
+
+		-- The IW8 map baking (sun shadows, Havok shapes, zone writing) is compute bound.
+		if name == "iw8" then
+			filter "configurations:Release"
+				optimize "Speed"
+			filter {}
+		end
 end
 
 local function converter_project(converter)

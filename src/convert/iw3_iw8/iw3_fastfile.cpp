@@ -18,6 +18,7 @@
 
 #include <algorithm>
 #include <array>
+#include <atomic>
 #include <cctype>
 #include <cfloat>
 #include <charconv>
@@ -26,6 +27,7 @@
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <exception>
 #include <fstream>
 #include <iomanip>
 #include <limits>
@@ -37,6 +39,7 @@
 #include <sstream>
 #include <stdexcept>
 #include <string_view>
+#include <thread>
 #include <tuple>
 #include <unordered_map>
 
@@ -44,6 +47,44 @@ namespace iw3
 {
 namespace
 {
+// `body(index)` for every index on every core; the results keep the index order and the first failure in that order
+// is rethrown (as a serial loop would).
+template <class Result, class Body> std::vector<Result> ParallelMap(const std::size_t count, const Body &body)
+{
+    std::vector<std::optional<Result>> results(count);
+    std::vector<std::exception_ptr> failures(count);
+    std::atomic<std::size_t> next{0};
+    const auto run = [&] {
+        for (std::size_t index; (index = next.fetch_add(1)) < count;)
+        {
+            try
+            {
+                results[index] = body(index);
+            }
+            catch (...)
+            {
+                failures[index] = std::current_exception();
+            }
+        }
+    };
+    std::vector<std::thread> workers;
+    const auto workerCount = std::min<std::size_t>(count, std::max(1u, std::thread::hardware_concurrency()));
+    for (std::size_t worker = 1; worker < workerCount; ++worker)
+        workers.emplace_back(run);
+    run();
+    for (auto &worker : workers)
+        worker.join();
+    std::vector<Result> output;
+    output.reserve(count);
+    for (std::size_t index = 0; index < count; ++index)
+    {
+        if (failures[index])
+            std::rethrow_exception(failures[index]);
+        output.push_back(std::move(*results[index]));
+    }
+    return output;
+}
+
 using Json = nlohmann::json;
 using Vec2 = std::array<float, 2>;
 using Vec3 = std::array<float, 3>;
@@ -2071,7 +2112,12 @@ Json ReadJson(const std::filesystem::path &path)
     {
         throw std::runtime_error("cannot read " + path.string());
     }
-    return Json::parse(input);
+    // Parsed from memory: nlohmann reads a stream one character at a time (a 200 MB world took 25 s).
+    input.seekg(0, std::ios::end);
+    std::string text(static_cast<std::size_t>(input.tellg()), '\0');
+    input.seekg(0);
+    input.read(text.data(), static_cast<std::streamsize>(text.size()));
+    return Json::parse(text);
 }
 
 void WriteJson(const std::filesystem::path &path, const Json &value)
@@ -2082,7 +2128,8 @@ void WriteJson(const std::filesystem::path &path, const Json &value)
     {
         throw std::runtime_error("cannot write " + path.string());
     }
-    output << value;
+    const auto text = value.dump();
+    output.write(text.data(), static_cast<std::streamsize>(text.size()));
     if (!output)
     {
         throw std::runtime_error("cannot finish " + path.string());
@@ -3155,6 +3202,13 @@ std::vector<BrushModel> ReadBrushModels(const Json &world, const std::filesystem
         throw std::runtime_error("IW3 world contains no render surfaces");
     }
 
+    // The surfaces are read on every core (IW7 worlds hold thousands of large ones).
+    std::vector<Surface> surfaces = ParallelMap<Surface>(sourceSurfaces.size(), [&](const std::size_t index) {
+        Surface surface = ReadWorldSurface(sourceSurfaces.at(index));
+        surface.visibilityGroup = visibility.surfaces.at(index);
+        AlignWinding(surface);
+        return surface;
+    });
     std::vector<BrushModel> output;
     if (world.contains("brush_models"))
     {
@@ -3189,10 +3243,7 @@ std::vector<BrushModel> ReadBrushModels(const Json &world, const std::filesystem
                     if (claimed[index])
                         throw std::runtime_error("overlapping IW3 brush-model surface ranges");
                     claimed[index] = true;
-                    Surface surface = ReadWorldSurface(sourceSurfaces.at(index));
-                    surface.visibilityGroup = visibility.surfaces.at(index);
-                    AlignWinding(surface);
-                    model.surfaces.push_back(std::move(surface));
+                    model.surfaces.push_back(std::move(surfaces[index]));
                 }
             }
             output.push_back(std::move(model));
@@ -3208,19 +3259,39 @@ std::vector<BrushModel> ReadBrushModels(const Json &world, const std::filesystem
         BrushModel model;
         model.minimum = ReadVector<3>(bounds.at(0));
         model.maximum = ReadVector<3>(bounds.at(1));
-        model.surfaces.reserve(sourceSurfaces.size());
-        std::size_t sourceIndex = 0;
-        for (const auto &sourceSurface : sourceSurfaces)
-        {
-            Surface surface = ReadWorldSurface(sourceSurface);
-            surface.visibilityGroup = visibility.surfaces.at(sourceIndex++);
-            AlignWinding(surface);
-            model.surfaces.push_back(std::move(surface));
-        }
+        model.surfaces = std::move(surfaces);
         output.push_back(std::move(model));
     }
 
+    // The models of the placements, read on every core in the order of their first placement.
     std::unordered_map<std::string, std::size_t> modelCache;
+    {
+        std::vector<std::string> modelNames;
+        std::set<std::string> externalNames;
+        for (const auto &instance : world.value("models", Json::array()))
+        {
+            std::string modelName = instance.at("model").get<std::string>();
+            if (!modelName.empty() && modelName.front() == ',')
+            {
+                modelName.erase(0, 1);
+                externalNames.insert(modelName);
+            }
+            if (modelCache.emplace(modelName, staticModels.models.size() + modelNames.size()).second)
+                modelNames.push_back(modelName);
+        }
+        auto models = ParallelMap<SourceStaticModel>(modelNames.size(), [&](const std::size_t index) {
+            std::error_code error;
+            const auto &modelName = modelNames[index];
+            // A missing external model is reported with its placement below.
+            if (externalNames.contains(modelName) &&
+                (modelName.empty() ||
+                 !std::filesystem::is_regular_file(SafeChild(root, std::filesystem::path("xmodel") / (modelName + ".json")), error)))
+                return SourceStaticModel{};
+            return ReadSourceModel(root, modelName, true);
+        });
+        for (auto &model : models)
+            staticModels.models.push_back(std::move(model));
+    }
     std::size_t instanceIndex = 0;
     for (const auto &instance : world.value("models", Json::array()))
     {
@@ -3238,13 +3309,7 @@ std::vector<BrushModel> ReadBrushModels(const Json &world, const std::filesystem
                     "'; add the matching IW3 zone with --search-path");
         }
 
-        auto found = modelCache.find(modelName);
-        if (found == modelCache.end())
-        {
-            const std::size_t modelIndex = staticModels.models.size();
-            staticModels.models.push_back(ReadSourceModel(root, modelName, true));
-            found = modelCache.emplace(modelName, modelIndex).first;
-        }
+        const auto found = modelCache.find(modelName);
 
         SourceStaticModelInstance converted;
         converted.model = found->second;
@@ -9471,7 +9536,7 @@ PreparedMap PrepareFastfile(const ImportOptions &options)
 
     PreparedMap result;
     result.scratch = MakeScratchDirectory(options.scratchRoot);
-    const auto extracted = result.scratch / "extracted";
+    auto extracted = result.scratch / "extracted";
     result.root = result.scratch / "prepared";
     std::filesystem::create_directories(extracted);
     std::filesystem::create_directories(result.root);
@@ -9484,7 +9549,14 @@ PreparedMap PrepareFastfile(const ImportOptions &options)
                         std::filesystem::is_regular_file(cacheDirectory / "complete", error);
     if (external && !cached)
         throw std::runtime_error("the extraction at " + cacheDirectory.string() + " is not complete");
-    if (cached)
+    if (cached && external)
+    {
+        // Another front end's extraction (IW7: thousands of files, gigabytes) is read where it is. The map IWD and
+        // the Unlinker, which add files to an extraction, are IW3's.
+        zt::info("iw3: reading the extraction %s", cacheDirectory.string().c_str());
+        extracted = cacheDirectory / "extracted";
+    }
+    else if (cached)
     {
         zt::info("iw3: reusing cached extraction %s", cacheDirectory.string().c_str());
         std::filesystem::copy(cacheDirectory / "extracted", extracted,
@@ -9508,9 +9580,11 @@ PreparedMap PrepareFastfile(const ImportOptions &options)
     const std::string sourceMap = sourceAsset.ends_with(bspSuffix)
                                       ? sourceAsset.substr(0, sourceAsset.size() - bspSuffix.size())
                                       : sourceAsset;
+    zt::LapTimer readTiming("iw3");
     const Json world = ReadJson(worldPath);
     const Json collision = ReadJson(collisionPath);
     const Json commonWorld = ReadJson(commonWorldPath);
+    readTiming.lap("world, collision and common world json");
     if (world.at("schema") != 1 || collision.at("schema") != 1 || commonWorld.at("schema") != 1)
     {
         throw std::runtime_error("unsupported ReplayMapDumpers export schema");
@@ -9949,7 +10023,9 @@ PreparedMap PrepareFastfile(const ImportOptions &options)
     std::vector<BrushModel> brushModels =
         ReadBrushModels(world, exportRoot, visibility, sourceStaticModels);
     RespaceLadderRungs(sourceStaticModels);
+    timing.lap("read brush and static models");
     SourceDynamicEntities sourceDynamicEntities = ReadDynamicEntities(collision, exportRoot);
+    timing.lap("read dynamic entities");
     // IW3 map scripts: translate them first so the entities they drive stay
     // entities, and so destroyed-state models can be converted and precached.
     std::set<std::string> scriptStrings;
@@ -10201,6 +10277,7 @@ PreparedMap PrepareFastfile(const ImportOptions &options)
             zt::warn("iw3: map scripts were not translated: %s", error.what());
         }
     }
+    timing.lap("map scripts");
     AddPromotedStaticModels(world, exportRoot, TakeUnscriptedScriptModels(entities, scriptStrings, exportRoot),
                             sourceStaticModels);
     const SourceStaticModels shadowOnlyStaticModels = TakeShadowOnlyStaticModels(exportRoot, sourceStaticModels);

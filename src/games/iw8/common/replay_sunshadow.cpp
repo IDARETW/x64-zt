@@ -1,18 +1,26 @@
 #include <std_include.hpp>
 #include "replay_sunshadow.h"
+#include "log.h"
 
 #include <d3d11.h>
 #include <d3dcompiler.h>
 #include <wrl/client.h>
 
 #include <algorithm>
+#include <atomic>
 #include <bit>
+#include <chrono>
 #include <cmath>
+#include <condition_variable>
 #include <cstring>
+#include <deque>
+#include <exception>
 #include <functional>
 #include <limits>
+#include <mutex>
 #include <stdexcept>
 #include <string>
+#include <thread>
 
 namespace replaysunshadow
 {
@@ -340,6 +348,7 @@ struct TileGrid
     float origin{}, inverseSpan{};
 };
 
+// Called on the rendering threads, at most once per cell: a visitor writes only that cell's data.
 using TileVisitor = std::function<void(unsigned x, unsigned y, const std::vector<float> &first,
                                        const std::vector<float> &behind)>;
 
@@ -363,6 +372,36 @@ void SunAxes(const Vec3 &sunDirection, Vec3 &right, Vec3 &up)
 // along the sun and, by depth peeling, the nearest surface behind it. Tiles
 // without a caster are skipped. Two-sided rasterization treats every caster
 // as an occluder whatever its facing (a ceiling seen from above).
+// body(index) for every index on every core; the first failure by index is rethrown, as a serial loop would.
+template <class Body> void ParallelFor(const std::size_t count, const Body &body)
+{
+    std::vector<std::exception_ptr> failures(count);
+    std::atomic<std::size_t> next{0};
+    const auto run = [&] {
+        for (std::size_t index; (index = next.fetch_add(1)) < count;)
+        {
+            try
+            {
+                body(index);
+            }
+            catch (...)
+            {
+                failures[index] = std::current_exception();
+            }
+        }
+    };
+    std::vector<std::thread> workers;
+    const auto workerCount = std::min<std::size_t>(count, std::max(1u, std::thread::hardware_concurrency()));
+    for (std::size_t worker = 1; worker < workerCount; ++worker)
+        workers.emplace_back(run);
+    run();
+    for (auto &worker : workers)
+        worker.join();
+    for (const auto &failure : failures)
+        if (failure)
+            std::rethrow_exception(failure);
+}
+
 bool RenderTiles(const Scene &scene, const std::array<float, 3> &sunDirection,
                  const replaybounds::Bounds &receiverBounds, const float sampleSize,
                  const replaybounds::Bounds *focus, const bool twoSided,
@@ -390,10 +429,10 @@ bool RenderTiles(const Scene &scene, const std::array<float, 3> &sunDirection,
     std::vector<Surface> projected = scene.surfaces;
     // Distant background geometry (IW3 terrain past 100000 units) casts no
     // shadow on the play space and would stretch the shadow crop; drop it.
-    for (auto &surface : projected)
-    {
+    ParallelFor(projected.size(), [&](const std::size_t surfaceIndex) {
+        auto &surface = projected[surfaceIndex];
         if (surface.vertices.size() % 3)
-            continue;
+            return;
         std::vector<decltype(surface.vertices)::value_type> kept;
         kept.reserve(surface.vertices.size());
         for (std::size_t first = 0; first < surface.vertices.size(); first += 3)
@@ -407,7 +446,7 @@ bool RenderTiles(const Scene &scene, const std::array<float, 3> &sunDirection,
                             surface.vertices.begin() + first + 3);
         }
         surface.vertices = std::move(kept);
-    }
+    });
     std::erase_if(projected, [](const Surface &surface) { return surface.vertices.empty(); });
     if (projected.empty())
         return false;
@@ -431,8 +470,10 @@ bool RenderTiles(const Scene &scene, const std::array<float, 3> &sunDirection,
         }
     }
     Vec3 minimum{INFINITY, INFINITY, INFINITY}, maximum{-INFINITY, -INFINITY, -INFINITY};
-    for (auto &surface : projected)
-    {
+    std::vector<std::array<Vec3, 2>> surfaceBounds(
+        projected.size(), {Vec3{INFINITY, INFINITY, INFINITY}, Vec3{-INFINITY, -INFINITY, -INFINITY}});
+    ParallelFor(projected.size(), [&](const std::size_t surfaceIndex) {
+        auto &surface = projected[surfaceIndex];
         if (surface.material >= scene.materials.size() || surface.vertices.empty() ||
             surface.vertices.size() % 3)
             throw std::runtime_error("invalid compressed sun-shadow caster surface");
@@ -468,13 +509,20 @@ bool RenderTiles(const Scene &scene, const std::array<float, 3> &sunDirection,
             }
             surface.vertices = std::move(kept);
         }
+        auto &bounds = surfaceBounds[surfaceIndex];
         for (const auto &vertex : surface.vertices)
             for (unsigned axis = 0; axis < 3; ++axis)
             {
-                minimum[axis] = std::min(minimum[axis], vertex.position[axis]);
-                maximum[axis] = std::max(maximum[axis], vertex.position[axis]);
+                bounds[0][axis] = std::min(bounds[0][axis], vertex.position[axis]);
+                bounds[1][axis] = std::max(bounds[1][axis], vertex.position[axis]);
             }
-    }
+    });
+    for (const auto &bounds : surfaceBounds)
+        for (unsigned axis = 0; axis < 3; ++axis)
+        {
+            minimum[axis] = std::min(minimum[axis], bounds[0][axis]);
+            maximum[axis] = std::max(maximum[axis], bounds[1][axis]);
+        }
     std::erase_if(projected, [](const Surface &surface) { return surface.vertices.empty(); });
     if (projected.empty())
         return false;
@@ -515,30 +563,74 @@ bool RenderTiles(const Scene &scene, const std::array<float, 3> &sunDirection,
     const float origin = 1.0f - minimum[2];
     const float inverseSpan = 1.0f / (maximum[2] - minimum[2] + 2.0f);
     begin({right, up, startX, startY, sampleSize, width, height, origin, inverseSpan});
-    std::vector<std::vector<std::size_t>> candidates(std::size_t(width) * height);
-    for (std::size_t index = 0; index < projected.size(); ++index)
-    {
-        auto &surface = projected[index];
-        float minX = INFINITY, minY = INFINITY, maxX = -INFINITY, maxY = -INFINITY;
-        for (auto &vertex : surface.vertices)
+    // The triangles of each tile ({surface, first vertex}), binned once: a tile draws a triangle whose bounds, offset
+    // by the tile's origin, overlap [0, TileResolution) (the offset rounds the same for every vertex, so the bounds of
+    // the offset vertices are the offset bounds).
+    using TileTriangles = std::vector<std::vector<std::pair<std::uint32_t, std::uint32_t>>>;
+    ParallelFor(projected.size(), [&](const std::size_t index) {
+        for (auto &vertex : projected[index].vertices)
         {
             vertex.position[0] = (vertex.position[0] - startX) / sampleSize;
             vertex.position[1] = (vertex.position[1] - startY) / sampleSize;
             vertex.position[2] = (vertex.position[2] + origin) * inverseSpan;
-            minX = std::min(minX, vertex.position[0]);
-            minY = std::min(minY, vertex.position[1]);
-            maxX = std::max(maxX, vertex.position[0]);
-            maxY = std::max(maxY, vertex.position[1]);
         }
-        // A focus crop can leave triangles starting before the grid.
-        const auto left = std::min(width - 1, static_cast<unsigned>(std::max(0.0f, minX) / TileResolution));
-        const auto top = std::min(height - 1, static_cast<unsigned>(std::max(0.0f, minY) / TileResolution));
-        const auto lastX = std::min(width - 1, static_cast<unsigned>(maxX / TileResolution));
-        const auto lastY = std::min(height - 1, static_cast<unsigned>(maxY / TileResolution));
-        for (unsigned y = top; y <= lastY; ++y)
-            for (unsigned x = left; x <= lastX; ++x)
-                candidates[y * width + x].push_back(index);
-    }
+    });
+    const std::size_t chunks = std::min<std::size_t>(projected.size(), std::max(1u, std::thread::hardware_concurrency()));
+    std::vector<TileTriangles> chunkTriangles(chunks, TileTriangles(std::size_t(width) * height));
+    ParallelFor(chunks, [&](const std::size_t chunk) {
+      auto &bins = chunkTriangles[chunk];
+      for (std::size_t index = projected.size() * chunk / chunks; index < projected.size() * (chunk + 1) / chunks; ++index)
+      {
+        const auto &surface = projected[index];
+        for (std::size_t first = 0; first < surface.vertices.size(); first += 3)
+        {
+            float minX = INFINITY, minY = INFINITY, maxX = -INFINITY, maxY = -INFINITY;
+            for (unsigned corner = 0; corner < 3; ++corner)
+            {
+                const auto &position = surface.vertices[first + corner].position;
+                minX = std::min(minX, position[0]);
+                maxX = std::max(maxX, position[0]);
+                minY = std::min(minY, position[1]);
+                maxY = std::max(maxY, position[1]);
+            }
+            // A focus crop can leave triangles starting before the grid.
+            const auto range = [](const float low, const float high, const unsigned count) {
+                const float first = std::floor(std::max(0.0f, low) / TileResolution) - 1.0f;
+                const float last = std::floor(std::max(0.0f, high) / TileResolution) + 1.0f;
+                return std::pair{static_cast<unsigned>(std::clamp(first, 0.0f, float(count - 1))),
+                                 static_cast<unsigned>(std::clamp(last, 0.0f, float(count - 1)))};
+            };
+            const auto [left, lastX] = range(minX, maxX, width);
+            const auto [top, lastY] = range(minY, maxY, height);
+            for (unsigned y = top; y <= lastY; ++y)
+            {
+                const float offsetY = float(y * TileResolution);
+                if (!(maxY - offsetY >= 0 && minY - offsetY < TileResolution))
+                    continue;
+                for (unsigned x = left; x <= lastX; ++x)
+                {
+                    const float offsetX = float(x * TileResolution);
+                    if (maxX - offsetX >= 0 && minX - offsetX < TileResolution)
+                        bins[y * width + x].emplace_back(static_cast<std::uint32_t>(index),
+                                                         static_cast<std::uint32_t>(first));
+                }
+            }
+        }
+      }
+    });
+    TileTriangles tileTriangles(std::size_t(width) * height);
+    ParallelFor(tileTriangles.size(), [&](const std::size_t tile) {
+        std::size_t count = 0;
+        for (const auto &bins : chunkTriangles)
+            count += bins[tile].size();
+        tileTriangles[tile].reserve(count);
+        for (auto &bins : chunkTriangles)
+        {
+            tileTriangles[tile].insert(tileTriangles[tile].end(), bins[tile].begin(), bins[tile].end());
+            std::vector<std::pair<std::uint32_t, std::uint32_t>>().swap(bins[tile]);
+        }
+    });
+    chunkTriangles.clear();
 
     constexpr char shaderSource[] = R"(
 cbuffer Material : register(b0) { uint alphaTest; uint atlasTile; float2 imageSize; };
@@ -591,133 +683,31 @@ void peel(Output input) {
     };
     const auto vertexCode = compile("vs", "vs_5_0"), pixelCode = compile("ps", "ps_5_0");
     const auto peelCode = compile("peel", "ps_5_0");
-    ComPtr<ID3D11Device> device;
-    ComPtr<ID3D11DeviceContext> context;
-    check(D3D11CreateDevice(nullptr, D3D_DRIVER_TYPE_WARP, nullptr, 0, nullptr, 0,
-                            D3D11_SDK_VERSION, &device, nullptr, &context), "create WARP device");
-    ComPtr<ID3D11VertexShader> vertexShader;
-    ComPtr<ID3D11PixelShader> pixelShader;
-    check(device->CreateVertexShader(vertexCode->GetBufferPointer(), vertexCode->GetBufferSize(),
-                                     nullptr, &vertexShader), "create vertex shader");
-    check(device->CreatePixelShader(pixelCode->GetBufferPointer(), pixelCode->GetBufferSize(),
-                                    nullptr, &pixelShader), "create pixel shader");
-    ComPtr<ID3D11PixelShader> peelShader;
-    check(device->CreatePixelShader(peelCode->GetBufferPointer(), peelCode->GetBufferSize(),
-                                    nullptr, &peelShader), "create depth-peel shader");
-    const std::array<D3D11_INPUT_ELEMENT_DESC, 3> elements{{
-        {"POSITION", 0, DXGI_FORMAT_R32G32B32_FLOAT, 0, 0, D3D11_INPUT_PER_VERTEX_DATA, 0},
-        {"TEXCOORD", 0, DXGI_FORMAT_R32G32_FLOAT, 0, 12, D3D11_INPUT_PER_VERTEX_DATA, 0},
-        {"COLOR", 0, DXGI_FORMAT_R32_FLOAT, 0, 20, D3D11_INPUT_PER_VERTEX_DATA, 0}}};
-    static_assert(sizeof(Vertex) == 24);
-    ComPtr<ID3D11InputLayout> inputLayout;
-    check(device->CreateInputLayout(elements.data(), static_cast<UINT>(elements.size()),
-                                    vertexCode->GetBufferPointer(), vertexCode->GetBufferSize(),
-                                    &inputLayout), "create caster input layout");
-    context->IASetInputLayout(inputLayout.Get());
-    context->IASetPrimitiveTopology(D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
-    context->VSSetShader(vertexShader.Get(), nullptr, 0);
-    std::array<ComPtr<ID3D11RasterizerState>, 3> rasterizers;
-    for (unsigned index = 0; index < rasterizers.size(); ++index)
-    {
-        D3D11_RASTERIZER_DESC raster{};
-        raster.FillMode = D3D11_FILL_SOLID;
-        raster.CullMode = std::array{D3D11_CULL_NONE, D3D11_CULL_BACK, D3D11_CULL_FRONT}[index];
-        raster.DepthClipEnable = TRUE;
-        check(device->CreateRasterizerState(&raster, &rasterizers[index]), "create rasterizer");
-    }
-    D3D11_DEPTH_STENCIL_DESC depth{};
-    depth.DepthEnable = TRUE;
-    depth.DepthWriteMask = D3D11_DEPTH_WRITE_MASK_ALL;
-    depth.DepthFunc = D3D11_COMPARISON_GREATER_EQUAL;
-    ComPtr<ID3D11DepthStencilState> depthState;
-    check(device->CreateDepthStencilState(&depth, &depthState), "create depth state");
-    context->OMSetDepthStencilState(depthState.Get(), 0);
-    const D3D11_VIEWPORT viewport{0, 0, float(TileResolution), float(TileResolution), 0, 1};
-    context->RSSetViewports(1, &viewport);
-    D3D11_TEXTURE2D_DESC texture{};
-    texture.Width = texture.Height = TileResolution;
-    texture.MipLevels = texture.ArraySize = 1;
-    texture.Format = DXGI_FORMAT_R32_TYPELESS;
-    texture.SampleDesc.Count = 1;
-    texture.BindFlags = D3D11_BIND_DEPTH_STENCIL;
-    ComPtr<ID3D11Texture2D> target, readback;
-    check(device->CreateTexture2D(&texture, nullptr, &target), "create depth image");
-    D3D11_DEPTH_STENCIL_VIEW_DESC depthViewDescription{};
-    depthViewDescription.Format = DXGI_FORMAT_D32_FLOAT;
-    depthViewDescription.ViewDimension = D3D11_DSV_DIMENSION_TEXTURE2D;
-    ComPtr<ID3D11DepthStencilView> depthView;
-    check(device->CreateDepthStencilView(target.Get(), &depthViewDescription, &depthView),
-          "create depth view");
-    texture.Usage = D3D11_USAGE_STAGING;
-    texture.BindFlags = 0;
-    texture.CPUAccessFlags = D3D11_CPU_ACCESS_READ;
-    check(device->CreateTexture2D(&texture, nullptr, &readback), "create readback image");
-    // The first-surface depth, read by the depth-peel pass.
-    texture.Usage = D3D11_USAGE_DEFAULT;
-    texture.BindFlags = D3D11_BIND_SHADER_RESOURCE;
-    texture.CPUAccessFlags = 0;
-    ComPtr<ID3D11Texture2D> firstCopy;
-    check(device->CreateTexture2D(&texture, nullptr, &firstCopy), "create first-surface image");
-    D3D11_SHADER_RESOURCE_VIEW_DESC firstViewDescription{};
-    firstViewDescription.Format = DXGI_FORMAT_R32_FLOAT;
-    firstViewDescription.ViewDimension = D3D11_SRV_DIMENSION_TEXTURE2D;
-    firstViewDescription.Texture2D.MipLevels = 1;
-    ComPtr<ID3D11ShaderResourceView> firstView;
-    check(device->CreateShaderResourceView(firstCopy.Get(), &firstViewDescription, &firstView),
-          "create first-surface view");
-    // A surface within peelEpsilon of the first (one world unit along the sun
-    // is inverseSpan) is the same layer.
-    const float peelEpsilon = 0.25f * inverseSpan;
-    ComPtr<ID3D11Buffer> peelConstants, opaqueConstants;
-    {
-        const std::array<float, 4> values{peelEpsilon, 0, 0, 0};
-        D3D11_BUFFER_DESC buffer{};
-        buffer.ByteWidth = sizeof(values);
-        buffer.Usage = D3D11_USAGE_IMMUTABLE;
-        buffer.BindFlags = D3D11_BIND_CONSTANT_BUFFER;
-        const D3D11_SUBRESOURCE_DATA data{values.data(), 0, 0};
-        check(device->CreateBuffer(&buffer, &data, &peelConstants), "create depth-peel constants");
-        const std::array<std::uint32_t, 4> opaque{0, 0, 0, 0};
-        const D3D11_SUBRESOURCE_DATA opaqueData{opaque.data(), 0, 0};
-        check(device->CreateBuffer(&buffer, &opaqueData, &opaqueConstants), "create opaque constants");
-    }
-    D3D11_SAMPLER_DESC sampler{};
-    sampler.Filter = D3D11_FILTER_MIN_MAG_MIP_LINEAR;
-    sampler.AddressU = sampler.AddressV = sampler.AddressW = D3D11_TEXTURE_ADDRESS_WRAP;
-    sampler.MaxLOD = D3D11_FLOAT32_MAX;
-    ComPtr<ID3D11SamplerState> alphaSampler;
-    check(device->CreateSamplerState(&sampler, &alphaSampler), "create alpha sampler");
-    context->PSSetSamplers(0, 1, alphaSampler.GetAddressOf());
-    std::vector<ComPtr<ID3D11Buffer>> constants(scene.materials.size());
-    std::vector<ComPtr<ID3D11ShaderResourceView>> alphaViews(scene.materials.size());
-    for (std::size_t index = 0; index < scene.materials.size(); ++index)
-    {
+    // The cells with casters. Several WARP devices render them (each tile is drawn whole by one device, and WARP is
+    // deterministic) and visit them on their own threads: a visitor writes only its cell's data.
+    std::vector<std::uint32_t> cells;
+    for (std::uint32_t cell = 0; cell < tileTriangles.size(); ++cell)
+        if (!tileTriangles[cell].empty())
+            cells.push_back(cell);
+    std::atomic<std::size_t> nextTask{0};
+    // Thread time in each step (microseconds), for the log.
+    std::atomic<std::uint64_t> buildTime{0}, drawTime{0}, visitTime{0};
+    std::mutex failureMutex;
+    std::exception_ptr failure;
+    std::atomic<bool> failed{false};
+    // The alpha mip chains of the alpha-tested materials, built once for every device.
+    std::vector<std::vector<std::vector<std::uint8_t>>> alphaLevels(scene.materials.size());
+    ParallelFor(scene.materials.size(), [&](const std::size_t index) {
         const auto &material = scene.materials[index];
-        if (material.cullMode > 2 || material.alphaTest > 3)
-            throw std::runtime_error("invalid compressed sun-shadow material state");
-        if (!material.alphaTest)
-            continue;
-        if (!material.width || !material.height || material.width > 16384 ||
-            material.height > 16384 || material.alpha.size() != std::size_t(material.width) * material.height ||
-            (material.atlasTile && (material.width != material.height || material.width < 4)))
-            throw std::runtime_error("invalid compressed sun-shadow alpha image");
-        const std::array<std::uint32_t, 4> values{material.alphaTest, material.atlasTile ? 1u : 0u,
-            std::bit_cast<std::uint32_t>(float(material.width)),
-            std::bit_cast<std::uint32_t>(float(material.height))};
-        D3D11_BUFFER_DESC buffer{};
-        buffer.ByteWidth = sizeof(values);
-        buffer.Usage = D3D11_USAGE_IMMUTABLE;
-        buffer.BindFlags = D3D11_BIND_CONSTANT_BUFFER;
-        const D3D11_SUBRESOURCE_DATA constantData{values.data(), 0, 0};
-        check(device->CreateBuffer(&buffer, &constantData, &constants[index]), "create alpha constants");
-        std::vector<std::vector<std::uint8_t>> levels{material.alpha};
-        std::vector<D3D11_SUBRESOURCE_DATA> subresources;
+        if (!material.alphaTest || !material.width || !material.height ||
+            material.alpha.size() != std::size_t(material.width) * material.height)
+            return;
+        auto &levels = alphaLevels[index];
+        levels.push_back(material.alpha);
         unsigned mipWidth = material.width, mipHeight = material.height;
         for (;;)
         {
-            subresources.push_back({levels.back().data(), mipWidth, 0});
-            if ((mipWidth == 1 && mipHeight == 1) ||
-                (material.atlasTile && mipWidth == 4 && mipHeight == 4))
+            if ((mipWidth == 1 && mipHeight == 1) || (material.atlasTile && mipWidth == 4 && mipHeight == 4))
                 break;
             const unsigned nextWidth = std::max(1u, mipWidth / 2);
             const unsigned nextHeight = std::max(1u, mipHeight / 2);
@@ -736,112 +726,352 @@ void peel(Output input) {
             mipWidth = nextWidth;
             mipHeight = nextHeight;
         }
-        D3D11_TEXTURE2D_DESC alphaTexture{};
-        alphaTexture.Width = material.width;
-        alphaTexture.Height = material.height;
-        alphaTexture.MipLevels = static_cast<UINT>(levels.size());
-        alphaTexture.ArraySize = 1;
-        alphaTexture.Format = DXGI_FORMAT_R8_UNORM;
-        alphaTexture.SampleDesc.Count = 1;
-        alphaTexture.Usage = D3D11_USAGE_IMMUTABLE;
-        alphaTexture.BindFlags = D3D11_BIND_SHADER_RESOURCE;
-        ComPtr<ID3D11Texture2D> alphaImage;
-        check(device->CreateTexture2D(&alphaTexture, subresources.data(), &alphaImage), "create alpha image");
-        check(device->CreateShaderResourceView(alphaImage.Get(), nullptr, &alphaViews[index]),
-              "create alpha image view");
-    }
-
-    std::vector<float> pixels(TileResolution * TileResolution);
-    std::vector<float> behind(TileResolution * TileResolution);
-    std::vector<Vertex> vertices;
-    // Draws one tile's casters into the depth image: the first surface, or
-    // with peel the nearest surface behind the first (firstCopy).
-    const auto drawCasters = [&](const unsigned x, const unsigned y,
-                                 const std::vector<std::size_t> &cellCasters, const bool peel) {
-        context->OMSetRenderTargets(0, nullptr, depthView.Get());
-        context->ClearDepthStencilView(depthView.Get(), D3D11_CLEAR_DEPTH, 0, 0);
-        if (peel)
+    });
+    // The tiles that the devices rendered, for the encoders (2 MB each, a bounded queue).
+    struct EncodeTask
+    {
+        unsigned x, y;
+        std::vector<float> first, behind;
+    };
+    std::mutex encodeMutex;
+    std::condition_variable encodeReady, encodeRoom;
+    std::deque<EncodeTask> encodeQueue;
+    bool renderingDone = false;
+    const auto worker = [&] {
+        try
         {
-            context->PSSetShaderResources(1, 1, firstView.GetAddressOf());
-            context->PSSetConstantBuffers(1, 1, peelConstants.GetAddressOf());
-        }
-        for (const auto index : cellCasters)
-        {
-            const auto &surface = projected[index];
-            const auto &material = scene.materials[surface.material];
-            vertices.clear();
-            for (std::size_t first = 0; first < surface.vertices.size(); first += 3)
+            ComPtr<ID3D11Device> device;
+            ComPtr<ID3D11DeviceContext> context;
+            check(D3D11CreateDevice(nullptr, D3D_DRIVER_TYPE_WARP, nullptr, 0, nullptr, 0,
+                                    D3D11_SDK_VERSION, &device, nullptr, &context), "create WARP device");
+            ComPtr<ID3D11VertexShader> vertexShader;
+            ComPtr<ID3D11PixelShader> pixelShader;
+            check(device->CreateVertexShader(vertexCode->GetBufferPointer(), vertexCode->GetBufferSize(),
+                                             nullptr, &vertexShader), "create vertex shader");
+            check(device->CreatePixelShader(pixelCode->GetBufferPointer(), pixelCode->GetBufferSize(),
+                                            nullptr, &pixelShader), "create pixel shader");
+            ComPtr<ID3D11PixelShader> peelShader;
+            check(device->CreatePixelShader(peelCode->GetBufferPointer(), peelCode->GetBufferSize(),
+                                            nullptr, &peelShader), "create depth-peel shader");
+            const std::array<D3D11_INPUT_ELEMENT_DESC, 3> elements{{
+                {"POSITION", 0, DXGI_FORMAT_R32G32B32_FLOAT, 0, 0, D3D11_INPUT_PER_VERTEX_DATA, 0},
+                {"TEXCOORD", 0, DXGI_FORMAT_R32G32_FLOAT, 0, 12, D3D11_INPUT_PER_VERTEX_DATA, 0},
+                {"COLOR", 0, DXGI_FORMAT_R32_FLOAT, 0, 20, D3D11_INPUT_PER_VERTEX_DATA, 0}}};
+            static_assert(sizeof(Vertex) == 24);
+            ComPtr<ID3D11InputLayout> inputLayout;
+            check(device->CreateInputLayout(elements.data(), static_cast<UINT>(elements.size()),
+                                            vertexCode->GetBufferPointer(), vertexCode->GetBufferSize(),
+                                            &inputLayout), "create caster input layout");
+            context->IASetInputLayout(inputLayout.Get());
+            context->IASetPrimitiveTopology(D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
+            context->VSSetShader(vertexShader.Get(), nullptr, 0);
+            std::array<ComPtr<ID3D11RasterizerState>, 3> rasterizers;
+            for (unsigned index = 0; index < rasterizers.size(); ++index)
             {
-                std::array<Vertex, 3> triangle;
-                float minX = INFINITY, minY = INFINITY, maxX = -INFINITY, maxY = -INFINITY;
-                for (unsigned corner = 0; corner < 3; ++corner)
-                {
-                    auto &vertex = triangle[corner];
-                    vertex = surface.vertices[first + corner];
-                    vertex.position[0] -= float(x * TileResolution);
-                    vertex.position[1] -= float(y * TileResolution);
-                    minX = std::min(minX, vertex.position[0]);
-                    maxX = std::max(maxX, vertex.position[0]);
-                    minY = std::min(minY, vertex.position[1]);
-                    maxY = std::max(maxY, vertex.position[1]);
-                }
-                if (maxX >= 0 && maxY >= 0 && minX < TileResolution && minY < TileResolution)
-                    vertices.insert(vertices.end(), triangle.begin(), triangle.end());
+                D3D11_RASTERIZER_DESC raster{};
+                raster.FillMode = D3D11_FILL_SOLID;
+                raster.CullMode = std::array{D3D11_CULL_NONE, D3D11_CULL_BACK, D3D11_CULL_FRONT}[index];
+                raster.DepthClipEnable = TRUE;
+                check(device->CreateRasterizerState(&raster, &rasterizers[index]), "create rasterizer");
             }
-            if (vertices.empty())
-                continue;
-            if (vertices.size() > UINT32_MAX / sizeof(Vertex))
-                throw std::runtime_error("compressed sun-shadow vertex buffer exceeds native size");
-            D3D11_BUFFER_DESC buffer{};
-            buffer.ByteWidth = static_cast<UINT>(vertices.size() * sizeof(Vertex));
-            buffer.Usage = D3D11_USAGE_IMMUTABLE;
-            buffer.BindFlags = D3D11_BIND_VERTEX_BUFFER;
-            const D3D11_SUBRESOURCE_DATA vertexData{vertices.data(), 0, 0};
-            ComPtr<ID3D11Buffer> vertexBuffer;
-            check(device->CreateBuffer(&buffer, &vertexData, &vertexBuffer), "create caster vertices");
-            const UINT stride = sizeof(Vertex), offset = 0;
-            context->IASetVertexBuffers(0, 1, vertexBuffer.GetAddressOf(), &stride, &offset);
-            context->RSSetState(rasterizers[twoSided ? 0u : material.cullMode].Get());
-            context->PSSetShader(peel ? peelShader.Get() : material.alphaTest ? pixelShader.Get() : nullptr,
-                                 nullptr, 0);
-            context->PSSetConstantBuffers(0, 1, material.alphaTest
-                                                    ? constants[surface.material].GetAddressOf()
-                                                    : opaqueConstants.GetAddressOf());
-            context->PSSetShaderResources(0, 1, alphaViews[surface.material].GetAddressOf());
-            context->Draw(static_cast<UINT>(vertices.size()), 0);
+            D3D11_DEPTH_STENCIL_DESC depth{};
+            depth.DepthEnable = TRUE;
+            depth.DepthWriteMask = D3D11_DEPTH_WRITE_MASK_ALL;
+            depth.DepthFunc = D3D11_COMPARISON_GREATER_EQUAL;
+            ComPtr<ID3D11DepthStencilState> depthState;
+            check(device->CreateDepthStencilState(&depth, &depthState), "create depth state");
+            context->OMSetDepthStencilState(depthState.Get(), 0);
+            const D3D11_VIEWPORT viewport{0, 0, float(TileResolution), float(TileResolution), 0, 1};
+            context->RSSetViewports(1, &viewport);
+            D3D11_TEXTURE2D_DESC texture{};
+            texture.Width = texture.Height = TileResolution;
+            texture.MipLevels = texture.ArraySize = 1;
+            texture.Format = DXGI_FORMAT_R32_TYPELESS;
+            texture.SampleDesc.Count = 1;
+            texture.BindFlags = D3D11_BIND_DEPTH_STENCIL;
+            ComPtr<ID3D11Texture2D> target, readback;
+            check(device->CreateTexture2D(&texture, nullptr, &target), "create depth image");
+            D3D11_DEPTH_STENCIL_VIEW_DESC depthViewDescription{};
+            depthViewDescription.Format = DXGI_FORMAT_D32_FLOAT;
+            depthViewDescription.ViewDimension = D3D11_DSV_DIMENSION_TEXTURE2D;
+            ComPtr<ID3D11DepthStencilView> depthView;
+            check(device->CreateDepthStencilView(target.Get(), &depthViewDescription, &depthView),
+                  "create depth view");
+            texture.Usage = D3D11_USAGE_STAGING;
+            texture.BindFlags = 0;
+            texture.CPUAccessFlags = D3D11_CPU_ACCESS_READ;
+            check(device->CreateTexture2D(&texture, nullptr, &readback), "create readback image");
+            // The first-surface depth, read by the depth-peel pass.
+            texture.Usage = D3D11_USAGE_DEFAULT;
+            texture.BindFlags = D3D11_BIND_SHADER_RESOURCE;
+            texture.CPUAccessFlags = 0;
+            ComPtr<ID3D11Texture2D> firstCopy;
+            check(device->CreateTexture2D(&texture, nullptr, &firstCopy), "create first-surface image");
+            D3D11_SHADER_RESOURCE_VIEW_DESC firstViewDescription{};
+            firstViewDescription.Format = DXGI_FORMAT_R32_FLOAT;
+            firstViewDescription.ViewDimension = D3D11_SRV_DIMENSION_TEXTURE2D;
+            firstViewDescription.Texture2D.MipLevels = 1;
+            ComPtr<ID3D11ShaderResourceView> firstView;
+            check(device->CreateShaderResourceView(firstCopy.Get(), &firstViewDescription, &firstView),
+                  "create first-surface view");
+            // A surface within peelEpsilon of the first (one world unit along the sun
+            // is inverseSpan) is the same layer.
+            const float peelEpsilon = 0.25f * inverseSpan;
+            ComPtr<ID3D11Buffer> peelConstants, opaqueConstants;
+            {
+                const std::array<float, 4> values{peelEpsilon, 0, 0, 0};
+                D3D11_BUFFER_DESC buffer{};
+                buffer.ByteWidth = sizeof(values);
+                buffer.Usage = D3D11_USAGE_IMMUTABLE;
+                buffer.BindFlags = D3D11_BIND_CONSTANT_BUFFER;
+                const D3D11_SUBRESOURCE_DATA data{values.data(), 0, 0};
+                check(device->CreateBuffer(&buffer, &data, &peelConstants), "create depth-peel constants");
+                const std::array<std::uint32_t, 4> opaque{0, 0, 0, 0};
+                const D3D11_SUBRESOURCE_DATA opaqueData{opaque.data(), 0, 0};
+                check(device->CreateBuffer(&buffer, &opaqueData, &opaqueConstants), "create opaque constants");
+            }
+            D3D11_SAMPLER_DESC sampler{};
+            sampler.Filter = D3D11_FILTER_MIN_MAG_MIP_LINEAR;
+            sampler.AddressU = sampler.AddressV = sampler.AddressW = D3D11_TEXTURE_ADDRESS_WRAP;
+            sampler.MaxLOD = D3D11_FLOAT32_MAX;
+            ComPtr<ID3D11SamplerState> alphaSampler;
+            check(device->CreateSamplerState(&sampler, &alphaSampler), "create alpha sampler");
+            context->PSSetSamplers(0, 1, alphaSampler.GetAddressOf());
+            std::vector<ComPtr<ID3D11Buffer>> constants(scene.materials.size());
+            std::vector<ComPtr<ID3D11ShaderResourceView>> alphaViews(scene.materials.size());
+            for (std::size_t index = 0; index < scene.materials.size(); ++index)
+            {
+                const auto &material = scene.materials[index];
+                if (material.cullMode > 2 || material.alphaTest > 3)
+                    throw std::runtime_error("invalid compressed sun-shadow material state");
+                if (!material.alphaTest)
+                    continue;
+                if (!material.width || !material.height || material.width > 16384 ||
+                    material.height > 16384 || material.alpha.size() != std::size_t(material.width) * material.height ||
+                    (material.atlasTile && (material.width != material.height || material.width < 4)))
+                    throw std::runtime_error("invalid compressed sun-shadow alpha image");
+                const std::array<std::uint32_t, 4> values{material.alphaTest, material.atlasTile ? 1u : 0u,
+                    std::bit_cast<std::uint32_t>(float(material.width)),
+                    std::bit_cast<std::uint32_t>(float(material.height))};
+                D3D11_BUFFER_DESC buffer{};
+                buffer.ByteWidth = sizeof(values);
+                buffer.Usage = D3D11_USAGE_IMMUTABLE;
+                buffer.BindFlags = D3D11_BIND_CONSTANT_BUFFER;
+                const D3D11_SUBRESOURCE_DATA constantData{values.data(), 0, 0};
+                check(device->CreateBuffer(&buffer, &constantData, &constants[index]), "create alpha constants");
+                const auto &levels = alphaLevels[index];
+                std::vector<D3D11_SUBRESOURCE_DATA> subresources;
+                for (unsigned level = 0, mipWidth = material.width; level < levels.size();
+                     ++level, mipWidth = std::max(1u, mipWidth / 2))
+                    subresources.push_back({levels[level].data(), mipWidth, 0});
+                D3D11_TEXTURE2D_DESC alphaTexture{};
+                alphaTexture.Width = material.width;
+                alphaTexture.Height = material.height;
+                alphaTexture.MipLevels = static_cast<UINT>(levels.size());
+                alphaTexture.ArraySize = 1;
+                alphaTexture.Format = DXGI_FORMAT_R8_UNORM;
+                alphaTexture.SampleDesc.Count = 1;
+                alphaTexture.Usage = D3D11_USAGE_IMMUTABLE;
+                alphaTexture.BindFlags = D3D11_BIND_SHADER_RESOURCE;
+                ComPtr<ID3D11Texture2D> alphaImage;
+                check(device->CreateTexture2D(&alphaTexture, subresources.data(), &alphaImage), "create alpha image");
+                check(device->CreateShaderResourceView(alphaImage.Get(), nullptr, &alphaViews[index]),
+                      "create alpha image view");
+            }
+
+            std::vector<float> pixels(TileResolution * TileResolution);
+            std::vector<float> behind(TileResolution * TileResolution);
+            std::vector<Vertex> vertices;
+            // One tile's casters in one vertex buffer, a draw per run of a material: the depth test keeps the farthest
+            // depth along the sun (GREATER_EQUAL, depth only), so the order of the triangles does not change the image.
+            struct Draw
+            {
+                std::uint32_t material;
+                UINT start, count;
+            };
+            std::vector<Draw> draws;
+            std::vector<std::pair<std::uint32_t, std::uint32_t>> sortedTriangles;
+            ComPtr<ID3D11Buffer> tileVertices;
+            const auto buildTile = [&](const unsigned x, const unsigned y,
+                                       const std::vector<std::pair<std::uint32_t, std::uint32_t>> &cellTriangles) {
+                sortedTriangles = cellTriangles;
+                std::ranges::stable_sort(sortedTriangles, {},
+                                         [&](const auto &triangle) { return projected[triangle.first].material; });
+                vertices.clear();
+                draws.clear();
+                for (const auto &[index, first] : sortedTriangles)
+                {
+                    const auto &surface = projected[index];
+                    for (unsigned corner = 0; corner < 3; ++corner)
+                    {
+                        auto vertex = surface.vertices[first + corner];
+                        vertex.position[0] -= float(x * TileResolution);
+                        vertex.position[1] -= float(y * TileResolution);
+                        vertices.push_back(vertex);
+                    }
+                    if (vertices.size() > UINT32_MAX / sizeof(Vertex))
+                        throw std::runtime_error("compressed sun-shadow vertex buffer exceeds native size");
+                    if (!draws.empty() && draws.back().material == surface.material)
+                        draws.back().count += 3;
+                    else
+                        draws.push_back({surface.material, static_cast<UINT>(vertices.size() - 3), 3});
+                }
+                tileVertices.Reset();
+                if (vertices.empty())
+                    return;
+                D3D11_BUFFER_DESC buffer{};
+                buffer.ByteWidth = static_cast<UINT>(vertices.size() * sizeof(Vertex));
+                buffer.Usage = D3D11_USAGE_IMMUTABLE;
+                buffer.BindFlags = D3D11_BIND_VERTEX_BUFFER;
+                const D3D11_SUBRESOURCE_DATA vertexData{vertices.data(), 0, 0};
+                check(device->CreateBuffer(&buffer, &vertexData, &tileVertices), "create caster vertices");
+            };
+            // Draws the tile's casters (buildTile) into the depth image: the first surface, or with peel the nearest
+            // surface behind the first (firstCopy).
+            const auto drawCasters = [&](const bool peel) {
+                context->OMSetRenderTargets(0, nullptr, depthView.Get());
+                context->ClearDepthStencilView(depthView.Get(), D3D11_CLEAR_DEPTH, 0, 0);
+                if (peel)
+                {
+                    context->PSSetShaderResources(1, 1, firstView.GetAddressOf());
+                    context->PSSetConstantBuffers(1, 1, peelConstants.GetAddressOf());
+                }
+                if (tileVertices)
+                {
+                    const UINT stride = sizeof(Vertex), offset = 0;
+                    context->IASetVertexBuffers(0, 1, tileVertices.GetAddressOf(), &stride, &offset);
+                }
+                for (const auto &draw : draws)
+                {
+                    const auto &material = scene.materials[draw.material];
+                    context->RSSetState(rasterizers[twoSided ? 0u : material.cullMode].Get());
+                    context->PSSetShader(peel ? peelShader.Get() : material.alphaTest ? pixelShader.Get() : nullptr,
+                                         nullptr, 0);
+                    context->PSSetConstantBuffers(0, 1, material.alphaTest
+                                                            ? constants[draw.material].GetAddressOf()
+                                                            : opaqueConstants.GetAddressOf());
+                    context->PSSetShaderResources(0, 1, alphaViews[draw.material].GetAddressOf());
+                    context->Draw(draw.count, draw.start);
+                }
+                context->OMSetRenderTargets(0, nullptr, nullptr);
+                if (peel)
+                {
+                    ID3D11ShaderResourceView *none = nullptr;
+                    context->PSSetShaderResources(1, 1, &none);
+                }
+            };
+            const auto readDepth = [&](std::vector<float> &out) {
+                context->CopyResource(readback.Get(), target.Get());
+                D3D11_MAPPED_SUBRESOURCE mapped{};
+                check(context->Map(readback.Get(), 0, D3D11_MAP_READ, 0, &mapped), "read caster depth");
+                for (unsigned row = 0; row < TileResolution; ++row)
+                    std::memcpy(out.data() + row * TileResolution,
+                                static_cast<const std::uint8_t *>(mapped.pData) + row * mapped.RowPitch,
+                                TileResolution * sizeof(float));
+                context->Unmap(readback.Get(), 0);
+            };
+            for (std::size_t task; !failed && (task = nextTask.fetch_add(1)) < cells.size();)
+            {
+                const auto cell = cells[task];
+                const unsigned x = cell % width, y = cell / width;
+                const auto micros = [](const auto from) {
+                    return static_cast<std::uint64_t>(std::chrono::duration_cast<std::chrono::microseconds>(
+                        std::chrono::steady_clock::now() - from).count());
+                };
+                auto started = std::chrono::steady_clock::now();
+                buildTile(x, y, tileTriangles[cell]);
+                buildTime += micros(started);
+                if (draws.empty())
+                    continue;
+                started = std::chrono::steady_clock::now();
+                drawCasters(false);
+                readDepth(pixels);
+                const bool cast = std::any_of(pixels.begin(), pixels.end(), [](float value) { return value != 0; });
+                if (cast)
+                {
+                    context->CopyResource(firstCopy.Get(), target.Get());
+                    drawCasters(true);
+                    readDepth(behind);
+                }
+                drawTime += micros(started);
+                if (!cast)
+                    continue;
+                {
+                    std::unique_lock lock(encodeMutex);
+                    encodeRoom.wait(lock, [&] { return failed || encodeQueue.size() < 64; });
+                    if (failed)
+                        return;
+                    encodeQueue.push_back({x, y, pixels, behind});
+                }
+                encodeReady.notify_one();
+            }
         }
-        context->OMSetRenderTargets(0, nullptr, nullptr);
-        if (peel)
+        catch (...)
         {
-            ID3D11ShaderResourceView *none = nullptr;
-            context->PSSetShaderResources(1, 1, &none);
+            std::lock_guard lock(failureMutex);
+            if (!failure)
+                failure = std::current_exception();
+            failed = true;
+        }
+        encodeReady.notify_all();
+        encodeRoom.notify_all();
+    };
+    const auto encoder = [&] {
+        for (;;)
+        {
+            EncodeTask task;
+            {
+                std::unique_lock lock(encodeMutex);
+                encodeReady.wait(lock, [&] { return failed || renderingDone || !encodeQueue.empty(); });
+                if (encodeQueue.empty() || failed)
+                    return;
+                task = std::move(encodeQueue.front());
+                encodeQueue.pop_front();
+            }
+            encodeRoom.notify_one();
+            try
+            {
+                const auto started = std::chrono::steady_clock::now();
+                visit(task.x, task.y, task.first, task.behind);
+                visitTime += static_cast<std::uint64_t>(std::chrono::duration_cast<std::chrono::microseconds>(
+                    std::chrono::steady_clock::now() - started).count());
+            }
+            catch (...)
+            {
+                {
+                    std::lock_guard lock(failureMutex);
+                    if (!failure)
+                        failure = std::current_exception();
+                    failed = true;
+                }
+                encodeRoom.notify_all();
+                return;
+            }
         }
     };
-    const auto readDepth = [&](std::vector<float> &out) {
-        context->CopyResource(readback.Get(), target.Get());
-        D3D11_MAPPED_SUBRESOURCE mapped{};
-        check(context->Map(readback.Get(), 0, D3D11_MAP_READ, 0, &mapped), "read caster depth");
-        for (unsigned row = 0; row < TileResolution; ++row)
-            std::memcpy(out.data() + row * TileResolution,
-                        static_cast<const std::uint8_t *>(mapped.pData) + row * mapped.RowPitch,
-                        TileResolution * sizeof(float));
-        context->Unmap(readback.Get(), 0);
-    };
-    for (unsigned y = 0; y < height; ++y)
-        for (unsigned x = 0; x < width; ++x)
-        {
-            const auto cell = y * width + x;
-            if (candidates[cell].empty())
-                continue;
-            drawCasters(x, y, candidates[cell], false);
-            readDepth(pixels);
-            if (std::none_of(pixels.begin(), pixels.end(), [](float value) { return value != 0; }))
-                continue;
-            context->CopyResource(firstCopy.Get(), target.Get());
-            drawCasters(x, y, candidates[cell], true);
-            readDepth(behind);
-            visit(x, y, pixels, behind);
-        }
+    // A WARP device holds the alpha images of every material: a few devices, not one per core (WARP draws on several
+    // threads itself).
+    const auto workerCount = static_cast<unsigned>(std::min<std::size_t>(
+        cells.size(), std::clamp(std::thread::hardware_concurrency() / 4, 1u, 4u)));
+    std::vector<std::thread> threads, encoders;
+    for (unsigned index = 0; index < workerCount; ++index)
+        threads.emplace_back(worker);
+    const unsigned encoderCount = std::max(1u, std::thread::hardware_concurrency() - workerCount);
+    for (unsigned index = 0; index < encoderCount; ++index)
+        encoders.emplace_back(encoder);
+    for (auto &thread : threads)
+        thread.join();
+    {
+        std::lock_guard lock(encodeMutex);
+        renderingDone = true;
+    }
+    encodeReady.notify_all();
+    for (auto &thread : encoders)
+        thread.join();
+    if (failure)
+        std::rethrow_exception(failure);
+    zt::info("sun-shadow: %zu tiles on %u WARP devices and %u encoders: thread time %.1fs triangles, %.1fs drawing, %.1fs "
+             "encoding", cells.size(), workerCount, encoderCount, buildTime / 1e6, drawTime / 1e6, visitTime / 1e6);
     return true;
 }
 
@@ -869,8 +1099,7 @@ Data Bake(const Scene &scene, const std::array<float, 3> &sunDirection,
     TileGrid grid;
     std::vector<std::vector<std::uint8_t>> tiles;
     std::vector<float> uniformCells;
-    std::vector<float> lowerBounds(TileResolution * TileResolution);
-    std::size_t encodedSize = 0;
+    std::vector<std::uint8_t> visitedCells;
     // Two-sided: IW3 light baking blocks the sun with every opaque surface.
     // With material culling a ceiling (back-facing the sun) let sunlight into
     // rooms whose roof top IW3 never drew.
@@ -888,10 +1117,11 @@ Data Bake(const Scene &scene, const std::array<float, 3> &sunDirection,
             parameters.reserved = grid.width << 16;
             tiles.assign(std::size_t(grid.width) * grid.height, {});
             uniformCells.assign(tiles.size(), 0.0f);
-            encodedSize = 32 + tiles.size() * 4;
+            visitedCells.assign(tiles.size(), 0);
         },
         [&](const unsigned x, const unsigned y, const std::vector<float> &pixels,
             const std::vector<float> &behind) {
+            std::vector<float> lowerBounds(pixels.size());
             for (std::size_t index = 0; index < pixels.size(); ++index)
                 lowerBounds[index] = LowerBound(pixels[index], behind[index], grid.inverseSpan);
             const auto cell = y * grid.width + x;
@@ -899,16 +1129,23 @@ Data Bake(const Scene &scene, const std::array<float, 3> &sunDirection,
             tiles[cell] =
                 EncodeIntervalTile(pixels, lowerBounds, grid.origin, grid.inverseSpan, uniform);
             uniformCells[cell] = uniform;
-            if (uniform != 0.0f)
-                ++result.uniformCells;
-            else
-                ++result.treeCells;
-            if (tiles[cell].size() > MaximumBytes - encodedSize)
-                throw std::runtime_error("compressed sun-shadow bake exceeds 31-bit pointers");
-            encodedSize += tiles[cell].size();
+            visitedCells[cell] = 1;
         });
     if (!baked)
         return {};
+    std::size_t encodedSize = 32 + tiles.size() * 4;
+    for (std::size_t cell = 0; cell < tiles.size(); ++cell)
+    {
+        if (!visitedCells[cell])
+            continue;
+        if (uniformCells[cell] != 0.0f)
+            ++result.uniformCells;
+        else
+            ++result.treeCells;
+        if (tiles[cell].size() > MaximumBytes - encodedSize)
+            throw std::runtime_error("compressed sun-shadow bake exceeds 31-bit pointers");
+        encodedSize += tiles[cell].size();
+    }
     result.bytes = EncodeForest(result.parameters.resolution,
                                 static_cast<std::uint16_t>(grid.width),
                                 static_cast<std::uint16_t>(grid.height), grid.origin,
