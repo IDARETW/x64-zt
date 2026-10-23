@@ -1,21 +1,41 @@
 #include <std_include.hpp>
 #include "export.hpp"
 
+#pragma warning(push, 0)
+#include <glaze/json.hpp>
+#pragma warning(pop)
+
 namespace zonetool::convert::iw7_iw8
 {
+	// A model's geometry file (xmodel/<name>.replay.json), written by glaze: the members are its keys and the values the
+	// doubles that json values held (a large model's tree took seconds to build and write). Glaze reflects the member
+	// names, which takes external linkage.
+	struct model_geometry_surface
+	{
+		bool deformed{};
+		std::string material;
+		int reflection_probe{};
+		std::vector<geometry_vertex> vertices;
+		std::vector<std::uint32_t> indices;
+	};
+
+	struct model_geometry_lod
+	{
+		double distance{};
+		std::vector<model_geometry_surface> surfaces;
+	};
+
+	struct model_geometry
+	{
+		int schema{};
+		std::string name;
+		unsigned bone_count{};
+		std::uint32_t contents{};
+		std::vector<model_geometry_lod> lods;
+	};
+
 	namespace
 	{
-		json vector_json(const float* values, const std::size_t count)
-		{
-			auto result = json::array();
-			for (std::size_t i = 0; i < count; i++)
-			{
-				result.push_back(values[i]);
-			}
-
-			return result;
-		}
-
 		std::array<float, 3> unpack_unit_vec(const iw7::PackedUnitVec& vector)
 		{
 			std::array<float, 3> result{};
@@ -28,7 +48,7 @@ namespace zonetool::convert::iw7_iw8
 		}
 
 		template <typename Vertex>
-		json export_vertex(const Vertex& vertex)
+		geometry_vertex export_vertex(const Vertex& vertex)
 		{
 			const auto normal = unpack_unit_vec(vertex.normal);
 			const auto tangent = unpack_unit_vec(vertex.tangent);
@@ -36,16 +56,18 @@ namespace zonetool::convert::iw7_iw8
 			PackedVec::Vec2UnpackTexCoords(vertex.texCoord.packed, uv);
 			// The top two bits of the tangent hold the binormal sign.
 			const auto binormal_sign = (vertex.tangent.packed >> 30) ? 1.0f : -1.0f;
-			return
+			geometry_vertex result;
+			for (auto i = 0; i < 3; i++)
 			{
-				{"position", vector_json(vertex.xyz, 3)},
-				{"normal", vector_json(normal.data(), 3)},
-				{"tangent", vector_json(tangent.data(), 3)},
-				{"binormal_sign", binormal_sign},
-				{"uv", vector_json(uv, 2)},
-				{"lightmap_uv", {0.0f, 0.0f}},
-				{"color", {255, 255, 255, 255}},
-			};
+				result.position[i] = vertex.xyz[i];
+				result.normal[i] = normal[i];
+				result.tangent[i] = tangent[i];
+			}
+
+			result.binormal_sign = binormal_sign;
+			result.uv = {uv[0], uv[1]};
+			result.color = {255, 255, 255, 255};
+			return result;
 		}
 
 		// Replay packs the bounds of model triangle clusters as half floats (at most 65504).
@@ -67,30 +89,25 @@ namespace zonetool::convert::iw7_iw8
 		}
 
 		template <typename Vertices, typename Faces>
-		json export_surface(const Vertices& source_vertices, const Faces& faces, const std::string& material)
+		model_geometry_surface export_surface(const Vertices& source_vertices, const Faces& faces, const std::string& material)
 		{
-			auto vertices = json::array();
+			model_geometry_surface surface;
+			surface.material = material;
+			surface.vertices.reserve(std::size(source_vertices));
 			for (const auto& vertex : source_vertices)
 			{
-				vertices.push_back(export_vertex(vertex));
+				surface.vertices.push_back(export_vertex(vertex));
 			}
 
-			auto indices = json::array();
+			surface.indices.reserve(std::size(faces) * 3);
 			for (const auto& face : faces)
 			{
-				indices.push_back(face.v1);
-				indices.push_back(face.v2);
-				indices.push_back(face.v3);
+				surface.indices.push_back(face.v1);
+				surface.indices.push_back(face.v2);
+				surface.indices.push_back(face.v3);
 			}
 
-			return
-			{
-				{"deformed", false},
-				{"material", material},
-				{"reflection_probe", 0},
-				{"vertices", std::move(vertices)},
-				{"indices", std::move(indices)},
-			};
+			return surface;
 		}
 
 		// The largest scale that the world places a model at (1 for a model that it does not place).
@@ -201,13 +218,18 @@ namespace zonetool::convert::iw7_iw8
 			const extraction& output)
 		{
 			auto table_lods = json::array();
-			auto geometry_lods = json::array();
+			model_geometry geometry;
+			geometry.schema = 1;
+			geometry.name = name;
+			// The importer warns about a missing skeleton export only for models with bones to keep.
+			geometry.bone_count = model->numBones;
+			geometry.contents = static_cast<std::uint32_t>(model->contents);
 			for (std::size_t lod = 0; lod < plan.lods.size(); lod++)
 			{
 				const auto& info = model->lodInfo[lod];
 				const auto surfaces = source.resolve(iw7::ASSET_TYPE_XMODEL_SURFS, info.modelSurfs);
 				const auto streamed = info.modelSurfs ? source.streamed_surfaces(asset_name(info.modelSurfs->name)) : nullptr;
-				auto lod_surfaces = json::array();
+				std::vector<model_geometry_surface> lod_surfaces;
 				for (std::size_t i = 0; i < info.numsurfs; i++)
 				{
 					const auto& material_name = plan.lods[lod].materials[i];
@@ -231,7 +253,7 @@ namespace zonetool::convert::iw7_iw8
 
 				const auto distance = plan.lods[lod].distance;
 				table_lods.push_back({{"distance", distance}, {"file", std::format("model_export/{}_lod{}.obj", name, lod)}});
-				geometry_lods.push_back({{"distance", distance}, {"surfaces", std::move(lod_surfaces)}});
+				geometry.lods.push_back({distance, std::move(lod_surfaces)});
 			}
 
 			write_json(output.extracted / "xmodel" / (name + ".json"),
@@ -250,15 +272,13 @@ namespace zonetool::convert::iw7_iw8
 				{"type", "rigid"},
 			});
 
-			write_json(output.extracted / "xmodel" / (name + ".replay.json"),
+			std::string text;
+			if (glz::write_json(geometry, text))
 			{
-				{"schema", 1},
-				{"name", name},
-				// The importer warns about a missing skeleton export only for models with bones to keep.
-				{"bone_count", model->numBones},
-				{"contents", static_cast<std::uint32_t>(model->contents)},
-				{"lods", std::move(geometry_lods)},
-			});
+				throw std::runtime_error(std::format("cannot write the geometry of {}", name));
+			}
+
+			write_text(output.extracted / "xmodel" / (name + ".replay.json"), text);
 		}
 	}
 
