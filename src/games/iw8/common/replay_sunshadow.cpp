@@ -5,6 +5,7 @@
 #include <d3d11.h>
 #include <d3dcompiler.h>
 #include <wrl/client.h>
+#include <bcrypt.h>
 
 #include <algorithm>
 #include <atomic>
@@ -15,12 +16,17 @@
 #include <cstring>
 #include <deque>
 #include <exception>
+#include <filesystem>
+#include <fstream>
 #include <functional>
+#include <iterator>
 #include <limits>
 #include <mutex>
+#include <optional>
 #include <stdexcept>
 #include <string>
 #include <thread>
+#include <type_traits>
 
 namespace replaysunshadow
 {
@@ -1089,9 +1095,11 @@ float LowerBound(const float first, const float behind, const float inverseSpan)
 }
 } // namespace
 
-Data Bake(const Scene &scene, const std::array<float, 3> &sunDirection,
-          const replaybounds::Bounds &receiverBounds, const float sampleSize,
-          const replaybounds::Bounds *focus, const std::size_t budget)
+namespace
+{
+Data BakeUncached(const Scene &scene, const std::array<float, 3> &sunDirection,
+                  const replaybounds::Bounds &receiverBounds, const float sampleSize,
+                  const replaybounds::Bounds *focus, const std::size_t budget)
 {
     if (!(sampleSize == 1.0f || sampleSize == 2.0f))
         throw std::runtime_error("compressed sun-shadow sample size must be 1 or 2 (shipped values)");
@@ -1156,8 +1164,8 @@ Data Bake(const Scene &scene, const std::array<float, 3> &sunDirection,
     return result;
 }
 
-DepthImage BakeDepthImage(const Scene &scene, const std::array<float, 3> &sunDirection,
-                          const replaybounds::Bounds &region)
+DepthImage BakeDepthImageUncached(const Scene &scene, const std::array<float, 3> &sunDirection,
+                                  const replaybounds::Bounds &region)
 {
     // Texel size: the smallest (in eighths of a unit) whose tile grid, with
     // one tile of slack per axis for the alignment to whole tiles, fits the
@@ -1247,4 +1255,220 @@ DepthImage BakeDepthImage(const Scene &scene, const std::array<float, 3> &sunDir
     image.baked = baked;
     return image;
 }
+
+// The digest of a bake's inputs: the scene (each surface and material digested on every core) and the bake's
+// own values.
+std::filesystem::path g_cacheDirectory;
+constexpr char kCacheVersion[] = "sunshadow-v1";
+
+std::array<std::uint8_t, 32> Digest(const void *data, const std::size_t size)
+{
+    std::array<std::uint8_t, 32> digest{};
+    if (BCryptHash(BCRYPT_SHA256_ALG_HANDLE, nullptr, 0, static_cast<PUCHAR>(const_cast<void *>(data)),
+                   static_cast<ULONG>(size), digest.data(), static_cast<ULONG>(digest.size())) < 0)
+        throw std::runtime_error("cannot digest the sun-shadow scene");
+    return digest;
+}
+
+std::string CacheKey(const Scene &scene, const std::vector<std::uint8_t> &values)
+{
+    std::vector<std::array<std::uint8_t, 32>> parts(scene.materials.size() + scene.surfaces.size());
+    ParallelFor(parts.size(), [&](const std::size_t index) {
+        if (index < scene.materials.size())
+        {
+            const auto &material = scene.materials[index];
+            std::vector<std::uint8_t> bytes(material.alpha);
+            for (const std::uint32_t value : {material.cullMode, material.alphaTest, material.width, material.height,
+                                              material.atlasTile ? 1u : 0u})
+                for (unsigned byte = 0; byte < 4; ++byte)
+                    bytes.push_back(static_cast<std::uint8_t>(value >> (8 * byte)));
+            parts[index] = Digest(bytes.data(), bytes.size());
+            return;
+        }
+        const auto &surface = scene.surfaces[index - scene.materials.size()];
+        std::vector<std::uint8_t> bytes(surface.vertices.size() * sizeof(Vertex) + 4);
+        std::memcpy(bytes.data(), surface.vertices.data(), surface.vertices.size() * sizeof(Vertex));
+        std::memcpy(bytes.data() + surface.vertices.size() * sizeof(Vertex), &surface.material, 4);
+        parts[index] = Digest(bytes.data(), bytes.size());
+    });
+    std::vector<std::uint8_t> all(kCacheVersion, kCacheVersion + sizeof(kCacheVersion));
+    const auto counts = std::array<std::uint64_t, 2>{scene.materials.size(), scene.surfaces.size()};
+    all.insert(all.end(), reinterpret_cast<const std::uint8_t *>(counts.data()),
+               reinterpret_cast<const std::uint8_t *>(counts.data()) + sizeof(counts));
+    for (const auto &part : parts)
+        all.insert(all.end(), part.begin(), part.end());
+    all.insert(all.end(), values.begin(), values.end());
+    const auto digest = Digest(all.data(), all.size());
+    static constexpr char hex[] = "0123456789abcdef";
+    std::string key;
+    for (std::size_t index = 0; index < 16; ++index)
+        key += {hex[digest[index] >> 4], hex[digest[index] & 15]};
+    return key;
+}
+
+template <class T> void AppendValue(std::vector<std::uint8_t> &bytes, const T &value)
+{
+    static_assert(std::is_trivially_copyable_v<T>);
+    const auto *begin = reinterpret_cast<const std::uint8_t *>(&value);
+    bytes.insert(bytes.end(), begin, begin + sizeof(T));
+}
+
+template <class T> T TakeValue(const std::vector<std::uint8_t> &bytes, std::size_t &offset)
+{
+    T value{};
+    if (offset + sizeof(T) > bytes.size())
+        throw std::runtime_error("truncated sun-shadow cache entry");
+    std::memcpy(&value, bytes.data() + offset, sizeof(T));
+    offset += sizeof(T);
+    return value;
+}
+
+std::vector<std::uint8_t> TakeBytes(const std::vector<std::uint8_t> &bytes, std::size_t &offset)
+{
+    const auto size = TakeValue<std::uint64_t>(bytes, offset);
+    if (size > bytes.size() - offset)
+        throw std::runtime_error("truncated sun-shadow cache entry");
+    std::vector<std::uint8_t> result(bytes.begin() + offset, bytes.begin() + offset + size);
+    offset += size;
+    return result;
+}
+
+void AppendBytes(std::vector<std::uint8_t> &bytes, const std::vector<std::uint8_t> &value)
+{
+    AppendValue(bytes, static_cast<std::uint64_t>(value.size()));
+    bytes.insert(bytes.end(), value.begin(), value.end());
+}
+
+std::optional<std::vector<std::uint8_t>> ReadCache(const std::string &key)
+{
+    if (g_cacheDirectory.empty())
+        return std::nullopt;
+    std::ifstream input(g_cacheDirectory / ("sunshadow_" + key + ".bin"), std::ios::binary);
+    if (!input)
+        return std::nullopt;
+    return std::vector<std::uint8_t>(std::istreambuf_iterator<char>(input), {});
+}
+
+// The cache is an optimisation: a full disk keeps converting.
+void WriteCache(const std::string &key, const std::vector<std::uint8_t> &bytes)
+{
+    if (g_cacheDirectory.empty())
+        return;
+    std::error_code error;
+    std::filesystem::create_directories(g_cacheDirectory, error);
+    const auto path = g_cacheDirectory / ("sunshadow_" + key + ".bin");
+    auto partial = path;
+    partial += "." + std::to_string(GetCurrentProcessId()) + ".partial";
+    {
+        std::ofstream output(partial, std::ios::binary | std::ios::trunc);
+        output.write(reinterpret_cast<const char *>(bytes.data()), static_cast<std::streamsize>(bytes.size()));
+        if (!output)
+        {
+            output.close();
+            std::filesystem::remove(partial, error);
+            return;
+        }
+    }
+    std::filesystem::rename(partial, path, error);
+    if (error)
+        std::filesystem::remove(partial, error);
+}
+} // namespace
+
+void SetCacheDirectory(std::filesystem::path directory)
+{
+    g_cacheDirectory = std::move(directory);
+}
+
+Data Bake(const Scene &scene, const std::array<float, 3> &sunDirection,
+          const replaybounds::Bounds &receiverBounds, const float sampleSize,
+          const replaybounds::Bounds *focus, const std::size_t budget)
+{
+    std::vector<std::uint8_t> values{'b'};
+    AppendValue(values, sunDirection);
+    AppendValue(values, receiverBounds);
+    AppendValue(values, sampleSize);
+    AppendValue(values, static_cast<std::uint8_t>(focus != nullptr));
+    if (focus)
+        AppendValue(values, *focus);
+    AppendValue(values, static_cast<std::uint64_t>(budget));
+    const auto key = g_cacheDirectory.empty() ? std::string{} : CacheKey(scene, values);
+    if (const auto cached = key.empty() ? std::nullopt : ReadCache(key))
+    {
+        std::size_t offset = 0;
+        const auto status = TakeValue<std::uint8_t>(*cached, offset);
+        if (status == 1)
+        {
+            const auto message = TakeBytes(*cached, offset);
+            throw std::runtime_error(std::string(message.begin(), message.end()));
+        }
+        Data data;
+        data.parameters = TakeValue<Parameters>(*cached, offset);
+        data.uniformCells = TakeValue<std::uint32_t>(*cached, offset);
+        data.treeCells = TakeValue<std::uint32_t>(*cached, offset);
+        data.bytes = TakeBytes(*cached, offset);
+        zt::info("sun-shadow: read the bake from the cache (%zu bytes)", data.bytes.size());
+        return data;
+    }
+    try
+    {
+        auto data = BakeUncached(scene, sunDirection, receiverBounds, sampleSize, focus, budget);
+        if (!key.empty())
+        {
+            std::vector<std::uint8_t> entry{0};
+            AppendValue(entry, data.parameters);
+            AppendValue(entry, data.uniformCells);
+            AppendValue(entry, data.treeCells);
+            AppendBytes(entry, data.bytes);
+            WriteCache(key, entry);
+        }
+        return data;
+    }
+    catch (const std::runtime_error &error)
+    {
+        // A bake past its budget is kept too: the next conversion goes straight to the bake that fits.
+        if (!key.empty() && std::string_view(error.what()).find("exceeds") != std::string_view::npos)
+        {
+            std::vector<std::uint8_t> entry{1};
+            const std::string message = error.what();
+            AppendBytes(entry, std::vector<std::uint8_t>(message.begin(), message.end()));
+            WriteCache(key, entry);
+        }
+        throw;
+    }
+}
+
+DepthImage BakeDepthImage(const Scene &scene, const std::array<float, 3> &sunDirection,
+                          const replaybounds::Bounds &region)
+{
+    std::vector<std::uint8_t> values{'d'};
+    AppendValue(values, sunDirection);
+    AppendValue(values, region);
+    const auto key = g_cacheDirectory.empty() ? std::string{} : CacheKey(scene, values);
+    if (const auto cached = key.empty() ? std::nullopt : ReadCache(key))
+    {
+        std::size_t offset = 1;
+        DepthImage image;
+        image.width = TakeValue<std::uint32_t>(*cached, offset);
+        image.height = TakeValue<std::uint32_t>(*cached, offset);
+        image.texelSize = TakeValue<float>(*cached, offset);
+        image.baked = TakeValue<std::uint8_t>(*cached, offset) != 0;
+        image.rgba = TakeBytes(*cached, offset);
+        zt::info("sun-shadow: read the sun depth image from the cache");
+        return image;
+    }
+    auto image = BakeDepthImageUncached(scene, sunDirection, region);
+    if (!key.empty())
+    {
+        std::vector<std::uint8_t> entry{0};
+        AppendValue(entry, image.width);
+        AppendValue(entry, image.height);
+        AppendValue(entry, image.texelSize);
+        AppendValue(entry, static_cast<std::uint8_t>(image.baked));
+        AppendBytes(entry, image.rgba);
+        WriteCache(key, entry);
+    }
+    return image;
+}
+
 } // namespace replaysunshadow

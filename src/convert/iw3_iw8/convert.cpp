@@ -1069,13 +1069,29 @@ void dropEnclosedShadowedSpots(iw8::MapSun &lighting, const std::vector<float> &
     constexpr double kReach = 64.0;
     std::vector<float> triangles = solidTriangles;
     if (casters)
+    {
+        size_t vertices = 0;
+        for (const auto &surface : casters->surfaces)
+            vertices += surface.vertices.size();
+        triangles.reserve(triangles.size() + vertices * 3);
         for (const auto &surface : casters->surfaces)
             for (const auto &vertex : surface.vertices)
                 triangles.insert(triangles.end(), vertex.position.begin(), vertex.position.end());
-    size_t dropped = 0, moved = 0;
-    for (size_t index = 0; index < lighting.primaryLights.size(); ++index)
+    }
+    // Each shadowed spot is tested on its own core (a large world holds millions of triangles); the results apply
+    // in light order.
+    struct Verdict
     {
-        auto &light = lighting.primaryLights[index];
+        bool tested = false, drop = false;
+        double nearPlane = 0, reach = 0;
+        unsigned blocked = 0, rays = 0;
+    };
+    std::vector<Verdict> verdicts(lighting.primaryLights.size());
+    std::atomic<size_t> nextLight{0};
+    const auto test = [&] {
+      for (size_t index; (index = nextLight.fetch_add(1)) < lighting.primaryLights.size();)
+      {
+        const auto &light = lighting.primaryLights[index];
         if (light.type != 2 || !light.canUseShadowMap || index == lighting.sunPrimaryLightIndex)
             continue;
         const double o[3]{light.origin[0], light.origin[1], light.origin[2]};
@@ -1156,16 +1172,34 @@ void dropEnclosedShadowedSpots(iw8::MapSun &lighting, const std::vector<float> &
         for (const auto &ray : hits)
             blocked += std::ranges::any_of(ray, [&](const double hit) { return hit > nearPlane; });
         const auto rays = static_cast<unsigned>(hits.size());
-        if (blocked * 5 >= rays * 3)
+        verdicts[index] = {true, blocked * 5 >= rays * 3, nearPlane, reach, blocked, rays};
+      }
+    };
+    {
+        std::vector<std::thread> workers;
+        for (unsigned worker = 1; worker < std::max(1u, std::thread::hardware_concurrency()); ++worker)
+            workers.emplace_back(test);
+        test();
+        for (auto &worker : workers)
+            worker.join();
+    }
+    size_t dropped = 0, moved = 0;
+    for (size_t index = 0; index < lighting.primaryLights.size(); ++index)
+    {
+        auto &light = lighting.primaryLights[index];
+        const auto &verdict = verdicts[index];
+        if (!verdict.tested)
+            continue;
+        if (verdict.drop)
         {
             light.canUseShadowMap = false;
             ++dropped;
             info("local light %zu: shadow casters close %u of %u cone rays within %.0f units; no shadow map",
-                 index, blocked, rays, reach);
+                 index, verdict.blocked, verdict.rays, verdict.reach);
         }
-        else if (nearPlane > kNearPlane)
+        else if (verdict.nearPlane > kNearPlane)
         {
-            light.shadowNearPlaneBias = static_cast<float>(nearPlane);
+            light.shadowNearPlaneBias = static_cast<float>(verdict.nearPlane);
             ++moved;
         }
     }
@@ -1638,6 +1672,7 @@ int writeMapPackage(const Args &args, const std::string &map, const std::string 
     calibrateLocalLights(args, lighting, renderMesh.solidTriangles);
     dropEnclosedShadowedSpots(lighting, renderMesh.solidTriangles, prepared ? &prepared->shadowScene : nullptr);
     limitShadowedSpotLights(lighting);
+    timing.lap("local lights");
     // Use the final ComWorld sun vector, including any requested profile.
     // Replay rejects compressed shadows whose stored direction differs from
     // the active sun. Moving entities and breakable panes are not baked.
@@ -2537,6 +2572,7 @@ int buildIw3(const Args &args)
                                            (map + "_iw8")
                                      : std::filesystem::path(args.outputDirectory);
     options.scratchRoot = std::filesystem::absolute(requestedOutput).parent_path();
+    replaysunshadow::SetCacheDirectory(options.scratchRoot / ".iw3-render-cache");
     for (const std::string &path : args.searchPaths)
     {
         options.searchPaths.emplace_back(path);

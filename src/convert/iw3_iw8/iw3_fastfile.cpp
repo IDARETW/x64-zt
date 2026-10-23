@@ -10288,10 +10288,9 @@ PreparedMap PrepareFastfile(const ImportOptions &options)
         if (std::find(keptEntityModelNames.begin(), keptEntityModelNames.end(), model) ==
             keptEntityModelNames.end())
             keptEntityModelNames.push_back(model);
-    sourceEntityModels.models.reserve(keptEntityModelNames.size());
-    for (const auto &modelName : keptEntityModelNames)
-        sourceEntityModels.models.push_back(
-            ReadSourceModel(exportRoot, modelName, false, skeletonRoot));
+    sourceEntityModels.models = ParallelMap<SourceStaticModel>(keptEntityModelNames.size(), [&](const std::size_t index) {
+        return ReadSourceModel(exportRoot, keptEntityModelNames[index], false, skeletonRoot);
+    });
     SourceStaticModels sourceFxModels;
     std::set<std::string> fxModelNames;
     for (const auto &effect : result.fxEffects)
@@ -10319,9 +10318,11 @@ PreparedMap PrepareFastfile(const ImportOptions &options)
                      name.c_str());
         sourcePartModels.models.push_back(std::move(model));
     }
-    sourceFxModels.models.reserve(fxModelNames.size());
-    for (const auto &name : fxModelNames)
-        sourceFxModels.models.push_back(ReadSourceModel(exportRoot, name));
+    {
+        const std::vector<std::string> names(fxModelNames.begin(), fxModelNames.end());
+        sourceFxModels.models = ParallelMap<SourceStaticModel>(
+            names.size(), [&](const std::size_t index) { return ReadSourceModel(exportRoot, names[index]); });
+    }
     std::vector<std::string> materialNames;
     std::vector<std::string> worldMaterialNames;
     std::vector<std::string> modelMaterialNames;
@@ -10842,6 +10843,7 @@ PreparedMap PrepareFastfile(const ImportOptions &options)
     BuildPreparedStaticModels(sourceStaticModels, renderPlan, options.map, "smodel", result.xmodels,
                               result.staticModels, true, false, false,
                               &result.staticModelCollisionModels);
+    timing.lap("static models");
     if (renderPlan.instanceLightingCount)
     {
         // IW3 lit each static model from its light grid at the model's
@@ -10914,6 +10916,7 @@ PreparedMap PrepareFastfile(const ImportOptions &options)
         if (!zt::write_file((mapDirectory / renderPlan.instanceLightingFile).string(), pixels))
             throw std::runtime_error("cannot write the static-model lighting image");
     }
+    timing.lap("static model lighting");
     result.shadowScene = std::move(renderPlan.shadowScene);
     {
         SourceStaticModels casters = sourceStaticModels;
