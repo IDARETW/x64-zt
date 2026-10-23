@@ -43,6 +43,10 @@
 #include <tuple>
 #include <unordered_map>
 
+#pragma warning(push, 0)
+#include <glaze/json.hpp>
+#pragma warning(pop)
+
 namespace iw3
 {
 namespace
@@ -2105,19 +2109,202 @@ void AuditSourceAssetDeclarations(const std::filesystem::path &root,
         zt::info("iw3: per-asset ledger written to %s", ledger::Report().string().c_str());
 }
 
-Json ReadJson(const std::filesystem::path &path)
+std::string ReadText(const std::filesystem::path &path)
 {
     std::ifstream input(path, std::ios::binary);
     if (!input)
     {
         throw std::runtime_error("cannot read " + path.string());
     }
-    // Parsed from memory: nlohmann reads a stream one character at a time (a 200 MB world took 25 s).
     input.seekg(0, std::ios::end);
     std::string text(static_cast<std::size_t>(input.tellg()), '\0');
     input.seekg(0);
     input.read(text.data(), static_cast<std::streamsize>(text.size()));
-    return Json::parse(text);
+    return text;
+}
+
+Json ReadJson(const std::filesystem::path &path)
+{
+    // Parsed from memory: nlohmann reads a stream one character at a time (a 200 MB world took 25 s).
+    return Json::parse(ReadText(path));
+}
+
+// Render surfaces as the exports write them (the members are the JSON keys). Glaze reads them straight from the
+// text: an IW7 map's models and world hold over a gigabyte of them, which nlohmann first builds into a tree several
+// times that size (a 177 MB model took 3.4 s to read and free, glaze 0.25 s). A file glaze cannot read takes the
+// tree, which reports what is wrong with it. Glaze reflects their member names, which takes external linkage.
+} // namespace
+
+struct RawVertex
+{
+    std::array<double, 3> position{}, normal{}, tangent{};
+    double binormal_sign{};
+    std::array<double, 2> uv{}, lightmap_uv{};
+    std::optional<std::array<int, 4>> color;
+};
+
+struct RawSurface
+{
+    std::string material;
+    std::optional<int> lightmap;
+    unsigned reflection_probe{};
+    std::optional<bool> deformed;
+    std::vector<RawVertex> vertices;
+    std::vector<std::uint32_t> indices;
+};
+
+struct RawGeometryLod
+{
+    double distance{};
+    std::vector<RawSurface> surfaces;
+};
+
+struct RawGeometry
+{
+    std::optional<int> schema;
+    std::string name;
+    std::vector<RawGeometryLod> lods;
+    std::optional<unsigned> contents;
+    std::optional<int> bone_count;
+};
+
+namespace
+{
+// Keys the converter does not read are skipped, as the tree readers ignore them.
+constexpr glz::opts kRawJson{.error_on_unknown_keys = false, .error_on_missing_keys = true};
+
+template <std::size_t Size> std::array<double, Size> RawVector(const Json &value)
+{
+    if (!value.is_array() || value.size() != Size)
+    {
+        throw std::runtime_error("invalid vector in IW3 map export");
+    }
+    std::array<double, Size> result{};
+    for (std::size_t index = 0; index < Size; ++index)
+        result[index] = value.at(index).get<double>();
+    return result;
+}
+
+RawSurface RawSurfaceFrom(const Json &source)
+{
+    RawSurface output;
+    output.material = source.at("material").get<std::string>();
+    output.lightmap = source.value("lightmap", -1);
+    output.reflection_probe = source.at("reflection_probe").get<unsigned>();
+    if (source.contains("deformed"))
+        output.deformed = source.at("deformed").get<bool>();
+    const auto &vertices = source.at("vertices");
+    const auto &indices = source.at("indices");
+    if (!vertices.is_array() || !indices.is_array())
+    {
+        throw std::runtime_error("invalid IW3 world surface");
+    }
+    output.vertices.reserve(vertices.size());
+    for (const auto &item : vertices)
+    {
+        RawVertex vertex;
+        vertex.position = RawVector<3>(item.at("position"));
+        vertex.normal = RawVector<3>(item.at("normal"));
+        vertex.tangent = RawVector<3>(item.at("tangent"));
+        vertex.binormal_sign = item.at("binormal_sign").get<double>();
+        vertex.uv = RawVector<2>(item.at("uv"));
+        vertex.lightmap_uv = RawVector<2>(item.at("lightmap_uv"));
+        if (item.contains("color"))
+        {
+            const auto &color = item.at("color");
+            if (!color.is_array() || color.size() != 4)
+            {
+                throw std::runtime_error("invalid IW3 vertex color");
+            }
+            vertex.color.emplace();
+            for (std::size_t channel = 0; channel < 4; ++channel)
+                (*vertex.color)[channel] = color.at(channel).get<int>();
+        }
+        output.vertices.push_back(vertex);
+    }
+    output.indices.reserve(indices.size());
+    for (const auto &item : indices)
+        output.indices.push_back(item.get<std::uint32_t>());
+    return output;
+}
+
+// A model's .replay.json geometry.
+RawGeometry ReadRawGeometry(const std::filesystem::path &path)
+{
+    const std::string text = ReadText(path);
+    RawGeometry output;
+    if (!glz::read<kRawJson>(output, text))
+        return output;
+    output = {};
+    const Json source = Json::parse(text);
+    output.schema = source.value("schema", 0);
+    output.name = source.at("name").get<std::string>();
+    if (source.contains("contents"))
+        output.contents = source.at("contents").get<unsigned>();
+    if (source.contains("bone_count"))
+        output.bone_count = source.at("bone_count").get<int>();
+    const auto &lods = source.at("lods");
+    if (!lods.is_array())
+        throw std::runtime_error("IW3 model geometry has no LOD table: " + path.string());
+    for (const auto &sourceLod : lods)
+    {
+        RawGeometryLod lod;
+        lod.distance = sourceLod.at("distance").get<double>();
+        const auto &surfaces = sourceLod.at("surfaces");
+        if (!surfaces.is_array())
+            throw std::runtime_error("IW3 model geometry has an invalid render LOD: " + path.string());
+        for (const auto &surface : surfaces)
+            lod.surfaces.push_back(RawSurfaceFrom(surface));
+        output.lods.push_back(std::move(lod));
+    }
+    return output;
+}
+
+// The world tree without its surfaces (nearly all of the file), which are read raw into `surfaces`.
+Json ReadWorldJson(const std::filesystem::path &path, std::vector<RawSurface> &surfaces)
+{
+    const std::string text = ReadText(path);
+    std::map<std::string, glz::raw_json_view> values;
+    if (!glz::read<kRawJson>(values, text))
+    {
+        const auto found = values.find("surfaces");
+        surfaces.clear();
+        if (found == values.end() || !glz::read<kRawJson>(surfaces, found->second.str))
+        {
+            Json world = Json::object();
+            for (const auto &[key, value] : values)
+                if (key != "surfaces")
+                    world[key] = Json::parse(value.str.begin(), value.str.end());
+            return world;
+        }
+    }
+    surfaces.clear();
+    Json world = Json::parse(text);
+    if (world.is_object() && world.contains("surfaces"))
+    {
+        const auto &source = world.at("surfaces");
+        if (!source.is_array())
+            throw std::runtime_error("IW3 world contains no render surfaces");
+        surfaces.reserve(source.size());
+        for (const auto &surface : source)
+            surfaces.push_back(RawSurfaceFrom(surface));
+        world.erase("surfaces");
+    }
+    return world;
+}
+
+template <std::size_t Size> std::array<float, Size> FloatVector(const std::array<double, Size> &value)
+{
+    std::array<float, Size> result{};
+    for (std::size_t index = 0; index < Size; ++index)
+    {
+        result[index] = static_cast<float>(value[index]);
+        if (!std::isfinite(result[index]))
+        {
+            throw std::runtime_error("non-finite value in IW3 map export");
+        }
+    }
+    return result;
 }
 
 void WriteJson(const std::filesystem::path &path, const Json &value)
@@ -2136,55 +2323,47 @@ void WriteJson(const std::filesystem::path &path, const Json &value)
     }
 }
 
-Surface ReadWorldSurface(const Json &source)
+Surface ReadWorldSurface(const RawSurface &source)
 {
     Surface output;
-    output.material = source.at("material").get<std::string>();
-    output.lightmap = source.value("lightmap", -1);
+    output.material = source.material;
+    output.lightmap = source.lightmap.value_or(-1);
     // IW3 reserves the five-bit value 31 for an unlightmapped world surface.
     // Keep real indices range-checked later, but do not treat this sentinel as
     // a reference to a missing atlas entry.
     if (output.lightmap == 31)
         output.lightmap = -1;
-    const auto reflectionProbe = source.at("reflection_probe").get<unsigned>();
-    if (reflectionProbe > UINT16_MAX)
+    if (source.reflection_probe > UINT16_MAX)
         throw std::runtime_error("IW3 surface reflection-probe index exceeds native width");
-    output.reflectionProbe = static_cast<std::uint16_t>(reflectionProbe);
-    const auto &vertices = source.at("vertices");
-    const auto &indices = source.at("indices");
-    if (!vertices.is_array() || vertices.empty() || !indices.is_array() || indices.size() % 3 != 0)
+    output.reflectionProbe = static_cast<std::uint16_t>(source.reflection_probe);
+    if (source.vertices.empty() || source.indices.size() % 3 != 0)
     {
         throw std::runtime_error("invalid IW3 world surface");
     }
 
-    output.vertices.reserve(vertices.size());
-    for (const auto &item : vertices)
+    output.vertices.reserve(source.vertices.size());
+    for (const RawVertex &item : source.vertices)
     {
         Vertex vertex;
-        vertex.position = ReadVector<3>(item.at("position"));
-        vertex.normal = Unit(ReadVector<3>(item.at("normal")));
-        vertex.tangent = ReadVector<3>(item.at("tangent"));
+        vertex.position = FloatVector(item.position);
+        vertex.normal = Unit(FloatVector(item.normal));
+        vertex.tangent = FloatVector(item.tangent);
         if (Dot(vertex.tangent, vertex.tangent) < 1.0e-12f)
             vertex.tangent = Cross(
                 std::abs(vertex.normal[2]) < 0.9f ? Vec3{0, 0, 1} : Vec3{0, 1, 0}, vertex.normal);
         vertex.tangent = Unit(vertex.tangent);
-        vertex.binormalSign = item.at("binormal_sign").get<float>();
+        vertex.binormalSign = static_cast<float>(item.binormal_sign);
         if (!std::isfinite(vertex.binormalSign) || std::abs(vertex.binormalSign) < 0.5f)
             throw std::runtime_error("invalid IW3 vertex tangent handedness");
         vertex.binormalSign = vertex.binormalSign < 0 ? -1.0f : 1.0f;
         vertex.authoredTangent = true;
-        vertex.uv = ReadVector<2>(item.at("uv"));
-        vertex.lightmapUv = ReadVector<2>(item.at("lightmap_uv"));
-        if (item.contains("color"))
+        vertex.uv = FloatVector(item.uv);
+        vertex.lightmapUv = FloatVector(item.lightmap_uv);
+        if (item.color)
         {
-            const auto &color = item.at("color");
-            if (!color.is_array() || color.size() != 4)
-            {
-                throw std::runtime_error("invalid IW3 vertex color");
-            }
             for (std::size_t channel = 0; channel < 4; ++channel)
             {
-                const int value = color.at(channel).get<int>();
+                const int value = (*item.color)[channel];
                 if (value < 0 || value > 255)
                 {
                     throw std::runtime_error("invalid IW3 vertex color");
@@ -2194,10 +2373,9 @@ Surface ReadWorldSurface(const Json &source)
         }
         output.vertices.push_back(vertex);
     }
-    output.indices.reserve(indices.size());
-    for (const auto &item : indices)
+    output.indices.reserve(source.indices.size());
+    for (const std::uint32_t index : source.indices)
     {
-        const auto index = item.get<std::uint32_t>();
         if (index >= output.vertices.size())
         {
             throw std::runtime_error("IW3 surface index is outside its vertex array");
@@ -2245,9 +2423,8 @@ std::filesystem::path SafeChild(const std::filesystem::path &root,
     return candidate;
 }
 
-VisibilityGroups ReadVisibilityGroups(const Json &world)
+VisibilityGroups ReadVisibilityGroups(const Json &world, const std::size_t surfaceCount)
 {
-    const auto &surfaces = world.at("surfaces");
     const auto &models = world.value("models", Json::array());
     const auto &dpvs = world.at("dpvs");
     const auto &cells = dpvs.at("cells");
@@ -2261,13 +2438,13 @@ VisibilityGroups ReadVisibilityGroups(const Json &world)
 
     VisibilityGroups result;
     result.cellTrees.resize(cells.size());
-    result.surfaces.assign(surfaces.size(), VisibilityGroups::Unassigned);
+    result.surfaces.assign(surfaceCount, VisibilityGroups::Unassigned);
     result.models.assign(models.size(), VisibilityGroups::Unassigned);
     result.nativeTopology = !cells.at(0).at("trees").empty() &&
                             cells.at(0).at("trees").at(0).contains("childCount");
     std::vector<std::vector<std::uint32_t>> surfaceTrees;
     if (result.nativeTopology)
-        surfaceTrees.resize(surfaces.size());
+        surfaceTrees.resize(surfaceCount);
     const auto assign = [](std::vector<std::uint32_t> &groups, const std::size_t index,
                            const std::uint32_t tree) {
         if (index >= groups.size())
@@ -2691,13 +2868,13 @@ SourceStaticModel ReadSourceModel(const std::filesystem::path &root, const std::
     if (!std::filesystem::is_regular_file(geometryPath))
         throw std::runtime_error("IW3 model attributes are missing for '" + modelName +
                                  "'; configure and rebuild the bundled OpenAssetTools Unlinker");
-    const Json geometry = ReadJson(geometryPath);
-    if (geometry.value("schema", 0) != 1 || geometry.at("name") != modelName ||
-        !geometry.at("lods").is_array() || geometry.at("lods").size() != model.at("lods").size())
+    const RawGeometry geometry = ReadRawGeometry(geometryPath);
+    if (geometry.schema.value_or(0) != 1 || geometry.name != modelName ||
+        geometry.lods.size() != model.at("lods").size())
         throw std::runtime_error("IW3 model geometry does not match its LOD table: " + modelName);
-    converted.contents = geometry.value("contents", 1u);
+    converted.contents = geometry.contents.value_or(1u);
     const auto skeleton = ReadSourceSkeleton(skeletonRoot, modelName, model.at("lods").size(),
-                                             geometry.value("bone_count", 0) != 1);
+                                             geometry.bone_count.value_or(0) != 1);
     if (!skeleton.empty())
         converted.bones = skeleton.front().bones;
     float previousDistance = 0.0f;
@@ -2708,18 +2885,19 @@ SourceStaticModel ReadSourceModel(const std::filesystem::path &root, const std::
         if (!std::isfinite(lod.distance) || lod.distance < previousDistance)
             throw std::runtime_error("IW3 model has invalid LOD distances: " + modelName);
         previousDistance = lod.distance;
-        const auto &geometryLod = geometry.at("lods").at(converted.lods.size());
-        if (geometryLod.at("distance").get<float>() != lod.distance ||
-            !geometryLod.at("surfaces").is_array() || geometryLod.at("surfaces").empty())
+        const auto &geometryLod = geometry.lods.at(converted.lods.size());
+        if (static_cast<float>(geometryLod.distance) != lod.distance || geometryLod.surfaces.empty())
             throw std::runtime_error("IW3 model has an empty render LOD: " + modelName);
         std::size_t sourceObject = 0;
-        for (const auto &sourceSurface : geometryLod.at("surfaces"))
+        for (const RawSurface &sourceSurface : geometryLod.surfaces)
         {
             const std::size_t object = sourceObject++;
             // OAT's IW3 model exporter writes verts0.xyz directly. Its GLTF bind
             // pose uses each baseMat and its inverse, so a placed static model's
             // deformed vertices have these exact model-space positions at rest.
-            if (sourceSurface.at("deformed").get<bool>() && !bindPose)
+            if (!sourceSurface.deformed)
+                throw std::runtime_error("IW3 model surface has no deformed flag: " + modelName);
+            if (*sourceSurface.deformed && !bindPose)
                 throw std::runtime_error("IW3 placed model requires skinning: " + modelName);
             Surface surface = ReadWorldSurface(sourceSurface);
             // IW3 destructible base models hold every damage state and hide the
@@ -3192,12 +3370,11 @@ SourceDynamicEntities ReadDynamicEntities(const Json &collision, const std::file
     return result;
 }
 
-std::vector<BrushModel> ReadBrushModels(const Json &world, const std::filesystem::path &root,
-                                        const VisibilityGroups &visibility,
+std::vector<BrushModel> ReadBrushModels(const Json &world, const std::vector<RawSurface> &sourceSurfaces,
+                                        const std::filesystem::path &root, const VisibilityGroups &visibility,
                                         SourceStaticModels &staticModels)
 {
-    const auto &sourceSurfaces = world.at("surfaces");
-    if (!sourceSurfaces.is_array() || sourceSurfaces.empty())
+    if (sourceSurfaces.empty())
     {
         throw std::runtime_error("IW3 world contains no render surfaces");
     }
@@ -9583,7 +9760,8 @@ PreparedMap PrepareFastfile(const ImportOptions &options)
                                       ? sourceAsset.substr(0, sourceAsset.size() - bspSuffix.size())
                                       : sourceAsset;
     zt::LapTimer readTiming("iw3");
-    const Json world = ReadJson(worldPath);
+    std::vector<RawSurface> worldSurfaces;
+    const Json world = ReadWorldJson(worldPath, worldSurfaces);
     const Json collision = ReadJson(collisionPath);
     const Json commonWorld = ReadJson(commonWorldPath);
     readTiming.lap("world, collision and common world json");
@@ -10020,10 +10198,10 @@ PreparedMap PrepareFastfile(const ImportOptions &options)
     }
 
     zt::LapTimer timing("iw3");
-    const VisibilityGroups visibility = ReadVisibilityGroups(world);
+    const VisibilityGroups visibility = ReadVisibilityGroups(world, worldSurfaces.size());
     SourceStaticModels sourceStaticModels;
     std::vector<BrushModel> brushModels =
-        ReadBrushModels(world, exportRoot, visibility, sourceStaticModels);
+        ReadBrushModels(world, worldSurfaces, exportRoot, visibility, sourceStaticModels);
     RespaceLadderRungs(sourceStaticModels);
     timing.lap("read brush and static models");
     SourceDynamicEntities sourceDynamicEntities = ReadDynamicEntities(collision, exportRoot);
@@ -10227,14 +10405,14 @@ PreparedMap PrepareFastfile(const ImportOptions &options)
             // (crash at 0x141959080+0x71A when falling or flying out; IW8 maps
             // kill out-of-bounds players before that).
             Vec3 low{INFINITY, INFINITY, INFINITY}, high{-INFINITY, -INFINITY, -INFINITY};
-            for (const auto &surface : world.at("surfaces"))
+            for (const RawSurface &surface : worldSurfaces)
             {
-                if (surface.value("material", std::string{}).find("sky") != std::string::npos)
+                if (surface.material.find("sky") != std::string::npos)
                     continue;
-                for (const auto &vertex : surface.at("vertices"))
+                for (const RawVertex &vertex : surface.vertices)
                     for (std::size_t axis = 0; axis < 3; ++axis)
                     {
-                        const float value = vertex.at("position").at(axis).get<float>();
+                        const float value = static_cast<float>(vertex.position[axis]);
                         low[axis] = std::min(low[axis], value);
                         high[axis] = std::max(high[axis], value);
                     }
