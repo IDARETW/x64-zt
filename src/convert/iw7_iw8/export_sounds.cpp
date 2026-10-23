@@ -820,6 +820,8 @@ namespace zonetool::convert::iw7_iw8
 				const auto entry = source_bank ? source_bank->find(alias.assetId) : nullptr;
 				if (!entry || entry->channelCount < 1 || entry->channelCount > 2)
 				{
+					ZONETOOL_WARNING("iw7: sound %08x of alias \"%s\" %s", alias.assetId, name.data(), entry ?
+						std::format("has {} channels", entry->channelCount).data() : "is in no loaded sound bank");
 					continue;
 				}
 
