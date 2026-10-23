@@ -106,6 +106,8 @@ namespace zonetool::convert::iw7_iw8
 		std::set<std::string> script_models;
 		// The models that the entity string places (script models), which keep the keyframed body of script models.
 		std::set<std::string> entity_models;
+		// The map has IW7 out-of-bounds volumes (OutOfBounds triggers), which the map script watches (iw7_out_of_bounds).
+		bool out_of_bounds{};
 		// IW7's clutter (the dynamic entities that its physics simulates: Frontier's fire extinguishers, Depot's buckets,
 		// cups and tools): Replay clutter of the model at its initial pose (a quaternion x, y, z, w), which the collision
 		// export writes as the map's dynamic models with their physics presets.
