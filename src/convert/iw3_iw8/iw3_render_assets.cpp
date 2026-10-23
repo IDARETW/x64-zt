@@ -149,6 +149,9 @@ struct SourceFxMaterial
     // An alpha-blended material that the extraction marks lit (IW7's lit effects), drawn through Replay's lit
     // effect technique when UseLitEffects is on.
     bool lit{};
+    // An atlas material whose frames the extraction marks blended (IW7's textureAtlasFrameBlend; IW3 has none), drawn
+    // through the stock frame-blend twin of its technique set where Replay has one.
+    bool frameBlend{};
     // IW3 zfeather featherParms (x = 1 / depth), falloff (falloffParms .z/.w,
     // begin/end colours) and eye offset (eyeOffsetParms.x).
     std::optional<std::array<float, 4>> feather, falloff, eyeOffset;
@@ -1866,6 +1869,7 @@ SourceFxMaterial ReadFxMaterial(const std::filesystem::path &root,
     material.columns = atlas.at("columns").get<unsigned>();
     material.lit = g_litEffects && source.value("lit", false) &&
                    (material.family == FxMaterialFamily::alpha || material.family == FxMaterialFamily::alphaFeather);
+    material.frameBlend = source.value("frame_blend", false);
     if (!material.rows || !material.columns || material.rows > 255 || material.columns > 255 ||
         !std::has_single_bit(material.columns) ||
         static_cast<std::uint64_t>(material.rows) * material.columns > 65535)
@@ -4093,6 +4097,16 @@ Json BuildFxMaterialDefinition(const SourceFxMaterial &source)
     // albedo's alpha, lights the particle from the per-particle lighting array and writes a real output alpha.
     constexpr std::string_view litTechset =
         "elcq/unlit_6_effect_bad_ta0_802_1004_0_1_0_0_0_10000020b_0_0_2_0_0";
+    // The frame-blend (0x2000) twins of additiveTechset (stock fire, techsets_common vfx_pyro_exp_rise) and
+    // litTechset (techsets_common_core_mp): the same constants, buffers and resources (disassembled VS e116fc27 / PS
+    // 069e69f0 and VS 5f0b7518 / PS 29734230 against their twins'); the VS also passes the next frame's offset in the
+    // atlas and the particle's frame fraction, and the PS mixes the two frames. Replay's 10a4 additive set draws with
+    // the shaders of its 1004 set. The unlit alpha set has no stock twin.
+    constexpr std::string_view additiveBlendTechset =
+        "elcq/unlit_6_effect_bad_tca_802_3004_0_1_0_0_0_100060023_0_0_3_0_0";
+    constexpr std::string_view litBlendTechset =
+        "elcq/unlit_6_effect_bad_ta0_802_3004_0_1_0_0_0_10000020b_0_0_2_0_0";
+    const bool frameBlend = source.frameBlend && source.rows * source.columns > 1;
     if (source.family == FxMaterialFamily::decal)
     {
         std::vector<std::uint8_t> info(32);
@@ -4178,7 +4192,7 @@ Json BuildFxMaterialDefinition(const SourceFxMaterial &source)
         return {{"schema", 1},
                 {"source", source.name},
                 {"info", Hex(info)},
-                {"techset", litTechset},
+                {"techset", frameBlend ? litBlendTechset : litTechset},
                 {"textures", Json::array({{{"header", "0000000000000000"}, {"image", ""}},
                                           {{"header", "4400000000000000"}, {"image", ""}}})},
                 {"constants", Hex(constants)},
@@ -4238,7 +4252,7 @@ Json BuildFxMaterialDefinition(const SourceFxMaterial &source)
         return {{"schema", 1},
                 {"source", source.name},
                 {"info", Hex(info)},
-                {"techset", additive ? additiveTechset : alphaTechset},
+                {"techset", additive ? (frameBlend ? additiveBlendTechset : additiveTechset) : alphaTechset},
                 {"textures", Json::array({{{"header", "1200000000000000"},
                                             {"image", ""}}})},
                 {"constants", Hex(constants)},
@@ -6689,6 +6703,7 @@ RenderPlan PrepareRenderAssets(const std::filesystem::path &exportRoot, const Js
     emitModelMaterials(TechniqueGeometry::entity, entityMaterials, &MaterialPlan::entityMaterial);
     timing.lap("entity materials");
 
+    std::size_t blendedFrames = 0, unblendedFrames = 0;
     for (const std::string &name : fxMaterials)
     {
         SourceFxMaterial source = ReadFxMaterial(exportRoot, sourcePaths, name);
@@ -6791,6 +6806,9 @@ RenderPlan PrepareRenderAssets(const std::filesystem::path &exportRoot, const Js
         const std::string id = materialName.substr(materialName.rfind('_') + 1);
         const std::string materialFile = stem + ".fx." + id + ".material.json";
         Json direct = BuildFxMaterialDefinition(source);
+        if (source.frameBlend)
+            ++(direct.value("techset", std::string{}).find("_3004_") != std::string::npos ? blendedFrames
+                                                                                        : unblendedFrames);
         if (source.family == FxMaterialFamily::decal)
         {
             // Replay decal volume material in the stock 0x44C layout: channel 0
@@ -6881,6 +6899,10 @@ RenderPlan PrepareRenderAssets(const std::filesystem::path &exportRoot, const Js
         if (const auto data = FxParticleMaterialData(source))
             plan.fxParticleMaterialData.emplace(name, *data);
     }
+    if (blendedFrames || unblendedFrames)
+        zt::info("iw3: %zu FX materials blend their atlas frames through Replay's frame-blend techniques; %zu that the "
+                 "source blends step (the unlit alpha technique has no frame-blend twin)",
+                 blendedFrames, unblendedFrames);
     finishResidentImages();
     timing.lap("resident images");
     zt::info("iw3: resident images: thread time %.1fs resize, %.1fs mips, %.1fs digests, %.1fs encode or cache, %.1fs writes",
