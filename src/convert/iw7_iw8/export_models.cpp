@@ -121,19 +121,32 @@ namespace zonetool::convert::iw7_iw8
 			return found != scales.end() ? std::max(found->second, 1.0f) : 1.0f;
 		}
 
-		bool export_model(const source_map& source, const std::string& name, const iw7::XModel* model, extraction& output)
+		// A model's export, planned in model order: its materials (each registers with the extraction), LOD distances
+		// and surfaces. A model that does not convert has none (it warns why).
+		struct model_plan
+		{
+			struct lod
+			{
+				float distance;
+				std::vector<std::string> materials;
+			};
+
+			std::vector<lod> lods;
+		};
+
+		std::optional<model_plan> plan_model(const source_map& source, const std::string& name, const iw7::XModel* model,
+			extraction& output)
 		{
 			if (!model || !model->numLods)
 			{
-				return false;
+				return std::nullopt;
 			}
 
 			// A model that the world places beyond the range of model bounds spans the map: the sky draws it (Breakneck's
 			// black hole, 4932 units placed at scale 60, cut through the level with its default-white disc).
 			const auto placement_scale = largest_placement_scale(source, name);
 
-			auto table_lods = json::array();
-			auto geometry_lods = json::array();
+			model_plan plan;
 			auto previous_distance = 0.0f;
 			for (auto lod = 0; lod < model->numLods && lod < 6; lod++)
 			{
@@ -144,31 +157,25 @@ namespace zonetool::convert::iw7_iw8
 				{
 					ZONETOOL_WARNING("iw7: model \"%s\" lod %d: surfaces \"%s\" are neither in the loaded zones nor streamed", name.data(),
 						lod, info.modelSurfs ? info.modelSurfs->name : "none");
-					return false;
+					return std::nullopt;
 				}
 
-				auto lod_surfaces = json::array();
+				auto& planned = plan.lods.emplace_back();
 				for (std::size_t i = 0; i < info.numsurfs; i++)
 				{
-					const auto material_name = output.add_material(source, model->materialHandles[info.surfIndex + i]);
+					planned.materials.push_back(output.add_material(source, model->materialHandles[info.surfIndex + i]));
 					auto largest = 0.0f;
 					if (surfaces && surfaces->surfs && i < surfaces->numsurfs)
 					{
 						const auto& surface = surfaces->surfs[i];
-						const std::span faces(surface.triIndices, surface.triCount);
 						const std::span motion(surface.verts0.packedMotionVerts0, surface.vertCount);
 						const std::span packed(surface.verts0.packedVerts0, surface.vertCount);
 						largest = (surface.flags & 8) != 0 ? largest_coordinate(motion) : largest_coordinate(packed);
-						lod_surfaces.push_back((surface.flags & 8) != 0 ? export_surface(motion, faces, material_name)
-							: export_surface(packed, faces, material_name));
 					}
 					else if (streamed && i < streamed->size())
 					{
 						const auto& surface = (*streamed)[i];
 						largest = surface.motion ? largest_coordinate(surface.motion_vertices) : largest_coordinate(surface.vertices);
-						lod_surfaces.push_back(surface.motion
-							? export_surface(std::span(surface.motion_vertices), std::span(surface.faces), material_name)
-							: export_surface(std::span(surface.vertices), std::span(surface.faces), material_name));
 					}
 
 					if (largest * placement_scale > largest_model_coordinate)
@@ -176,19 +183,58 @@ namespace zonetool::convert::iw7_iw8
 						ZONETOOL_WARNING("iw7: model \"%s\" reaches %.0f units (placed at scale %g), beyond the range of Replay model "
 							"bounds: the sky draws it", name.data(), largest * placement_scale, placement_scale);
 						output.distant_models.insert(name);
-						return false;
+						return std::nullopt;
 					}
 				}
 
 				// IW7 LOD distances need not grow (650, 419.8, 2500); Replay takes a strictly growing sequence.
 				previous_distance = lod + 1 == model->numLods ? std::max(1000000.0f, previous_distance + 1.0f)
 					: std::max(previous_distance + 1.0f, std::isfinite(info.dist) ? info.dist : 0.0f);
-				const auto distance = previous_distance;
+				planned.distance = previous_distance;
+			}
+
+			return plan;
+		}
+
+		// Writes a planned model: its OAT xmodel table and its geometry (any thread).
+		void write_model(const source_map& source, const std::string& name, const iw7::XModel* model, const model_plan& plan,
+			const extraction& output)
+		{
+			auto table_lods = json::array();
+			auto geometry_lods = json::array();
+			for (std::size_t lod = 0; lod < plan.lods.size(); lod++)
+			{
+				const auto& info = model->lodInfo[lod];
+				const auto surfaces = source.resolve(iw7::ASSET_TYPE_XMODEL_SURFS, info.modelSurfs);
+				const auto streamed = info.modelSurfs ? source.streamed_surfaces(asset_name(info.modelSurfs->name)) : nullptr;
+				auto lod_surfaces = json::array();
+				for (std::size_t i = 0; i < info.numsurfs; i++)
+				{
+					const auto& material_name = plan.lods[lod].materials[i];
+					if (surfaces && surfaces->surfs && i < surfaces->numsurfs)
+					{
+						const auto& surface = surfaces->surfs[i];
+						const std::span faces(surface.triIndices, surface.triCount);
+						const std::span motion(surface.verts0.packedMotionVerts0, surface.vertCount);
+						const std::span packed(surface.verts0.packedVerts0, surface.vertCount);
+						lod_surfaces.push_back((surface.flags & 8) != 0 ? export_surface(motion, faces, material_name)
+							: export_surface(packed, faces, material_name));
+					}
+					else if (streamed && i < streamed->size())
+					{
+						const auto& surface = (*streamed)[i];
+						lod_surfaces.push_back(surface.motion
+							? export_surface(std::span(surface.motion_vertices), std::span(surface.faces), material_name)
+							: export_surface(std::span(surface.vertices), std::span(surface.faces), material_name));
+					}
+				}
+
+				const auto distance = plan.lods[lod].distance;
 				table_lods.push_back({{"distance", distance}, {"file", std::format("model_export/{}_lod{}.obj", name, lod)}});
 				geometry_lods.push_back({{"distance", distance}, {"surfaces", std::move(lod_surfaces)}});
 			}
 
-			write_json_async(output.extracted / "xmodel" / (name + ".json"),
+			write_json(output.extracted / "xmodel" / (name + ".json"),
 			{
 				{"$schema", "http://openassettools.dev/schema/xmodel.v1.json"},
 				{"_game", "iw3"},
@@ -204,7 +250,7 @@ namespace zonetool::convert::iw7_iw8
 				{"type", "rigid"},
 			});
 
-			write_json_async(output.extracted / "xmodel" / (name + ".replay.json"),
+			write_json(output.extracted / "xmodel" / (name + ".replay.json"),
 			{
 				{"schema", 1},
 				{"name", name},
@@ -213,10 +259,9 @@ namespace zonetool::convert::iw7_iw8
 				{"contents", static_cast<std::uint32_t>(model->contents)},
 				{"lods", std::move(geometry_lods)},
 			});
-
-			return true;
 		}
 	}
+
 
 	bool model_has_surfaces(const source_map& source, const iw7::XModel* model)
 	{
@@ -305,9 +350,64 @@ namespace zonetool::convert::iw7_iw8
 	{
 		std::size_t written{};
 		std::map<std::uint32_t, std::size_t> contents;
+		// Planned in model order (materials register with the extraction), written on up to 8 cores (the json of a large
+		// model takes gigabytes).
+		std::vector<std::tuple<const std::string*, const iw7::XModel*, model_plan>> planned;
+		std::set<std::string> converted;
 		for (const auto& [name, model] : output.models)
 		{
-			if (export_model(source, name, model, output))
+			if (auto plan = plan_model(source, name, model, output))
+			{
+				planned.emplace_back(&name, model, std::move(*plan));
+				converted.insert(name);
+			}
+		}
+
+		{
+			std::atomic<std::size_t> next{0};
+			std::exception_ptr failure;
+			std::mutex failure_mutex;
+			const auto run = [&]
+			{
+				for (std::size_t index; (index = next.fetch_add(1)) < planned.size();)
+				{
+					try
+					{
+						const auto& [name, model, plan] = planned[index];
+						write_model(source, *name, model, plan, output);
+					}
+					catch (...)
+					{
+						std::lock_guard lock(failure_mutex);
+						if (!failure)
+						{
+							failure = std::current_exception();
+						}
+					}
+				}
+			};
+
+			std::vector<std::thread> workers;
+			for (auto worker = 1u; worker < std::clamp(std::thread::hardware_concurrency(), 1u, 8u); worker++)
+			{
+				workers.emplace_back(run);
+			}
+
+			run();
+			for (auto& worker : workers)
+			{
+				worker.join();
+			}
+
+			if (failure)
+			{
+				std::rethrow_exception(failure);
+			}
+		}
+
+		for (const auto& [name, model] : output.models)
+		{
+			if (converted.contains(name))
 			{
 				output.exported_models.insert(name);
 				written++;
@@ -322,7 +422,6 @@ namespace zonetool::convert::iw7_iw8
 			}
 		}
 
-		finish_json_writes();
 		std::string kinds;
 		for (const auto& [value, count] : contents)
 		{

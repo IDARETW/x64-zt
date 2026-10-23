@@ -71,9 +71,10 @@ struct Data
 // With focus, only casters whose sun projection overlaps the focus box's sun
 // projection are baked, and the shadow covers only that projection (huge IW3
 // worlds whose play space is a small part of the terrain).
+// A bake whose tiles pass `budget` bytes stops early with an error that says it "exceeds" the budget.
 Data Bake(const Scene &scene, const std::array<float, 3> &sunDirection,
           const replaybounds::Bounds &receiverBounds, float sampleSize = 1.0f,
-          const replaybounds::Bounds *focus = nullptr);
+          const replaybounds::Bounds *focus = nullptr, std::size_t budget = SIZE_MAX);
 
 // World-space sun depth image for the converted surface shaders: 16-bit
 // occluder depths (the midpoint of each texel's stored-depth interval, 0 = no

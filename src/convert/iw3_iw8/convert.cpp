@@ -1651,9 +1651,10 @@ int writeMapPackage(const Args &args, const std::string &map, const std::string 
         -> std::optional<replaysunshadow::Data> {
         try
         {
+            // A bake past the budget stops as soon as its tiles pass it.
             auto data = replaysunshadow::Bake(
                 prepared->shadowScene, {lighting.direction[0], lighting.direction[1], lighting.direction[2]},
-                renderMesh.sceneBounds, sampleSize, focus);
+                renderMesh.sceneBounds, sampleSize, focus, kSunShadowBudget);
             if (data.bytes.size() <= kSunShadowBudget)
                 return data;
             info("sun-shadow: %zu bytes at %.0f unit(s) per texel%s exceed the %zu-byte budget",
