@@ -539,6 +539,7 @@ namespace zonetool::convert::iw7_iw8
 					if (!debris)
 					{
 						output.script_models.insert(name);
+						output.machine_models[name]++;
 					}
 					else if (!output.debris_models.contains(name))
 					{
@@ -576,7 +577,8 @@ namespace zonetool::convert::iw7_iw8
 							{"b", events(data.random.eventsB, data.random.eventBCount, self)}});
 						break;
 					case iw7::Scriptable_EventType_Model:
-						result.push_back({{"t", "model"}, {"model", model_name(data.model.model)}, {"physics", data.model.activatePhysics}});
+						result.push_back({{"t", "model"}, {"model", model_name(data.model.model)}, {"physics", data.model.activatePhysics},
+							{"dynamic", data.model.dynamicSimulation}, {"never_moves", data.model.neverMoves}});
 						break;
 					case iw7::Scriptable_EventType_PFX:
 					{
@@ -701,12 +703,37 @@ namespace zonetool::convert::iw7_iw8
 				for (auto s = 0u; part.states && s < part.numStates; s++)
 				{
 					const auto& state = part.states[s];
-					// A force on a state that swaps in a physics model drops the piece (a fall); others rock it.
+					// A force on a state that swaps in a physics model drops the piece (a fall); others rock it. A last state of
+					// the root part that swaps its model and then pushes it (picture frames that fall, broken cash registers and
+					// keyboards that the push kicks away; IW7 sets no physics flag on them) drops it too: when only such states
+					// set the model, it becomes a physics prop that the push launches (export_effects: physics_models).
 					auto state_events = events(state.base.events, state.base.numEvents, static_cast<int>(p));
-					const auto falls = std::ranges::any_of(state_events, [](const json& event)
+					const auto last = state.type == iw7::Scriptable_StateType_Simple && std::ranges::none_of(state_events, [](const json& event)
 					{
-						return event.value("t", std::string{}) == "model" && event.value("physics", false);
+						return event.value("t", std::string{}) == "state";
 					});
+					std::string swapped;
+					auto falls = false;
+					for (const auto& event : state_events)
+					{
+						const auto t = event.value("t", std::string{});
+						if (t == "model")
+						{
+							swapped = event.value("model", std::string{});
+							falls = falls || event.value("physics", false) || event.value("dynamic", false);
+						}
+						else if (t == "force" && last && parents[p] < 0 && !swapped.empty())
+						{
+							falls = true;
+							if (convert)
+							{
+								output.swap_models[swapped]++;
+							}
+
+							break;
+						}
+					}
+
 					for (auto& event : state_events)
 					{
 						if (event.value("t", std::string{}) == "force")
