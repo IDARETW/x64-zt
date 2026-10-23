@@ -262,6 +262,8 @@ struct Mesh : Material
     }
 };
 Mesh Load(const std::string &path);
+// The same from a definition already in memory (the IW3 converter's); `path` still places the files it names.
+Mesh Load(const std::string &path, const nlohmann::json &definition);
 void RegisterMaterial(iw8::ZoneWriter &writer, const Mesh &mesh);
 void RegisterMapMaterials(iw8::ZoneWriter &main, iw8::ZoneWriter &techsets,
                           const Mesh &mesh);

@@ -257,6 +257,9 @@ struct PreparedMap
     replayrender::StaticModels staticModels;
     std::vector<iw8::staticmodelcollision::Model> staticModelCollisionModels;
     replaysunshadow::Scene shadowScene;
+    // The native render definition, handed to the packager in memory (the scratch keeps a copy only when
+    // IW8_ZONETOOL_KEEP_SCRATCH keeps the scratch). The packager empties it once the mesh is read.
+    nlohmann::json render;
     std::vector<iw8::DynamicEntity> dynamicEntities;
     iw8::navigation::Source navigation;
     // IW8 GSC translated from the map's IW3 scripts (without the generated

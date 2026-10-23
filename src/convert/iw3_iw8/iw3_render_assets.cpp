@@ -2495,28 +2495,10 @@ void ClassifyFoliage(SourceMaterial &material, const Image &color)
 
 std::vector<std::uint8_t> Sha256(const std::span<const std::uint8_t> data)
 {
-    BCRYPT_ALG_HANDLE algorithm{};
-    BCRYPT_HASH_HANDLE hash{};
-    DWORD objectLength = 0, digestLength = 0, returned = 0;
-    if (BCryptOpenAlgorithmProvider(&algorithm, BCRYPT_SHA256_ALGORITHM, nullptr, 0) < 0 ||
-        BCryptGetProperty(algorithm, BCRYPT_OBJECT_LENGTH, reinterpret_cast<PUCHAR>(&objectLength),
-                          sizeof(objectLength), &returned, 0) < 0 ||
-        BCryptGetProperty(algorithm, BCRYPT_HASH_LENGTH, reinterpret_cast<PUCHAR>(&digestLength),
-                          sizeof(digestLength), &returned, 0) < 0)
-        throw std::runtime_error("cannot initialize SHA-256");
-    std::vector<std::uint8_t> object(objectLength), digest(digestLength);
-    if (BCryptCreateHash(algorithm, &hash, object.data(), objectLength, nullptr, 0, 0) < 0 ||
-        BCryptHashData(hash, const_cast<PUCHAR>(data.data()), static_cast<ULONG>(data.size()), 0) <
-            0 ||
-        BCryptFinishHash(hash, digest.data(), digestLength, 0) < 0)
-    {
-        if (hash)
-            BCryptDestroyHash(hash);
-        BCryptCloseAlgorithmProvider(algorithm, 0);
+    std::vector<std::uint8_t> digest(32);
+    if (BCryptHash(BCRYPT_SHA256_ALG_HANDLE, nullptr, 0, const_cast<PUCHAR>(data.data()),
+                   static_cast<ULONG>(data.size()), digest.data(), static_cast<ULONG>(digest.size())) < 0)
         throw std::runtime_error("cannot calculate SHA-256");
-    }
-    BCryptDestroyHash(hash);
-    BCryptCloseAlgorithmProvider(algorithm, 0);
     return digest;
 }
 
@@ -2613,7 +2595,8 @@ std::vector<std::uint8_t> Compile(const std::string &source, const char *target,
         if (!file.empty())
         {
             auto partial = file;
-            partial += "." + std::to_string(GetCurrentProcessId()) + ".partial";
+            partial += "." + std::to_string(GetCurrentProcessId()) + "." + std::to_string(GetCurrentThreadId()) +
+                       ".partial";
             try
             {
                 std::filesystem::create_directories(g_shaderCacheRoot, error);
@@ -3103,7 +3086,7 @@ Json BuildTechset(const std::string &map, const unsigned columns, const unsigned
     return techset;
 }
 
-Json CreateVariant(const Json &base, Json &material, const std::string &stem,
+Json CreateVariant(const Json &base, const Json &material, const std::string &stem,
                    const std::string &map, const std::string &kind)
 {
     Json techset = base;
@@ -5655,8 +5638,15 @@ RenderPlan PrepareRenderAssets(const std::filesystem::path &exportRoot, const Js
     };
     material["techsetDefinition"] = stem + ".techset.json";
     material["imageDefinitions"] = Json::array();
+    // The three atlases build their mips and encode on their own threads; their definitions join the material in
+    // channel order. The authored tile sources are found first (the image cache is not shared between threads).
+    std::array<std::vector<const Image *>, 3> tileSources;
     for (unsigned channel = 0; channel < 3; ++channel)
-    {
+        for (const auto &tile : atlasTileMips[channel])
+            tileSources[channel].push_back(&image(tile.image).front());
+    std::array<std::pair<std::string, std::string>, 3> atlasFiles; // image name, file
+    std::array<std::exception_ptr, 3> atlasFailures;
+    const auto buildAtlas = [&](const unsigned channel) {
         // Keep authored mip coverage inside exact-size material tiles. The
         // surrounding atlas (including lightmaps and sky) still downsamples
         // normally; the source's lower levels must not be re-averaged away.
@@ -5666,10 +5656,11 @@ RenderPlan PrepareRenderAssets(const std::filesystem::path &exportRoot, const Js
                                                : atlases[channel].mips.back(),
                                     channel == 0);
             const unsigned mipCell = cell >> level;
-            for (const auto &tile : atlasTileMips[channel])
+            for (std::size_t tileIndex = 0; tileIndex < atlasTileMips[channel].size(); ++tileIndex)
             {
+                const auto &tile = atlasTileMips[channel][tileIndex];
                 const unsigned tileMip = tileCell(tile.tile) >> level;
-                const auto &sourceMips = image(tile.image).front().mips;
+                const auto &sourceMips = tileSources[channel][tileIndex]->mips;
                 if (level > sourceMips.size() || sourceMips[level - 1].width != tileMip ||
                     sourceMips[level - 1].height != tileMip)
                     continue;
@@ -5684,12 +5675,36 @@ RenderPlan PrepareRenderAssets(const std::filesystem::path &exportRoot, const Js
         }
         auto chain = MipChain(std::move(atlases[channel]), mipCount, channel == 0);
         if constexpr (atlasSize > 4096)
-        {
             chain = EncodeBc7Chain(chain, atlasSize, mipCount, cacheRoot);
-            const std::string filename = map + "_atlas_" + std::to_string(channel) + ".bc7";
-            const std::string name = ImageName(map, channel, chain);
-            WriteBytes(mapDirectory / filename, chain);
-            material["textures"][channel]["image"] = name;
+        const std::string filename =
+            map + "_atlas_" + std::to_string(channel) + (atlasSize > 4096 ? ".bc7" : ".rgba");
+        atlasFiles[channel] = {ImageName(map, channel, chain), filename};
+        WriteBytes(mapDirectory / filename, chain);
+    };
+    {
+        std::array<std::thread, 3> threads;
+        for (unsigned channel = 0; channel < 3; ++channel)
+            threads[channel] = std::thread([&, channel] {
+                try
+                {
+                    buildAtlas(channel);
+                }
+                catch (...)
+                {
+                    atlasFailures[channel] = std::current_exception();
+                }
+            });
+        for (auto &thread : threads)
+            thread.join();
+        for (const auto &failure : atlasFailures)
+            if (failure)
+                std::rethrow_exception(failure);
+    }
+    for (unsigned channel = 0; channel < 3; ++channel)
+    {
+        const auto &[name, filename] = atlasFiles[channel];
+        material["textures"][channel]["image"] = name;
+        if constexpr (atlasSize > 4096)
             // Replay format table 0x1423E25F0: 44 BC7_UNORM, 45 BC7_UNORM_SRGB.
             material["imageDefinitions"].push_back({{"name", name},
                                                     {"width", atlasSize},
@@ -5697,20 +5712,13 @@ RenderPlan PrepareRenderAssets(const std::filesystem::path &exportRoot, const Js
                                                     {"bc7", filename},
                                                     {"format", channel == 0 ? 45 : 44},
                                                     {"mipCount", mipCount}});
-        }
         else
-        {
-            const std::string filename = map + "_atlas_" + std::to_string(channel) + ".rgba";
-            const std::string name = ImageName(map, channel, chain);
-            WriteBytes(mapDirectory / filename, chain);
-            material["textures"][channel]["image"] = name;
             material["imageDefinitions"].push_back({{"name", name},
                                                     {"width", atlasSize},
                                                     {"height", atlasSize},
                                                     {"rgba8", filename},
                                                     {"format", channel == 0 ? 7 : 6},
                                                     {"mipCount", mipCount}});
-        }
     }
     zt::info("iw3: source atlas %ux%u, %u columns, %u-pixel material tiles, %u mips", atlasSize,
              atlasSize, columns, cell, mipCount);
@@ -5961,6 +5969,7 @@ RenderPlan PrepareRenderAssets(const std::filesystem::path &exportRoot, const Js
                                             {"material", plan.material + "_" + kind},
                                             {"materialDefinition", variant.at("definition")}});
     }
+    timing.lap("world variants");
 
     // Baked opaque BSP surfaces use Replay's shipped world shader family and
     // the native lightmap table. Keep the generated shader for surfaces whose
@@ -6111,9 +6120,21 @@ RenderPlan PrepareRenderAssets(const std::filesystem::path &exportRoot, const Js
             {{"schema", 1}, {"material", materialName}, {"materialDefinition", materialFile}});
         plan.materials.at(source.name).worldMaterialIndex = index;
     }
+    timing.lap("native world materials");
 
     // FxGlassSystem supplies its own vertices. A BSP glass variant cannot be
     // used here: Replay R_DrawGlassSurf (18F9F00) rejects layouts other than 31.
+    // The panes are named in surface order and then built on every core (an IW7 map holds hundreds); they join the
+    // asset materials in that order.
+    struct Pane
+    {
+        const std::string *sourceName;
+        std::string kind, definition;
+    };
+    std::vector<Pane> panes;
+    std::set<std::string> assetMaterialNames;
+    for (const auto &existing : plan.assetMaterials)
+        assetMaterialNames.insert(existing.at("material").get<std::string>());
     for (const std::string &sourceName : surfaceMaterials)
     {
         auto &entry = plan.materials.at(sourceName);
@@ -6126,12 +6147,14 @@ RenderPlan PrepareRenderAssets(const std::filesystem::path &exportRoot, const Js
                                  std::to_string(entry.flags) + "_" +
                                  Hex(std::span(sourceDigest).first(8)) + "_glass";
         entry.glassMaterial = plan.material + "_" + kind;
-        if (std::any_of(plan.assetMaterials.begin(), plan.assetMaterials.end(),
-                        [&](const Json &existing) {
-                            return existing.at("material") == entry.glassMaterial;
-                        }))
-            continue;
-        Json variant = CreateVariant(techset, worldMaterial, stem, map, kind);
+        if (assetMaterialNames.insert(entry.glassMaterial).second)
+            panes.push_back({&sourceName, kind, {}});
+    }
+    parallelFor(panes.size(), [&](const std::size_t paneIndex) {
+        auto &pane = panes[paneIndex];
+        const std::string &sourceName = *pane.sourceName;
+        const auto &entry = plan.materials.at(sourceName);
+        Json variant = CreateVariant(techset, worldMaterial, stem, map, pane.kind);
         Json &paneTechset = variant.at("techset");
         const auto &environment = entry.environment;
         const std::string vertexSource = "#define GLASS_PANE 1\n#define GLASS_TILE " +
@@ -6194,12 +6217,14 @@ RenderPlan PrepareRenderAssets(const std::filesystem::path &exportRoot, const Js
         info[0x10] = 3;
         info[0x11] = 26;
         variant["material"]["info"] = Hex(info);
-        WriteJson(mapDirectory / variant.at("definition").get<std::string>(),
-                  variant.at("material"));
+        pane.definition = variant.at("definition").get<std::string>();
+        WriteJson(mapDirectory / pane.definition, variant.at("material"));
         WriteJson(mapDirectory / variant.at("techsetFile").get<std::string>(), paneTechset);
-        plan.assetMaterials.push_back({{"schema", 1}, {"material", entry.glassMaterial},
-                                       {"materialDefinition", variant.at("definition")}});
-    }
+    });
+    for (const auto &pane : panes)
+        plan.assetMaterials.push_back({{"schema", 1},
+                                       {"material", plan.materials.at(*pane.sourceName).glassMaterial},
+                                       {"materialDefinition", pane.definition}});
 
     // Static placements draw through Replay's static-model tables; script,
     // dynamic and effect XModels draw as DObjs, whose shaders take the object
@@ -6450,7 +6475,7 @@ RenderPlan PrepareRenderAssets(const std::filesystem::path &exportRoot, const Js
             plan.materials.at(source.name).*target = materialName;
         }
     };
-    timing.lap("world variants, native world and glass materials");
+    timing.lap("glass materials");
     emitModelMaterials(TechniqueGeometry::staticModel, modelMaterials, &MaterialPlan::modelMaterial);
     timing.lap("static model materials");
     emitModelMaterials(TechniqueGeometry::entity, entityMaterials, &MaterialPlan::entityMaterial);

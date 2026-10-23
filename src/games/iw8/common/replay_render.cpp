@@ -1,5 +1,6 @@
 #include <std_include.hpp>
 #include "replay_render.h"
+#include "log.h"
 #include <algorithm>
 #include <atomic>
 #include <cmath>
@@ -8,6 +9,7 @@
 #include <d3dcompiler.h>
 #include <filesystem>
 #include <fstream>
+#include <future>
 #include <iterator>
 #include <limits>
 #include <map>
@@ -402,13 +404,27 @@ Image LoadImageDefinition(const std::string &path, const nlohmann::json &source,
     image.category = static_cast<uint8_t>(category);
     // Materials repeat image definitions (world atlas per glass pane, light volume per
     // entity material): read each file once and share the bytes.
+    // Each file has its own lock: the materials load on every core, and other files read meanwhile.
+    struct CachedPixels
+    {
+        std::mutex mutex;
+        std::weak_ptr<std::vector<uint8_t>> bytes;
+    };
     static std::mutex cacheMutex;
-    static std::map<std::string, std::weak_ptr<std::vector<uint8_t>>> cache;
+    static std::map<std::string, std::shared_ptr<CachedPixels>> cache;
     const auto stamp = std::filesystem::last_write_time(pixelPath, error).time_since_epoch().count();
     const std::string key = pixelPath.lexically_normal().string() + '|' + std::to_string(stamp) +
                             '|' + std::to_string(length);
-    const std::lock_guard lock(cacheMutex);
-    if (auto cached = cache[key].lock())
+    std::shared_ptr<CachedPixels> entry;
+    {
+        const std::lock_guard lock(cacheMutex);
+        auto &slot = cache[key];
+        if (!slot)
+            slot = std::make_shared<CachedPixels>();
+        entry = slot;
+    }
+    const std::lock_guard lock(entry->mutex);
+    if (auto cached = entry->bytes.lock())
     {
         image.pixels.share(std::move(cached));
         return image;
@@ -418,12 +434,52 @@ Image LoadImageDefinition(const std::string &path, const nlohmann::json &source,
     if (!input.read(reinterpret_cast<char *>(bytes->data()), length))
         throw std::runtime_error(std::string("Cannot read ") + (blocks ? "block-compressed" : "RGBA8") +
                                  " image pixels");
-    cache[key] = bytes;
+    entry->bytes = bytes;
     image.pixels.share(std::move(bytes));
     return image;
 }
 
-Material LoadMaterial(const std::string &path, const nlohmann::json &j,
+// The technique sets of one render load, each parsed once: a map's materials share a few large ones (951 of IW7
+// Carnage's world materials name one). The first material to need a file parses it; the others wait for it.
+class TechsetFiles
+{
+  public:
+    std::shared_ptr<const nlohmann::json> get(const std::filesystem::path &file)
+    {
+        std::promise<std::shared_ptr<const nlohmann::json>> promise;
+        std::shared_future<std::shared_ptr<const nlohmann::json>> parsed;
+        bool parses = false;
+        {
+            const std::lock_guard lock(mutex_);
+            auto [entry, inserted] = files_.try_emplace(file.lexically_normal().string());
+            if (inserted)
+            {
+                entry->second = promise.get_future().share();
+                parses = true;
+            }
+            parsed = entry->second;
+        }
+        if (parses)
+        {
+            try
+            {
+                std::ifstream input(file, std::ios::binary);
+                promise.set_value(std::make_shared<const nlohmann::json>(parseFile(input)));
+            }
+            catch (...)
+            {
+                promise.set_exception(std::current_exception());
+            }
+        }
+        return parsed.get();
+    }
+
+  private:
+    std::mutex mutex_;
+    std::map<std::string, std::shared_future<std::shared_ptr<const nlohmann::json>>> files_;
+};
+
+Material LoadMaterial(const std::string &path, const nlohmann::json &j, TechsetFiles &techsets,
                       const bool auxiliaryEffect = false)
 {
     Material m;
@@ -507,8 +563,8 @@ Material LoadMaterial(const std::string &path, const nlohmann::json &j,
             const auto tf = d.at("techsetDefinition").get<std::string>();
             if (std::filesystem::path(tf).filename() != tf || tf.find("..") != std::string::npos)
                 throw std::runtime_error("Techset definition must be adjacent");
-            std::ifstream fts(std::filesystem::path(path).parent_path() / tf, std::ios::binary);
-            const auto ts = parseFile(fts);
+            const auto techsetFile = techsets.get(std::filesystem::path(path).parent_path() / tf);
+            const auto &ts = *techsetFile;
             nativeReplayFixture = ts.value("nativeReplayFixture", false);
             m.techsetHeader = unhex(ts.at("header"));
             if (ts.at("schema") != 1 || ts.at("name") != m.techset || m.techsetHeader.size() != 64)
@@ -1147,21 +1203,27 @@ void OrderNativeTreeSurfaces(Mesh &mesh)
 
 Mesh Load(const std::string &path)
 {
-    Mesh m;
     if (path.empty())
-        return m;
+        return {};
     std::ifstream f(path, std::ios::binary);
     if (!f)
         throw std::runtime_error("Cannot read Replay render mesh: " + path);
-    const auto j = parseFile(f);
-    static_cast<Material &>(m) = LoadMaterial(path, j);
+    return Load(path, parseFile(f));
+}
+
+Mesh Load(const std::string &path, const nlohmann::json &j)
+{
+    Mesh m;
+    zt::LapTimer timing("render load");
+    TechsetFiles techsets;
+    static_cast<Material &>(m) = LoadMaterial(path, j, techsets);
     if (j.contains("additionalMaterials"))
     {
         if (!j.at("additionalMaterials").is_array() ||
             j.at("additionalMaterials").size() > kMaxWorldSurfaces)
             throw std::runtime_error("Invalid surface material table");
         m.additionalMaterials = loadInParallel<Material>(
-            j.at("additionalMaterials"), [&](const nlohmann::json &definition) { return LoadMaterial(path, definition); });
+            j.at("additionalMaterials"), [&](const nlohmann::json &definition) { return LoadMaterial(path, definition, techsets); });
     }
     if (j.contains("assetMaterials"))
     {
@@ -1169,8 +1231,9 @@ Mesh Load(const std::string &path)
         if (!definitions.is_array() || definitions.size() > kMaxWorldSurfaces)
             throw std::runtime_error("Invalid auxiliary material table");
         m.assetMaterials = loadInParallel<Material>(
-            definitions, [&](const nlohmann::json &definition) { return LoadMaterial(path, definition, true); });
+            definitions, [&](const nlohmann::json &definition) { return LoadMaterial(path, definition, techsets, true); });
     }
+    timing.lap("materials");
     if (j.contains("sunFlare"))
     {
         const auto &sun = j.at("sunFlare");
@@ -1834,6 +1897,7 @@ Mesh Load(const std::string &path)
         m.brushModels.front().bounds = m.sceneBounds;
     }
     m.drawBounds = drawBounds.Finish();
+    timing.lap("geometry");
     return m;
 }
 void StampWorld(std::vector<uint8_t> &w, const Mesh &m)

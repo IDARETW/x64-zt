@@ -9008,6 +9008,7 @@ PreparedMap::PreparedMap(PreparedMap &&other) noexcept
     , staticModels(std::move(other.staticModels))
     , staticModelCollisionModels(std::move(other.staticModelCollisionModels))
     , shadowScene(std::move(other.shadowScene))
+    , render(std::move(other.render))
     , dynamicEntities(std::move(other.dynamicEntities))
     , navigation(std::move(other.navigation))
     , mapScript(std::move(other.mapScript))
@@ -9051,6 +9052,7 @@ PreparedMap &PreparedMap::operator=(PreparedMap &&other) noexcept
         staticModels = std::move(other.staticModels);
         staticModelCollisionModels = std::move(other.staticModelCollisionModels);
         shadowScene = std::move(other.shadowScene);
+        render = std::move(other.render);
         dynamicEntities = std::move(other.dynamicEntities);
         navigation = std::move(other.navigation);
         mapScript = std::move(other.mapScript);
@@ -11722,7 +11724,9 @@ PreparedMap PrepareFastfile(const ImportOptions &options)
     AddReplayTemplateEntities(nativeCollision, render, entities, minimum, maximum, templateFloor);
     minimum[2] = templateFloor - 64.0f;
     render["sunFlare"] = ReadSunFlare(exportRoot, sourceMap);
-    WriteJson(mapDirectory / (targetAsset + ".render.json"), render);
+    if (GetEnvironmentVariableW(L"IW8_ZONETOOL_KEEP_SCRATCH", nullptr, 0))
+        WriteJson(mapDirectory / (targetAsset + ".render.json"), render);
+    result.render = std::move(render);
     WriteJson(mapDirectory / (targetAsset + ".bounds.json"),
               {{"schema", 1}, {"min", minimum}, {"max", maximum}});
 
