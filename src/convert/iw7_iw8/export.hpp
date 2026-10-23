@@ -79,6 +79,10 @@ namespace zonetool::convert::iw7_iw8
 			int health{};
 		};
 		std::map<std::string, scriptable_destructible> scriptable_destructibles;
+		// The placed scriptables of the other kinds that take damage (several parts, stages, reactions, explosions, IW7's
+		// destructible cars): their instances are script models of this targetname, whose state machine (export_entities'
+		// scriptable_machine) the map script runs (iw7_scriptables).
+		std::map<std::string, json> scriptable_machines;
 		// The models that the map script sets by name (precachemodel, setmodel: Rivet's drones, the collision patches that
 		// the scripts spawn), which convert as script models.
 		std::set<std::string> script_models;

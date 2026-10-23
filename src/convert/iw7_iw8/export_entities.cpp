@@ -372,6 +372,278 @@ namespace zonetool::convert::iw7_iw8
 			return states;
 		}
 
+		// Whether a scriptable kind takes damage: a part (or a child part) has a health state.
+		bool takes_damage(const iw7::ScriptableDef& def)
+		{
+			const std::function<bool(const iw7::ScriptablePartDef*, unsigned)> any = [&](const iw7::ScriptablePartDef* parts,
+				const unsigned count)
+			{
+				for (auto p = 0u; parts && p < count; p++)
+				{
+					for (auto s = 0u; parts[p].states && s < parts[p].numStates; s++)
+					{
+						if (parts[p].states[s].type == iw7::Scriptable_StateType_Health)
+						{
+							return true;
+						}
+					}
+
+					if (any(parts[p].childParts, parts[p].numChildParts))
+					{
+						return true;
+					}
+				}
+
+				return false;
+			};
+
+			return any(def.parts, def.numParts);
+		}
+
+		// A scriptable kind's state machine as the map script runs it (iw7_scriptables): its parts in tree order (name, tag,
+		// parent), each part's states (name, kind, health), and each state's events in order. Models, effects and sound
+		// aliases convert with the map; event kinds that do not convert keep their IW7 type (e<n>) for the log.
+		json scriptable_machine(const source_map& source, const iw7::ScriptableDef& def, extraction& output, const bool convert)
+		{
+			std::vector<const iw7::ScriptablePartDef*> parts;
+			std::vector<int> parents;
+			const std::function<void(const iw7::ScriptablePartDef*, unsigned, int)> flatten =
+				[&](const iw7::ScriptablePartDef* list, const unsigned count, const int parent)
+			{
+				for (auto p = 0u; list && p < count; p++)
+				{
+					const auto index = static_cast<int>(parts.size());
+					parts.push_back(&list[p]);
+					parents.push_back(parent);
+					flatten(list[p].childParts, list[p].numChildParts, index);
+				}
+			};
+			flatten(def.parts, def.numParts, -1);
+
+			// A part reference names a part relative to the event's (verified on IW7 data: Fallen's coffee sack, Riot's cars,
+			// Mansion's body scanner): 0 its parent, 1 itself, 2 its child of the index in the reference, 3 the part of the
+			// index path from the top-level parts. A state change's target state is the index that its part field holds.
+			const auto reference_part = [&](const iw7::ScriptablePartReference& reference, const int self) -> int
+			{
+				switch (reference.type)
+				{
+				case 0:
+					return self >= 0 ? parents[self] : -1;
+				case 1:
+					return self;
+				case 2:
+				{
+					std::uint32_t child{};
+					std::memcpy(&child, reference.u.__2.__pad0, sizeof(child));
+					for (std::size_t p = 0, n = 0; p < parts.size(); p++)
+					{
+						if (parents[p] == self && n++ == child)
+						{
+							return static_cast<int>(p);
+						}
+					}
+
+					return -1;
+				}
+				case 3:
+				{
+					const auto& path = reference.u.__3;
+					if (!path.val || !path.count || path.count > 8)
+					{
+						return -1;
+					}
+
+					int part = -1;
+					for (auto step = 0u; step < path.count; step++)
+					{
+						int found = -1;
+						for (std::size_t p = 0, n = 0; p < parts.size() && found < 0; p++)
+						{
+							if (parents[p] == part && n++ == path.val[step])
+							{
+								found = static_cast<int>(p);
+							}
+						}
+
+						if (found < 0)
+						{
+							return -1;
+						}
+
+						part = found;
+					}
+
+					return part;
+				}
+				default:
+					return -1;
+				}
+			};
+
+			const auto model_name = [&](iw7::XModel* header) -> std::string
+			{
+				const auto* model = header ? source.resolve(iw7::ASSET_TYPE_XMODEL, header) : nullptr;
+				if (!model)
+				{
+					return {};
+				}
+
+				const std::string name(asset_name(iw7::get_asset_name(iw7::ASSET_TYPE_XMODEL, model)));
+				if (convert)
+				{
+					output.models.try_emplace(file_name(name), model);
+					output.script_models.insert(file_name(name));
+				}
+
+				return file_name(name);
+			};
+
+			const std::function<json(const iw7::ScriptableEventDef*, unsigned, int)> events = [&](const iw7::ScriptableEventDef* list,
+				const unsigned count, const int self)
+			{
+				auto result = json::array();
+				for (auto e = 0u; list && e < count; e++)
+				{
+					const auto& event = list[e];
+					const auto& data = event.data;
+					switch (event.type)
+					{
+					case iw7::Scriptable_EventType_StateChange:
+					{
+						const auto part = reference_part(data.stateChange.partReference, self);
+						const auto state = reinterpret_cast<std::uintptr_t>(data.stateChange.part);
+						const auto states = part >= 0 && parts[part]->states ? parts[part]->numStates : 0u;
+						result.push_back({{"t", "state"}, {"part", part}, {"index", state < states ? static_cast<int>(state) : -1}});
+						break;
+					}
+					case iw7::Scriptable_EventType_Wait:
+						result.push_back({{"t", "wait"}, {"min", data.wait.delayMin}, {"max", data.wait.delayMax}});
+						break;
+					case iw7::Scriptable_EventType_Random:
+						result.push_back({{"t", "random"}, {"threshold", data.random.threshold},
+							{"a", events(data.random.eventsA, data.random.eventACount, self)},
+							{"b", events(data.random.eventsB, data.random.eventBCount, self)}});
+						break;
+					case iw7::Scriptable_EventType_Model:
+						result.push_back({{"t", "model"}, {"model", model_name(data.model.model)}, {"physics", data.model.activatePhysics}});
+						break;
+					case iw7::Scriptable_EventType_PFX:
+					{
+						const auto& fx = data.particleFX;
+						const auto vfx = fx.effectDef.type == iw7::FX_COMBINED_VFX ? source.resolve(iw7::ASSET_TYPE_VFX, fx.effectDef.u.vfx) :
+							nullptr;
+						auto tags = json::array();
+						for (auto t = 0u; fx.scrTagNames && t < fx.scrTagCount; t++)
+						{
+							tags.push_back(script_string(fx.scrTagNames[t]));
+						}
+
+						result.push_back({{"t", "fx"}, {"effect", vfx ? std::string(asset_name(iw7::get_asset_name(iw7::ASSET_TYPE_VFX, vfx))) :
+							std::string{}}, {"tags", tags}, {"loop", fx.loopRate}, {"kill", fx.killOnExit}});
+						break;
+					}
+					case iw7::Scriptable_EventType_Sound:
+						result.push_back({{"t", "sound"}, {"alias", data.sound.soundAlias ? std::string(asset_name(data.sound.soundAlias)) :
+							std::string{}}, {"tag", data.sound.tagName ? data.sound.tagName : ""}, {"stateful", data.sound.stateful}});
+						break;
+					case iw7::Scriptable_EventType_HideShowBone:
+						result.push_back({{"t", "hide"}, {"tag", data.hideShowBone.tagName ? data.hideShowBone.tagName : ""},
+							{"hide", data.hideShowBone.hide}, {"children", data.hideShowBone.hideShowChildren}});
+						break;
+					case iw7::Scriptable_EventType_Explosion:
+						result.push_back({{"t", "explosion"}, {"tag", data.explosion.tagName ? data.explosion.tagName : ""},
+							{"radius", data.explosion.radius}, {"inner", data.explosion.dmgInner}, {"outer", data.explosion.dmgOuter}});
+						break;
+					case iw7::Scriptable_EventType_Screenshake:
+						result.push_back({{"t", "shake"}, {"duration", data.screenshake.duration}, {"radius", data.screenshake.radius},
+							{"scale", data.screenshake.scaleEarthquake}, {"earthquake", data.screenshake.isEarthquake}});
+						break;
+					case iw7::Scriptable_EventType_ApplyForce:
+						result.push_back({{"t", "force"}, {"pos", {data.applyForce.forcePos[0], data.applyForce.forcePos[1],
+							data.applyForce.forcePos[2]}}, {"vector", {data.applyForce.forceVector[0], data.applyForce.forceVector[1],
+							data.applyForce.forceVector[2]}}});
+						break;
+					case iw7::Scriptable_EventType_Animation:
+					{
+						const auto* anim = data.animation.animation ? source.resolve(iw7::ASSET_TYPE_XANIMPARTS, data.animation.animation) :
+							nullptr;
+						std::string name = anim && anim->name ? std::string(asset_name(anim->name)) : std::string{};
+						if (convert && !name.empty() && !export_script_animation(source, name, output))
+						{
+							name.clear();
+						}
+
+						result.push_back({{"t", "anim"}, {"anim", name}});
+						break;
+					}
+					case iw7::Scriptable_EventType_Script:
+						result.push_back({{"t", "script"}, {"notify", data.script.notification ? data.script.notification : ""},
+							{"param", data.script.param}});
+						break;
+					case iw7::Scriptable_EventType_PartDamage:
+					{
+						// IW7's event keeps IW8's layout after its amount (verified on Riot's cars: a destroy flag, then the
+						// damage over time 12 and its interval 0.2), which ScriptableEventPartDamageDef leaves out.
+						const auto* bytes = reinterpret_cast<const std::uint8_t*>(&data.partDamage);
+						float amount{}, dot{}, interval{};
+						std::memcpy(&amount, bytes + 56, sizeof(amount));
+						std::memcpy(&dot, bytes + 64, sizeof(dot));
+						std::memcpy(&interval, bytes + 68, sizeof(interval));
+						const bool destroy = bytes[60] != 0;
+						result.push_back({{"t", "damage"}, {"part", reference_part(data.partDamage.partReference, self)},
+							{"amount", destroy ? 1.0e9f : amount}, {"dot", dot}, {"interval", interval}});
+						break;
+					}
+					case iw7::Scriptable_EventType_AddModel:
+						result.push_back({{"t", "addmodel"}, {"tag", data.addModel.tagName ? data.addModel.tagName : ""},
+							{"model", model_name(data.addModel.model)}});
+						break;
+					default:
+						result.push_back({{"t", std::format("e{}", static_cast<int>(event.type))}});
+						break;
+					}
+				}
+
+				return result;
+			};
+
+			auto list = json::array();
+			for (std::size_t p = 0; p < parts.size(); p++)
+			{
+				const auto& part = *parts[p];
+				auto states = json::array();
+				for (auto s = 0u; part.states && s < part.numStates; s++)
+				{
+					const auto& state = part.states[s];
+					// A force on a state that swaps in a physics model drops the piece (a fall); others rock it.
+					auto state_events = events(state.base.events, state.base.numEvents, static_cast<int>(p));
+					const auto falls = std::ranges::any_of(state_events, [](const json& event)
+					{
+						return event.value("t", std::string{}) == "model" && event.value("physics", false);
+					});
+					for (auto& event : state_events)
+					{
+						if (event.value("t", std::string{}) == "force")
+						{
+							event["fall"] = falls;
+						}
+					}
+
+					const auto health = state.type == iw7::Scriptable_StateType_Health;
+					states.push_back({{"name", state.base.name ? state.base.name : ""},
+						{"kind", health ? "health" : state.type == iw7::Scriptable_StateType_Scripted ? "scripted" : "simple"},
+						{"health", health ? state.data.health.health : 0}, {"mindamage", health ? state.data.health.minimumDamage : 0},
+						{"to_parent", health ? state.data.health.damagePropagationToParent : 0.0f},
+						{"events", std::move(state_events)}});
+				}
+
+				list.push_back({{"name", part.name ? part.name : ""}, {"tag", part.tagName ? part.tagName : ""}, {"parent", parents[p]},
+					{"states", states}});
+			}
+
+			return {{"def", def.name ? std::string(asset_name(def.name)) : std::string{}}, {"parts", list}};
+		}
+
 		// The effects that the first state of each part of a scriptable plays, on the tags of the instance's model.
 		void add_scriptable_effects(const source_map& source, const iw7::ScriptableDef& def, const iw7::XModel* model,
 			const iw7::ScriptableInstanceContext& context, extraction& output)
@@ -950,6 +1222,7 @@ namespace zonetool::convert::iw7_iw8
 		// targetname that the map script breaks them by; those whose first state plays an animation, one that the map script
 		// animates them by. Their other states and events do not convert.
 		const auto& scriptables = map_ents->scriptableMapEnts;
+		std::set<const iw7::ScriptableDef*> dumped_machines;
 		std::size_t placed{};
 		std::size_t destructibles{};
 		for (auto i = 0u; scriptables.instances && i < scriptables.totalInstanceCount; i++)
@@ -963,6 +1236,13 @@ namespace zonetool::convert::iw7_iw8
 			}
 
 			const auto name = model ? asset_name(iw7::get_asset_name(iw7::ASSET_TYPE_XMODEL, model)) : std::string_view{};
+
+			// IW7_SCRIPTABLE_DUMP=2: each definition's state machine (scriptable_machine), once.
+			if (const auto* level = std::getenv("IW7_SCRIPTABLE_DUMP"); level && std::string_view(level) == "2" && def &&
+				dumped_machines.insert(def).second)
+			{
+				ZONETOOL_INFO("iw7 scriptable machine: %s", scriptable_machine(source, *def, output, false).dump().data());
+			}
 
 			// IW7_SCRIPTABLE_DUMP=1: each instance's definition, model source, parts and first states with their events.
 			if (std::getenv("IW7_SCRIPTABLE_DUMP"))
@@ -1058,6 +1338,20 @@ namespace zonetool::convert::iw7_iw8
 				});
 				animated = "iw7_animated_" + kind;
 				entities += std::format("\"targetname\" \"{}\"\n", animated);
+			}
+			else if (def && takes_damage(*def))
+			{
+				std::string kind(def_name);
+				std::ranges::transform(kind, kind.begin(), [](const unsigned char c)
+				{
+					return std::isalnum(c) ? static_cast<char>(std::tolower(c)) : '_';
+				});
+				const auto machine_name = "iw7_scriptable_" + kind;
+				entities += std::format("\"targetname\" \"{}\"\n", machine_name);
+				if (!output.scriptable_machines.contains(machine_name))
+				{
+					output.scriptable_machines.emplace(machine_name, scriptable_machine(source, *def, output, true));
+				}
 			}
 
 			if (!animated.empty())
