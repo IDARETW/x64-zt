@@ -375,10 +375,11 @@ namespace zonetool
 		}));
 	}
 
-	void zone_reader::move_deferred_offsets(const void* source, const std::size_t size, void* destination)
+	void zone_reader::move_deferred_offsets(const void* source, const std::size_t size, void* destination,
+		const std::size_t first)
 	{
 		const auto source_start = static_cast<const std::uint8_t*>(source);
-		for (auto& deferred : this->deferred_offsets_)
+		for (auto& deferred : std::span(this->deferred_offsets_).subspan(std::min(first, this->deferred_offsets_.size())))
 		{
 			const auto field = reinterpret_cast<std::uint8_t*>(deferred.field);
 			if (field >= source_start && field < source_start + size)

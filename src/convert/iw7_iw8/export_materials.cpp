@@ -1235,7 +1235,7 @@ namespace zonetool::convert::iw7_iw8
 			{
 				const auto casts = name.find("shadow") != std::string::npos && tools.find("nocast") == std::string_view::npos;
 				auto state = state_json("none", false, surface_kind::opaque);
-				write_json(output.extracted / "materials" / (name + ".json"),
+				write_json_async(output.extracted / "materials" / (name + ".json"),
 				{
 					{"$schema", "http://openassettools.dev/schema/material.v1.json"},
 					{"_game", "iw3"},
@@ -1252,7 +1252,7 @@ namespace zonetool::convert::iw7_iw8
 					{"techniqueSet", "shadowcaster"},
 					{"textureAtlas", {{"columns", 1}, {"rows", 1}}},
 					{"textures", json::array({texture_json("colorMap", "$white")})},
-				});
+				}, 16);
 				continue;
 			}
 
@@ -1303,7 +1303,7 @@ namespace zonetool::convert::iw7_iw8
 
 				const auto tint = material ? material_constant(material, "colorTint").value_or(std::array{1.0f, 1.0f, 1.0f, 1.0f})
 					: std::array{1.0f, 1.0f, 1.0f, 1.0f};
-				write_json(output.extracted / "materials" / (name + ".json"),
+				write_json_async(output.extracted / "materials" / (name + ".json"),
 				{
 					{"$schema", "http://openassettools.dev/schema/material.v1.json"},
 					{"_game", "iw3"},
@@ -1320,7 +1320,7 @@ namespace zonetool::convert::iw7_iw8
 					{"techniqueSet", "wc_l_sm_b0c0n0s0"},
 					{"textureAtlas", {{"columns", 1}, {"rows", 1}}},
 					{"textures", std::move(textures)},
-				});
+				}, 16);
 				continue;
 			}
 
@@ -1332,8 +1332,8 @@ namespace zonetool::convert::iw7_iw8
 					ZONETOOL_WARNING("iw7: effect material \"%s\" has no colour map and adds nothing", name.data());
 				}
 
-				write_json(output.extracted / "materials" / (name + ".json"), export_effect_material(material, color,
-					light_unit_scale(source), output.atlas_materials.contains(name)));
+				write_json_async(output.extracted / "materials" / (name + ".json"), export_effect_material(material, color,
+					light_unit_scale(source), output.atlas_materials.contains(name)), 16);
 				continue;
 			}
 
@@ -1367,8 +1367,8 @@ namespace zonetool::convert::iw7_iw8
 
 			kinds[static_cast<std::size_t>(kind.kind)]++;
 			missing += material == nullptr;
-			write_json(output.extracted / "materials" / (name + ".json"), export_material(material, images, kind, layer,
-				light_unit_scale(source)));
+			write_json_async(output.extracted / "materials" / (name + ".json"), export_material(material, images, kind, layer,
+				light_unit_scale(source)), 16);
 		}
 
 		// The HUD minimap. IW7 keeps it as a 2D material of the map, compass_map_<map> or a game mode's variant of it

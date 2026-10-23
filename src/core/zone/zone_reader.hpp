@@ -111,7 +111,13 @@ namespace zonetool
 		std::size_t alias_count() const;
 		void move_aliases(const void* source, std::size_t size, void* destination, std::size_t first);
 		std::size_t count_misplaced_strings() const;
-		void move_deferred_offsets(const void* source, std::size_t size, void* destination);
+		// Moves the deferred offsets whose fields lie in [source, source + size) to destination: those from the
+		// `first` deferred offset on (deferred_offset_count before the source was read; older ones point elsewhere).
+		void move_deferred_offsets(const void* source, std::size_t size, void* destination, std::size_t first = 0);
+		std::size_t deferred_offset_count() const
+		{
+			return this->deferred_offsets_.size();
+		}
 		void** insert_pointer();
 
 		template <typename T>

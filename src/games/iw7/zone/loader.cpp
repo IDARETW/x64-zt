@@ -182,6 +182,8 @@ namespace zonetool::iw7
 				}
 
 				const auto& loader = asset_loaders()[type];
+				// Only the offsets deferred while the asset reads can point into its header.
+				const auto first_deferred = this->reader_.deferred_offset_count();
 				const auto data = this->reader_.read_bytes(loader.size);
 				try
 				{
@@ -196,7 +198,7 @@ namespace zonetool::iw7
 
 				auto header = static_cast<void*>(this->reader_.allocate<std::uint8_t>(loader.size));
 				std::memcpy(header, data, loader.size);
-				this->reader_.move_deferred_offsets(data, loader.size, header);
+				this->reader_.move_deferred_offsets(data, loader.size, header, first_deferred);
 
 				const auto asset_type = static_cast<XAssetType>(type);
 				const auto name = loader.name(header);
