@@ -17,6 +17,10 @@ namespace iw3
 // do (SV_IsFrontFace; the disassembled foliage shader negates N, T and B). IW3 materials never set it. Model
 // vertices carry it as attribute bit 24 clear (their metadata word keeps only flag bits 0-17).
 constexpr unsigned kBackFaceNormalsFlag = 1u << 21;
+// IW7 layers that blend by their reveal map (layer token v<n>): the colour's alpha holds the reveal, the vertex colour
+// the layer's weight (alpha) and sharpness (red = sqrt(sharpness / 2)); the world shader's MAP_REVEAL_LAYERS ramp makes
+// the alpha.
+constexpr unsigned kRevealLayerFlag = 1u << 22;
 
 enum class SurfaceKind : unsigned
 {

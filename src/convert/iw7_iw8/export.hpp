@@ -221,6 +221,9 @@ namespace zonetool::convert::iw7_iw8
 	// The bytes that a layer (1-3) keeps per vertex in GfxWorldTransientZone.vld: its UV (8), and a packed tangent frame
 	// (4) when it has a normal map of its own (nl, nal, nbl).
 	unsigned int material_layer_vertex_size(const iw7::Material* material, int layer);
+	// The reveal sharpness of a layer (1-3) that blends by its reveal map (its token holds v<layer>), none for a layer
+	// that blends by its weight alone.
+	std::optional<float> material_layer_reveal(const iw7::Material* material, int layer);
 
 	// The brush model of trigger model N of the map entities: the trigger models follow the world's brush models.
 	unsigned int trigger_brush_model(const source_map& source, unsigned int trigger);

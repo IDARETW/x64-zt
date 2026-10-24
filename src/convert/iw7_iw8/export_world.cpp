@@ -1,5 +1,6 @@
 #include <std_include.hpp>
 #include "export.hpp"
+#include "images.hpp"
 
 #pragma warning(push, 0)
 #include <glaze/json.hpp>
@@ -118,17 +119,70 @@ namespace zonetool::convert::iw7_iw8
 			{
 				static std::size_t logged{};
 				const auto* layer_zone = source.resolve(iw7::ASSET_TYPE_GFXWORLD_TRANSIENT_ZONE, world.draw.transientZones[surface.transientZone]);
-				if (layer_zone && logged++ < 40)
+				if (layer_zone)
 				{
-					std::string bytes;
-					for (auto b = 0u; layer_zone->vld.data && b < 48 && tris.vertexLayerData + b < layer_zone->vertexLayerDataSize; b++)
+					if (logged++ < 40)
 					{
-						bytes += std::format("{:02x}", layer_zone->vld.data[tris.vertexLayerData + b]);
+						std::string bytes;
+						for (auto b = 0u; layer_zone->vld.data && b < 48 && tris.vertexLayerData + b < layer_zone->vertexLayerDataSize; b++)
+						{
+							bytes += std::format("{:02x}", layer_zone->vld.data[tris.vertexLayerData + b]);
+						}
+
+						ZONETOOL_INFO("iw7 layers: %s (%s) layers %u verts %u first %u offset %u zone %u size %u: %s",
+							resolved ? resolved->name : "?", resolved && resolved->techniqueSet ? resolved->techniqueSet->name : "?",
+							layers, tris.vertexCount, tris.firstVertex, tris.vertexLayerData, surface.transientZone,
+							layer_zone->vertexLayerDataSize, bytes.data());
 					}
 
-					ZONETOOL_INFO("iw7 layers: %s layers %u verts %u first %u offset %u zone %u size %u: %s",
-						resolved ? resolved->name : "?", layers, tris.vertexCount, tris.firstVertex, tris.vertexLayerData,
-						surface.transientZone, layer_zone->vertexLayerDataSize, bytes.data());
+					// The material's constants and textures (semantic, the first and last characters of the shader's texture
+					// name: the last is the layer digit, image), once per material.
+					static std::unordered_set<const iw7::Material*> described;
+					if (resolved && described.insert(resolved).second)
+					{
+						ZONETOOL_INFO("iw7 layers: material %s (%s)", resolved->name, resolved->techniqueSet ? resolved->techniqueSet->name : "?");
+						for (auto c = 0; resolved->constantTable && c < resolved->constantCount; c++)
+						{
+							const auto& constant = resolved->constantTable[c];
+							ZONETOOL_INFO("iw7 layers:   constant %.12s %08x (%g %g %g %g)", constant.name, constant.nameHash, constant.literal[0],
+								constant.literal[1], constant.literal[2], constant.literal[3]);
+						}
+
+						for (auto t = 0; resolved->textureTable && t < resolved->textureCount; t++)
+						{
+							const auto& texture = resolved->textureTable[t];
+							const auto* image = source.resolve(iw7::ASSET_TYPE_IMAGE, texture.image);
+							ZONETOOL_INFO("iw7 layers:   texture semantic %u name %c..%c sampler %u %s", texture.semantic, texture.nameStart,
+								texture.nameEnd, texture.samplerState, image && image->name ? image->name : "?");
+							// Alpha, reveal and thickness maps: the format and the mean of each channel and of |R - G|.
+							if (image && texture.semantic == iw7::TS_ALPHA_REVEAL_THICKNESS_MAP)
+							{
+								const auto faces = load_image_faces(*image, DXGI_FORMAT_R8G8B8A8_UNORM, 64);
+								if (faces.size() == 1)
+								{
+									const auto* top = faces.front().GetImage(0, 0, 0);
+									std::array<double, 5> sums{};
+									for (std::size_t y = 0; y < top->height; y++)
+									{
+										const auto* row = top->pixels + y * top->rowPitch;
+										for (std::size_t x = 0; x < top->width; x++)
+										{
+											for (auto c = 0; c < 4; c++)
+											{
+												sums[c] += row[x * 4 + c];
+											}
+
+											sums[4] += std::abs(row[x * 4] - row[x * 4 + 1]);
+										}
+									}
+
+									const auto texels = static_cast<double>(top->width * top->height);
+									ZONETOOL_INFO("iw7 layers:     format %d: mean r %.1f g %.1f b %.1f a %.1f |r-g| %.2f", image->imageFormat,
+										sums[0] / texels, sums[1] / texels, sums[2] / texels, sums[3] / texels, sums[4] / texels);
+								}
+							}
+						}
+					}
 				}
 			}
 
@@ -279,10 +333,17 @@ namespace zonetool::convert::iw7_iw8
 					return std::isfinite(uv[0]) && std::isfinite(uv[1]) ? std::optional(uv) : std::nullopt;
 				};
 
+				// A layer that blends by its reveal map keeps its sharpness k in red as sqrt(k / 2) (IW7 maps keep 0.015 to 1:
+				// within 1% down to 0.015): the pipeline ramps the reveal by the weight (kRevealLayerFlag), and IW7 tints no
+				// layer by its vertex colour.
+				const auto reveal = material_layer_reveal(resolved, layer);
+				const auto red = reveal
+					? static_cast<std::uint8_t>(std::lround(std::sqrt(std::clamp(*reveal / 2.0f, 0.0f, 1.0f)) * 255.0f))
+					: std::uint8_t{255};
 				auto overlay = vertices;
 				for (std::size_t v = 0; v < overlay.size(); v++)
 				{
-					overlay[v].color = {255, 255, 255, weight(order[v])};
+					overlay[v].color = {red, 255, 255, weight(order[v])};
 					if (const auto uv = layer_uv(order[v]))
 					{
 						overlay[v].uv = {(*uv)[0], (*uv)[1]};
