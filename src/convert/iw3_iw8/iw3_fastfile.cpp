@@ -4642,8 +4642,13 @@ void BuildPreparedStaticModels(const SourceStaticModels &source, const RenderPla
                 // table row of a falloff layer, else the IW3 polygon offset level
                 // (flags bits 18-19), bits 16-23 the low flags.
                 // Flag bit 20 (the emission gain of unlit world surfaces) has no model field:
-                // model surfaces emit their colour as is.
-                const unsigned flags = material.flags & ~(1u << 20);
+                // model surfaces emit their colour as is. Bit 21 (back-face normals) clears
+                // bit 24, the low bit of the word's top byte, which Replay's self-visibility
+                // layout leaves outside its visibility (bits 25-31) and the shaders read as
+                // that flag.
+                const unsigned flags = material.flags & ~((1u << 20) | kBackFaceNormalsFlag);
+                const std::uint32_t topByte =
+                    (material.flags & kBackFaceNormalsFlag) != 0 ? 0xFE000000u : 0xFF000000u;
                 const unsigned lowFlags = (kind + flags) & 0xFFu;
                 const unsigned blendFlags = (flags >> 8) & 0xFu;
                 const unsigned layer = (flags >> 12) & 0x3Fu;
@@ -4652,7 +4657,7 @@ void BuildPreparedStaticModels(const SourceStaticModels &source, const RenderPla
                     throw std::runtime_error("IW3 model material metadata exceeds Replay fields");
                 const unsigned row = (flags & 1024u) != 0 ? material.falloffIndex : offsetLevel;
                 const std::uint32_t metadata = blendFlags | (layer << 4) | (row << 10) |
-                                               (lowFlags << 16) | 0xFF000000u;
+                                               (lowFlags << 16) | topByte;
                 auto &destinationSurface = converted.surfaces[surfaceIndex];
                 // A reactive surface of a placed reactive model: XSurface flag 4, as on stock reactive foliage
                 // (0x45 on tm/uk_foliage_small_weeds_02_reactive; its non-reactive proxy LOD keeps 0x40).

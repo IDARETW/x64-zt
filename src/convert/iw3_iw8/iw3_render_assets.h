@@ -13,6 +13,11 @@
 
 namespace iw3
 {
+// Material flag bit 21: a two-sided surface lights its back faces with flipped normals, as IW7's lit pixel shaders
+// do (SV_IsFrontFace; the disassembled foliage shader negates N, T and B). IW3 materials never set it. Model
+// vertices carry it as attribute bit 24 clear (their metadata word keeps only flag bits 0-17).
+constexpr unsigned kBackFaceNormalsFlag = 1u << 21;
+
 enum class SurfaceKind : unsigned
 {
     opaque,

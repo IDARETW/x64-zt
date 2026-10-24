@@ -57,6 +57,9 @@ struct Input {
     // Camera-relative lighting origin of the drawn surface (entity VS).
     nointerpolation float3 lightingOrigin : LIGHTORIGIN0;
 #endif
+#ifdef MAP_BACK_FACE_NORMALS
+    bool frontFace : SV_IsFrontFace;
+#endif
 };
 #ifdef STATIC_MODEL
 Texture2D<float4> sourceAtlas : register(t0);
@@ -994,6 +997,14 @@ float4 main(Input input) : SV_TARGET0 {
     uint tile = tileWord & 0xffff;
     int fixedProbe = (int)(tileWord >> 16) - 1;
     uint flags = (uint)input.metadata.y;
+#ifdef MAP_BACK_FACE_NORMALS
+    // IW7's lit pixel shaders light a two-sided surface's back faces with the
+    // tangent frame negated (normal, tangent and binormal: flag bit 21).
+    if ((flags & 2097152) != 0 && !input.frontFace) {
+        input.normal = -input.normal;
+        input.tangent = -input.tangent;
+    }
+#endif
     uint kind = flags % 4;
     bool sky = kind == 1;
     float2 mappedUv = input.uv.xy;

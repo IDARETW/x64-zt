@@ -381,6 +381,11 @@ Output main(uint id : SV_VertexID) {
     // Models sample their own textures: no atlas tile.
     o.metadata = float2(0, ((attributes.x >> 16) & 0xff) | ((extended & 15) << 8) |
                                (((extended >> 4) & 63) << 12));
+#ifdef MAP_BACK_FACE_NORMALS
+    // Attribute bit 24 clear: the material lights back faces with flipped normals (flag bit 21).
+    if (((attributes.x >> 24) & 1) == 0)
+        o.metadata.y += 2097152;
+#endif
     o.materialParameters = float4(.8, 4, 2.5, .625);
     // IW3 falloff layers on models: the material's own falloff row.
     if (falloff)
