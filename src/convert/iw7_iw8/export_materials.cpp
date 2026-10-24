@@ -24,6 +24,11 @@ namespace zonetool::convert::iw7_iw8
 			color,
 			normal,
 			specular,
+			// The stock Replay world images (MW120R_STOCK_WORLD): IW7's colour with its specular alpha, and its packed normal
+			// map (gloss in red, the hemi-octahedral normal in green and alpha), both as IW7 keeps them: Replay's world
+			// shader reads its "<c>&<s>" and "<n>&<g>" with IW7's own metalness ramp and gloss curve.
+			replay_color,
+			replay_normal_gloss,
 			count,
 		};
 
@@ -491,11 +496,13 @@ namespace zonetool::convert::iw7_iw8
 				return false;
 			}
 
+			// A packed normal map for Replay's world shader keeps IW7's channels.
+			const auto normal_data = role == image_role::normal || role == image_role::replay_normal_gloss;
 			if (role == image_role::normal)
 			{
 				encode_normal_slopes(pixels);
 			}
-			else
+			else if (role != image_role::replay_normal_gloss)
 			{
 				// Before its alpha is replaced: the alpha that holds IW7's specular darkens the metal texels.
 				if (file.metal_alpha)
@@ -513,7 +520,7 @@ namespace zonetool::convert::iw7_iw8
 			// extraction small. A normal map stays uncompressed (its slopes would band in BC1 colours) at half the size.
 			auto top = pixels.GetImage(0, 0, 0);
 			DirectX::ScratchImage smaller;
-			if (role == image_role::normal && std::max(top->width, top->height) > max_image_size / 2)
+			if (normal_data && std::max(top->width, top->height) > max_image_size / 2)
 			{
 				if (FAILED(DirectX::Resize(*top, std::max<std::size_t>(1, top->width / 2), std::max<std::size_t>(1, top->height / 2),
 					DirectX::TEX_FILTER_BOX | DirectX::TEX_FILTER_FORCE_NON_WIC, smaller)))
@@ -535,7 +542,7 @@ namespace zonetool::convert::iw7_iw8
 			}
 
 			DirectX::ScratchImage stored;
-			if (role == image_role::normal)
+			if (normal_data)
 			{
 				// The A8R8G8B8 masks: blue, green, red and alpha bytes.
 				if (FAILED(DirectX::Convert(mips.GetImages(), mips.GetImageCount(), mips.GetMetadata(), DXGI_FORMAT_B8G8R8A8_UNORM,
@@ -779,6 +786,15 @@ namespace zonetool::convert::iw7_iw8
 			textures.push_back(texture_json("normalMap",
 				images[static_cast<std::size_t>(image_role::normal)].value_or("$identitynormalmap")));
 			textures.push_back(texture_json("specularMap", images[static_cast<std::size_t>(image_role::specular)].value_or("$black")));
+			if (const auto& replay_color = images[static_cast<std::size_t>(image_role::replay_color)])
+			{
+				textures.push_back(texture_json("replayColorMap", *replay_color));
+			}
+
+			if (const auto& replay_normal = images[static_cast<std::size_t>(image_role::replay_normal_gloss)])
+			{
+				textures.push_back(texture_json("replayNormalGlossMap", *replay_normal));
+			}
 
 			// The IW3 techniques: 4 unlit, 7 lit. An unlit material has no lit pass.
 			auto entries = json::array();
@@ -846,6 +862,33 @@ namespace zonetool::convert::iw7_iw8
 			if (layer && material_layer_reveal(material, layer))
 			{
 				result["iw7RevealLayer"] = true;
+			}
+
+			// What the stock world images hold: the colour's alpha is IW7's specular (TS_COLOR_SPECULAR_MAP), and the normal
+			// map's red its gloss (packed "_packed_n...g"); else Replay's shader takes the material's defaults.
+			if (images[static_cast<std::size_t>(image_role::replay_color)] && material)
+			{
+				for (auto i = 0; i < material->textureCount; i++)
+				{
+					const auto& texture = material->textureTable[i];
+					const auto* image = texture.image;
+					if (texture_layer(texture) != layer || !image || !image->name)
+					{
+						continue;
+					}
+
+					const auto image_name = asset_name(image->name);
+					const auto packed = image_name.rfind("_packed_n");
+					if (texture_role(texture) == image_role::color && texture.semantic == iw7::TS_COLOR_SPECULAR_MAP)
+					{
+						result["replaySpecularAlpha"] = true;
+					}
+					else if (texture_role(texture) == image_role::normal && packed != std::string_view::npos &&
+						image_name.substr(packed + 9).find('g') != std::string_view::npos)
+					{
+						result["replayGloss"] = true;
+					}
+				}
 			}
 
 			return result;
@@ -1409,6 +1452,19 @@ namespace zonetool::convert::iw7_iw8
 				const auto [slot, inserted] = files.try_emplace(file, entry);
 				slot->second.limit = std::max(slot->second.limit, entry.limit);
 				roles[index].push_back(file);
+
+				// The stock world images of a world material's own (base) colour and normal map, as IW7 keeps them.
+				if (replay_stock_world() && !layer && output.world_materials.contains(name) &&
+					(*role == image_role::color || *role == image_role::normal))
+				{
+					const auto replay_role = *role == image_role::color ? image_role::replay_color : image_role::replay_normal_gloss;
+					image_file replay{image, replay_role};
+					replay.limit = entry.limit;
+					const auto replay_file = file_name(asset_name(image->name)) + "_replay";
+					const auto [replay_slot, replay_inserted] = files.try_emplace(replay_file, replay);
+					replay_slot->second.limit = std::max(replay_slot->second.limit, replay.limit);
+					roles[static_cast<std::size_t>(replay_role)].push_back(replay_file);
+				}
 			}
 
 			// The specular map that IW7 keeps in the colour's alpha, after any specular map of the material's own.

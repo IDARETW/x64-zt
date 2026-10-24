@@ -221,6 +221,13 @@ namespace zonetool::convert::iw7_iw8
 	// the weights in the green, blue and alpha channels of the vertex colours and, for the fourth, in the layer vertex
 	// data (layer_vertex_layout).
 	constexpr int max_material_layer = 4;
+	// MW120R_STOCK_WORLD=1: world surfaces draw with Replay's stock world technique sets (AGENTS.md plan 1.4), from the
+	// stock images that the extraction then carries beside the converted ones.
+	inline bool replay_stock_world()
+	{
+		static const bool enabled = [] { const char* value = std::getenv("MW120R_STOCK_WORLD"); return value && *value == '1'; }();
+		return enabled;
+	}
 	int material_layer_count(const iw7::Material* material);
 	// The technique-set token of a layer (1 to max_material_layer) of a layered material ("b1c1s1nl1pa1": blend b, alpha
 	// test t, add a, multiply m, then its maps), empty without one.

@@ -53,6 +53,9 @@ struct MaterialPlan
     // The material's native world material (a Replay material of its own: additionalMaterials index + 1), 0 for
     // none (its surfaces draw with their world variant's atlas material).
     unsigned worldMaterialIndex{};
+    // Its stock Replay world material (MW120R_STOCK_WORLD: Replay's own world technique set and images,
+    // additionalMaterials index + 1), 0 for none; its lightmapped surfaces draw with it.
+    unsigned stockWorldMaterialIndex{};
     // World surfaces with an IW3 detail map: row of RenderPlan::worldDetails
     // (a "_detail<row>" world material variant), -1 for none.
     int worldDetail{-1};
@@ -213,6 +216,9 @@ struct RenderPlan
     // parameters, near fade and eye offset (MaterialPlan::falloffIndex rows).
     std::string modelFalloffDefines;
     std::vector<NativeLightmapPlan> nativeLightmaps;
+    // The region of the lightmap rectangles that the native lightmap covers (a single lightmap's own rectangle), in
+    // which stock world surfaces keep their lightmap UVs.
+    LightmapRectangle nativeLightmapRegion;
     replaysunshadow::Scene shadowScene;
     std::unordered_map<std::string, unsigned> worldShadowMaterials;
     std::unordered_map<std::string, unsigned> modelShadowMaterials;
