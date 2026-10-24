@@ -5994,6 +5994,10 @@ Json BuildRender(const Json &world, const VisibilityGroups &visibility,
                                (material.stockLayers ? surface.layerUvs.size() == surface.vertices.size() &&
                                                            surface.layerUvs.front().size() + 1 == material.stockLayers
                                                      : surface.layerUvs.empty());
+            // Replay's world is single-sided (its stock world shaders light back faces with the front's normal): a stock
+            // surface of a two-sided material also draws its back face, mirrored with its tangent frame turned as IW7's
+            // shaders turn it on back faces (N, T and B negated).
+            const unsigned sides = stock && (material.flags & kBackFaceNormalsFlag) ? 2u : 1u;
             if (!stock && material.stockWorldMaterialIndex && !material.worldMaterialIndex)
                 throw std::runtime_error("a surface of " + surface.material + " needs the converted material that its "
                                          "stock world material replaced");
@@ -6013,9 +6017,9 @@ Json BuildRender(const Json &world, const VisibilityGroups &visibility,
                 key << ':' << cell[0] << ',' << cell[1] << ',' << cell[2];
             }
             if (!target || activeKey != key.str() ||
-                targetVertices + surface.vertices.size() > 60000 ||
-                targetIndices + surface.indices.size() > 65535u * 3u ||
-                (spatial && targetIndices && targetIndices + surface.indices.size() > 4096u * 3u))
+                targetVertices + surface.vertices.size() * sides > 60000 ||
+                targetIndices + surface.indices.size() * sides > 65535u * 3u ||
+                (spatial && targetIndices && targetIndices + surface.indices.size() * sides > 4096u * 3u))
             {
                 output["surfaces"].push_back({{"vertices", Json::array()},
                                               {"indices", Json::array()},
@@ -6058,6 +6062,8 @@ Json BuildRender(const Json &world, const VisibilityGroups &visibility,
                         treeSurfaces.at(surface.visibilityGroup).insert(destinationSurface);
                 }
             }
+            for (unsigned side = 0; side < sides; ++side)
+            {
             std::unordered_map<std::uint32_t, std::uint32_t> remap;
             for (std::size_t offset = 0; offset < surface.indices.size(); offset += 3)
             {
@@ -6068,14 +6074,21 @@ Json BuildRender(const Json &world, const VisibilityGroups &visibility,
                     Cross(Subtract(b.position, a.position), Subtract(c.position, a.position));
                 if (Dot(cross, cross) < 1.0e-12f)
                     throw std::runtime_error("degenerate render triangle in IW3 map");
-                for (const std::uint32_t sourceIndex :
-                     {surface.indices[offset], surface.indices[offset + 2],
-                      surface.indices[offset + 1]})
+                const std::array<std::uint32_t, 3> corners =
+                    side ? std::array{surface.indices[offset], surface.indices[offset + 1], surface.indices[offset + 2]}
+                         : std::array{surface.indices[offset], surface.indices[offset + 2], surface.indices[offset + 1]};
+                for (const std::uint32_t sourceIndex : corners)
                 {
                     auto found = remap.find(sourceIndex);
                     if (found == remap.end())
                     {
-                        const Vertex &vertex = surface.vertices[sourceIndex];
+                        Vertex vertex = surface.vertices[sourceIndex];
+                        if (side)
+                        {
+                            vertex.normal = {-vertex.normal[0], -vertex.normal[1], -vertex.normal[2]};
+                            vertex.tangent = {-vertex.tangent[0], -vertex.tangent[1], -vertex.tangent[2]};
+                            vertex.binormalSign = -vertex.binormalSign;
+                        }
                         if (surface.reflectionProbe >= geometryProbeBounds.size())
                             throw std::runtime_error(
                                 "IW3 surface references an invalid reflection probe");
@@ -6113,6 +6126,7 @@ Json BuildRender(const Json &world, const VisibilityGroups &visibility,
                     ++targetIndices;
                 }
                 ++triangleCount;
+            }
             }
         }
 
