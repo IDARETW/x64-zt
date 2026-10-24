@@ -1766,6 +1766,13 @@ namespace zonetool::convert::iw7_iw8
 			missing += material == nullptr;
 			auto exported = export_material(material, images, kind, layer, light_unit_scale(source),
 				output.decal_range_materials.contains(name));
+			// Every surface of the world material is lightmapped: a stock Replay world material of it draws them all, and
+			// it needs no converted material.
+			if (replay_stock_world() && !layer && output.world_materials.contains(name) &&
+				!output.lightless_world_materials.contains(name))
+			{
+				exported["replayStockOnly"] = true;
+			}
 			// A stock layered surface's material names its layers: how each blends (by its weight, or multiplying), the
 			// sharpness of its reveal ramp, and whether its alpha, reveal and thickness map holds an alpha and a reveal.
 			if (const auto stock = output.stock_layered_materials.find(name); stock != output.stock_layered_materials.end())
