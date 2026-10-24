@@ -24,9 +24,16 @@ namespace zonetool::convert::iw7_iw8
 				std::unordered_map<std::uint32_t, std::string_view> result;
 				for (const auto& [id, name] : xsk::gsc::iw7::token_list)
 				{
-					result.try_emplace(id, name);
+					if (*name)
+					{
+						result.try_emplace(id, name);
+					}
 				}
 
+				// Keys that the token list has no text for, named by their use. 0x213 is the worldspawn's north yaw: 90 on
+				// Afghan, Breakneck and Pixel, whose minimap art has +y up (their spawns land on its floor so), and absent
+				// on Paris, whose art has +x up.
+				result.try_emplace(0x213, "northyaw");
 				return result;
 			}();
 
@@ -51,7 +58,7 @@ namespace zonetool::convert::iw7_iw8
 					}
 
 					const auto found = names.find(id);
-					result += found != names.end() && !found->second.empty() ? std::format("\"{}\"", found->second)
+					result += found != names.end() ? std::format("\"{}\"", found->second)
 						: std::format("\"_id_{:X}\"", id);
 					result += line.substr(digits);
 				}

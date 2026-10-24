@@ -18,8 +18,8 @@ struct CompassBounds
     float northwestY{};
     float southeastX{};
     float southeastY{};
-    // IW3 worldspawn northyaw (default 90): the compass image's north direction.
-    float northYaw{90.0f};
+    // Source worldspawn northyaw (default 0): where the top of the compass image points.
+    float northYaw{};
 };
 
 bool iw3KeyToIw8KeyId(const std::string &key, uint32_t &keyId);

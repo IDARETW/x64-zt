@@ -2343,16 +2343,18 @@ int buildMap(const Args &args, iw3::PreparedMap *prepared = nullptr)
                  scale, compassBounds.northwestX, compassBounds.northwestY,
                  compassBounds.southeastX, compassBounds.southeastY);
         }
-        // IW3 draws the compass image with northyaw up; Replay's minimap wants
-        // it turned clockwise by northyaw (Office, default 90, was verified at 90).
+        // The source draws the compass image with its north (worldspawn northyaw,
+        // default 0) up; Replay's minimap (north 90) takes it turned clockwise by
+        // 90 - northyaw. Spawn points land on the drawn floor only so: Office and
+        // IW7 Paris (no key) at 90, Arnhem and IW7 Afghan, Breakneck, Pixel (90) at 0.
         if (!metadata.compassRotationSet)
         {
-            const float yaw = std::fmod(std::fmod(compassBounds.northYaw, 360.0f) + 360.0f, 360.0f);
-            const float quarter = std::round(yaw / 90.0f);
-            if (std::abs(yaw - quarter * 90.0f) < 0.01f)
+            const float turn = std::fmod(std::fmod(90.0f - compassBounds.northYaw, 360.0f) + 360.0f, 360.0f);
+            const float quarter = std::round(turn / 90.0f);
+            if (std::abs(turn - quarter * 90.0f) < 0.01f)
             {
                 metadata.compassRotation = static_cast<unsigned>(quarter * 90.0f) % 360u;
-                info("compass: rotating the IW3 minimap %u degrees for northyaw %.1f",
+                info("compass: rotating the minimap %u degrees for northyaw %.1f",
                      metadata.compassRotation, compassBounds.northYaw);
             }
             else

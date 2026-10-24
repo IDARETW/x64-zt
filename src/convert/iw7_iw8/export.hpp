@@ -383,6 +383,7 @@ namespace zonetool::convert::iw7_iw8
 	// explosions), which the pipeline's static models take from Replay's reactive-motion sim.
 	bool reactive_motion(const iw7::Material* material);
 	void export_loadscreen(const source_map& source, const extraction& output);
+	void export_compass(const source_map& source, const extraction& output);
 	void export_models(const source_map& source, extraction& output);
 	// Writes the animations of the animated scriptables (IW3 XAnim dumps, extracted/xanim/<name>.iw3.json) and the
 	// skeletons of their models (skeleton/: an XMODEL_EXPORT of each LOD), which the pipeline reads for entity models.
