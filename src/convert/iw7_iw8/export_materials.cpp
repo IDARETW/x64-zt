@@ -118,7 +118,7 @@ namespace zonetool::convert::iw7_iw8
 		// The layer of a texture of a layered material: the digit that ends its shader name (colorMap1), else 0.
 		int texture_layer(const iw7::MaterialTextureDef& texture)
 		{
-			return texture.nameEnd >= '1' && texture.nameEnd <= '3' ? texture.nameEnd - '0' : 0;
+			return texture.nameEnd >= '1' && texture.nameEnd <= '0' + max_material_layer ? texture.nameEnd - '0' : 0;
 		}
 
 		// The engine images that the pipeline makes itself: a zone holds them without pixels.
@@ -699,7 +699,7 @@ namespace zonetool::convert::iw7_iw8
 			return std::nullopt;
 		}
 
-		// The tint of a layer of a material (colorTint, colorTint1 to colorTint3): lit materials keep albedo tints up to
+		// The tint of a layer of a material (colorTint, colorTint1 to colorTint4): lit materials keep albedo tints up to
 		// 1, unlit ones (high dynamic range emission) the hue of theirs.
 		std::array<float, 4> material_tint(const iw7::Material* material, const int layer, const material_class& kind)
 		{
@@ -1100,48 +1100,77 @@ namespace zonetool::convert::iw7_iw8
 		// Each layer is one token that opens with its blend (b, t, a or m) and its digit: Frontier's t1, a2 and m2 layers
 		// were left out when only b counted, and their vertex data (vld) then fell out of step.
 		auto layers = 1;
-		for (auto layer = 1; layer <= 3; layer++)
+		for (auto layer = 1; layer <= max_material_layer; layer++)
 		{
 			layers = material_layer_token(material, layer).empty() ? layers : layer + 1;
 		}
 
-		return std::min(layers, 4);
+		return layers;
+	}
+
+	namespace
+	{
+		// The technique-set token of layer 0 (the base) to max_material_layer, empty without one.
+		std::string_view technique_layer_token(const iw7::Material* material, const int layer)
+		{
+			if (!material || !material->techniqueSet || layer < 0 || layer > max_material_layer)
+			{
+				return {};
+			}
+
+			for (const auto token : std::views::split(asset_name(material->techniqueSet->name), '_'))
+			{
+				const std::string_view text(token.begin(), token.end());
+				if (text.size() > 1 && text[0] >= 'a' && text[0] <= 'z' && text[1] == '0' + layer)
+				{
+					return text;
+				}
+			}
+
+			return {};
+		}
+
+		// Whether a layer (0 to max_material_layer) has a normal map of its own: its token holds nl, nal or nbl with its
+		// digit.
+		bool layer_has_normal_map(const iw7::Material* material, const int layer)
+		{
+			const auto token = technique_layer_token(material, layer);
+			const char digit = static_cast<char>('0' + layer);
+			return std::ranges::any_of(std::array{"nl", "nal", "nbl"}, [&](const char* prefix)
+			{
+				return token.find(std::string(prefix) + digit) != std::string_view::npos;
+			});
+		}
 	}
 
 	std::string_view material_layer_token(const iw7::Material* material, const int layer)
 	{
-		if (!material || !material->techniqueSet || layer < 1 || layer > 3)
-		{
-			return {};
-		}
-
-		for (const auto token : std::views::split(asset_name(material->techniqueSet->name), '_'))
-		{
-			const std::string_view text(token.begin(), token.end());
-			if (text.size() > 1 && text[0] >= 'a' && text[0] <= 'z' && text[1] == '0' + layer)
-			{
-				return text;
-			}
-		}
-
-		return {};
+		return layer >= 1 ? technique_layer_token(material, layer) : std::string_view{};
 	}
 
-	unsigned int material_layer_vertex_size(const iw7::Material* material, const int layer)
+	layer_vertex_layout material_layer_vertex_layout(const iw7::Material* material)
 	{
-		const auto token = material_layer_token(material, layer);
-		if (token.empty())
+		const auto layers = material_layer_count(material);
+		layer_vertex_layout layout{};
+		if (layers < 2)
 		{
-			return 0;
+			return layout;
 		}
 
-		const char digit = static_cast<char>('0' + layer);
-		const auto has = [&](const std::string_view prefix)
+		auto normal_maps = 0u;
+		for (auto layer = 0; layer < layers; layer++)
 		{
-			return token.find(std::string(prefix) + digit) != std::string_view::npos;
-		};
+			normal_maps += layer_has_normal_map(material, layer);
+		}
 
-		return 8 + (has("nl") || has("nal") || has("nbl") ? 4 : 0);
+		layout.size = 8u * static_cast<unsigned int>(layers - 1) + 4u * (normal_maps ? normal_maps - 1 : 0u);
+		if (layers > max_material_layer)
+		{
+			layout.fourth_weight = layout.size;
+			layout.size += 4;
+		}
+
+		return layout;
 	}
 
 	std::optional<float> material_layer_reveal(const iw7::Material* material, const int layer)
@@ -1154,10 +1183,10 @@ namespace zonetool::convert::iw7_iw8
 
 		// revealParams<layer>.x (IW7's layered pixel shader reads only x), found by its name hash: the 13-character names
 		// fill the 12 characters that a constant keeps. IW7's hashes of these names differ by the code of their last
-		// character alone (colorTint1 to 3: 0x7793A24B, 0x7793A248, 0x7793A249), which places revealParams1 to 3 (Afghan
-		// keeps all three) at 0x1963B944, 0x1963B947 and 0x1963B946. A material without the constant takes 1, the value
-		// that every revealParams of Afghan holds.
-		static constexpr std::array<std::uint32_t, 3> hashes{0x1963B944, 0x1963B947, 0x1963B946};
+		// character alone (colorTint1 to 4: 0x7793A24B, 0x7793A248, 0x7793A249, 0x7793A24E), which places revealParams1
+		// to 4 at 0x1963B944, 0x1963B947, 0x1963B946 and 0x1963B941 (Afghan keeps the first three, Carnage all four). A
+		// material without the constant takes 1, the value that every revealParams of Afghan holds.
+		static constexpr std::array<std::uint32_t, max_material_layer> hashes{0x1963B944, 0x1963B947, 0x1963B946, 0x1963B941};
 		for (auto i = 0; material && i < material->constantCount; i++)
 		{
 			const auto& constant = material->constantTable[i];

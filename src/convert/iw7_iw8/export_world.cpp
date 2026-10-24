@@ -297,12 +297,32 @@ namespace zonetool::convert::iw7_iw8
 			std::vector<world_geometry_surface> result;
 			result.push_back({material_name, lightmap, static_cast<int>(probe), vertices, indices});
 
+			// The weight of layer 4 is the x of its c2 colour (B8G8R8A8: the third byte); the other bytes hold 0 on Carnage.
+			constexpr std::size_t fourth_weight_byte = 2;
+
+			// Each layer has its own UV in the transient zone's layer vertex data (vld), per vertex as its IW7 vertex
+			// declaration routes it (layer_vertex_layout). The base UV put the decal sheets of layers (Frontier's wayfinding
+			// signs) as repeated, cut slices across the panels (owner test of cbf4948); a UV read one tangent off cut
+			// Carnage's graffiti, a layer after a normal-mapped one.
+			const auto layout = material_layer_vertex_layout(resolved);
+			const auto layer_bytes = [&](const std::uint16_t index, const unsigned int offset, const std::size_t size) -> const std::uint8_t*
+			{
+				const auto at = static_cast<std::size_t>(tris.vertexLayerData) + static_cast<std::size_t>(index) * layout.size + offset;
+				return zone->vld.data && layout.size && at + size <= zone->vertexLayerDataSize ? zone->vld.data + at : nullptr;
+			};
+
 			for (auto layer = 1; layer < layers; layer++)
 			{
-				// Green, blue and alpha weigh the second to fourth layers.
-				const auto weight = [&](const std::uint16_t index)
+				// Green, blue and alpha weigh the second to fourth layers, the layer vertex data the fifth.
+				const auto weight = [&](const std::uint16_t index) -> std::uint8_t
 				{
-					return vertex(index).color.array[layer];
+					if (layer < max_material_layer)
+					{
+						return vertex(index).color.array[layer];
+					}
+
+					const auto* bytes = layout.fourth_weight ? layer_bytes(index, *layout.fourth_weight, 4) : nullptr;
+					return bytes ? bytes[fourth_weight_byte] : std::uint8_t{};
 				};
 
 				if (std::ranges::none_of(order, [&](const auto index) { return weight(index) != 0; }))
@@ -310,27 +330,16 @@ namespace zonetool::convert::iw7_iw8
 					continue;
 				}
 
-				// Each layer has its own UV in the transient zone's layer vertex data (vld): per vertex the records of the
-				// layers in turn (material_layer_vertex_size). The base UV put the decal sheets of layers (Frontier's
-				// wayfinding signs) as repeated, cut slices across the panels (owner test of cbf4948).
-				unsigned int record_size{};
-				unsigned int layer_offset{};
-				for (auto l = 1; l < layers; l++)
-				{
-					layer_offset += l < layer ? material_layer_vertex_size(resolved, l) : 0;
-					record_size += material_layer_vertex_size(resolved, l);
-				}
-
 				const auto layer_uv = [&](const std::uint16_t index) -> std::optional<std::array<float, 2>>
 				{
-					const auto at = static_cast<std::size_t>(tris.vertexLayerData) + static_cast<std::size_t>(index) * record_size + layer_offset;
-					if (!zone->vld.data || !record_size || at + 8 > zone->vertexLayerDataSize)
+					const auto* bytes = layer_bytes(index, layer_vertex_layout::uv(layer), 8);
+					if (!bytes)
 					{
 						return std::nullopt;
 					}
 
 					std::array<float, 2> uv{};
-					std::memcpy(uv.data(), zone->vld.data + at, sizeof(uv));
+					std::memcpy(uv.data(), bytes, sizeof(uv));
 					return std::isfinite(uv[0]) && std::isfinite(uv[1]) ? std::optional(uv) : std::nullopt;
 				};
 
