@@ -216,18 +216,33 @@ namespace zonetool::convert::iw7_iw8
 	// Neptune is its colour map times 20); white without one.
 	std::array<float, 4> material_color_tint(const iw7::Material* material);
 
-	// The layers of a material: IW7 world techsets blend up to three layers over the first ("r0..._b1..._b2..._b3..."),
-	// each with its own textures (whose shader names end with the layer's digit) and tint (colorTint1 to colorTint3), by
-	// the weights in the green, blue and alpha channels of the vertex colours.
+	// The layers of a material: IW7 world techsets blend up to four layers over the first ("r0..._b1..._b2..._b3..._b4"),
+	// each with its own textures (whose shader names end with the layer's digit) and tint (colorTint1 to colorTint4), by
+	// the weights in the green, blue and alpha channels of the vertex colours and, for the fourth, in the layer vertex
+	// data (layer_vertex_layout).
+	constexpr int max_material_layer = 4;
 	int material_layer_count(const iw7::Material* material);
-	// The technique-set token of a layer (1-3) of a layered material ("b1c1s1nl1pa1": blend b, alpha test t, add a,
-	// multiply m, then its maps), empty without one.
+	// The technique-set token of a layer (1 to max_material_layer) of a layered material ("b1c1s1nl1pa1": blend b, alpha
+	// test t, add a, multiply m, then its maps), empty without one.
 	std::string_view material_layer_token(const iw7::Material* material, int layer);
-	// The bytes that a layer (1-3) keeps per vertex in GfxWorldTransientZone.vld: its UV (8), and a packed tangent frame
-	// (4) when it has a normal map of its own (nl, nal, nbl).
-	unsigned int material_layer_vertex_size(const iw7::Material* material, int layer);
-	// The reveal sharpness of a layer (1-3) that blends by its reveal map (its token holds v<layer>), none for a layer
-	// that blends by its weight alone.
+	// What a layered material keeps per vertex in GfxWorldTransientZone.vld, in the order the vertex declarations of its
+	// IW7 techset route it (".ft1t3.ft2t4.fx0t5.fx1t6.fc2c1"): the UVs of layers 1 to 4 in turn (t1 holds the first
+	// two, t2 the others), a packed tangent frame (x0 on) for each layer with a normal map of its own (nl, nal, nbl)
+	// but the first of the material, whose frame is the vertex's own (the base's when the base has a normal map), then
+	// the weight of layer 4 (c2). Carnage's strides match it for every technique.
+	struct layer_vertex_layout
+	{
+		unsigned int size{};
+		std::optional<unsigned int> fourth_weight;
+
+		static constexpr unsigned int uv(const int layer)
+		{
+			return 8u * static_cast<unsigned int>(layer - 1);
+		}
+	};
+	layer_vertex_layout material_layer_vertex_layout(const iw7::Material* material);
+	// The reveal sharpness of a layer (1 to max_material_layer) that blends by its reveal map (its token holds
+	// v<layer>), none for a layer that blends by its weight alone.
 	std::optional<float> material_layer_reveal(const iw7::Material* material, int layer);
 
 	// The brush model of trigger model N of the map entities: the trigger models follow the world's brush models.
