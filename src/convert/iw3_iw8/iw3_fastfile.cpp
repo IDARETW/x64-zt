@@ -3690,25 +3690,20 @@ std::uint32_t PackedNormal(const Vec3 &source, const Vec3 &sourceTangent, const 
     return packed;
 }
 
-unsigned MaterialIndex(const RenderPlan &plan, const MaterialPlan &material,
-                       const bool nativeWorld)
+// The material of a surface: its native world material, else its world variant's atlas material (0: the world
+// material itself).
+unsigned MaterialIndex(const RenderPlan &plan, const MaterialPlan &material)
 {
-    if (nativeWorld)
+    if (material.worldMaterialIndex)
     {
-        if (!material.worldMaterialIndex ||
-            material.worldMaterialIndex > plan.additionalMaterials.size())
-            throw std::runtime_error("IW3 render plan is missing a native world material");
+        if (material.worldMaterialIndex > plan.additionalMaterials.size())
+            throw std::runtime_error("IW3 render plan has an invalid native world material");
         return material.worldMaterialIndex;
     }
-    if (material.kind == SurfaceKind::opaque && !material.depthBias && material.worldDetail < 0 &&
-        material.worldWater < 0)
+    const std::string kind = WorldVariantKind(material);
+    if (kind.empty())
         return 0;
-    const std::string suffix = material.worldWater >= 0 ? "_water" + std::to_string(material.worldWater)
-                               : material.kind == SurfaceKind::glass ? "_" + GlassVariantKind(material)
-                               : material.worldDetail >= 0 ? "_detail" + std::to_string(material.worldDetail)
-                               : material.kind == SurfaceKind::opaque ? "_opaque_bias"
-                               : material.kind == SurfaceKind::cutout ? "_" + CutoutVariantKind(material)
-                                                                      : "_sky";
+    const std::string suffix = "_" + kind;
     for (std::size_t index = 0; index < plan.additionalMaterials.size(); ++index)
         if (plan.additionalMaterials[index].at("material").get<std::string>().ends_with(suffix))
             return static_cast<unsigned>(index + 1);
@@ -3731,8 +3726,7 @@ unsigned ReflectionProbeTag(const std::size_t sourceProbe, const std::size_t sou
 // lightmap V of offset decals snapped onto black padding rows (Nuketown's
 // trailer lettering drew black, owner test 2026-10-16).
 std::array<double, 2> EncodedLightmap(const Vertex &vertex, const Surface &surface,
-                                      const MaterialPlan &material, const RenderPlan &plan,
-                                      const bool nativeWorld)
+                                      const MaterialPlan &material, const RenderPlan &plan)
 {
     float x = 0, y = 0;
     if (surface.lightmap >= 0 && static_cast<std::size_t>(surface.lightmap) >= plan.lightmaps.size())
@@ -3741,26 +3735,12 @@ std::array<double, 2> EncodedLightmap(const Vertex &vertex, const Surface &surfa
     if (baked)
     {
         const auto &rectangle = plan.lightmaps[surface.lightmap];
-        // A single native lightmap retains its source dimensions and has no
-        // offset in the generated material atlas. Replay applies its own atlas
-        // placement to these local UVs in the native world pixel shader.
-        if (nativeWorld && plan.lightmaps.size() == 1)
-            return {std::clamp(vertex.lightmapUv[0], 0.5f / rectangle.width,
-                               1.0f - 0.5f / rectangle.width),
-                    std::clamp(vertex.lightmapUv[1], 0.5f / rectangle.height,
-                               1.0f - 0.5f / rectangle.height)};
         x = (rectangle.x +
              std::clamp(vertex.lightmapUv[0] * rectangle.width, 0.5f, rectangle.width - 0.5f)) /
             static_cast<float>(plan.atlasSize);
         y = (rectangle.y +
              std::clamp(vertex.lightmapUv[1] * rectangle.height, 0.5f, rectangle.height - 0.5f)) /
             static_cast<float>(plan.atlasSize);
-    }
-    if (nativeWorld)
-    {
-        if (!baked)
-            throw std::runtime_error("native Replay world material requires a baked lightmap");
-        return {x, y};
     }
     const unsigned kind = material.kind == SurfaceKind::cutout  ? 3u
                           : material.kind == SurfaceKind::glass ? 2u
@@ -5834,7 +5814,7 @@ Json BuildRender(const Json &world, const VisibilityGroups &visibility,
     const auto appendSky = [&] {
         MaterialPlan skyPlan;
         skyPlan.kind = SurfaceKind::sky;
-        const unsigned skyMaterial = MaterialIndex(plan, skyPlan, false);
+        const unsigned skyMaterial = MaterialIndex(plan, skyPlan);
         using SkyMapping = Vec3 (*)(float, float);
         const std::array<SkyMapping, 6> mappings{[](float u, float v) { return Vec3{1, -v, -u}; },
                                                  [](float u, float v) { return Vec3{-1, -v, u}; },
@@ -5957,53 +5937,9 @@ Json BuildRender(const Json &world, const VisibilityGroups &visibility,
                 target = nullptr;
                 activeKey.clear();
             }
-            // Opaque BSP surfaces draw with the generated atlas material. In
-            // Replay 1.20 the native world materials were drawn through the
-            // atlas world pipeline anyway (tile 0 of a layer-1 record), which
-            // showed one 32-texel corner of each texture per repeat (Nuketown
-            // fixes-29..31 grass, siding, garage doors). MW120R_NATIVE_WORLD=1
-            // keeps the retained Replay world shader path for investigation.
-            static const bool nativeWorldPath = std::getenv("MW120R_NATIVE_WORLD") != nullptr;
-            const bool nativeWorld =
-                material.kind == SurfaceKind::opaque && surface.lightmap >= 0 && nativeWorldPath;
-            const unsigned materialIndex = MaterialIndex(plan, material, nativeWorld);
-            // Replay's world shader carries texture coordinates at reduced
-            // precision; stock maps keep them near zero. IW3 world UVs are
-            // absolute (Nuketown reaches 164 repeats), which snapped them into
-            // blocks of texels. Repeating textures tolerate whole-tile shifts,
-            // so each triangle moves to the tile of its UV centroid; vertices
-            // shared by triangles in different tiles are duplicated.
-            std::vector<std::array<int, 2>> triangleTiles(surface.indices.size() / 3);
-            std::size_t emittedVertices = surface.vertices.size();
-            if (nativeWorld)
-            {
-                std::set<std::tuple<std::uint32_t, int, int>> unique;
-                for (std::size_t triangle = 0; triangle < triangleTiles.size(); ++triangle)
-                {
-                    Vec2 centroid{};
-                    float largest = 0.0f;
-                    for (std::size_t corner = 0; corner < 3; ++corner)
-                    {
-                        const Vec2 &uv = surface.vertices[surface.indices[triangle * 3 + corner]].uv;
-                        for (std::size_t axis = 0; axis < 2; ++axis)
-                        {
-                            centroid[axis] += uv[axis] / 3.0f;
-                            largest = std::max(largest, std::abs(uv[axis]));
-                        }
-                    }
-                    // Clamped decals and trims stay within a tile or two.
-                    if (largest > 2.0f)
-                        triangleTiles[triangle] = {static_cast<int>(std::floor(centroid[0])),
-                                                   static_cast<int>(std::floor(centroid[1]))};
-                    for (std::size_t corner = 0; corner < 3; ++corner)
-                        unique.insert({surface.indices[triangle * 3 + corner],
-                                       triangleTiles[triangle][0], triangleTiles[triangle][1]});
-                }
-                emittedVertices = unique.size();
-                if (emittedVertices > 60000)
-                    throw std::runtime_error("IW3 world surface exceeds Replay's vertex batch after "
-                                             "UV recentring: " + surface.material);
-            }
+            // A material with its own native world material draws with it, the others with their world variant's
+            // atlas material (PrepareRenderAssets). Both read the same vertex records.
+            const unsigned materialIndex = MaterialIndex(plan, material);
             std::ostringstream key;
             key << materialIndex;
             for (const float value : material.environment)
@@ -6019,16 +5955,19 @@ Json BuildRender(const Json &world, const VisibilityGroups &visibility,
                 key << ':' << cell[0] << ',' << cell[1] << ',' << cell[2];
             }
             if (!target || activeKey != key.str() ||
-                targetVertices + emittedVertices > 60000 ||
+                targetVertices + surface.vertices.size() > 60000 ||
                 targetIndices + surface.indices.size() > 65535u * 3u ||
                 (spatial && targetIndices && targetIndices + surface.indices.size() > 4096u * 3u))
             {
                 output["surfaces"].push_back({{"vertices", Json::array()},
                                               {"indices", Json::array()},
                                               {"materialIndex", materialIndex},
-                                              {"atlasVertexLayout", nativeWorld ? 1u : 3u},
+                                              {"atlasVertexLayout", 3u},
                                               {"lightmapIndex", 0u},
-                                              {"opaque", material.kind == SurfaceKind::opaque},
+                                              // Cut-outs draw in the opaque range, after their masked
+                                              // depth prepass (the cut-out variants' coverage pass).
+                                              {"opaque", material.kind == SurfaceKind::opaque ||
+                                                             material.kind == SurfaceKind::cutout},
                                               {"decal", material.kind == SurfaceKind::glass && material.depthBias},
                                               {"sunShadowMask", material.castsShadow ? sunShadowMask : 0u},
                                               {"reflectionProbe", surface.reflectionProbe},
@@ -6060,10 +5999,9 @@ Json BuildRender(const Json &world, const VisibilityGroups &visibility,
                         treeSurfaces.at(surface.visibilityGroup).insert(destinationSurface);
                 }
             }
-            std::map<std::tuple<std::uint32_t, int, int>, std::uint32_t> remap;
+            std::unordered_map<std::uint32_t, std::uint32_t> remap;
             for (std::size_t offset = 0; offset < surface.indices.size(); offset += 3)
             {
-                const auto &tile = triangleTiles[offset / 3];
                 const Vertex &a = surface.vertices[surface.indices[offset]];
                 const Vertex &b = surface.vertices[surface.indices[offset + 1]];
                 const Vertex &c = surface.vertices[surface.indices[offset + 2]];
@@ -6075,42 +6013,34 @@ Json BuildRender(const Json &world, const VisibilityGroups &visibility,
                      {surface.indices[offset], surface.indices[offset + 2],
                       surface.indices[offset + 1]})
                 {
-                    const std::tuple<std::uint32_t, int, int> remapKey{sourceIndex, tile[0],
-                                                                       tile[1]};
-                    auto found = remap.find(remapKey);
+                    auto found = remap.find(sourceIndex);
                     if (found == remap.end())
                     {
                         const Vertex &vertex = surface.vertices[sourceIndex];
-                        const Vec2 uv{vertex.uv[0] - static_cast<float>(tile[0]),
-                                      vertex.uv[1] - static_cast<float>(tile[1])};
                         if (surface.reflectionProbe >= geometryProbeBounds.size())
                             throw std::runtime_error(
                                 "IW3 surface references an invalid reflection probe");
                         addProbePoint(surface.reflectionProbe, vertex.position);
                         const std::uint32_t index = static_cast<std::uint32_t>(targetVertices++);
-                        const auto lightmap =
-                            EncodedLightmap(vertex, surface, material, plan, nativeWorld);
+                        const auto lightmap = EncodedLightmap(vertex, surface, material, plan);
                         // The tile word carries the surface's IW3 reflection probe
                         // as converted slot + 1 above bit 16 (the shader reflects
                         // that probe alone); added in double so the lightmap
                         // fraction keeps its precision.
-                        Json encoded = Json::array({lightmap[0], lightmap[1]});
-                        if (!nativeWorld)
-                        {
-                            if (material.tile >= 0x10000)
-                                throw std::runtime_error("IW3 atlas tile exceeds the 16-bit tile word");
-                            encoded[0] = lightmap[0] +
-                                         65536.0 * ReflectionProbeTag(surface.reflectionProbe,
-                                                                      geometryProbeBounds.size());
-                        }
+                        if (material.tile >= 0x10000)
+                            throw std::runtime_error("IW3 atlas tile exceeds the 16-bit tile word");
+                        const Json encoded = Json::array(
+                            {lightmap[0] + 65536.0 * ReflectionProbeTag(surface.reflectionProbe,
+                                                                        geometryProbeBounds.size()),
+                             lightmap[1]});
                         (*target)["vertices"].push_back(
                             {{"position", vertex.position},
-                             {"uv", uv},
+                             {"uv", vertex.uv},
                              {"normal", PackedNormal(vertex.normal, vertex.tangent,
                                                      vertex.binormalSign, vertex.authoredTangent)},
                              {"lightmapUV", encoded},
                              {"color", vertex.color}});
-                        found = remap.emplace(remapKey, index).first;
+                        found = remap.emplace(sourceIndex, index).first;
                     }
                     (*target)["indices"].push_back(found->second);
                     ++targetIndices;

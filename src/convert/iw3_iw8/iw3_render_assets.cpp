@@ -2877,14 +2877,21 @@ Json Shader(const unsigned type, const std::string &label, const std::string &de
             {"program", Hex(program)}};
 }
 
+// A technique's state identities from a seed, its header and its shaders: techniques that share a header but not
+// their shaders (a world variant and its native twin, a glass layer with and without a detail map) keep apart.
 void PatchStateIdentity(Json &technique, const std::vector<std::uint8_t> &seed)
 {
     auto states = Unhex(technique.at("states").get<std::string>());
     const auto header = Unhex(technique.at("header").get<std::string>());
+    std::string shaders;
+    for (const auto &shader : technique.at("shaders"))
+        if (shader.is_string())
+            shaders += shader.get<std::string>() + ';';
     for (std::size_t offset = 0; offset < states.size(); offset += 16)
     {
         std::vector<std::uint8_t> input = seed;
         input.insert(input.end(), header.begin(), header.end());
+        input.insert(input.end(), shaders.begin(), shaders.end());
         input.push_back(static_cast<std::uint8_t>(offset));
         const auto digest = Sha256(input);
         std::copy_n(digest.begin(), 8, states.begin() + offset);
@@ -3088,6 +3095,9 @@ std::string g_tileSpanDefines;
 std::string g_emissionDefines;
 // MAP_BACK_FACE_NORMALS when a material lights its back faces (kBackFaceNormalsFlag); IW3 maps compile without it.
 std::string g_backFaceDefines;
+// The pixel defines of native world techsets: world surfaces that bind their material's own images (a Replay
+// material per source material) in place of their tile of the shared atlases.
+constexpr std::string_view kNativeWorldDefines = "#define MAP_NATIVE_WORLD 1\n";
 
 void ReplaceAtlasTokens(std::string &source, const unsigned columns, const unsigned atlasSize)
 {
@@ -3135,13 +3145,16 @@ Json BuildTechset(const std::string &map, const unsigned columns, const unsigned
         pixelSource += "#define MAP_BAKED_SUN 1\n";
     const bool detailTexture = model && !detailDefines.empty();
     const bool waterTexture = !model && detailDefines.find("#define MAP_WATER ") != std::string::npos;
+    // Native world surfaces bind their material's own images (kNativeWorldDefines), their detail map at slot 0x3D.
+    const bool nativeWorld = !model && pixelDefines.find(kNativeWorldDefines) != std::string::npos;
+    const bool nativeDetailTexture = nativeWorld && detailDefines.find("#define MAP_DETAIL ") != std::string::npos;
     pixelSource += detailDefines;
     pixelSource += pixelDefines;
     pixelSource += ResourceText(IDR_IW3_PIXEL_SHADER);
     ReplaceAtlasTokens(pixelSource, columns, atlasSize);
-    // Model coverage passes bind no view mip bias; sample with the gradients alone.
+    // Coverage passes of material-texture surfaces bind no view mip bias; sample with the gradients alone.
     const std::string coverageSource =
-        model ? "#define MAP_MIP_BIAS 0\n" + pixelSource : pixelSource;
+        model || nativeWorld ? "#define MAP_MIP_BIAS 0\n" + pixelSource : pixelSource;
     const auto pixel = Compile(pixelSource, "ps_5_0", "iw3_map_surface.hlsl");
     const std::string vertexDefines =
         (entity ? "#define MAP_ENTITY 1\n" : "") +
@@ -3186,6 +3199,10 @@ Json BuildTechset(const std::string &map, const unsigned columns, const unsigned
         AppendTextureArgument(lit, "05100a003e00"); // t10, slot 0x3E: IW3 detail map
     if (waterTexture)
         AppendTextureArgument(lit, "05100a003d00"); // t10, slot 0x3D: IW3 water flipbook
+    if (nativeDetailTexture)
+        AppendTextureArgument(lit, "05100a003d00"); // t10, slot 0x3D: the native world material's detail map
+    if (nativeWorld)
+        AppendTextureArgument(lit, "05100b004000"); // t11, slot 0x40: lightmap primary-light mask
     PatchStateIdentity(lit, pixel);
 
     const auto depthProgram =
@@ -4973,8 +4990,8 @@ RenderPlan PrepareRenderAssets(const std::filesystem::path &exportRoot, const Js
     }
     unsigned columns = 0, cell = 0;
     // One 8192 BC7 atlas. Generated world materials read IW3's lightmaps from the
-    // uncompressed lightmap layers (any number of lightmaps); only the optional
-    // native world path (MW120R_NATIVE_WORLD) reads the native lightmap below.
+    // uncompressed lightmap layers (any number of lightmaps); the world's native
+    // lightmap table below (Replay's own format) is written for the engine alone.
     const unsigned atlasSize = 8192u;
     plan.atlasSize = atlasSize;
     std::vector<bool> occupied;
@@ -5429,12 +5446,16 @@ RenderPlan PrepareRenderAssets(const std::filesystem::path &exportRoot, const Js
         lightmapBottom = std::max(lightmapBottom, rectangle.y + rectangle.height);
     }
     Image lightmapPrimary, lightmapSecondary;
+    // The primary-light visibility mask over the same region, for native world surfaces, which bind their own
+    // colour images where atlas surfaces read the mask from the colour atlas.
+    std::vector<std::uint8_t> lightmapMask;
     if (!plan.lightmaps.empty())
     {
         lightmapPrimary = {lightmapRight - lightmapLeft, lightmapBottom - lightmapTop,
                            std::vector<std::uint8_t>(std::size_t{lightmapRight - lightmapLeft} *
                                                      (lightmapBottom - lightmapTop) * 4)};
         lightmapSecondary = lightmapPrimary;
+        lightmapMask.resize(std::size_t{lightmapPrimary.width} * lightmapPrimary.height);
     }
     std::size_t lightmapIndex = 0;
     for (const auto &pair : world.value("lightmaps", Json::array()))
@@ -5486,6 +5507,7 @@ RenderPlan PrepareRenderAssets(const std::filesystem::path &exportRoot, const Js
             const std::size_t target =
                 ((rectangle.y - lightmapTop + index / width) * std::size_t{lightmapPrimary.width} +
                  rectangle.x - lightmapLeft + index % width) * 4;
+            lightmapMask[target / 4] = mask.rgba[index * 4];
             for (const auto &[layer, source] :
                  {std::pair{&lightmapPrimary, a}, std::pair{&lightmapSecondary, b}})
             {
@@ -6073,24 +6095,34 @@ RenderPlan PrepareRenderAssets(const std::filesystem::path &exportRoot, const Js
         worldVariants.push_back("detail" + std::to_string(row));
     for (std::size_t row = 0; row < plan.worldWaters.size(); ++row)
         worldVariants.push_back("water" + std::to_string(row));
-    for (const std::string &kind : worldVariants)
-    {
-        const std::string &name = kind;
+    // The world variant `name` (worldVariants: cut-out kinds, blended layers, the sky, depth-biased opaque surfaces,
+    // detail and water rows): its techset and material, from `base`, the world techset. Native twins (native: base is
+    // the native world techset) sample their material's own images; their detail rows bind the detail map itself.
+    const auto buildWorldVariant = [&](const std::string &name, const Json &base, const bool native) {
+        const std::string pixelDefines = native ? std::string(kNativeWorldDefines) : std::string{};
+        const auto detailDefines = [&](const RenderPlan::WorldDetail &detail) {
+            char defines[192];
+            if (native)
+                std::snprintf(defines, sizeof(defines),
+                              "#define MAP_DETAIL 1\n#define MAP_DETAIL_SCALE float2(%.9g, %.9g)\n",
+                              detail.scale[0], detail.scale[1]);
+            else
+                std::snprintf(defines, sizeof(defines),
+                              "#define MAP_WORLD_DETAIL_TILE %zu\n#define MAP_DETAIL_SCALE float2(%.9g, %.9g)\n",
+                              detail.tile, detail.scale[0], detail.scale[1]);
+            return std::string(defines);
+        };
         Json variant;
         if (name.starts_with("detail"))
         {
             // IW3 wc_*d0* (disassembled ps_lm_sun_r0c0d0n0s0_sm3): colour +
             // detail(uv * detailScale.xy) - 0.5 in gamma space, before the vertex colour.
             const auto &detail = plan.worldDetails.at(std::stoul(name.substr(6)));
-            char defines[192];
-            std::snprintf(defines, sizeof(defines),
-                          "#define MAP_WORLD_DETAIL_TILE %zu\n#define MAP_DETAIL_SCALE float2(%.9g, %.9g)\n",
-                          detail.tile, detail.scale[0], detail.scale[1]);
             Json detailed = BuildTechset(map, columns, plan.atlasSize, TechniqueGeometry::world,
                                          plan.glassEnvironment, false, {}, lightmapDefines, true,
-                                         {}, defines);
+                                         {}, detailDefines(detail), pixelDefines);
             const std::string suffix = "_" + name;
-            detailed["name"] = techset.at("name").get<std::string>() + suffix;
+            detailed["name"] = base.at("name").get<std::string>() + suffix;
             for (auto &technique : detailed.at("techniques"))
             {
                 const auto header = Unhex(technique.at("header").get<std::string>());
@@ -6121,9 +6153,9 @@ RenderPlan PrepareRenderAssets(const std::filesystem::path &exportRoot, const Js
                           water.color[0], water.color[1], water.color[2]);
             Json watered = BuildTechset(map, columns, plan.atlasSize, TechniqueGeometry::world,
                                         plan.glassEnvironment, false, {}, lightmapDefines, true,
-                                        {}, defines);
+                                        {}, defines, pixelDefines);
             const std::string suffix = "_" + name;
-            watered["name"] = techset.at("name").get<std::string>() + suffix;
+            watered["name"] = base.at("name").get<std::string>() + suffix;
             for (auto &technique : watered.at("techniques"))
             {
                 const auto header = Unhex(technique.at("header").get<std::string>());
@@ -6156,7 +6188,7 @@ RenderPlan PrepareRenderAssets(const std::filesystem::path &exportRoot, const Js
         }
         else if (name == "opaque_bias")
         {
-            Json biased = techset;
+            Json biased = base;
             ApplyDepthBias(biased);
             Json biasedMaterial = worldMaterial;
             biasedMaterial["techset"] = biased.at("name");
@@ -6168,7 +6200,7 @@ RenderPlan PrepareRenderAssets(const std::filesystem::path &exportRoot, const Js
         }
         else if (name.starts_with("foliage_"))
         {
-            variant = CreateVariant(techset, worldMaterial, stem, map, "foliage");
+            variant = CreateVariant(base, worldMaterial, stem, map, "foliage");
             if (name.find("_back") != std::string::npos)
             {
                 Json &cutout = variant["techset"];
@@ -6196,19 +6228,16 @@ RenderPlan PrepareRenderAssets(const std::filesystem::path &exportRoot, const Js
         {
             // glass..._d<row>: a blended layer with an IW3 detail map, drawn with the detail
             // variant's shader.
-            Json base;
+            Json detailBase;
             if (const auto at = name.find("_d"); name.starts_with("glass") && at != std::string::npos &&
                                                  at + 2 < name.size() && std::isdigit(static_cast<unsigned char>(name[at + 2])))
             {
                 const auto &detail = plan.worldDetails.at(std::stoul(name.substr(at + 2)));
-                char defines[192];
-                std::snprintf(defines, sizeof(defines),
-                              "#define MAP_WORLD_DETAIL_TILE %zu\n#define MAP_DETAIL_SCALE float2(%.9g, %.9g)\n",
-                              detail.tile, detail.scale[0], detail.scale[1]);
-                base = BuildTechset(map, columns, plan.atlasSize, TechniqueGeometry::world, plan.glassEnvironment,
-                                    false, {}, lightmapDefines, true, {}, defines);
+                detailBase = BuildTechset(map, columns, plan.atlasSize, TechniqueGeometry::world,
+                                          plan.glassEnvironment, false, {}, lightmapDefines, true, {},
+                                          detailDefines(detail), pixelDefines);
             }
-            variant = CreateVariant(base.is_null() ? techset : base, worldMaterial, stem, map, kind);
+            variant = CreateVariant(detailBase.is_null() ? base : detailBase, worldMaterial, stem, map, name);
             if (name.starts_with("glass") && name.ends_with("_bias"))
             {
                 ApplyDepthBias(variant["techset"]);
@@ -6227,6 +6256,11 @@ RenderPlan PrepareRenderAssets(const std::filesystem::path &exportRoot, const Js
                 variant["material"]["info"] = Hex(info);
             }
         }
+        return variant;
+    };
+    for (const std::string &kind : worldVariants)
+    {
+        const Json variant = buildWorldVariant(kind, techset, false);
         WriteJson(mapDirectory / variant.at("definition").get<std::string>(),
                   variant.at("material"));
         WriteJson(mapDirectory / variant.at("techsetFile").get<std::string>(),
@@ -6237,154 +6271,119 @@ RenderPlan PrepareRenderAssets(const std::filesystem::path &exportRoot, const Js
     }
     timing.lap("world variants");
 
-    // Baked opaque BSP surfaces use Replay's shipped world shader family and
-    // the native lightmap table. Keep the generated shader for surfaces whose
-    // source semantics are not yet represented by that family.
-    const std::set<std::string> neededWorldMaterials(worldMaterials.begin(),
-                                                     worldMaterials.end());
-    const Json nativeWorldTemplate = Json::parse(ResourceText(IDR_IW3_TECHSET_TEMPLATE));
-    std::map<unsigned, std::pair<std::string, std::string>> nativeWorldTechsets;
-    for (const SourceMaterial &source : materials)
+    // Native world materials: a Replay material per source world material, the native twin of its world variant
+    // (kNativeWorldDefines) with the material's own colour, normal and response images in the atlas slots, its
+    // detail map at slot 0x3D and the lightmap mask at 0x40. They sample at the source's resolution with the
+    // material sampler (wrap, anisotropy, every mip), where atlas tiles are clamped, at most 512 texels (IW7
+    // Frontier: 229 of 396 at 256 once the atlas filled) and pulled toward their centre at a distance: the smeared
+    // ground of the owner's IW7 tests. Their surfaces keep the atlas vertex records (lightmap UVs in atlas units, the
+    // reflection probe tag); the sky stays on the atlas. MW120R_ATLAS_WORLD=1 keeps every surface on the atlas.
+    static const bool atlasWorld = std::getenv("MW120R_ATLAS_WORLD") != nullptr;
+    if (!plan.lightmaps.empty() && !atlasWorld)
     {
-        if (!neededWorldMaterials.contains(source.name) || source.kind != SurfaceKind::opaque)
-            continue;
-        auto [entry, inserted] =
-            nativeWorldTechsets.try_emplace(source.cullMode | (source.depthBias ? 4u : 0u));
-        if (inserted)
-        {
-            Json nativeTechset = nativeWorldTemplate;
-            const std::string suffix =
-                "_cull" + std::to_string(source.cullMode) + (source.depthBias ? "_bias" : "");
-            nativeTechset["name"] = "tw/mw120r_" + map + "_native_world" + suffix;
-            nativeTechset["nativeReplayFixture"] = true;
-            for (auto &technique : nativeTechset.at("techniques"))
+        const std::set<std::string> neededWorldMaterials(worldMaterials.begin(), worldMaterials.end());
+        const std::set<std::string> atlasImages{atlasFiles[0].first, atlasFiles[1].first, atlasFiles[2].first};
+        auto encodedMask = EncodeBc4(lightmapPrimary.width, lightmapPrimary.height, lightmapMask);
+        encodedMask.resize((encodedMask.size() + 15) & ~std::size_t{15});
+        const std::string maskName = "mw120r/" + map + "_lightmap_mask";
+        const std::string maskFile = map + "_lightmap_mask.bc4";
+        WriteBytes(mapDirectory / maskFile, encodedMask);
+        const Json maskDefinition = {{"name", maskName},
+                                     {"width", lightmapPrimary.width},
+                                     {"height", lightmapPrimary.height},
+                                     {"bc4", maskFile},
+                                     {"format", 39},
+                                     {"mipCount", 1}};
+        const Json nativeTechset = BuildTechset(map, columns, plan.atlasSize, TechniqueGeometry::world,
+                                                plan.glassEnvironment, false, {}, lightmapDefines, true, {}, {},
+                                                std::string(kNativeWorldDefines));
+        // The native twin of each world variant ("" for the world material), written once under names of its own:
+        // CreateVariant names a variant by its kind and lit header, which the twin shares with its atlas variant.
+        std::map<std::string, Json> nativeVariants;
+        const auto nativeVariant = [&](const std::string &kind) -> const Json & {
+            if (const auto found = nativeVariants.find(kind); found != nativeVariants.end())
+                return found->second;
+            Json variant;
+            if (kind.empty())
             {
-                auto header = Unhex(technique.at("header").get<std::string>());
-                unsigned cull = source.cullMode;
-                if (At<std::uint32_t>(header, 8) == 28 && cull)
-                    cull = 3 - cull;
-                Put<std::uint64_t>(header, 0xA0,
-                                   (At<std::uint64_t>(header, 0xA0) & ~3ull) | cull |
-                                       (source.depthBias ? 0x10ull : 0ull));
-                technique["header"] = Hex(header);
-                technique["name"] = technique.at("name").get<std::string>() + "_mw120r_" +
-                                    map + suffix;
-                PatchStateIdentity(technique, header);
+                Json material = worldMaterial;
+                material["techset"] = nativeTechset.at("name");
+                variant = {{"techset", nativeTechset}, {"material", std::move(material)}};
             }
-            const std::string file = stem + ".native_world" + suffix + ".techset.json";
-            entry->second = {nativeTechset.at("name").get<std::string>(), file};
-            WriteJson(mapDirectory / file, nativeTechset);
-        }
-
-        const auto sourceBytes = std::span(
-            reinterpret_cast<const std::uint8_t *>(source.name.data()), source.name.size());
-        const auto nameDigest = Sha256(sourceBytes);
-        const std::string id = Hex(std::span(nameDigest).first(8));
-        const std::string materialName = "w/mw120r_" + map + "_world_" + id;
-        const std::string materialFile = stem + ".world." + id + ".material.json";
-        Json direct = Json::parse(ResourceText(IDR_IW3_MATERIAL_TEMPLATE));
-        direct["source"] = source.name;
-        direct["techset"] = entry->second.first;
-        direct["techsetDefinition"] = entry->second.second;
-        direct["imageDefinitions"] = Json::array();
-        auto pixelConstants = Unhex(direct.at("buffers").at(0).at(3).get<std::string>());
-        if (pixelConstants.size() != 64 || pixelConstants[54] != 0x7e)
-            throw std::runtime_error("native world normal-strength template changed");
-        // The retained pixel shader scales the octahedral G/A normal by
-        // (cb3[3].y[16:23] + 1) / 256. Use the full encoded direction.
-        pixelConstants[54] = 0xff;
-        direct["buffers"][0][3] = Hex(pixelConstants);
-        // Shipped Replay world textures pack specular intensity in color alpha
-        // ("<c>&<s>", 255 for "&defaultspec") and gloss in the normal map's red
-        // channel ("<n>&<g>"). IW3 specular maps carry intensity in RGB and
-        // gloss (cosine power) in alpha. Color alpha gets its own mip chain:
-        // the color chain weights texels by alpha as coverage.
-        const Image *colorImage = &image(source.color).front();
-        const Image *responseImage = source.response.empty() ? nullptr : &image(source.response).front();
-        const bool hasNormal = !source.normal.empty() && source.normal != "$identitynormalmap";
-        const Image *normalImage = hasNormal ? &image(source.normal).front() : nullptr;
-        const std::size_t colorBytes = imageBytes(*colorImage) + (responseImage ? imageBytes(*responseImage) : 0);
-        residentImageRecipe(
-            direct, 0,
-            [colorImage, responseImage, name = source.name]() {
-                Image worldColor = *colorImage;
-                // Runtime probe: MW120R_DEBUG_MIP_COLORS=<IW3 material> (e.g. wc/zz_grass)
-                // paints each mip of that native colour image one flat colour (red,
-                // orange, yellow, green, cyan, blue, magenta, white, grey, black), so a
-                // screenshot shows which level Replay samples and that the image binds.
-                if (const char *probe = std::getenv("MW120R_DEBUG_MIP_COLORS"); probe && name == probe)
-                {
-                    static constexpr std::array<std::array<std::uint8_t, 3>, 10> colors{
-                        {{255, 0, 0}, {255, 128, 0}, {255, 255, 0}, {0, 255, 0}, {0, 255, 255},
-                         {0, 0, 255}, {255, 0, 255}, {255, 255, 255}, {128, 128, 128}, {0, 0, 0}}};
-                    const auto paint = [&](Image &level, const unsigned index) {
-                        const auto &color = colors[std::min<std::size_t>(index, colors.size() - 1)];
-                        for (std::size_t offset = 0; offset < level.rgba.size(); offset += 4)
-                            std::copy(color.begin(), color.end(), level.rgba.begin() + offset);
-                    };
-                    paint(worldColor, 0);
-                    worldColor.mips.clear();
-                    for (unsigned level = 1, width = worldColor.width, height = worldColor.height;
-                         width > 1 || height > 1; ++level)
-                    {
-                        width = std::max(1u, width / 2);
-                        height = std::max(1u, height / 2);
-                        Image mip{width, height,
-                                  std::vector<std::uint8_t>(std::size_t{width} * height * 4, 255)};
-                        paint(mip, level);
-                        worldColor.mips.push_back(std::move(mip));
-                    }
-                    zt::warn("iw3: debug mip colours on native world material %s", name.c_str());
-                }
-                for (std::size_t offset = 3; offset < worldColor.rgba.size(); offset += 4)
-                    worldColor.rgba[offset] = 255;
-                for (auto &mip : worldColor.mips)
-                    for (std::size_t offset = 3; offset < mip.rgba.size(); offset += 4)
-                        mip.rgba[offset] = 255;
-                // Raw IW3 specular bytes left typical surfaces at a quarter of the
-                // Replay default and removed their gloss; see ReplaySpecularIntensity.
-                Image specular = responseImage ? ReplaySpecularIntensity(*responseImage)
-                                               : Image{1, 1, std::vector<std::uint8_t>{255, 255, 255, 255}};
-                return std::pair{std::move(worldColor), std::optional<Image>(std::move(specular))};
-            },
-            colorBytes, source.tint, "world");
-        residentImageRecipe(
-            direct, 1,
-            [normalImage, responseImage]() {
-                return std::pair{ReplayNormalGloss(normalImage, responseImage), std::optional<Image>{}};
-            },
-            (normalImage ? imageBytes(*normalImage) : 0) + (responseImage ? imageBytes(*responseImage) : 0),
-            {1, 1, 1, 1}, "world");
-        if (responseImage)
-            residentImageAsync(direct, 2, *responseImage, {1, 1, 1, 1}, "world");
-        else
-            residentImageOwned(direct, 2, Image{1, 1, std::vector<std::uint8_t>{0, 0, 0, 0}}, {1, 1, 1, 1}, "world");
-        // Replay resolves a technique's material textures by a linear search
-        // of the slot byte with no end check (sub_1419824A0). These materials
-        // are drawn with techniques binding the world material's extra slots
-        // (baked sun depth, lightmaps); without them the search ran past the
-        // table and bound garbage (round 42/43 map-load crash at 0x1413BEAD0).
-        // Carry the same entries; the stock technique ignores them.
-        {
-            const auto &extra = worldMaterial.at("textures");
-            for (std::size_t texture = direct.at("textures").size(); texture < extra.size();
-                 ++texture)
+            else
             {
-                direct["textures"].push_back(extra[texture]);
-                const auto name = extra[texture].at("image");
-                for (const auto &definition : worldMaterial.at("imageDefinitions"))
-                    if (definition.at("name") == name)
-                        direct["imageDefinitions"].push_back(definition);
+                variant = buildWorldVariant(kind, nativeTechset, true);
+                Json &techset = variant["techset"];
+                techset["name"] = techset.at("name").get<std::string>() + "_native";
+                for (auto &technique : techset.at("techniques"))
+                    technique["name"] = technique.at("name").get<std::string>() + "_native";
+                variant["material"]["techset"] = techset.at("name");
             }
+            const std::string file = stem + ".native" + (kind.empty() ? "" : "." + kind) + ".techset.json";
+            variant["material"]["techsetDefinition"] = file;
+            WriteJson(mapDirectory / file, variant.at("techset"));
+            return nativeVariants.emplace(kind, std::move(variant)).first->second;
+        };
+        std::size_t nativeMaterials = 0;
+        for (const SourceMaterial &source : materials)
+        {
+            if (!neededWorldMaterials.contains(source.name))
+                continue;
+            MaterialPlan &planned = plan.materials.at(source.name);
+            if (planned.kind == SurfaceKind::sky || planned.kind == SurfaceKind::skipped)
+                continue;
+            Json direct = nativeVariant(WorldVariantKind(planned)).at("material");
+            direct["source"] = source.name;
+            auto &definitions = direct["imageDefinitions"];
+            definitions.erase(std::remove_if(definitions.begin(), definitions.end(),
+                                             [&](const Json &definition) {
+                                                 return atlasImages.contains(definition.at("name").get<std::string>());
+                                             }),
+                              definitions.end());
+            // The images as static models take them, shared with the model materials of the same images: the tinted
+            // colour (IW3 "ge128" cut-outs keep their alpha coverage), the normal and the response.
+            const bool alphaCoverage = planned.kind == SurfaceKind::cutout && !(source.flags & 24u);
+            residentImageAsync(direct, 0, image(source.color).front(), source.tint, "model", alphaCoverage);
+            if (source.normal.empty())
+                residentImageOwned(direct, 1, Image{1, 1, std::vector<std::uint8_t>{128, 128, 128, 128}},
+                                   {1, 1, 1, 1}, "model");
+            else
+                residentImageAsync(direct, 1, image(source.normal).front(), {1, 1, 1, 1}, "model");
+            if (source.response.empty())
+                residentImageOwned(direct, 2, Image{1, 1, std::vector<std::uint8_t>{0, 0, 0, 0}}, {1, 1, 1, 1},
+                                   "model");
+            else
+                residentImageAsync(direct, 2, image(source.response).front(), {1, 1, 1, 1}, "model");
+            auto &textures = direct["textures"];
+            if (planned.worldDetail >= 0 && planned.worldWater < 0)
+            {
+                // Slot 0x3D, after the baked sun depth (0x3C): the table stays slot-sorted.
+                std::size_t at = 0;
+                while (at < textures.size() && Unhex(textures[at].at("header").get<std::string>()).at(0) < 0x3D)
+                    ++at;
+                textures.insert(textures.begin() + static_cast<std::ptrdiff_t>(at),
+                                Json{{"header", "3d00000000000000"}, {"image", ""}});
+                residentImageAsync(direct, static_cast<unsigned>(at), image(source.detail).front(), {1, 1, 1, 1},
+                                   "model_detail");
+            }
+            textures.push_back({{"header", "4000000000000000"}, {"image", maskName}});
+            definitions.push_back(maskDefinition);
             auto info = Unhex(direct.at("info").get<std::string>());
-            info[0x14] = static_cast<std::uint8_t>(direct.at("textures").size());
+            info[0x14] = static_cast<std::uint8_t>(textures.size());
             direct["info"] = Hex(info);
+            const auto sourceBytes =
+                std::span(reinterpret_cast<const std::uint8_t *>(source.name.data()), source.name.size());
+            const auto nameDigest = Sha256(sourceBytes);
+            const std::string id = Hex(std::span(nameDigest).first(8));
+            const std::string materialName = "w/mw120r_" + map + "_world_" + id;
+            const std::string materialFile = stem + ".world." + id + ".material.json";
+            writeMaterial(mapDirectory / materialFile, std::move(direct));
+            plan.additionalMaterials.push_back(
+                {{"schema", 1}, {"material", materialName}, {"materialDefinition", materialFile}});
+            planned.worldMaterialIndex = static_cast<unsigned>(plan.additionalMaterials.size());
+            ++nativeMaterials;
         }
-        writeMaterial(mapDirectory / materialFile, std::move(direct));
-        const unsigned index = static_cast<unsigned>(plan.additionalMaterials.size() + 1);
-        plan.additionalMaterials.push_back(
-            {{"schema", 1}, {"material", materialName}, {"materialDefinition", materialFile}});
-        plan.materials.at(source.name).worldMaterialIndex = index;
+        zt::info("iw3: %zu native world materials in %zu technique sets", nativeMaterials, nativeVariants.size());
     }
     timing.lap("native world materials");
 
