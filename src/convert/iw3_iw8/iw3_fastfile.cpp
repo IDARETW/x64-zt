@@ -5994,6 +5994,9 @@ Json BuildRender(const Json &world, const VisibilityGroups &visibility,
                                (material.stockLayers ? surface.layerUvs.size() == surface.vertices.size() &&
                                                            surface.layerUvs.front().size() + 1 == material.stockLayers
                                                      : surface.layerUvs.empty());
+            if (!stock && material.stockWorldMaterialIndex && !material.worldMaterialIndex)
+                throw std::runtime_error("a surface of " + surface.material + " needs the converted material that its "
+                                         "stock world material replaced");
             const unsigned materialIndex = stock ? material.stockWorldMaterialIndex : MaterialIndex(plan, material);
             std::ostringstream key;
             key << materialIndex;

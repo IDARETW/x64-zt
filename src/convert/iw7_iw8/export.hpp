@@ -68,6 +68,9 @@ namespace zonetool::convert::iw7_iw8
 		// The materials whose layered surfaces draw as one stock Replay layered surface (material_stock_layered), with
 		// their layer count; their layers are materials of their own (material_layers) without surfaces.
 		std::map<std::string, int> stock_layered_materials;
+		// The world materials of a surface without a lightmap: Replay's stock world materials draw lightmapped surfaces
+		// only, so these keep their converted material beside a stock one.
+		std::set<std::string> lightless_world_materials;
 		// The strings of the map's scripts that can name sound aliases (createfx loop sounds, playsound): export_sounds
 		// writes the aliases of the map's sound bank among them.
 		std::set<std::string> sound_names;

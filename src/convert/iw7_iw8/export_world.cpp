@@ -293,6 +293,11 @@ namespace zonetool::convert::iw7_iw8
 			}
 
 			const auto lightmap = surface.lightmapIndex < lightmap_count ? static_cast<int>(surface.lightmapIndex) : -1;
+			if (lightmap < 0)
+			{
+				output.lightless_world_materials.insert(material_name);
+			}
+
 			const auto probe = probes.find(center);
 			std::vector<world_geometry_surface> result;
 			result.push_back({material_name, lightmap, static_cast<int>(probe), vertices, indices});

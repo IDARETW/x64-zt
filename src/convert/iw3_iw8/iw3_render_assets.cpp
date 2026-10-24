@@ -90,6 +90,9 @@ struct SourceMaterial
     std::string replayNormalGloss;
     bool replaySpecularAlpha{};
     bool replayGloss{};
+    // Every surface of the material is lightmapped (replayStockOnly): with a stock world material it needs no converted
+    // one.
+    bool replayStockOnly{};
     // A stock layer's alpha, reveal and thickness map (replayRevealMap: red alpha, green reveal).
     std::string replayReveal;
     // The layers of a stock layered surface's material (replayLayers): each a material of its own, blending by its
@@ -2480,6 +2483,7 @@ SourceMaterial ReadMaterial(const std::filesystem::path &root,
     }
     material.replaySpecularAlpha = source.value("replaySpecularAlpha", false);
     material.replayGloss = source.value("replayGloss", false);
+    material.replayStockOnly = source.value("replayStockOnly", false);
     for (const auto &constant : source.value("constants", Json::array()))
     {
         const std::string key = constant.value("name", std::string{});
@@ -6759,13 +6763,16 @@ RenderPlan PrepareRenderAssets(const std::filesystem::path &exportRoot, const Js
         nativeTechset = BuildTechset(map, columns, plan.atlasSize, TechniqueGeometry::world, plan.glassEnvironment,
                                      false, {}, lightmapDefines, true, {}, {}, std::string(kNativeWorldDefines));
         const std::set<std::string> neededWorldMaterials(worldMaterials.begin(), worldMaterials.end());
-        std::size_t nativeMaterials = 0;
+        // Stock world materials first: a material whose surfaces they all draw needs no converted one.
+        std::size_t nativeMaterials =
+            world.value("replay_stock_world", false) ? buildStockWorldMaterials(neededWorldMaterials) : 0;
         for (const SourceMaterial &source : materials)
         {
             if (!neededWorldMaterials.contains(source.name))
                 continue;
             MaterialPlan &planned = plan.materials.at(source.name);
-            if (planned.kind == SurfaceKind::sky || planned.kind == SurfaceKind::skipped)
+            if (planned.kind == SurfaceKind::sky || planned.kind == SurfaceKind::skipped ||
+                (planned.stockWorldMaterialIndex && source.replayStockOnly))
                 continue;
             Json direct = nativeVariant(WorldVariantKind(planned)).at("material");
             direct["source"] = source.name;
@@ -6782,8 +6789,6 @@ RenderPlan PrepareRenderAssets(const std::filesystem::path &exportRoot, const Js
             planned.worldMaterialIndex = static_cast<unsigned>(plan.additionalMaterials.size());
             ++nativeMaterials;
         }
-        if (world.value("replay_stock_world", false))
-            nativeMaterials += buildStockWorldMaterials(neededWorldMaterials);
         // The sky faces: a material each with its face image whole, at the extraction's resolution (atlas faces took
         // one cell: 256 texels on IW7 Frontier), sampled at its top level inside its edges (the native sky kind).
         for (unsigned face = 0; face < 6; ++face)
