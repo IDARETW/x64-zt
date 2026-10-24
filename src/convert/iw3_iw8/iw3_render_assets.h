@@ -46,8 +46,10 @@ struct MaterialPlan
     unsigned falloffIndex{};
     // IW7 reactive foliage: its static-model surfaces bend by Replay's reactive-motion sim (XSurface flag 4).
     bool reactiveMotion{};
+    // The material's native world material (a Replay material of its own: additionalMaterials index + 1), 0 for
+    // none (its surfaces draw with their world variant's atlas material).
     unsigned worldMaterialIndex{};
-    // Atlas world surfaces with an IW3 detail map: row of RenderPlan::worldDetails
+    // World surfaces with an IW3 detail map: row of RenderPlan::worldDetails
     // (a "_detail<row>" world material variant), -1 for none.
     int worldDetail{-1};
     // IW3 wc_water world surfaces: row of RenderPlan::worldWaters (a
@@ -75,6 +77,23 @@ inline std::string GlassVariantKind(const MaterialPlan &material)
     return std::string("glass") + (material.blend ? "_b" + std::to_string(material.blend) : "") +
            (material.worldDetail >= 0 ? "_d" + std::to_string(material.worldDetail) : "") +
            (material.depthBias ? "_bias" : "");
+}
+
+// The world material variant that draws a surface material ("" for the world material itself): its water or
+// detail row, its blended layer, depth-biased opaque surfaces, its cut-out kind or the sky.
+inline std::string WorldVariantKind(const MaterialPlan &material)
+{
+    if (material.worldWater >= 0)
+        return "water" + std::to_string(material.worldWater);
+    if (material.kind == SurfaceKind::glass)
+        return GlassVariantKind(material);
+    if (material.worldDetail >= 0)
+        return "detail" + std::to_string(material.worldDetail);
+    if (material.kind == SurfaceKind::opaque)
+        return material.depthBias ? "opaque_bias" : "";
+    if (material.kind == SurfaceKind::cutout)
+        return CutoutVariantKind(material);
+    return "sky";
 }
 
 // Replay GfxBlendStateBits: srcRgb | dstRgb << 4 | opRgb << 8 | srcAlpha << 11 |

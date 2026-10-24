@@ -188,6 +188,27 @@ namespace zonetool::convert::iw7_iw8
 			// black hole, 4932 units placed at scale 60, cut through the level with its default-white disc).
 			const auto placement_scale = largest_placement_scale(source, name);
 
+			// IW7_LOD_DUMP=<model>: the model's LODs (distance, flags, materials and technique sets) and LOD fields.
+			if (const auto dump = std::getenv("IW7_LOD_DUMP"); dump && name == dump)
+			{
+				ZONETOOL_INFO("iw7 lod dump %s: numLods %d shadowCutoffLod %d collLod %d maxLoadedLod %d", name.data(), model->numLods,
+					model->shadowCutoffLod, model->collLod, model->maxLoadedLod);
+				for (auto lod = 0; lod < model->numLods && lod < 6; lod++)
+				{
+					const auto& info = model->lodInfo[lod];
+					std::string materials;
+					for (auto i = 0; i < info.numsurfs; i++)
+					{
+						const auto* material = source.resolve(iw7::ASSET_TYPE_MATERIAL, model->materialHandles[info.surfIndex + i]);
+						materials += std::format(" {}({})", material && material->name ? material->name : "?",
+							material && material->techniqueSet ? material->techniqueSet->name : "?");
+					}
+
+					ZONETOOL_INFO("iw7 lod dump %s: lod %d dist %g flags %x subdiv %x surfs %d:%s", name.data(), lod, info.dist,
+						static_cast<unsigned char>(info.flags), info.subdivLodValidMask, info.numsurfs, materials.data());
+				}
+			}
+
 			model_plan plan;
 			auto previous_distance = 0.0f;
 			for (auto lod = 0; lod < model->numLods && lod < 6; lod++)

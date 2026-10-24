@@ -36,6 +36,19 @@
 #ifndef MAP_COLOR_LOD_BIAS
 #define MAP_COLOR_LOD_BIAS -0.5
 #endif
+// Surfaces whose material binds its own colour, normal and response images (static models, entities and, with
+// MAP_NATIVE_WORLD, world surfaces) sample them as Replay's shipped shaders do: the material sampler, screen
+// gradients across repeating coordinates and the view mip bias. Coverage passes bind no view mip bias and use the
+// gradients alone (MAP_MIP_BIAS 0). Atlas world surfaces sample their tile of the shared atlases instead.
+#if defined(STATIC_MODEL) || defined(MAP_NATIVE_WORLD)
+#define MAP_MATERIAL_TEXTURES 1
+#endif
+#ifndef MAP_MIP_BIAS
+#define MAP_MIP_BIAS replayView[7].y
+#endif
+#if defined(MAP_NATIVE_WORLD) && !defined(MAP_LIGHTMAP_TEXTURES)
+#error native world surfaces read their lightmaps from the lightmap textures
+#endif
 struct Input {
     float4 position : SV_POSITION;
     float4 uv : TEXCOORDS0;
@@ -117,7 +130,8 @@ float3 DecodeSrgb(float3 value) {
     return lerp(value / 12.92, pow((value + .055) / 1.055, 2.4), step(.04045, value));
 }
 #ifdef MAP_DETAIL
-// IW3 detailMap, material texture slot 0x3E (models only; worlds use it for lightmaps).
+// IW3 detailMap: material texture slot 0x3E on models, 0x3D on native world surfaces (which keep 0x3E and 0x3F
+// for their lightmaps).
 Texture2D<float4> detailMap : register(t10);
 #endif
 #ifndef MAP_TILE_SPAN_BITS
@@ -133,8 +147,8 @@ float3
 SourceWorldNormal(Input input, uint flags, float2 atlasUV, float lod, out float3 tangentNormal) {
     tangentNormal = float3(0, 0, 1);
     if ((flags & 32) != 0) {
-#ifdef STATIC_MODEL
-        float4 raw = sourceNormalAtlas.SampleBias(colorSampler, atlasUV, replayView[7].y);
+#ifdef MAP_MATERIAL_TEXTURES
+        float4 raw = sourceNormalAtlas.SampleBias(colorSampler, atlasUV, MAP_MIP_BIAS);
 #else
         float4 raw = sourceNormalAtlas.SampleLevel(colorSampler, atlasUV, lod);
 #endif
@@ -154,10 +168,19 @@ SourceWorldNormal(Input input, uint flags, float2 atlasUV, float lod, out float3
 // occupy: primary = A colour + direction X, secondary = B colour + direction Y.
 Texture2D<float4> lightmapPrimary : register(t7);
 Texture2D<float4> lightmapSecondary : register(t8);
+#ifdef MAP_NATIVE_WORLD
+// The lightmaps' primary-light visibility mask (red) over the same region, which atlas surfaces read from the
+// colour atlas's lightmap tiles.
+Texture2D<float4> lightmapMask : register(t11);
+#endif
+// The lightmap textures' coordinates of a lightmap UV in atlas units.
+float2 LightmapTextureUV(float2 uv) {
+    return (uv * ATLAS_SIZE.0 - MAP_LIGHTMAP_ORIGIN) / MAP_LIGHTMAP_SIZE;
+}
 #endif
 float3 SourceIndirect(float2 uv, float3 first, float3 tangentNormal) {
 #ifdef MAP_LIGHTMAP_TEXTURES
-    float2 lightmapUV = (uv * ATLAS_SIZE.0 - MAP_LIGHTMAP_ORIGIN) / MAP_LIGHTMAP_SIZE;
+    float2 lightmapUV = LightmapTextureUV(uv);
     float4 primary = lightmapPrimary.SampleLevel(colorSampler, lightmapUV, 0);
     float4 secondary = lightmapSecondary.SampleLevel(colorSampler, lightmapUV, 0);
     first = primary.rgb;
@@ -629,8 +652,8 @@ float3 SourceSunSpecular(Input input,
                          int fixedProbe) {
     if ((flags & 64) == 0)
         return 0;
-#ifdef STATIC_MODEL
-    float4 raw = sourceResponseAtlas.SampleBias(colorSampler, uv, replayView[7].y);
+#ifdef MAP_MATERIAL_TEXTURES
+    float4 raw = sourceResponseAtlas.SampleBias(colorSampler, uv, MAP_MIP_BIAS);
 #else
     float4 raw = sourceResponseAtlas.SampleLevel(colorSampler, uv, lod);
 #endif
@@ -1009,14 +1032,9 @@ float4 main(Input input) : SV_TARGET0 {
     bool sky = kind == 1;
     float2 mappedUv = input.uv.xy;
     float2 local = sky ? saturate(mappedUv) : frac(mappedUv);
-#ifdef STATIC_MODEL
-    // Replay's shipped static-model shaders use the material sampler, screen
-    // gradients and the view mip bias. Preserve the unwrapped model UV so the
-    // sampler can calculate gradients across repeating texture coordinates.
-    // Coverage passes bind no view mip bias and use the gradients alone.
-#ifndef MAP_MIP_BIAS
-#define MAP_MIP_BIAS replayView[7].y
-#endif
+#ifdef MAP_MATERIAL_TEXTURES
+    // The material's own images (MAP_MATERIAL_TEXTURES): the unwrapped UV keeps
+    // the sampler's gradients continuous across repeating texture coordinates.
     float lod = 0;
     float2 sampleUV = input.uv.xy;
     float4 texel = sourceAtlas.SampleBias(colorSampler, sampleUV, MAP_MIP_BIAS);
@@ -1203,7 +1221,14 @@ float4 main(Input input) : SV_TARGET0 {
                    MAP_INDIRECT_GAIN;
 #endif
     if ((flags & 4) != 0) {
+#ifdef MAP_NATIVE_WORLD
+        // The material's colour is bound in the atlas's place: the mask comes from its own texture (the
+        // lightmap colours from the lightmap textures, SourceIndirect).
+        float4 lm = float4(0, 0, 0,
+                           lightmapMask.SampleLevel(colorSampler, LightmapTextureUV(saturate(input.lightmapUV)), 0).r);
+#else
         float4 lm = sourceAtlas.SampleLevel(colorSampler, saturate(input.lightmapUV), 0);
+#endif
         // Both styles keep IW3's baked sun visibility: native shadows alone
         // let sun leak through roofs and ceilings whose outer faces IW3 never
         // drew (caulk), lighting interiors and floors (owner test 2026-10-15).
@@ -1261,8 +1286,8 @@ float4 main(Input input) : SV_TARGET0 {
     float f90 = 1;
 #if MAP_SOURCE_CHANNELS
     if ((flags & 64) != 0) {
-#ifdef STATIC_MODEL
-        float4 response = sourceResponseAtlas.SampleBias(colorSampler, sampleUV, replayView[7].y);
+#ifdef MAP_MATERIAL_TEXTURES
+        float4 response = sourceResponseAtlas.SampleBias(colorSampler, sampleUV, MAP_MIP_BIAS);
 #else
         float4 response = sourceResponseAtlas.SampleLevel(colorSampler, sampleUV, lod);
 #endif
@@ -1460,7 +1485,11 @@ float4 main(Input input) : SV_TARGET0 {
 #if MAP_SOURCE_CHANNELS
         // IW3 reflects only on materials with a specular map (s0 techsets).
         if ((flags & 64) != 0)
+#ifdef MAP_MATERIAL_TEXTURES
+            glassSpecular = sourceResponseAtlas.SampleBias(colorSampler, sampleUV, MAP_MIP_BIAS);
+#else
             glassSpecular = sourceResponseAtlas.SampleLevel(colorSampler, sampleUV, lod);
+#endif
 #endif
         float3 probe = Iw3ProbeRadiance(screenPixel, input.position.w, input.relativePosition,
                                         reflect(-view, shadingNormal), 6 - 8 * glassSpecular.a,
