@@ -1794,7 +1794,8 @@ namespace zonetool::convert::iw7_iw8
 			{"dpvs", {{"planes", json::array()}, {"nodes", json::array({1})},
 				{"cells", json::array({std::move(cell)})}}},
 			{"lightmaps", std::move(lightmaps.entries)},
-			{"lightmap_encoding", {{"log_scale", lightmap_log_scale}, {"maximum", lightmap_maximum}}},
+			// IW7 lights a texel as A + B * saturate(dot(normal, direction)): the first layer is a constant ambient.
+			{"lightmap_encoding", {{"log_scale", lightmap_log_scale}, {"maximum", lightmap_maximum}, {"constant_ambient", true}}},
 			{"light_regions", json::array()},
 			{"reflection_probes", std::move(probes.entries)},
 		};

@@ -312,9 +312,42 @@ std::uint32_t EncodeR11G11B10(const float red, const float green, const float bl
 struct NativeLightmapPixel
 {
     std::uint32_t irradiance{};
+    std::uint8_t ambient{};
     std::uint8_t directionX{};
     std::uint8_t directionY{};
 };
+
+// How an extraction's lightmap layers hold their light: bytes in [0, 1] (IW3), or log2(1 + scale * value) /
+// log2(1 + scale * maximum) (the world's "lightmap_encoding", IW7); and whether the first layer is a constant
+// ambient (IW7 lights A + B * sat(N.D)) or IW3's A * N.z.
+struct LightmapLayerEncoding
+{
+    float logScale = 0.0f;
+    float logMaximum = 0.0f;
+    bool constantAmbient = false;
+
+    float Decode(const std::uint8_t byte) const
+    {
+        const float value = byte * (1.0f / 255.0f);
+        return logScale > 0.0f ? (std::exp2(value * logMaximum) - 1.0f) / logScale : value;
+    }
+};
+
+LightmapLayerEncoding ReadLightmapLayerEncoding(const Json &world)
+{
+    LightmapLayerEncoding result;
+    if (const auto encoding = world.find("lightmap_encoding"); encoding != world.end())
+    {
+        const float scale = encoding->at("log_scale").get<float>();
+        const float maximum = encoding->at("maximum").get<float>();
+        if (!(scale > 0.0f) || !(maximum > 0.0f))
+            throw std::runtime_error("invalid lightmap encoding");
+        result.logScale = scale;
+        result.logMaximum = std::log2(1.0f + scale * maximum);
+        result.constantAmbient = encoding->value("constant_ambient", false);
+    }
+    return result;
+}
 
 std::array<std::uint8_t, 2> EncodeOctDirection(const float slopeX, const float slopeY)
 {
@@ -329,33 +362,50 @@ std::array<std::uint8_t, 2> EncodeOctDirection(const float slopeX, const float s
 }
 
 NativeLightmapPixel EncodeNativeLightmapPixel(const std::array<std::uint8_t, 4> &a,
-                                             const std::array<std::uint8_t, 4> &b)
+                                             const std::array<std::uint8_t, 4> &b,
+                                             const LightmapLayerEncoding &encoding)
 {
-    // IW3's secondary lightmap evaluates A * normal.z + B * dot(normal, D).
-    // The retained Replay shader evaluates irradiance * dot(normal, D') / D'.z
-    // when its BC4 ambient fraction is zero. Fit the shared direction to the
-    // three color channels, preserving the source flat-normal result before
-    // Replay's own exposure scale is applied.
+    // Replay's world shader (stock PS a3f48686, disassembled) lights a texel as
+    // (1 - f) C / max(D.z, .001) sat(N.D) + f C from its colour C (R11G11B10F),
+    // ambient fraction f (BC4) and tangent-space direction D (octahedral BC5).
     constexpr float byteScale = 1.0f / 255.0f;
     const float slopeX = 4.07999992f * (a[3] * byteScale) - 2.07999992f;
     const float slopeY = 4.06451607f * (b[3] * byteScale) - 2.06451607f;
     const float directionZ = 1.0f / std::sqrt(1.0f + slopeX * slopeX + slopeY * slopeY);
-    std::array<float, 3> irradiance{};
+    std::array<float, 3> ambient{}, directional{}, irradiance{};
+    for (unsigned channel = 0; channel < 3; ++channel)
+    {
+        ambient[channel] = encoding.Decode(a[channel]);
+        directional[channel] = encoding.Decode(b[channel]);
+        irradiance[channel] = ambient[channel] + directional[channel] * directionZ;
+    }
+    const auto luminance = [](const std::array<float, 3> &rgb) {
+        return .2126f * rgb[0] + .7152f * rgb[1] + .0722f * rgb[2];
+    };
+    if (encoding.constantAmbient)
+    {
+        // IW7 lights A + B sat(N.D): C = A + B D.z and f = A / C are the same light, exact in luminance.
+        const float total = luminance(irradiance);
+        const float fraction = total > 0.0f ? std::clamp(luminance(ambient) / total, 0.0f, 1.0f) : 1.0f;
+        const auto direction = EncodeOctDirection(slopeX, slopeY);
+        return {EncodeR11G11B10(irradiance[0], irradiance[1], irradiance[2]),
+                static_cast<std::uint8_t>(std::lround(fraction * 255.0f)), direction[0], direction[1]};
+    }
+    // IW3 lights A N.z + B sat(N.D): with no ambient (f = 0), the shared direction is fitted to the three colour
+    // channels, preserving the flat-normal result.
     float irradianceSquared = 0.0f;
     float directionalDot = 0.0f;
     for (unsigned channel = 0; channel < 3; ++channel)
     {
-        const float directional = b[channel] * byteScale;
-        irradiance[channel] = a[channel] * byteScale + directional * directionZ;
         irradianceSquared += irradiance[channel] * irradiance[channel];
-        directionalDot += irradiance[channel] * directional;
+        directionalDot += irradiance[channel] * directional[channel];
     }
     const float ratio = irradianceSquared > 0.0f
                             ? directionZ * directionalDot / irradianceSquared
                             : 0.0f;
     const auto direction = EncodeOctDirection(slopeX * ratio, slopeY * ratio);
-    return {EncodeR11G11B10(irradiance[0], irradiance[1], irradiance[2]),
-            direction[0], direction[1]};
+    return {EncodeR11G11B10(irradiance[0], irradiance[1], irradiance[2]), 0, direction[0],
+            direction[1]};
 }
 
 Image EncodeNativeWorldNormal(Image source)
@@ -5476,6 +5526,7 @@ RenderPlan PrepareRenderAssets(const std::filesystem::path &exportRoot, const Js
         lightmapRight = std::max(lightmapRight, rectangle.x + rectangle.width);
         lightmapBottom = std::max(lightmapBottom, rectangle.y + rectangle.height);
     }
+    const LightmapLayerEncoding lightmapEncoding = ReadLightmapLayerEncoding(world);
     Image lightmapPrimary, lightmapSecondary;
     // The primary-light visibility mask over the same region, for native world surfaces, which bind their own
     // colour images where atlas surfaces read the mask from the colour atlas.
@@ -5564,8 +5615,8 @@ RenderPlan PrepareRenderAssets(const std::filesystem::path &exportRoot, const Js
                 const auto *a = secondBytes.data() + index * 4;
                 const auto *b = secondBytes.data() + half + index * 4;
                 const auto sample = EncodeNativeLightmapPixel(
-                    {a[2], a[1], a[0], a[3]}, {b[2], b[1], b[0], b[3]});
-                maskValues[index] = 0;
+                    {a[2], a[1], a[0], a[3]}, {b[2], b[1], b[0], b[3]}, lightmapEncoding);
+                maskValues[index] = sample.ambient;
                 directionX[index] = sample.directionX;
                 directionY[index] = sample.directionY;
                 std::memcpy(irradiance.data() + index * sizeof(sample.irradiance),
@@ -5615,7 +5666,8 @@ RenderPlan PrepareRenderAssets(const std::filesystem::path &exportRoot, const Js
             const auto *secondary = lightmapSecondary.rgba.data() + index * 4;
             const auto sample = EncodeNativeLightmapPixel(
                 {primary[0], primary[1], primary[2], primary[3]},
-                {secondary[0], secondary[1], secondary[2], secondary[3]});
+                {secondary[0], secondary[1], secondary[2], secondary[3]}, lightmapEncoding);
+            maskValues[index] = sample.ambient;
             directionX[index] = sample.directionX;
             directionY[index] = sample.directionY;
             std::memcpy(irradiance.data() + index * sizeof(sample.irradiance),
@@ -6098,15 +6150,11 @@ RenderPlan PrepareRenderAssets(const std::filesystem::path &exportRoot, const Js
                           std::to_string(lightmapPrimary.height) + ")\n";
         // Extractions that keep a lightmap's high range store its layers as log2(1 + scale * value) / log2(1 + scale
         // * maximum) (IW7).
-        if (const auto encoding = world.find("lightmap_encoding"); encoding != world.end())
+        if (lightmapEncoding.logScale > 0.0f)
         {
-            const float scale = encoding->at("log_scale").get<float>();
-            const float maximum = encoding->at("maximum").get<float>();
-            if (!(scale > 0.0f) || !(maximum > 0.0f))
-                throw std::runtime_error("invalid lightmap encoding");
             char define[128];
-            std::snprintf(define, sizeof(define), "#define MAP_LIGHTMAP_LOG float2(%.9g, %.9g)\n", scale,
-                          std::log2(1.0f + scale * maximum));
+            std::snprintf(define, sizeof(define), "#define MAP_LIGHTMAP_LOG float2(%.9g, %.9g)\n",
+                          lightmapEncoding.logScale, lightmapEncoding.logMaximum);
             lightmapDefines += define;
         }
         zt::info("iw3: lightmap layers %ux%u at (%u, %u) as uncompressed textures",
