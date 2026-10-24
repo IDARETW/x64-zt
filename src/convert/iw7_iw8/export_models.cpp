@@ -332,6 +332,14 @@ namespace zonetool::convert::iw7_iw8
 				std::copy_n(vertex.xyz, 3, converted.position.begin());
 				converted.normal = unpack_unit_vec(vertex.normal);
 				PackedVec::Vec2UnpackTexCoords(vertex.texCoord.packed, converted.uv.data());
+				if constexpr (requires { vertex.color.array[3]; })
+				{
+					for (std::size_t channel = 0; channel < 4; channel++)
+					{
+						converted.color[channel] = vertex.color.array[channel] / 255.0f;
+					}
+				}
+
 				surface.vertices.push_back(converted);
 			}
 
