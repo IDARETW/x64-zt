@@ -51,6 +51,8 @@ namespace zonetool::convert::iw7_iw8
 		std::set<std::string> atlas_materials;
 		// The world materials of particle decals, which convert as the pipeline's decal materials (Replay decal volumes).
 		std::set<std::string> decal_materials;
+		// The materials (and material layers) of world surfaces, whose colour maps keep more texels (world_color_size).
+		std::set<std::string> world_materials;
 		// IW7's light-grid intensity tweak, which the map script sets (r_lightGridEnableTweaks, r_lightGridIntensity: 1.33 on
 		// Frontier and Breakneck) and Replay lacks: the converted light grid holds it.
 		float light_grid_intensity = 1.0f;

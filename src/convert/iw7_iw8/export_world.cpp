@@ -286,6 +286,7 @@ namespace zonetool::convert::iw7_iw8
 			}
 
 			const auto material_name = output.add_material(source, surface.material);
+			output.world_materials.insert(material_name);
 			for (auto& value : center)
 			{
 				value /= static_cast<float>(vertices.size());
@@ -350,7 +351,9 @@ namespace zonetool::convert::iw7_iw8
 					}
 				}
 
-				result.push_back({output.add_material_layer(source, surface.material, layer), lightmap, static_cast<int>(probe),
+				const auto layer_name = output.add_material_layer(source, surface.material, layer);
+				output.world_materials.insert(layer_name);
+				result.push_back({layer_name, lightmap, static_cast<int>(probe),
 					std::move(overlay), indices});
 			}
 
