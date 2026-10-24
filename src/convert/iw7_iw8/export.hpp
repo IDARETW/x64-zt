@@ -261,7 +261,7 @@ namespace zonetool::convert::iw7_iw8
 		}
 	};
 	layer_vertex_layout material_layer_vertex_layout(const iw7::Material* material);
-	// The reveal sharpness of a layer (1 to max_material_layer) that blends by its reveal map (its token holds
+	// The reveal sharpness of a layer (0 to max_material_layer) that blends by its reveal map (its token holds
 	// v<layer>), none for a layer that blends by its weight alone.
 	std::optional<float> material_layer_reveal(const iw7::Material* material, int layer);
 	// Whether a layered material draws as one stock Replay layered surface (MW120R_STOCK_WORLD): two to four layers, each
