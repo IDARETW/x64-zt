@@ -358,7 +358,11 @@ bool iw3CompassBounds(const std::string &input, CompassBounds &bounds)
 {
     std::array<std::array<float, 2>, 2> corners{};
     size_t cornerCount = 0;
-    float northYaw = 90.0f;
+    // The source's north (IW3 and IW7 read a missing key as 0): the direction the
+    // top of its compass image points to. The corners are ordered in Replay's
+    // frame, which every converted map shares (worldspawn northyaw 90).
+    float northYaw = 0.0f;
+    constexpr float replayNorthYaw = 90.0f;
 
     for (const Entity &entity : parseEntities(input))
     {
@@ -406,7 +410,7 @@ bool iw3CompassBounds(const std::string &input, CompassBounds &bounds)
         return false;
 
     constexpr float pi = 3.14159265358979323846f;
-    const float radians = northYaw * (pi / 180.0f);
+    const float radians = replayNorthYaw * (pi / 180.0f);
     const std::array<float, 2> north{std::cos(radians), std::sin(radians)};
     const std::array<float, 2> west{-north[1], north[0]};
     const std::array<float, 2> difference{corners[1][0] - corners[0][0],
@@ -648,6 +652,10 @@ size_t iw3ToIw8EntityString(const std::string &input, std::string &output,
             // the flag itself.
             if (name == "trigger_radius" && key == "model")
                 continue;
+            // Replay's minimap frame is fixed (worldspawn northyaw 90, below); the
+            // source's north turns the compass image instead (iw3CompassBounds).
+            if (name == "worldspawn" && key == "northyaw")
+                continue;
             uint32_t keyId = 0;
             if (!iw3KeyToIw8KeyId(key, keyId))
             {
@@ -676,13 +684,11 @@ size_t iw3ToIw8EntityString(const std::string &input, std::string &output,
             appendKey(0xAB6F, std::to_string(++hardpointZones));
         }
 
-        if (name == "worldspawn" &&
-            std::none_of(entity.begin(), entity.end(), [](const KeyValue &pair) {
-                return lowercase(pair.key) == "northyaw";
-            }))
+        if (name == "worldspawn")
         {
-            // IW3 defaults northyaw to 90; Replay defaults the missing key
-            // to 0, which makes native setminimap reject IW3 corner bounds.
+            // Every converted map takes north 90 (Replay defaults the missing key
+            // to 0, which makes native setminimap reject the corner bounds that
+            // iw3CompassBounds picks in this frame).
             if (!body.empty())
                 body.push_back(' ');
             body += std::to_string(kNorthYawKey) + " \"90\"";

@@ -13,6 +13,8 @@ namespace zonetool::convert::iw7_iw8
 		// with mip levels: 512 pixels keep the map zone at the size of a converted IW3 map (Frontier: 1.1 GB of model
 		// images, against 3 GB at 1024).
 		constexpr std::size_t max_image_size = 512;
+		// The minimap and the loading screen are single 2D images: they keep IW7's size (1024 minimaps).
+		constexpr std::size_t hud_image_size = 4096;
 
 		enum class image_role
 		{
@@ -40,6 +42,8 @@ namespace zonetool::convert::iw7_iw8
 			std::optional<bool> written;
 			// The written colour's alpha is 1 everywhere.
 			bool opaque_alpha{};
+			// The largest size that the file keeps (HUD images keep theirs).
+			std::size_t limit{max_image_size};
 		};
 
 		// FNV-1a: a short name for a combination of images, the same in each run.
@@ -417,7 +421,7 @@ namespace zonetool::convert::iw7_iw8
 		{
 			const auto& image = *file.image;
 			const auto role = file.role;
-			auto faces = load_faces(image, DXGI_FORMAT_R8G8B8A8_UNORM);
+			auto faces = load_faces(image, DXGI_FORMAT_R8G8B8A8_UNORM, file.limit);
 			if (faces.size() != 1)
 			{
 				ZONETOOL_WARNING("iw7: image \"%s\" cannot be read: %s", image.name, image_read_failure(image).data());
@@ -1510,39 +1514,6 @@ namespace zonetool::convert::iw7_iw8
 				light_unit_scale(source)), 16);
 		}
 
-		// The HUD minimap. IW7 keeps it as a 2D material of the map, compass_map_<map> or a game mode's variant of it
-		// (Frontier: compass_map_mp_frontier_tdmd); the importer (iw3_fastfile.cpp CopyCompass) takes
-		// images/compass_map_<map>.dds as the converted map's compass, with its alpha (the transparent outside).
-		{
-			const auto compass_name = "compass_map_" + source.name();
-			const iw7::Material* compass{};
-			for (const auto& [material_name, asset] : source.assets(iw7::ASSET_TYPE_MATERIAL))
-			{
-				if (material_name == compass_name)
-				{
-					compass = static_cast<const iw7::Material*>(asset);
-					break;
-				}
-
-				if (!compass && material_name.starts_with(compass_name + "_"))
-				{
-					compass = static_cast<const iw7::Material*>(asset);
-				}
-			}
-
-			const auto* image = compass && compass->textureCount && compass->textureTable
-				? source.resolve(iw7::ASSET_TYPE_IMAGE, compass->textureTable[0].image) : nullptr;
-			image_file entry{image, image_role::color};
-			if (!image)
-			{
-				ZONETOOL_WARNING("iw7: the map has no minimap material (%s); the HUD compass keeps the default", compass_name.data());
-			}
-			else if (write_image(entry, folder / (compass_name + ".dds")))
-			{
-				ZONETOOL_INFO("iw7: exported the minimap %s (%ux%u)", image->name, image->width, image->height);
-			}
-		}
-
 		const auto written = std::ranges::count_if(files, [](const auto& entry)
 		{
 			return entry.second.written.value_or(false);
@@ -1651,6 +1622,7 @@ namespace zonetool::convert::iw7_iw8
 		const auto* image = static_cast<const iw7::GfxImage*>(source.find(iw7::ASSET_TYPE_IMAGE, name));
 		image_file entry{image, image_role::color};
 		entry.opaque = true;
+		entry.limit = hud_image_size;
 		if (!image)
 		{
 			ZONETOOL_WARNING("iw7: the ui zone holds no map art %s; the map loads with the default loading screen", name.data());
@@ -1659,6 +1631,34 @@ namespace zonetool::convert::iw7_iw8
 		{
 			ZONETOOL_INFO("iw7: exported the map art %s as the loading screen (the arena names the map %s)", image->name,
 				long_name.empty() ? "nothing" : long_name.data());
+		}
+	}
+
+	// The HUD minimap: the image of IW7's 2D material compass_map_<map>, which the map script sets (setupminimap). The map's
+	// zones lack Frontier's material, and their only Frontier material, compass_map_mp_frontier_tdmd, is a game mode's mask,
+	// not the layout; its image is in the ui zone. The importer (iw3_fastfile.cpp CopyCompass) takes
+	// images/compass_map_<map>.dds as the converted map's compass, with its alpha (the transparent outside).
+	void export_compass(const source_map& source, const extraction& output)
+	{
+		const auto name = "compass_map_" + source.name();
+		const auto* material = static_cast<const iw7::Material*>(source.find(iw7::ASSET_TYPE_MATERIAL, name));
+		const auto* image = material && material->textureCount && material->textureTable
+			? source.resolve(iw7::ASSET_TYPE_IMAGE, material->textureTable[0].image) : nullptr;
+		if (!image)
+		{
+			image = static_cast<const iw7::GfxImage*>(source.find(iw7::ASSET_TYPE_IMAGE, name));
+		}
+
+		image_file entry{image, image_role::color};
+		entry.limit = hud_image_size;
+		if (!image)
+		{
+			ZONETOOL_WARNING("iw7: the map has no minimap (%s); the HUD compass keeps the default", name.data());
+		}
+		else if (write_image(entry, output.extracted / "images" / (name + ".dds")))
+		{
+			ZONETOOL_INFO("iw7: exported the minimap %s (%ux%u)%s", image->name, image->width, image->height,
+				material ? "" : " without its material");
 		}
 	}
 }

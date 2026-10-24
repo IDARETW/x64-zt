@@ -63,10 +63,10 @@ namespace zonetool::convert::iw7_iw8
 		// those materials. The base common and global zones (which the game loads before them) hold the rest that map
 		// effects name: the debris shapes of sparks (vfx_physfxpip_particle_spark) and other shared assets. The
 		// first zone that holds an asset gives it, so they only fill in.
-		// The patch of a common zone (newer versions, the props of later maps) comes before it.
+		// The patch of a common or global zone (newer versions, the props and minimaps of later maps) comes before it.
 		for (const auto common : {"patch_common_core_mp", "common_core_mp", "patch_common_mp", "common_mp", "techsets_common",
-			"techsets_common_core_mp", "techsets_common_mp", "techsets_global_core_mp", "global_core_mp", "global_mp", "patch_common",
-			"common", "global"})
+			"techsets_common_core_mp", "techsets_common_mp", "techsets_global_core_mp", "patch_global_core_mp", "global_core_mp",
+			"patch_global_mp", "global_mp", "patch_common", "common", "patch_global", "global"})
 		{
 			this->load(common);
 		}

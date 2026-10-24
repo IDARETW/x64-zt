@@ -116,8 +116,8 @@ namespace zonetool::convert::iw7_iw8
 		lap("lights");
 		export_materials(source, output);
 		lap("materials and images");
-		// The map art of the map select is in the ui zone, which loads after the materials so that it fills in none of
-		// theirs.
+		// The map art of the map select (and Frontier's minimap) is in the ui zone, which loads after the materials so that
+		// it fills in none of theirs.
 		if (source.load("ui"))
 		{
 			export_loadscreen(source, output);
@@ -127,7 +127,8 @@ namespace zonetool::convert::iw7_iw8
 			ZONETOOL_WARNING("iw7: zone \"ui\" was not found; the map loads with the default loading screen");
 		}
 
-		lap("loading screen");
+		export_compass(source, output);
+		lap("loading screen and minimap");
 
 		// The zone declarations of the IW3 export name the map's raw files and effects, which do not convert yet.
 		std::filesystem::create_directories(output.extracted / "zone_source");
