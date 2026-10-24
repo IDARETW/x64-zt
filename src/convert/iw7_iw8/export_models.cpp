@@ -468,6 +468,24 @@ namespace zonetool::convert::iw7_iw8
 		}
 
 		ZONETOOL_INFO("iw7: exported %zu of %zu static models (contents %s)", written, output.models.size(), kinds.data());
+
+		// IW7's reactive motion (foliage bending around players), which does not convert: the models that carry it.
+		std::string reactive;
+		std::size_t reactive_models{};
+		for (const auto& [name, model] : output.models)
+		{
+			const auto* resolved = model ? source.resolve(iw7::ASSET_TYPE_XMODEL, const_cast<iw7::XModel*>(model)) : nullptr;
+			if (resolved && resolved->numReactiveMotionParts && converted.contains(name))
+			{
+				reactive += reactive_models++ < 6 ? std::format("{}{} ({} parts)", reactive.empty() ? "" : ", ", name,
+					resolved->numReactiveMotionParts) : "";
+			}
+		}
+
+		if (reactive_models)
+		{
+			ZONETOOL_INFO("iw7: %zu models carry reactive motion, which does not convert (e.g. %s)", reactive_models, reactive.data());
+		}
 	}
 
 	namespace
