@@ -1420,11 +1420,13 @@ namespace zonetool::convert::iw7_iw8
 		{
 			auto& roles = candidates[name];
 			const auto layer = layer_of(name);
-			// A layer of a stock layered surface (material_stock_layered), or a lit blended world material that draws as a
-			// stock decal: their alpha, reveal and thickness maps go to Replay's shaders as IW7 keeps them.
+			// A layer of a stock layered surface (material_stock_layered), or a lit blended or alpha-tested world material
+			// that draws as a stock decal or cut-out: their alpha, reveal and thickness maps go to Replay's shaders as IW7
+			// keeps them.
 			const auto stock_layer = layer && output.stock_layered_materials.contains(name.substr(0, name.rfind("__layer")));
 			const auto stock_decal = replay_stock_world() && !layer && output.world_materials.contains(name) &&
-				classify_material(material).kind == surface_kind::blend && !classify_material(material).unlit;
+				(classify_material(material).kind == surface_kind::blend || classify_material(material).kind == surface_kind::alpha_test) &&
+				!classify_material(material).unlit;
 			// The sky's cube map converts with the sky (export_sky); the sky material takes no image of its own.
 			if (classify_material(material).kind == surface_kind::sky)
 			{

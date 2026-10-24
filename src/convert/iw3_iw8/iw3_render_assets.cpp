@@ -6552,30 +6552,42 @@ RenderPlan PrepareRenderAssets(const std::filesystem::path &exportRoot, const Js
             entry->second = {name, file};
             return entry->second;
         };
-        // A pixel constant row of a stock material: the row of its constant buffer (cb3[row]) and of its constant table
-        // (the row's id: 0x48 the shared row, then per layer L the flags and UV transform 0x00 + L, the tint and reveal
-        // sharpness 0x09 + L, the specular, gloss and normal strength 0x36 + L).
+        // A pixel constant row of a stock material: the row of its constant buffers (cb3[row] of each buffer that holds
+        // it: a cut-out's depth prepass buffer holds the first three) and of its constant table (the row's id: 0x48 the
+        // shared row, then per layer L the flags and UV transform 0x00 + L, the tint and reveal sharpness 0x09 + L, the
+        // specular, gloss and normal strength 0x36 + L).
         const auto setRow = [](Json &direct, const std::uint32_t id, const std::size_t row,
                                const std::array<std::uint32_t, 4> &value) {
             auto table = Unhex(direct.at("constants").get<std::string>());
-            auto buffer = Unhex(direct.at("buffers").at(0).at(3).get<std::string>());
-            bool found = false;
+            std::optional<std::vector<std::uint8_t>> previous;
             for (std::size_t offset = 0; offset + 20 <= table.size(); offset += 20)
                 if (At<std::uint32_t>(table, offset) == id)
                 {
+                    previous.emplace(table.begin() + static_cast<std::ptrdiff_t>(offset + 4),
+                                     table.begin() + static_cast<std::ptrdiff_t>(offset + 20));
                     for (std::size_t k = 0; k < 4; ++k)
                         Put<std::uint32_t>(table, offset + 4 + 4 * k, value[k]);
-                    found = true;
                 }
-            if (!found || buffer.size() < 16 * (row + 1))
+            if (!previous)
                 throw std::runtime_error("stock world material has no constant row " + std::to_string(id));
-            for (std::size_t k = 0; k < 4; ++k)
-                Put<std::uint32_t>(buffer, 16 * row + 4 * k, value[k]);
+            bool written = false;
+            for (auto &buffer : direct.at("buffers"))
+            {
+                auto bytes = Unhex(buffer.at(3).get<std::string>());
+                if (bytes.size() < 16 * (row + 1) ||
+                    !std::equal(previous->begin(), previous->end(), bytes.begin() + static_cast<std::ptrdiff_t>(16 * row)))
+                    continue;
+                for (std::size_t k = 0; k < 4; ++k)
+                    Put<std::uint32_t>(bytes, 16 * row + 4 * k, value[k]);
+                buffer[3] = Hex(bytes);
+                written = true;
+            }
+            if (!written)
+                throw std::runtime_error("stock world material has no constant buffer row " + std::to_string(row));
             direct["constants"] = Hex(table);
-            direct["buffers"][0][3] = Hex(buffer);
         };
         const auto row = [](const Json &direct, const std::size_t row) {
-            const auto buffer = Unhex(direct.at("buffers").at(0).at(3).get<std::string>());
+            const auto buffer = Unhex(direct.at("buffers").back().at(3).get<std::string>());
             if (buffer.size() < 16 * (row + 1))
                 throw std::runtime_error("stock world material lacks a constant row");
             return std::array<std::uint32_t, 4>{At<std::uint32_t>(buffer, 16 * row), At<std::uint32_t>(buffer, 16 * row + 4),
@@ -6616,6 +6628,29 @@ RenderPlan PrepareRenderAssets(const std::filesystem::path &exportRoot, const Js
                 },
                 imageBytes(image(source.replayColor).front()), source.tint, "world", false, true);
         };
+        // The alpha map (slot 0x1B, alpha in red) of a colour map that keeps its alpha, the alpha test of a cut-out (IW3
+        // flag 8: alpha above 0; 16: alpha below 0.5) moved to Replay's test of 0.5 and above.
+        const auto alphaMapOf = [&](Json &direct, const unsigned channel, const SourceMaterial &source, const unsigned test) {
+            residentImageRecipe(
+                direct, channel,
+                [color = &image(source.replayColor).front(), test] {
+                    const auto alphaMap = [test](const Image &level) {
+                        Image result{level.width, level.height, std::vector<std::uint8_t>(level.rgba.size())};
+                        for (std::size_t offset = 0; offset < level.rgba.size(); offset += 4)
+                        {
+                            const std::uint8_t alpha = level.rgba[offset + 3];
+                            result.rgba[offset] = test == 8 ? (alpha ? 255 : 0) : test == 16 ? (alpha < 128 ? 255 : 0) : alpha;
+                            result.rgba[offset + 3] = 255;
+                        }
+                        return result;
+                    };
+                    Image map = alphaMap(*color);
+                    for (const auto &mip : color->mips)
+                        map.mips.push_back(alphaMap(mip));
+                    return std::pair{std::move(map), std::optional<Image>{}};
+                },
+                imageBytes(image(source.replayColor).front()), {1, 1, 1, 1}, "world");
+        };
         const auto addMaterial = [&](Json direct, const std::string &sourceName, MaterialPlan &planned) {
             const auto sourceBytes =
                 std::span(reinterpret_cast<const std::uint8_t *>(sourceName.data()), sourceName.size());
@@ -6637,13 +6672,63 @@ RenderPlan PrepareRenderAssets(const std::filesystem::path &exportRoot, const Js
             if (const auto at = name.find("__layer"); at != std::string::npos)
                 layered.insert(name.substr(0, at));
         const Json singleTechset = Json::parse(ResourceText(IDR_IW3_TECHSET_TEMPLATE));
-        std::size_t count = 0, layeredCount = 0, decalCount = 0;
+        std::size_t count = 0, layeredCount = 0, decalCount = 0, cutoutCount = 0;
         for (const SourceMaterial &source : materials)
         {
             if (!neededWorldMaterials.contains(source.name) || source.replayColor.empty() ||
                 source.name.find("__layer") != std::string::npos)
                 continue;
             MaterialPlan &planned = plan.materials.at(source.name);
+            // Replay's stock world shaders light back faces with the front's normal (no SV_IsFrontFace): two-sided
+            // materials (kBackFaceNormalsFlag) keep the generated shader, which turns the frame on back faces.
+            if (source.flags & kBackFaceNormalsFlag)
+                continue;
+            // A lit single-sided cut-out draws as a stock alpha-tested material (tw lit_3_lit_alt: its depth prepass and
+            // shadow techniques test the red of slot 0x1B at 0.5, its lit technique the opaque one).
+            if (planned.kind == SurfaceKind::cutout && !(source.flags & (128u | kRevealLayerFlag | kEmissionFlag)) &&
+                source.emission == 1 && !layered.contains(source.name) && source.replayLayers.empty() &&
+                planned.worldWater < 0 && planned.worldDetail < 0)
+            {
+                if (replayZones.empty())
+                    throw std::runtime_error("stock cut-outs need the Replay install (--replay)");
+                if (!stockLibrary)
+                    stockLibrary.emplace(replayZones);
+                Json direct = stockLibrary->Material("tw/plastic_pvc_wire_cable_sheet_01_ge128");
+                const auto &[techsetName, techsetFile] =
+                    stockTechset(stockLibrary->TechniqueSet(direct.at("techset").get<std::string>()), "tw", "_cutout", source);
+                direct["source"] = source.name;
+                direct["techset"] = techsetName;
+                direct["techsetDefinition"] = techsetFile;
+                direct["imageDefinitions"] = Json::array();
+                const auto channelOf = [&](const unsigned slot) {
+                    const auto &textures = direct.at("textures");
+                    for (std::size_t index = 0; index < textures.size(); ++index)
+                        if (Unhex(textures[index].at("header").get<std::string>()).at(0) == slot)
+                            return static_cast<unsigned>(index);
+                    throw std::runtime_error("stock cut-out material has no texture slot " + std::to_string(slot));
+                };
+                for (auto &texture : direct.at("textures"))
+                    texture["image"] = Unhex(texture.at("header").get<std::string>()).at(0) == 0x09 ? "$identitynormalmap"
+                                                                                                    : "$black";
+                stockColour(direct, channelOf(0x00), source);
+                if (!source.replayNormalGloss.empty())
+                    residentImageAsync(direct, channelOf(0x09), image(source.replayNormalGloss).front(), {1, 1, 1, 1}, "world");
+                // The alpha: IW7's alpha map (red alpha, as Replay's), else the colour's own alpha.
+                const unsigned test = source.flags & 24u;
+                if (!source.replayReveal.empty() && source.replayAlpha && !test)
+                    residentImageAsync(direct, channelOf(0x1B), image(source.replayReveal).front(), {1, 1, 1, 1}, "world");
+                else if (!source.replaySpecularAlpha)
+                    alphaMapOf(direct, channelOf(0x1B), source, test);
+                else
+                    continue;
+                auto flags = row(direct, 1);
+                flags[0] = (!source.replayNormalGloss.empty() ? 1u | 2u : 0u) | (source.replayGloss ? 4u : 0u) | 8u;
+                setRow(direct, 0x00, 1, flags);
+                setSpecular(direct, 0, 3, source);
+                addMaterial(std::move(direct), source.name, planned);
+                ++cutoutCount;
+                continue;
+            }
             // A lit blended decal (stains, signs, paint lines: flag 2048, alpha blended) draws as a stock decal (twc
             // lit_3_lit_bad_tca, PS 39852264): its colour tinted by the vertex colour, its coverage the vertex alpha
             // through IW7's reveal ramp or times its alpha map (slot 0x1B: red alpha, green reveal).
@@ -6824,9 +6909,10 @@ RenderPlan PrepareRenderAssets(const std::filesystem::path &exportRoot, const Js
             addMaterial(std::move(direct), source.name, planned);
             ++layeredCount;
         }
-        zt::info("iw3: %zu stock Replay world materials, %zu stock layered ones and %zu stock decals in %zu technique sets",
-                 count, layeredCount, decalCount, techsets.size());
-        return count + layeredCount + decalCount;
+        zt::info("iw3: %zu stock Replay world materials, %zu stock layered ones, %zu stock decals and %zu stock cut-outs "
+                 "in %zu technique sets",
+                 count, layeredCount, decalCount, cutoutCount, techsets.size());
+        return count + layeredCount + decalCount + cutoutCount;
     };
     if (nativeWorld)
     {
