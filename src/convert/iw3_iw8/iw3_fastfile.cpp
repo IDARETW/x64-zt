@@ -3749,6 +3749,24 @@ std::array<double, 2> EncodedLightmap(const Vertex &vertex, const Surface &surfa
             static_cast<double>(kind + material.flags + (baked ? 4u : 0u)) + 0.25 + y * 0.25};
 }
 
+// A stock Replay world surface's lightmap UV: in the native lightmap (RenderPlan::nativeLightmapRegion), which
+// Replay's world shader maps through the surface's lightmap rectangle (reindex element 0: the whole image), half
+// a texel inside the surface's own lightmap.
+std::array<double, 2> StockLightmapUv(const Vertex &vertex, const Surface &surface, const RenderPlan &plan)
+{
+    if (surface.lightmap < 0 || static_cast<std::size_t>(surface.lightmap) >= plan.lightmaps.size())
+        throw std::runtime_error("a stock Replay world surface needs a lightmap");
+    const auto &rectangle = plan.lightmaps[surface.lightmap];
+    const auto &region = plan.nativeLightmapRegion;
+    if (!region.width || !region.height)
+        throw std::runtime_error("a stock Replay world surface needs the native lightmap");
+    const double x = rectangle.x - region.x +
+                     std::clamp(static_cast<double>(vertex.lightmapUv[0]) * rectangle.width, 0.5, rectangle.width - 0.5);
+    const double y = rectangle.y - region.y +
+                     std::clamp(static_cast<double>(vertex.lightmapUv[1]) * rectangle.height, 0.5, rectangle.height - 0.5);
+    return {x / region.width, y / region.height};
+}
+
 using EntityFields = std::unordered_map<std::string, std::string>;
 
 std::vector<EntityFields> ParseEntityFields(
@@ -5939,8 +5957,11 @@ Json BuildRender(const Json &world, const VisibilityGroups &visibility,
                 activeKey.clear();
             }
             // A material with its own native world material draws with it, the others with their world variant's
-            // atlas material (PrepareRenderAssets). Both read the same vertex records.
-            const unsigned materialIndex = MaterialIndex(plan, material);
+            // atlas material (PrepareRenderAssets). Both read the same vertex records. A lightmapped surface of a
+            // material with a stock Replay world material draws with that, from plain vertex records (layout 1) whose
+            // lightmap UVs lie in the native lightmap (StockLightmapUv).
+            const bool stock = material.stockWorldMaterialIndex && surface.lightmap >= 0;
+            const unsigned materialIndex = stock ? material.stockWorldMaterialIndex : MaterialIndex(plan, material);
             std::ostringstream key;
             key << materialIndex;
             for (const float value : material.environment)
@@ -5963,7 +5984,7 @@ Json BuildRender(const Json &world, const VisibilityGroups &visibility,
                 output["surfaces"].push_back({{"vertices", Json::array()},
                                               {"indices", Json::array()},
                                               {"materialIndex", materialIndex},
-                                              {"atlasVertexLayout", 3u},
+                                              {"atlasVertexLayout", stock ? 1u : 3u},
                                               {"lightmapIndex", 0u},
                                               // Cut-outs draw in the opaque range, after their masked
                                               // depth prepass (the cut-out variants' coverage pass).
@@ -6023,14 +6044,16 @@ Json BuildRender(const Json &world, const VisibilityGroups &visibility,
                                 "IW3 surface references an invalid reflection probe");
                         addProbePoint(surface.reflectionProbe, vertex.position);
                         const std::uint32_t index = static_cast<std::uint32_t>(targetVertices++);
-                        const auto lightmap = EncodedLightmap(vertex, surface, material, plan);
+                        const auto lightmap = stock ? StockLightmapUv(vertex, surface, plan)
+                                                    : EncodedLightmap(vertex, surface, material, plan);
                         // The tile word carries the surface's IW3 reflection probe
                         // as converted slot + 1 above bit 16 (the shader reflects
                         // that probe alone); added in double so the lightmap
                         // fraction keeps its precision.
                         if (material.tile >= 0x10000)
                             throw std::runtime_error("IW3 atlas tile exceeds the 16-bit tile word");
-                        const Json encoded = Json::array(
+                        const Json encoded = stock ? Json::array({lightmap[0], lightmap[1]})
+                                                   : Json::array(
                             {lightmap[0] + 65536.0 * ReflectionProbeTag(surface.reflectionProbe,
                                                                         geometryProbeBounds.size()),
                              lightmap[1]});

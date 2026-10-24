@@ -1796,6 +1796,8 @@ namespace zonetool::convert::iw7_iw8
 			{"lightmaps", std::move(lightmaps.entries)},
 			// IW7 lights a texel as A + B * saturate(dot(normal, direction)): the first layer is a constant ambient.
 			{"lightmap_encoding", {{"log_scale", lightmap_log_scale}, {"maximum", lightmap_maximum}, {"constant_ambient", true}}},
+			// The world draws with Replay's stock world technique sets (MW120R_STOCK_WORLD, AGENTS.md plan 1.4).
+			{"replay_stock_world", replay_stock_world()},
 			{"light_regions", json::array()},
 			{"reflection_probes", std::move(probes.entries)},
 		};
