@@ -5814,6 +5814,7 @@ Json BuildRender(const Json &world, const VisibilityGroups &visibility,
     const auto appendSky = [&] {
         MaterialPlan skyPlan;
         skyPlan.kind = SurfaceKind::sky;
+        // The sky variant's atlas material, or a native material per face (plan.skyMaterials).
         const unsigned skyMaterial = MaterialIndex(plan, skyPlan);
         using SkyMapping = Vec3 (*)(float, float);
         const std::array<SkyMapping, 6> mappings{[](float u, float v) { return Vec3{1, -v, -u}; },
@@ -5826,7 +5827,7 @@ Json BuildRender(const Json &world, const VisibilityGroups &visibility,
         {
             Json sky = {{"vertices", Json::array()},
                         {"indices", {0, 1, 2, 2, 3, 0}},
-                        {"materialIndex", skyMaterial},
+                        {"materialIndex", plan.skyMaterials[face] ? plan.skyMaterials[face] : skyMaterial},
                         {"renderClass", "sky"}};
             std::array<Vec3, 4> positions{};
             const std::array<Vec2, 4> uvs{{{0, 0}, {1, 0}, {1, 1}, {0, 1}}};

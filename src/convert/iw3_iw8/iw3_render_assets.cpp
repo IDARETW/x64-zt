@@ -5153,7 +5153,12 @@ RenderPlan PrepareRenderAssets(const std::filesystem::path &exportRoot, const Js
         g_tileSpanDefines += "}\n";
     }
     const auto tileCell = [&](const std::size_t tile) { return cell * tileSpan.at(tile); };
-    const std::size_t atlasBytes = std::size_t{atlasSize} * atlasSize * 4;
+    // World surfaces, the sky and glass panes draw native materials of their own (the native world materials below)
+    // when the map's lightmaps are textures of their own: no surface reads the atlases, which are not built. Atlas
+    // coordinates remain the lightmap UVs' units. MW120R_ATLAS_WORLD=1 keeps the atlas path for every surface.
+    static const bool atlasWorld = std::getenv("MW120R_ATLAS_WORLD") != nullptr;
+    const bool nativeWorld = !plan.lightmaps.empty() && !atlasWorld;
+    const std::size_t atlasBytes = nativeWorld ? 0 : std::size_t{atlasSize} * atlasSize * 4;
     std::array<Image, 3> atlases{Image{atlasSize, atlasSize, std::vector<std::uint8_t>(atlasBytes)},
                                  Image{atlasSize, atlasSize, std::vector<std::uint8_t>(atlasBytes)},
                                  Image{atlasSize, atlasSize, std::vector<std::uint8_t>(atlasBytes)}};
@@ -5188,7 +5193,8 @@ RenderPlan PrepareRenderAssets(const std::filesystem::path &exportRoot, const Js
     std::vector<AtlasJob> atlasJobs;
     const auto queuePaste = [&](const unsigned atlas, const Image &source, const unsigned size, const bool color,
                                 const std::array<float, 4> &tint, const std::size_t tile) {
-        atlasJobs.push_back({atlas, &source, nullptr, size, color, tint, tile});
+        if (!nativeWorld)
+            atlasJobs.push_back({atlas, &source, nullptr, size, color, tint, tile});
     };
     std::set<std::string> bledColors;
     for (const SourceMaterial &material : materials)
@@ -5438,7 +5444,7 @@ RenderPlan PrepareRenderAssets(const std::filesystem::path &exportRoot, const Js
     const auto &sky = image(skyName);
     if (sky.size() != 6)
         throw std::runtime_error("IW3 sky image is not a complete cubemap: " + skyName);
-    for (unsigned face = 0; face < 6; ++face)
+    for (unsigned face = 0; face < 6 && !nativeWorld; ++face)
         Paste(atlases[0], Resize(sky[face], cell, cell, true),
               static_cast<unsigned>(plan.skyTiles[face] % columns) * cell,
               static_cast<unsigned>(plan.skyTiles[face] / columns) * cell);
@@ -5564,9 +5570,12 @@ RenderPlan PrepareRenderAssets(const std::filesystem::path &exportRoot, const Js
                        EncodeBc5(width, height, directionX, directionY));
             plan.nativeLightmaps.push_back(std::move(native));
         }
-        Paste(atlases[0], color, rectangle.x, rectangle.y);
-        Paste(atlases[1], normal, rectangle.x, rectangle.y);
-        Paste(atlases[2], response, rectangle.x, rectangle.y);
+        if (!nativeWorld)
+        {
+            Paste(atlases[0], color, rectangle.x, rectangle.y);
+            Paste(atlases[1], normal, rectangle.x, rectangle.y);
+            Paste(atlases[2], response, rectangle.x, rectangle.y);
+        }
     }
 
     if (lightmapDimensions.size() > 1)
@@ -5586,17 +5595,14 @@ RenderPlan PrepareRenderAssets(const std::filesystem::path &exportRoot, const Js
         std::vector<std::uint8_t> maskValues(nativePixelCount),
             irradiance(nativePixelCount * sizeof(std::uint32_t)),
             directionX(nativePixelCount), directionY(nativePixelCount);
+        // The lightmap layers over the lightmaps' region: A colour + direction X, B colour + direction Y.
         for (std::size_t index = 0; index < nativePixelCount; ++index)
         {
-            const std::size_t source =
-                ((lightmapTop + index / nativeWidth) * std::size_t{atlasSize} + lightmapLeft +
-                 index % nativeWidth) * 4;
-            const auto *color = atlases[0].rgba.data() + source;
-            const auto *normal = atlases[1].rgba.data() + source;
-            const auto *response = atlases[2].rgba.data() + source;
+            const auto *primary = lightmapPrimary.rgba.data() + index * 4;
+            const auto *secondary = lightmapSecondary.rgba.data() + index * 4;
             const auto sample = EncodeNativeLightmapPixel(
-                {color[0], color[1], color[2], normal[0]},
-                {response[0], response[1], response[2], normal[1]});
+                {primary[0], primary[1], primary[2], primary[3]},
+                {secondary[0], secondary[1], secondary[2], secondary[3]});
             directionX[index] = sample.directionX;
             directionY[index] = sample.directionY;
             std::memcpy(irradiance.data() + index * sizeof(sample.irradiance),
@@ -5938,90 +5944,101 @@ RenderPlan PrepareRenderAssets(const std::filesystem::path &exportRoot, const Js
     };
     material["techsetDefinition"] = stem + ".techset.json";
     material["imageDefinitions"] = Json::array();
-    // The three atlases build their mips and encode on their own threads; their definitions join the material in
-    // channel order. The authored tile sources are found first (the image cache is not shared between threads).
-    std::array<std::vector<const Image *>, 3> tileSources;
-    for (unsigned channel = 0; channel < 3; ++channel)
-        for (const auto &tile : atlasTileMips[channel])
-            tileSources[channel].push_back(&image(tile.image).front());
     std::array<std::pair<std::string, std::string>, 3> atlasFiles; // image name, file
-    std::array<std::exception_ptr, 3> atlasFailures;
-    const auto buildAtlas = [&](const unsigned channel) {
-        // Keep authored mip coverage inside exact-size material tiles. The
-        // surrounding atlas (including lightmaps and sky) still downsamples
-        // normally; the source's lower levels must not be re-averaged away.
-        for (unsigned level = 1; level < mipCount && !atlasTileMips[channel].empty(); ++level)
-        {
-            Image next = Downsample(level == 1 ? atlases[channel]
-                                               : atlases[channel].mips.back(),
-                                    channel == 0);
-            const unsigned mipCell = cell >> level;
-            for (std::size_t tileIndex = 0; tileIndex < atlasTileMips[channel].size(); ++tileIndex)
-            {
-                const auto &tile = atlasTileMips[channel][tileIndex];
-                const unsigned tileMip = tileCell(tile.tile) >> level;
-                const auto &sourceMips = tileSources[channel][tileIndex]->mips;
-                if (level > sourceMips.size() || sourceMips[level - 1].width != tileMip ||
-                    sourceMips[level - 1].height != tileMip)
-                    continue;
-                const Image authored = Resize(sourceMips[level - 1], tileMip, tileMip,
-                                              channel == 0,
-                                              channel == 0 ? tile.tint
-                                                           : std::array<float, 4>{1, 1, 1, 1});
-                Paste(next, authored, static_cast<unsigned>(tile.tile % columns) * mipCell,
-                      static_cast<unsigned>(tile.tile / columns) * mipCell);
-            }
-            atlases[channel].mips.push_back(std::move(next));
-        }
-        auto chain = MipChain(std::move(atlases[channel]), mipCount, channel == 0);
-        if constexpr (atlasSize > 4096)
-            chain = EncodeBc7Chain(chain, atlasSize, mipCount, cacheRoot);
-        const std::string filename =
-            map + "_atlas_" + std::to_string(channel) + (atlasSize > 4096 ? ".bc7" : ".rgba");
-        atlasFiles[channel] = {ImageName(map, channel, chain), filename};
-        WriteBytes(mapDirectory / filename, chain);
-    };
+    if (nativeWorld)
     {
-        std::array<std::thread, 3> threads;
+        // No surface reads the atlases: the materials built on the world material keep the engine's own images.
+        for (const auto &[channel, builtin] :
+             {std::pair{0u, "$gray"}, std::pair{1u, "$identitynormalmap"}, std::pair{2u, "$black"}})
+            material["textures"][channel]["image"] = builtin;
+        zt::info("iw3: no source atlas: world surfaces, the sky and glass panes draw native materials");
+    }
+    else
+    {
+        // The three atlases build their mips and encode on their own threads; their definitions join the material in
+        // channel order. The authored tile sources are found first (the image cache is not shared between threads).
+        std::array<std::vector<const Image *>, 3> tileSources;
         for (unsigned channel = 0; channel < 3; ++channel)
-            threads[channel] = std::thread([&, channel] {
-                try
+            for (const auto &tile : atlasTileMips[channel])
+                tileSources[channel].push_back(&image(tile.image).front());
+        std::array<std::exception_ptr, 3> atlasFailures;
+        const auto buildAtlas = [&](const unsigned channel) {
+            // Keep authored mip coverage inside exact-size material tiles. The
+            // surrounding atlas (including lightmaps and sky) still downsamples
+            // normally; the source's lower levels must not be re-averaged away.
+            for (unsigned level = 1; level < mipCount && !atlasTileMips[channel].empty(); ++level)
+            {
+                Image next = Downsample(level == 1 ? atlases[channel]
+                                                   : atlases[channel].mips.back(),
+                                        channel == 0);
+                const unsigned mipCell = cell >> level;
+                for (std::size_t tileIndex = 0; tileIndex < atlasTileMips[channel].size(); ++tileIndex)
                 {
-                    buildAtlas(channel);
+                    const auto &tile = atlasTileMips[channel][tileIndex];
+                    const unsigned tileMip = tileCell(tile.tile) >> level;
+                    const auto &sourceMips = tileSources[channel][tileIndex]->mips;
+                    if (level > sourceMips.size() || sourceMips[level - 1].width != tileMip ||
+                        sourceMips[level - 1].height != tileMip)
+                        continue;
+                    const Image authored = Resize(sourceMips[level - 1], tileMip, tileMip,
+                                                  channel == 0,
+                                                  channel == 0 ? tile.tint
+                                                               : std::array<float, 4>{1, 1, 1, 1});
+                    Paste(next, authored, static_cast<unsigned>(tile.tile % columns) * mipCell,
+                          static_cast<unsigned>(tile.tile / columns) * mipCell);
                 }
-                catch (...)
-                {
-                    atlasFailures[channel] = std::current_exception();
-                }
-            });
-        for (auto &thread : threads)
-            thread.join();
-        for (const auto &failure : atlasFailures)
-            if (failure)
-                std::rethrow_exception(failure);
+                atlases[channel].mips.push_back(std::move(next));
+            }
+            auto chain = MipChain(std::move(atlases[channel]), mipCount, channel == 0);
+            if constexpr (atlasSize > 4096)
+                chain = EncodeBc7Chain(chain, atlasSize, mipCount, cacheRoot);
+            const std::string filename =
+                map + "_atlas_" + std::to_string(channel) + (atlasSize > 4096 ? ".bc7" : ".rgba");
+            atlasFiles[channel] = {ImageName(map, channel, chain), filename};
+            WriteBytes(mapDirectory / filename, chain);
+        };
+        {
+            std::array<std::thread, 3> threads;
+            for (unsigned channel = 0; channel < 3; ++channel)
+                threads[channel] = std::thread([&, channel] {
+                    try
+                    {
+                        buildAtlas(channel);
+                    }
+                    catch (...)
+                    {
+                        atlasFailures[channel] = std::current_exception();
+                    }
+                });
+            for (auto &thread : threads)
+                thread.join();
+            for (const auto &failure : atlasFailures)
+                if (failure)
+                    std::rethrow_exception(failure);
+        }
+        for (unsigned channel = 0; channel < 3; ++channel)
+        {
+            const auto &[name, filename] = atlasFiles[channel];
+            material["textures"][channel]["image"] = name;
+            if constexpr (atlasSize > 4096)
+                // Replay format table 0x1423E25F0: 44 BC7_UNORM, 45 BC7_UNORM_SRGB.
+                material["imageDefinitions"].push_back({{"name", name},
+                                                        {"width", atlasSize},
+                                                        {"height", atlasSize},
+                                                        {"bc7", filename},
+                                                        {"format", channel == 0 ? 45 : 44},
+                                                        {"mipCount", mipCount}});
+            else
+                material["imageDefinitions"].push_back({{"name", name},
+                                                        {"width", atlasSize},
+                                                        {"height", atlasSize},
+                                                        {"rgba8", filename},
+                                                        {"format", channel == 0 ? 7 : 6},
+                                                        {"mipCount", mipCount}});
+        }
+        zt::info("iw3: source atlas %ux%u, %u columns, %u-pixel material tiles, %u mips", atlasSize,
+                 atlasSize, columns, cell, mipCount);
     }
-    for (unsigned channel = 0; channel < 3; ++channel)
-    {
-        const auto &[name, filename] = atlasFiles[channel];
-        material["textures"][channel]["image"] = name;
-        if constexpr (atlasSize > 4096)
-            // Replay format table 0x1423E25F0: 44 BC7_UNORM, 45 BC7_UNORM_SRGB.
-            material["imageDefinitions"].push_back({{"name", name},
-                                                    {"width", atlasSize},
-                                                    {"height", atlasSize},
-                                                    {"bc7", filename},
-                                                    {"format", channel == 0 ? 45 : 44},
-                                                    {"mipCount", mipCount}});
-        else
-            material["imageDefinitions"].push_back({{"name", name},
-                                                    {"width", atlasSize},
-                                                    {"height", atlasSize},
-                                                    {"rgba8", filename},
-                                                    {"format", channel == 0 ? 7 : 6},
-                                                    {"mipCount", mipCount}});
-    }
-    zt::info("iw3: source atlas %ux%u, %u columns, %u-pixel material tiles, %u mips", atlasSize,
-             atlasSize, columns, cell, mipCount);
     timing.lap("atlas mips");
     // World materials (and their variants and glass panes, which share the world
     // technique) add the two uncompressed lightmap layers; model materials keep
@@ -6286,56 +6303,112 @@ RenderPlan PrepareRenderAssets(const std::filesystem::path &exportRoot, const Js
     // Native world materials: a Replay material per source world material, the native twin of its world variant
     // (kNativeWorldDefines) with the material's own colour, normal and response images in the atlas slots, its
     // detail map at slot 0x3D and the lightmap mask at 0x40. They sample at the source's resolution with the
-    // material sampler (wrap, anisotropy, every mip), where atlas tiles are clamped, at most 512 texels (IW7
+    // material sampler (wrap, anisotropy, every mip), where atlas tiles were clamped, at most 512 texels (IW7
     // Frontier: 229 of 396 at 256 once the atlas filled) and pulled toward their centre at a distance: the smeared
     // ground of the owner's IW7 tests. Their surfaces keep the atlas vertex records (lightmap UVs in atlas units, the
-    // reflection probe tag); the sky stays on the atlas. MW120R_ATLAS_WORLD=1 keeps every surface on the atlas.
-    static const bool atlasWorld = std::getenv("MW120R_ATLAS_WORLD") != nullptr;
-    if (!plan.lightmaps.empty() && !atlasWorld)
+    // reflection probe tag). The sky faces and the glass panes take native materials too.
+    Json nativeTechset;
+    std::map<std::string, Json> nativeVariants;
+    std::string maskName;
+    Json maskDefinition;
+    // The native twin of each world variant ("" for the world material), written once under names of its own:
+    // CreateVariant names a variant by its kind and lit header, which the twin shares with its atlas variant.
+    const auto nativeVariant = [&](const std::string &kind) -> const Json & {
+        if (const auto found = nativeVariants.find(kind); found != nativeVariants.end())
+            return found->second;
+        Json variant;
+        if (kind.empty())
+        {
+            Json material = worldMaterial;
+            material["techset"] = nativeTechset.at("name");
+            variant = {{"techset", nativeTechset}, {"material", std::move(material)}};
+        }
+        else
+        {
+            variant = buildWorldVariant(kind, nativeTechset, true);
+            Json &techset = variant["techset"];
+            techset["name"] = techset.at("name").get<std::string>() + "_native";
+            for (auto &technique : techset.at("techniques"))
+                technique["name"] = technique.at("name").get<std::string>() + "_native";
+            variant["material"]["techset"] = techset.at("name");
+        }
+        const std::string file = stem + ".native" + (kind.empty() ? "" : "." + kind) + ".techset.json";
+        variant["material"]["techsetDefinition"] = file;
+        WriteJson(mapDirectory / file, variant.at("techset"));
+        return nativeVariants.emplace(kind, std::move(variant)).first->second;
+    };
+    // The lightmap mask (slot 0x40, after the lightmaps) closes a native material's texture table.
+    const auto addLightmapMask = [&](Json &direct) {
+        direct["textures"].push_back({{"header", "4000000000000000"}, {"image", maskName}});
+        direct["imageDefinitions"].push_back(maskDefinition);
+        auto info = Unhex(direct.at("info").get<std::string>());
+        info[0x14] = static_cast<std::uint8_t>(direct.at("textures").size());
+        direct["info"] = Hex(info);
+    };
+    // A native material's own images, as static models take them (shared with the model materials of the same
+    // images): the tinted colour (IW3 "ge128" cut-outs keep their alpha coverage; a reveal layer's alpha is data, its
+    // reveal, which keeps a linear chain of its own), the normal and the response; then the detail map of a detail
+    // row (slot 0x3D, after the baked sun depth 0x3C, as the table stays slot-sorted) and the lightmap mask.
+    const auto nativeImages = [&](Json &direct, const SourceMaterial &source, const MaterialPlan &planned) {
+        const bool alphaCoverage = planned.kind == SurfaceKind::cutout && !(source.flags & 24u);
+        if (source.flags & kRevealLayerFlag)
+        {
+            const Image &color = image(source.color).front();
+            residentImageRecipe(
+                direct, 0,
+                [color = &color] {
+                    const auto opaqueAlpha = [](Image &level) {
+                        for (std::size_t offset = 3; offset < level.rgba.size(); offset += 4)
+                            level.rgba[offset] = 255;
+                    };
+                    Image opaque = *color;
+                    opaqueAlpha(opaque);
+                    for (auto &mip : opaque.mips)
+                        opaqueAlpha(mip);
+                    return std::pair{std::move(opaque), std::optional<Image>(*color)};
+                },
+                imageBytes(color) * 2, source.tint, "model");
+        }
+        else
+            residentImageAsync(direct, 0, image(source.color).front(), source.tint, "model", alphaCoverage);
+        if (source.normal.empty())
+            residentImageOwned(direct, 1, Image{1, 1, std::vector<std::uint8_t>{128, 128, 128, 128}}, {1, 1, 1, 1},
+                               "model");
+        else
+            residentImageAsync(direct, 1, image(source.normal).front(), {1, 1, 1, 1}, "model");
+        if (source.response.empty())
+            residentImageOwned(direct, 2, Image{1, 1, std::vector<std::uint8_t>{0, 0, 0, 0}}, {1, 1, 1, 1}, "model");
+        else
+            residentImageAsync(direct, 2, image(source.response).front(), {1, 1, 1, 1}, "model");
+        if (planned.worldDetail >= 0 && planned.worldWater < 0)
+        {
+            auto &textures = direct["textures"];
+            std::size_t at = 0;
+            while (at < textures.size() && Unhex(textures[at].at("header").get<std::string>()).at(0) < 0x3D)
+                ++at;
+            textures.insert(textures.begin() + static_cast<std::ptrdiff_t>(at),
+                            Json{{"header", "3d00000000000000"}, {"image", ""}});
+            residentImageAsync(direct, static_cast<unsigned>(at), image(source.detail).front(), {1, 1, 1, 1},
+                               "model_detail");
+        }
+        addLightmapMask(direct);
+    };
+    if (nativeWorld)
     {
-        const std::set<std::string> neededWorldMaterials(worldMaterials.begin(), worldMaterials.end());
-        const std::set<std::string> atlasImages{atlasFiles[0].first, atlasFiles[1].first, atlasFiles[2].first};
         auto encodedMask = EncodeBc4(lightmapPrimary.width, lightmapPrimary.height, lightmapMask);
         encodedMask.resize((encodedMask.size() + 15) & ~std::size_t{15});
-        const std::string maskName = "mw120r/" + map + "_lightmap_mask";
+        maskName = "mw120r/" + map + "_lightmap_mask";
         const std::string maskFile = map + "_lightmap_mask.bc4";
         WriteBytes(mapDirectory / maskFile, encodedMask);
-        const Json maskDefinition = {{"name", maskName},
-                                     {"width", lightmapPrimary.width},
-                                     {"height", lightmapPrimary.height},
-                                     {"bc4", maskFile},
-                                     {"format", 39},
-                                     {"mipCount", 1}};
-        const Json nativeTechset = BuildTechset(map, columns, plan.atlasSize, TechniqueGeometry::world,
-                                                plan.glassEnvironment, false, {}, lightmapDefines, true, {}, {},
-                                                std::string(kNativeWorldDefines));
-        // The native twin of each world variant ("" for the world material), written once under names of its own:
-        // CreateVariant names a variant by its kind and lit header, which the twin shares with its atlas variant.
-        std::map<std::string, Json> nativeVariants;
-        const auto nativeVariant = [&](const std::string &kind) -> const Json & {
-            if (const auto found = nativeVariants.find(kind); found != nativeVariants.end())
-                return found->second;
-            Json variant;
-            if (kind.empty())
-            {
-                Json material = worldMaterial;
-                material["techset"] = nativeTechset.at("name");
-                variant = {{"techset", nativeTechset}, {"material", std::move(material)}};
-            }
-            else
-            {
-                variant = buildWorldVariant(kind, nativeTechset, true);
-                Json &techset = variant["techset"];
-                techset["name"] = techset.at("name").get<std::string>() + "_native";
-                for (auto &technique : techset.at("techniques"))
-                    technique["name"] = technique.at("name").get<std::string>() + "_native";
-                variant["material"]["techset"] = techset.at("name");
-            }
-            const std::string file = stem + ".native" + (kind.empty() ? "" : "." + kind) + ".techset.json";
-            variant["material"]["techsetDefinition"] = file;
-            WriteJson(mapDirectory / file, variant.at("techset"));
-            return nativeVariants.emplace(kind, std::move(variant)).first->second;
-        };
+        maskDefinition = {{"name", maskName},
+                          {"width", lightmapPrimary.width},
+                          {"height", lightmapPrimary.height},
+                          {"bc4", maskFile},
+                          {"format", 39},
+                          {"mipCount", 1}};
+        nativeTechset = BuildTechset(map, columns, plan.atlasSize, TechniqueGeometry::world, plan.glassEnvironment,
+                                     false, {}, lightmapDefines, true, {}, {}, std::string(kNativeWorldDefines));
+        const std::set<std::string> neededWorldMaterials(worldMaterials.begin(), worldMaterials.end());
         std::size_t nativeMaterials = 0;
         for (const SourceMaterial &source : materials)
         {
@@ -6346,76 +6419,39 @@ RenderPlan PrepareRenderAssets(const std::filesystem::path &exportRoot, const Js
                 continue;
             Json direct = nativeVariant(WorldVariantKind(planned)).at("material");
             direct["source"] = source.name;
-            auto &definitions = direct["imageDefinitions"];
-            definitions.erase(std::remove_if(definitions.begin(), definitions.end(),
-                                             [&](const Json &definition) {
-                                                 return atlasImages.contains(definition.at("name").get<std::string>());
-                                             }),
-                              definitions.end());
-            // The images as static models take them, shared with the model materials of the same images: the tinted
-            // colour (IW3 "ge128" cut-outs keep their alpha coverage), the normal and the response.
-            const bool alphaCoverage = planned.kind == SurfaceKind::cutout && !(source.flags & 24u);
-            if (source.flags & kRevealLayerFlag)
-            {
-                // A reveal layer's alpha is data (its reveal): an opaque colour chain, the alpha a linear chain of its own.
-                const Image &color = image(source.color).front();
-                residentImageRecipe(
-                    direct, 0,
-                    [source = &color] {
-                        const auto opaqueAlpha = [](Image &level) {
-                            for (std::size_t offset = 3; offset < level.rgba.size(); offset += 4)
-                                level.rgba[offset] = 255;
-                        };
-                        Image opaque = *source;
-                        opaqueAlpha(opaque);
-                        for (auto &mip : opaque.mips)
-                            opaqueAlpha(mip);
-                        return std::pair{std::move(opaque), std::optional<Image>(*source)};
-                    },
-                    imageBytes(color) * 2, source.tint, "model");
-            }
-            else
-                residentImageAsync(direct, 0, image(source.color).front(), source.tint, "model", alphaCoverage);
-            if (source.normal.empty())
-                residentImageOwned(direct, 1, Image{1, 1, std::vector<std::uint8_t>{128, 128, 128, 128}},
-                                   {1, 1, 1, 1}, "model");
-            else
-                residentImageAsync(direct, 1, image(source.normal).front(), {1, 1, 1, 1}, "model");
-            if (source.response.empty())
-                residentImageOwned(direct, 2, Image{1, 1, std::vector<std::uint8_t>{0, 0, 0, 0}}, {1, 1, 1, 1},
-                                   "model");
-            else
-                residentImageAsync(direct, 2, image(source.response).front(), {1, 1, 1, 1}, "model");
-            auto &textures = direct["textures"];
-            if (planned.worldDetail >= 0 && planned.worldWater < 0)
-            {
-                // Slot 0x3D, after the baked sun depth (0x3C): the table stays slot-sorted.
-                std::size_t at = 0;
-                while (at < textures.size() && Unhex(textures[at].at("header").get<std::string>()).at(0) < 0x3D)
-                    ++at;
-                textures.insert(textures.begin() + static_cast<std::ptrdiff_t>(at),
-                                Json{{"header", "3d00000000000000"}, {"image", ""}});
-                residentImageAsync(direct, static_cast<unsigned>(at), image(source.detail).front(), {1, 1, 1, 1},
-                                   "model_detail");
-            }
-            textures.push_back({{"header", "4000000000000000"}, {"image", maskName}});
-            definitions.push_back(maskDefinition);
-            auto info = Unhex(direct.at("info").get<std::string>());
-            info[0x14] = static_cast<std::uint8_t>(textures.size());
-            direct["info"] = Hex(info);
+            nativeImages(direct, source, planned);
             const auto sourceBytes =
                 std::span(reinterpret_cast<const std::uint8_t *>(source.name.data()), source.name.size());
             const auto nameDigest = Sha256(sourceBytes);
             const std::string id = Hex(std::span(nameDigest).first(8));
-            const std::string materialName = "w/mw120r_" + map + "_world_" + id;
             const std::string materialFile = stem + ".world." + id + ".material.json";
             writeMaterial(mapDirectory / materialFile, std::move(direct));
-            plan.additionalMaterials.push_back(
-                {{"schema", 1}, {"material", materialName}, {"materialDefinition", materialFile}});
+            plan.additionalMaterials.push_back({{"schema", 1},
+                                                {"material", "w/mw120r_" + map + "_world_" + id},
+                                                {"materialDefinition", materialFile}});
             planned.worldMaterialIndex = static_cast<unsigned>(plan.additionalMaterials.size());
             ++nativeMaterials;
         }
-        zt::info("iw3: %zu native world materials in %zu technique sets", nativeMaterials, nativeVariants.size());
+        // The sky faces: a material each with its face image whole, at the extraction's resolution (atlas faces took
+        // one cell: 256 texels on IW7 Frontier), sampled at its top level inside its edges (the native sky kind).
+        for (unsigned face = 0; face < 6; ++face)
+        {
+            Json direct = nativeVariant("sky").at("material");
+            direct["source"] = skyName + "#" + std::to_string(face);
+            residentImageAsync(direct, 0, sky[face], {1, 1, 1, 1}, "model");
+            residentImageOwned(direct, 1, Image{1, 1, std::vector<std::uint8_t>{128, 128, 128, 128}}, {1, 1, 1, 1},
+                               "model");
+            residentImageOwned(direct, 2, Image{1, 1, std::vector<std::uint8_t>{0, 0, 0, 0}}, {1, 1, 1, 1}, "model");
+            addLightmapMask(direct);
+            const std::string materialFile = stem + ".sky" + std::to_string(face) + ".material.json";
+            writeMaterial(mapDirectory / materialFile, std::move(direct));
+            plan.additionalMaterials.push_back({{"schema", 1},
+                                                {"material", plan.material + "_sky_face" + std::to_string(face)},
+                                                {"materialDefinition", materialFile}});
+            plan.skyMaterials[face] = static_cast<unsigned>(plan.additionalMaterials.size());
+        }
+        zt::info("iw3: %zu native world materials and 6 sky faces in %zu technique sets", nativeMaterials,
+                 nativeVariants.size());
     }
     timing.lap("native world materials");
 
@@ -6427,6 +6463,7 @@ RenderPlan PrepareRenderAssets(const std::filesystem::path &exportRoot, const Js
     {
         const std::string *sourceName;
         std::string kind, definition;
+        Json material;
     };
     std::vector<Pane> panes;
     std::set<std::string> assetMaterialNames;
@@ -6451,7 +6488,7 @@ RenderPlan PrepareRenderAssets(const std::filesystem::path &exportRoot, const Js
         auto &pane = panes[paneIndex];
         const std::string &sourceName = *pane.sourceName;
         const auto &entry = plan.materials.at(sourceName);
-        Json variant = CreateVariant(techset, worldMaterial, stem, map, pane.kind);
+        Json variant = CreateVariant(nativeWorld ? nativeTechset : techset, worldMaterial, stem, map, pane.kind);
         Json &paneTechset = variant.at("techset");
         const auto &environment = entry.environment;
         const std::string vertexSource = "#define GLASS_PANE 1\n#define GLASS_TILE " +
@@ -6515,13 +6552,22 @@ RenderPlan PrepareRenderAssets(const std::filesystem::path &exportRoot, const Js
         info[0x11] = 26;
         variant["material"]["info"] = Hex(info);
         pane.definition = variant.at("definition").get<std::string>();
-        WriteJson(mapDirectory / pane.definition, variant.at("material"));
+        pane.material = std::move(variant.at("material"));
         WriteJson(mapDirectory / variant.at("techsetFile").get<std::string>(), paneTechset);
     });
-    for (const auto &pane : panes)
-        plan.assetMaterials.push_back({{"schema", 1},
-                                       {"material", plan.materials.at(*pane.sourceName).glassMaterial},
-                                       {"materialDefinition", pane.definition}});
+    // Native panes sample their material's own images (queued here: the resident images are not built on threads).
+    std::map<std::string_view, const SourceMaterial *> paneSources;
+    for (const SourceMaterial &source : materials)
+        paneSources.emplace(source.name, &source);
+    for (auto &pane : panes)
+    {
+        const auto &entry = plan.materials.at(*pane.sourceName);
+        if (nativeWorld)
+            nativeImages(pane.material, *paneSources.at(*pane.sourceName), entry);
+        writeMaterial(mapDirectory / pane.definition, std::move(pane.material));
+        plan.assetMaterials.push_back(
+            {{"schema", 1}, {"material", entry.glassMaterial}, {"materialDefinition", pane.definition}});
+    }
 
     // Static placements draw through Replay's static-model tables; script,
     // dynamic and effect XModels draw as DObjs, whose shaders take the object
