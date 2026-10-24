@@ -1387,8 +1387,15 @@ std::vector<std::uint8_t> BuildReflectionProbeArray(const std::vector<Cubemap> &
                 const unsigned targetWidth = std::max(1u, width >> level);
                 if (targetWidth < 4 || targetWidth % 4)
                     throw std::runtime_error("reflection-probe array mip is not BC6H block aligned");
-                const unsigned sourceLevel =
-                    std::min(level ? level - 1 : 0, cubemap.mipCount - 1);
+                // The cube level whose texels match the array level's: an octahedron of width W covers the sphere
+                // as a cube of W / sqrt(6) texel faces does. A finer level, read with one bilinear tap per texel,
+                // skips texels: IW7's 128-texel cubes (one level finer than IW3's 64, which this rule keeps) gave
+                // aliased, pixelated reflections at every blurred level.
+                const float faceTexels = static_cast<float>(targetWidth) / std::sqrt(6.0f);
+                unsigned sourceLevel = 0;
+                while (sourceLevel + 1 < cubemap.mipCount &&
+                       static_cast<float>(std::max(1u, cubemap.width >> (sourceLevel + 1))) >= faceTexels)
+                    ++sourceLevel;
                 std::vector<float> image(static_cast<std::size_t>(targetWidth) * targetWidth * 4);
                 for (unsigned y = 0; y < targetWidth; ++y)
                     for (unsigned x = 0; x < targetWidth; ++x)
@@ -3979,7 +3986,7 @@ std::vector<std::uint8_t> EncodeBc7Rectangle(const std::vector<std::uint8_t> &rg
 // (BC6H, about 5 minutes per map) and atlases. Bump a version whenever its
 // encoder changes.
 constexpr const char *kBc7AtlasEncoderVersion = "bc7-mode6-v1";
-constexpr const char *kBc6hProbeEncoderVersion = "bc6h-dxtex-v1";
+constexpr const char *kBc6hProbeEncoderVersion = "bc6h-dxtex-v2";
 
 // BC7 encoding of a square RGBA8 mip chain laid out by MipChain.
 // Values pass through unchanged, so sRGB data stays sRGB for format 45.
