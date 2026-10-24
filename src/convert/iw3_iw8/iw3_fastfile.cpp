@@ -3525,6 +3525,8 @@ std::vector<BrushModel> ReadBrushModels(const Json &world, const std::vector<Raw
             staticModels.models.push_back(std::move(model));
     }
     std::size_t instanceIndex = 0;
+    // The LOD distance scale each model already took (IW7 lod_scale).
+    std::unordered_map<std::size_t, float> lodScales;
     for (const auto &instance : world.value("models", Json::array()))
     {
         std::string modelName = instance.at("model").get<std::string>();
@@ -3580,6 +3582,23 @@ std::vector<BrushModel> ReadBrushModels(const Json &world, const std::vector<Raw
         for (std::size_t row = 0; row < 3; ++row)
         {
             converted.axis[row] = ReadVector<3>(instance.at("axis").at(row));
+        }
+        // An IW7 placement scales its model's LOD distances (lod_scale). Replay keeps one set
+        // per model, so the model takes its placements' largest scale above 1: its LODs
+        // switch no nearer than IW7's for any placement.
+        if (const auto scale = instance.find("lod_scale"); scale != instance.end())
+        {
+            const float lodScale = scale->get<float>();
+            if (!std::isfinite(lodScale) || lodScale <= 0.0f)
+                throw std::runtime_error("invalid static-model LOD scale");
+            auto [applied, inserted] = lodScales.try_emplace(converted.model, 1.0f);
+            if (lodScale > applied->second)
+            {
+                for (auto &lod : staticModels.models[converted.model].lods)
+                    if (lod.distance < kReplayNeverCulled)
+                        lod.distance = std::min(lod.distance * lodScale / applied->second, kReplayNeverCulled);
+                applied->second = lodScale;
+            }
         }
         // IW3 culls each placement at its own cullDist and keeps drawing the
         // lowest LOD past that LOD's distance. Replay culls at the model's last

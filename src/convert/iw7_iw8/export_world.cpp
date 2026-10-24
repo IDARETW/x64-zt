@@ -897,6 +897,15 @@ namespace zonetool::convert::iw7_iw8
 			return std::pair(std::move(text), static_cast<std::uint8_t>(std::lround(visibility / static_cast<double>(frames.size()))));
 		}
 
+		// IW7 placements scale their model's LOD distances by g_lodDistIndexToScale[flags & 0xF] (index 6 is 1; designers
+		// raise it on large props seen from afar: Renaissance 554 of 9221 placements, up to 4).
+		float lod_distance_scale(const unsigned short flags)
+		{
+			constexpr std::array<float, 16> scales{0.25f, 0.375f, 0.5f, 0.625f, 0.75f, 0.875f, 1.0f, 1.125f, 1.25f, 1.5f, 1.75f, 2.0f,
+				2.5f, 3.0f, 3.5f, 4.0f};
+			return scales[flags & iw7::STATIC_MODEL_FLAG_SCALE_MODIFIER_MASK];
+		}
+
 		json export_static_model(const source_map& source, const iw7::GfxWorld& world, const unsigned int index,
 			const reflection_probes& probes, const floor_light& floors, iw7_light_grid& grid, extraction& output)
 		{
@@ -918,6 +927,9 @@ namespace zonetool::convert::iw7_iw8
 				{"axis", std::move(axis)},
 				{"scale", instance.placement.scale},
 				{"cull_dist", instance.cullDist ? static_cast<float>(instance.cullDist) : 1000000.0f},
+				// The placement's LOD distance scale: the index in its flags into g_lodDistIndexToScale (the table of
+				// IW7's engine generation, as H1's; index 6 is 1).
+				{"lod_scale", lod_distance_scale(instance.flags)},
 				{"ground_lighting", ground.value_or(0)},
 				// IW3's STATIC_MODEL_FLAG_GROUND_LIGHTING.
 				{"model_flags", ground ? 1 : 0},
@@ -1517,6 +1529,8 @@ namespace zonetool::convert::iw7_iw8
 		std::size_t grid_lit{};
 		// IW7's own lighting of its static models (STATIC_MODEL_FLAG_*_LIGHTING), for the log.
 		std::array<std::size_t, 4> iw7_lighting{};
+		// The placements by their LOD distance scale (STATIC_MODEL_FLAG_SCALE_MODIFIER_MASK), for the log.
+		std::array<std::size_t, 16> lod_scales{};
 		// The others by their flags (without the scale): how many, with lightmap or vertex lighting data, and one model.
 		std::map<unsigned, std::tuple<std::size_t, std::size_t, std::size_t, std::string>> other_lighting;
 		for (auto i = 0u; i < dpvs.smodelCount; i++)
@@ -1529,6 +1543,7 @@ namespace zonetool::convert::iw7_iw8
 
 			const auto& draw = dpvs.smodelDrawInsts[i];
 			const auto flags = draw.flags;
+			lod_scales[flags & iw7::STATIC_MODEL_FLAG_SCALE_MODIFIER_MASK]++;
 			const auto lighting = (flags & iw7::STATIC_MODEL_FLAG_LIGHTGRID_LIGHTING) ? 0 : (flags & iw7::STATIC_MODEL_FLAG_VERTEXLIT_LIGHTING) ? 1
 				: (flags & iw7::STATIC_MODEL_FLAG_LIGHTMAP_LIGHTING) ? 2 : 3;
 			iw7_lighting[lighting]++;
@@ -1740,5 +1755,13 @@ namespace zonetool::convert::iw7_iw8
 			ZONETOOL_INFO("iw7: other static model lighting: flags %#x x%zu (lightmap data %zu, vertex data %zu), e.g. %s", flags, count,
 				lightmapped, vertex_lit, example.data());
 		}
+
+		std::string scales;
+		for (std::size_t scale = 0; scale < lod_scales.size(); scale++)
+		{
+			scales += lod_scales[scale] ? std::format("{}{} x{}", scales.empty() ? "" : ", ", scale, lod_scales[scale]) : "";
+		}
+
+		ZONETOOL_INFO("iw7: static model LOD scale indices: %s", scales.data());
 	}
 }
