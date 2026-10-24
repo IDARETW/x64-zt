@@ -40,6 +40,8 @@ namespace zonetool::convert::iw7_iw8
 			std::size_t alpha_channel{};
 			// A second channel of the alpha's image that the alpha is multiplied by (a reveal layer's own alpha).
 			std::optional<std::size_t> alpha_factor_channel;
+			// The colour's own alpha is IW7's specular, whose metal texels darken it (darken_metal).
+			bool metal_alpha{};
 			bool opaque{};
 			// A specular map made of the colour's alpha (IW7's F0) and the gloss in the red of a packed normal map.
 			bool derived_specular{};
@@ -320,11 +322,13 @@ namespace zonetool::convert::iw7_iw8
 			}
 		}
 
-		// An IW3 specular map of an IW7 colour map of TS_COLOR_SPECULAR_MAP: its alpha is the linear reflectance at normal
-		// incidence (F0 x 255: plastics and tiles 10, floors 5, metals 250, chrome 125). IW3 specular maps hold the reflectance
-		// gamma encoded in RGB (the pipeline decodes it to Replay's specular intensity) and the gloss in alpha, which is the
-		// red of IW7's packed normal maps (128 without one). Without it every converted surface was matte and glass, which
-		// shows only by its reflection, was missing (Frontier's patterned roof glass).
+		// An IW3 specular map of an IW7 colour map of TS_COLOR_SPECULAR_MAP. IW7's lit pixel shaders (layered world PS
+		// 9423eedc, disassembled) read its alpha a as a metalness ramp: metal = saturate((a - 0.1) / 0.9), F0 = metal x
+		// albedo + min(a, 0.1) with albedo the colour squared (dielectric F0 up to 0.1: plastics and tiles 10/255, floors
+		// 5; metals take the colour's hue). The specular map holds that F0 gamma encoded in RGB (the pipeline decodes it:
+		// MAP_IW7_SPECULAR) and the gloss in alpha, which is the red of IW7's packed normal maps (128 without one).
+		// Without it every converted surface was matte and glass, which shows only by its reflection, was missing
+		// (Frontier's patterned roof glass).
 		bool derive_specular(DirectX::ScratchImage& pixels, const iw7::GfxImage* gloss)
 		{
 			const auto& metadata = pixels.GetMetadata();
@@ -375,12 +379,42 @@ namespace zonetool::convert::iw7_iw8
 				for (std::size_t x = 0; x < metadata.width; x++)
 				{
 					auto* pixel = row + x * 4;
-					pixel[0] = pixel[1] = pixel[2] = encoded[pixel[3]];
+					const auto alpha = pixel[3] / 255.0f;
+					const auto metal = std::clamp((alpha - 0.1f) / 0.9f, 0.0f, 1.0f);
+					for (auto c = 0; c < 3; c++)
+					{
+						const auto albedo = pixel[c] / 255.0f;
+						const auto f0 = metal * albedo * albedo + std::min(alpha, 0.1f);
+						pixel[c] = encoded[std::clamp(std::lround(f0 * 255.0f), 0l, 255l)];
+					}
+
 					pixel[3] = gloss_row ? gloss_row[x * 4] : 128;
 				}
 			}
 
 			return true;
+		}
+
+		// Darkens the metal texels of a colour whose alpha is IW7's specular (derive_specular): IW7's albedo is the colour
+		// squared times 1 - metal, which the colour times sqrt(1 - metal) gives.
+		void darken_metal(DirectX::ScratchImage& pixels)
+		{
+			const auto& metadata = pixels.GetMetadata();
+			const auto* target = pixels.GetImage(0, 0, 0);
+			for (std::size_t y = 0; y < metadata.height; y++)
+			{
+				auto* row = target->pixels + y * target->rowPitch;
+				for (std::size_t x = 0; x < metadata.width; x++)
+				{
+					auto* pixel = row + x * 4;
+					const auto metal = std::clamp((pixel[3] / 255.0f - 0.1f) / 0.9f, 0.0f, 1.0f);
+					const auto scale = std::sqrt(1.0f - metal);
+					for (auto c = 0; c < 3; c++)
+					{
+						pixel[c] = static_cast<std::uint8_t>(std::lround(pixel[c] * scale));
+					}
+				}
+			}
 		}
 
 		// Replaces the alpha of a colour image: with the channel of an alpha texture (at the colour's size), or opaque.
@@ -452,9 +486,18 @@ namespace zonetool::convert::iw7_iw8
 			{
 				encode_normal_slopes(pixels);
 			}
-			else if ((file.alpha || file.opaque) && !replace_alpha(pixels, file.alpha, file.alpha_channel, file.alpha_factor_channel))
+			else
 			{
-				return false;
+				// Before its alpha is replaced: the alpha that holds IW7's specular darkens the metal texels.
+				if (file.metal_alpha)
+				{
+					darken_metal(pixels);
+				}
+
+				if ((file.alpha || file.opaque) && !replace_alpha(pixels, file.alpha, file.alpha_channel, file.alpha_factor_channel))
+				{
+					return false;
+				}
 			}
 
 			// The pipeline decodes the files and encodes the zone's images itself: block compression keeps the
@@ -1315,6 +1358,7 @@ namespace zonetool::convert::iw7_iw8
 					entry.alpha = alpha;
 					entry.alpha_channel = channel;
 					entry.alpha_factor_channel = factor;
+					entry.metal_alpha = true;
 					entry.opaque = !alpha;
 					file += alpha ? std::format("_{}{:08x}", reveals ? factor ? "ra" : "r" : "a", name_hash(asset_name(alpha->name))) : "";
 				}

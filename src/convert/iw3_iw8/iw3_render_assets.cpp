@@ -3106,6 +3106,9 @@ std::string g_emissionDefines;
 std::string g_backFaceDefines;
 // MAP_REVEAL_LAYERS when a world layer blends by its reveal map (kRevealLayerFlag); IW3 maps compile without it.
 std::string g_revealDefines;
+// MAP_IW7_SPECULAR when the extraction's specular maps hold IW7's F0 and gloss ("iw7_specular"); IW3 maps compile
+// without it.
+std::string g_iw7SpecularDefines;
 // The pixel defines of native world techsets: world surfaces that bind their material's own images (a Replay
 // material per source material) in place of their tile of the shared atlases.
 constexpr std::string_view kNativeWorldDefines = "#define MAP_NATIVE_WORLD 1\n";
@@ -3140,7 +3143,7 @@ Json BuildTechset(const std::string &map, const unsigned columns, const unsigned
         ApplyStaticModelTechniqueLayout(techset);
     std::string pixelSource =
         "#define MAP_SOURCE_SUN_MASK 1\n#define MAP_SOURCE_CHANNELS 1\n" + glassEnvironment +
-        g_emissionDefines + g_backFaceDefines + g_revealDefines;
+        g_emissionDefines + g_backFaceDefines + g_revealDefines + g_iw7SpecularDefines;
     if (const char *diag = std::getenv("IW8_ZONETOOL_DIAG_NO_PROBES"); diag && *diag == '1')
         pixelSource += "#define MAP_DIAG_NO_PROBES 1\n";
     if (model)
@@ -4712,8 +4715,10 @@ RenderPlan PrepareRenderAssets(const std::filesystem::path &exportRoot, const Js
             // Grass blades, leaves and hedges: their IW3 specular maps read as a
             // wet sheen under Replay's view-angle reflections (owner test
             // 2026-10-15, Greenband grass). Foliage shades without a specular
-            // map (the shader's matte default).
-            if (FoliageName(material.name + " " + material.color) && !material.response.empty())
+            // map (the shader's matte default). IW7's foliage keeps its own
+            // physical specular (MAP_IW7_SPECULAR).
+            if (FoliageName(material.name + " " + material.color) && !material.response.empty() &&
+                !world.value("iw7_specular", false))
             {
                 material.response.clear();
                 material.flags &= ~64u;
@@ -4721,6 +4726,7 @@ RenderPlan PrepareRenderAssets(const std::filesystem::path &exportRoot, const Js
         }
         materials.push_back(std::move(material));
     }
+    g_iw7SpecularDefines = world.value("iw7_specular", false) ? "#define MAP_IW7_SPECULAR 1\n" : "";
     g_emissionDefines = std::ranges::any_of(materials, [](const SourceMaterial &material) {
                             return (material.flags & kEmissionFlag) != 0;
                         })
