@@ -6523,11 +6523,13 @@ RenderPlan PrepareRenderAssets(const std::filesystem::path &exportRoot, const Js
     std::optional<iw8::stock::Library> stockLibrary;
     const auto buildStockWorldMaterials = [&](const std::set<std::string> &neededWorldMaterials) {
         // The stock techniques with a material's cull mode and depth bias (the back-face shadow technique, 28, culls
-        // the other side), under names of their own.
+        // the other side), under names of their own. A two-sided material culls back faces: its surfaces draw their
+        // back faces as faces of their own (the writer mirrors them), as Replay's single-sided world does.
         std::map<std::string, std::pair<std::string, std::string>> techsets;
         const auto stockTechset = [&](const Json &stock, const std::string &family, const std::string &variant,
                                       const SourceMaterial &source) -> const std::pair<std::string, std::string> & {
-            const std::string suffix = "_cull" + std::to_string(source.cullMode) + variant + (source.depthBias ? "_bias" : "");
+            const unsigned cullMode = (source.flags & kBackFaceNormalsFlag) ? 1u : source.cullMode;
+            const std::string suffix = "_cull" + std::to_string(cullMode) + variant + (source.depthBias ? "_bias" : "");
             const std::string name = family + "/mw120r_" + map + "_native_world" + suffix;
             auto [entry, inserted] = techsets.try_emplace(name);
             if (!inserted)
@@ -6538,7 +6540,7 @@ RenderPlan PrepareRenderAssets(const std::filesystem::path &exportRoot, const Js
             for (auto &technique : techset.at("techniques"))
             {
                 auto header = Unhex(technique.at("header").get<std::string>());
-                unsigned cull = source.cullMode;
+                unsigned cull = cullMode;
                 if (At<std::uint32_t>(header, 8) == 28 && cull)
                     cull = 3 - cull;
                 Put<std::uint64_t>(header, 0xA0, (At<std::uint64_t>(header, 0xA0) & ~3ull) | cull |
@@ -6679,10 +6681,6 @@ RenderPlan PrepareRenderAssets(const std::filesystem::path &exportRoot, const Js
                 source.name.find("__layer") != std::string::npos)
                 continue;
             MaterialPlan &planned = plan.materials.at(source.name);
-            // Replay's stock world shaders light back faces with the front's normal (no SV_IsFrontFace): two-sided
-            // materials (kBackFaceNormalsFlag) keep the generated shader, which turns the frame on back faces.
-            if (source.flags & kBackFaceNormalsFlag)
-                continue;
             // A lit single-sided cut-out draws as a stock alpha-tested material (tw lit_3_lit_alt: its depth prepass and
             // shadow techniques test the red of slot 0x1B at 0.5, its lit technique the opaque one).
             if (planned.kind == SurfaceKind::cutout && !(source.flags & (128u | kRevealLayerFlag | kEmissionFlag)) &&
