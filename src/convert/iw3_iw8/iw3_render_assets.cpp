@@ -106,6 +106,10 @@ struct SourceMaterial
         bool alpha{};
     };
     std::vector<ReplayLayer> replayLayers;
+    // A blended material's own reveal ramp sharpness and whether its alpha, reveal and thickness map holds an alpha
+    // (replayRevealSharpness, replayAlpha): what a stock decal of it blends by.
+    std::optional<float> replayRevealSharpness;
+    bool replayAlpha{};
     // IW3 detailMap and detailScale.xy (lp_*d0* techsets: colour + detail - 0.5).
     std::string detail;
     std::array<float, 2> detailScale{1, 1};
@@ -2484,6 +2488,9 @@ SourceMaterial ReadMaterial(const std::filesystem::path &root,
     material.replaySpecularAlpha = source.value("replaySpecularAlpha", false);
     material.replayGloss = source.value("replayGloss", false);
     material.replayStockOnly = source.value("replayStockOnly", false);
+    if (source.contains("replayRevealSharpness"))
+        material.replayRevealSharpness = source.at("replayRevealSharpness").get<float>();
+    material.replayAlpha = source.value("replayAlpha", false);
     for (const auto &constant : source.value("constants", Json::array()))
     {
         const std::string key = constant.value("name", std::string{});
@@ -6630,13 +6637,87 @@ RenderPlan PrepareRenderAssets(const std::filesystem::path &exportRoot, const Js
             if (const auto at = name.find("__layer"); at != std::string::npos)
                 layered.insert(name.substr(0, at));
         const Json singleTechset = Json::parse(ResourceText(IDR_IW3_TECHSET_TEMPLATE));
-        std::size_t count = 0, layeredCount = 0;
+        std::size_t count = 0, layeredCount = 0, decalCount = 0;
         for (const SourceMaterial &source : materials)
         {
             if (!neededWorldMaterials.contains(source.name) || source.replayColor.empty() ||
                 source.name.find("__layer") != std::string::npos)
                 continue;
             MaterialPlan &planned = plan.materials.at(source.name);
+            // A lit blended decal (stains, signs, paint lines: flag 2048, alpha blended) draws as a stock decal (twc
+            // lit_3_lit_bad_tca, PS 39852264): its colour tinted by the vertex colour, its coverage the vertex alpha
+            // through IW7's reveal ramp or times its alpha map (slot 0x1B: red alpha, green reveal).
+            if (planned.kind == SurfaceKind::glass && !source.blend && (source.flags & 2048u) && !(source.flags & 128u) &&
+                !(source.flags & (kRevealLayerFlag | kEmissionFlag)) && source.emission == 1 && !layered.contains(source.name))
+            {
+                if (replayZones.empty())
+                    throw std::runtime_error("stock decals need the Replay install (--replay)");
+                if (!stockLibrary)
+                    stockLibrary.emplace(replayZones);
+                Json direct = stockLibrary->Material("twc/paint_lines_01_thick_yellow_clean");
+                const auto &[techsetName, techsetFile] =
+                    stockTechset(stockLibrary->TechniqueSet(direct.at("techset").get<std::string>()), "tw", "_decal", source);
+                direct["source"] = source.name;
+                direct["techset"] = techsetName;
+                direct["techsetDefinition"] = techsetFile;
+                direct["imageDefinitions"] = Json::array();
+                const auto channelOf = [&](const unsigned slot) {
+                    const auto &textures = direct.at("textures");
+                    for (std::size_t index = 0; index < textures.size(); ++index)
+                        if (Unhex(textures[index].at("header").get<std::string>()).at(0) == slot)
+                            return static_cast<unsigned>(index);
+                    throw std::runtime_error("stock decal material has no texture slot " + std::to_string(slot));
+                };
+                for (auto &texture : direct.at("textures"))
+                    texture["image"] = Unhex(texture.at("header").get<std::string>()).at(0) == 0x09 ? "$identitynormalmap"
+                                                                                                    : "$black";
+                stockColour(direct, channelOf(0x00), source);
+                if (!source.replayNormalGloss.empty())
+                    residentImageAsync(direct, channelOf(0x09), image(source.replayNormalGloss).front(), {1, 1, 1, 1}, "world");
+                // The alpha, reveal and thickness map; a colour map that keeps the alpha itself (no specular in its
+                // alpha) gives it.
+                bool alpha = source.replayAlpha, reveal = source.replayRevealSharpness.has_value();
+                if (!source.replayReveal.empty())
+                    residentImageAsync(direct, channelOf(0x1B), image(source.replayReveal).front(), {1, 1, 1, 1}, "world");
+                else if (!source.replaySpecularAlpha)
+                {
+                    residentImageRecipe(
+                        direct, channelOf(0x1B),
+                        [color = &image(source.replayColor).front()] {
+                            const auto alphaMap = [](const Image &level) {
+                                Image result{level.width, level.height, std::vector<std::uint8_t>(level.rgba.size())};
+                                for (std::size_t offset = 0; offset < level.rgba.size(); offset += 4)
+                                {
+                                    result.rgba[offset] = level.rgba[offset + 3];
+                                    result.rgba[offset + 3] = 255;
+                                }
+                                return result;
+                            };
+                            Image map = alphaMap(*color);
+                            for (const auto &mip : color->mips)
+                                map.mips.push_back(alphaMap(mip));
+                            return std::pair{std::move(map), std::optional<Image>{}};
+                        },
+                        imageBytes(image(source.replayColor).front()), {1, 1, 1, 1}, "world");
+                    alpha = true;
+                    reveal = false;
+                }
+                else
+                    alpha = reveal = false;
+                auto flags = row(direct, 1);
+                flags[0] = (!source.replayNormalGloss.empty() ? 1u | 2u : 0u) | (source.replayGloss ? 4u : 0u) |
+                           (alpha ? 8u : 0u) | (reveal ? 16u : 0u);
+                setRow(direct, 0x00, 1, flags);
+                auto tint = row(direct, 2);
+                const auto sharpness = static_cast<std::uint32_t>(
+                    std::clamp(std::lround(source.replayRevealSharpness.value_or(1.0f) * 255.0f), 0l, 255l));
+                tint[0] = 0x00FFFFFFu | (sharpness << 24);
+                setRow(direct, 0x09, 2, tint);
+                setSpecular(direct, 0, 3, source);
+                addMaterial(std::move(direct), source.name, planned);
+                ++decalCount;
+                continue;
+            }
             if (planned.kind != SurfaceKind::opaque || planned.worldWater >= 0 || planned.worldDetail >= 0 ||
                 (source.flags & (kRevealLayerFlag | kEmissionFlag)) || source.emission != 1)
                 continue;
@@ -6743,9 +6824,9 @@ RenderPlan PrepareRenderAssets(const std::filesystem::path &exportRoot, const Js
             addMaterial(std::move(direct), source.name, planned);
             ++layeredCount;
         }
-        zt::info("iw3: %zu stock Replay world materials and %zu stock layered ones in %zu technique sets", count,
-                 layeredCount, techsets.size());
-        return count + layeredCount;
+        zt::info("iw3: %zu stock Replay world materials, %zu stock layered ones and %zu stock decals in %zu technique sets",
+                 count, layeredCount, decalCount, techsets.size());
+        return count + layeredCount + decalCount;
     };
     if (nativeWorld)
     {
