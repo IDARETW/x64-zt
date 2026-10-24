@@ -2590,6 +2590,7 @@ int buildIw3(const Args &args)
     options.map = map;
     options.unlinker = args.unlinkerExecutable;
     options.extraction = args.extraction;
+    options.replayZones = std::filesystem::path(args.replayExecutable).parent_path() / "zone";
     options.exposureAdjust = metadata.exposureAdjust;
     options.iw3ModeAssets = args.iw3ModeAssets;
     options.style =

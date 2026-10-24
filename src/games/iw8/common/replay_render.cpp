@@ -654,7 +654,9 @@ Material LoadMaterial(const std::string &path, const nlohmann::json &j, TechsetF
                     throw std::runtime_error("Generated material metadata is incomplete");
                 std::memcpy(&materialType, m.materialInfo.data() + 0xC, sizeof(materialType));
                 std::memcpy(&techsetType, m.techsetHeader.data() + 0x10, sizeof(techsetType));
-                const bool staticWorld = materialType == 0x210000u && techsetType == 0x210000u;
+                // World geometry, with its flag bits (stock layered world materials: 0x210044, vertex colour and
+                // layers) as its technique set has them.
+                const bool staticWorld = (materialType & 0xFFFF0000u) == 0x210000u && techsetType == materialType;
                 const bool staticModel = materialType == 589844u && techsetType == 589844u;
                 // MTL_TYPE_MODEL_VERTCOL_SELFVIS: script/dynamic/effect XModels (DObj path).
                 const bool entityModel = materialType == 0x80014u && techsetType == 0x80014u;
@@ -1695,6 +1697,11 @@ Mesh Load(const std::string &path, const nlohmann::json &j)
         const unsigned material = s.value("materialIndex", 0u);
         const unsigned surfaceLayout = s.value("atlasVertexLayout", atlasLayout);
         const unsigned lightmapIndex = s.value("lightmapIndex", 0u);
+        // A stock Replay layered surface (layout 1): the UV of each of its layers per vertex, and a tangent transform
+        // stream for each layer after the first that has one (normalTransformOffset[layer - 1]).
+        const unsigned stockLayers = s.value("stockLayers", 0u);
+        if (stockLayers > 4 || (stockLayers > 1 && surfaceLayout != 1))
+            throw std::runtime_error("Invalid stock layered surface");
         if (material > m.additionalMaterials.size())
             throw std::runtime_error("Invalid surface material index");
         if (surfaceLayout < 1 || surfaceLayout > 3)
@@ -1781,6 +1788,20 @@ Mesh Load(const std::string &path, const nlohmann::json &j)
                     throw std::runtime_error("Nonfinite UV");
                 append(m.aux, x);
             }
+            if (stockLayers > 1)
+            {
+                const auto &layerUvs = v.at("layerUVs");
+                if (!layerUvs.is_array() || layerUvs.size() + 1 != stockLayers)
+                    throw std::runtime_error("Stock layered vertex needs a UV per layer");
+                for (const auto &layerUv : layerUvs)
+                    for (unsigned k = 0; k < 2; ++k)
+                    {
+                        const float x = layerUv.at(k).get<float>();
+                        if (!std::isfinite(x))
+                            throw std::runtime_error("Nonfinite layer UV");
+                        append(m.aux, x);
+                    }
+            }
             if (surfaceLayout >= 2)
             {
                 if (!v.contains("lightmapUV") || v.at("lightmapUV").size() != 2)
@@ -1848,6 +1869,25 @@ Mesh Load(const std::string &path, const nlohmann::json &j)
             }
             append(m.aux, rgba);
         }
+        // Replay's layered VS takes identity (0xFF8080FF: bytes * 2 / 255 - 1) where a layer has no stream.
+        std::array<unsigned, 3> transformOffsets{};
+        for (unsigned layer = 1; layer < stockLayers; ++layer)
+        {
+            const auto transform = [&](const nlohmann::json &v) {
+                const auto &transforms = v.at("layerTransforms");
+                if (!transforms.is_array() || transforms.size() + 1 != stockLayers)
+                    throw std::runtime_error("Stock layered vertex needs a transform per layer");
+                return transforms.at(layer - 1).get<uint32_t>();
+            };
+            if (std::none_of(vertices.begin(), vertices.end(), [&](const auto &v) { return transform(v) != 0; }))
+                continue;
+            transformOffsets[layer - 1] = unsigned(m.aux.size());
+            for (const auto &v : vertices)
+            {
+                const uint32_t value = transform(v);
+                append(m.aux, value ? value : 0xFF8080FFu);
+            }
+        }
         const unsigned baseIndex = unsigned(m.indices.size() / 2);
         float maxEdge = 0;
         for (size_t ix = 0; ix < indices.size(); ++ix)
@@ -1914,12 +1954,14 @@ Mesh Load(const std::string &path, const nlohmann::json &j)
             put(bounds, 12 + 4 * k, sky ? 100000.0f : (maxs[k] - mins[k]) * 0.5f + margin);
         }
         auto *gpu = m.surfData.data() + 88 * i;
-        put(gpu, 4, uint32_t(surfaceLayout == 3 ? 4 : surfaceLayout));
+        put(gpu, 4, uint32_t(stockLayers > 1 ? stockLayers : surfaceLayout == 3 ? 4 : surfaceLayout));
         put(gpu, 8, posOffset);
         put(gpu, 12, normalOffset);
         put(gpu, 16, lmOffset);
         put(gpu, 20, colorOffset);
         put(gpu, 24, uvOffset);
+        for (unsigned layer = 0; layer < transformOffsets.size(); ++layer)
+            put(gpu, 28 + 4 * layer, transformOffsets[layer]);
     }
     if (j.contains("brushModels"))
         m.sceneBounds = m.brushModels.front().bounds;

@@ -4,6 +4,8 @@
 
 #include "resources.h"
 
+#include <iw8/assets/replay_stock_library.h>
+
 #include <iw8/common/fs_util.h>
 #include <iw8/common/log.h>
 #include <iw8/common/scratch_files.h>
@@ -88,6 +90,19 @@ struct SourceMaterial
     std::string replayNormalGloss;
     bool replaySpecularAlpha{};
     bool replayGloss{};
+    // A stock layer's alpha, reveal and thickness map (replayRevealMap: red alpha, green reveal).
+    std::string replayReveal;
+    // The layers of a stock layered surface's material (replayLayers): each a material of its own, blending by its
+    // weight or multiplying, with its reveal ramp's sharpness and whether its alpha, reveal and thickness map holds an
+    // alpha.
+    struct ReplayLayer
+    {
+        std::string material;
+        bool multiply{};
+        std::optional<float> reveal;
+        bool alpha{};
+    };
+    std::vector<ReplayLayer> replayLayers;
     // IW3 detailMap and detailScale.xy (lp_*d0* techsets: colour + detail - 0.5).
     std::string detail;
     std::array<float, 2> detailScale{1, 1};
@@ -2450,6 +2465,18 @@ SourceMaterial ReadMaterial(const std::filesystem::path &root,
             material.replayColor = texture.at("image").get<std::string>();
         else if (semantic == "replayNormalGlossMap")
             material.replayNormalGloss = texture.at("image").get<std::string>();
+        else if (semantic == "replayRevealMap")
+            material.replayReveal = texture.at("image").get<std::string>();
+    }
+    for (const auto &layer : source.value("replayLayers", Json::array()))
+    {
+        SourceMaterial::ReplayLayer entry;
+        entry.material = layer.at("material").get<std::string>();
+        entry.multiply = layer.value("multiply", false);
+        if (layer.contains("reveal"))
+            entry.reveal = layer.at("reveal").get<float>();
+        entry.alpha = layer.value("alpha", false);
+        material.replayLayers.push_back(std::move(entry));
     }
     material.replaySpecularAlpha = source.value("replaySpecularAlpha", false);
     material.replayGloss = source.value("replayGloss", false);
@@ -4694,7 +4721,8 @@ RenderPlan PrepareRenderAssets(const std::filesystem::path &exportRoot, const Js
                                const std::string &surfaceShaderDefines,
                                const unsigned staticModelInstances,
                                const EntityLightVolume *entityLightVolume,
-                               const float lightUnitScale, const bool iw3Effects)
+                               const float lightUnitScale, const bool iw3Effects,
+                               const std::filesystem::path &replayZones)
 {
     zt::LapTimer timing("render");
     g_shaderCacheRoot = cacheRoot;
@@ -5738,10 +5766,11 @@ RenderPlan PrepareRenderAssets(const std::filesystem::path &exportRoot, const Js
     const auto computeResident = [&](const unsigned channel, Image source, const std::array<float, 4> tint,
                                      const std::string domain, const bool alphaCoverage,
                                      const std::optional<Image> alphaChannel, const bool linearData,
-                                     const unsigned encodeWorkers) {
-        // Texture 0 is a colour map (sRGB format, colour mips) unless it holds data.
+                                     const unsigned encodeWorkers, const bool colourImage = false) {
+        // Texture 0 is a colour map (sRGB format, colour mips) unless it holds data; a stock layered material's layer
+        // colours are colour maps in later textures (colourImage).
         auto lapStart = std::chrono::steady_clock::now();
-        const bool colour = channel == 0 && !linearData;
+        const bool colour = (channel == 0 || colourImage) && !linearData;
         if (colour)
         {
             for (auto &mip : source.mips)
@@ -5878,14 +5907,16 @@ RenderPlan PrepareRenderAssets(const std::filesystem::path &exportRoot, const Js
     };
     const auto residentImageRecipe = [&](Json &definition, const unsigned channel, ResidentRecipe recipe,
                                          const std::size_t bytes, const std::array<float, 4> &tint,
-                                         const std::string_view domain, const bool alphaCoverage = false) {
+                                         const std::string_view domain, const bool alphaCoverage = false,
+                                         const bool colourImage = false) {
         if (!residentPool)
             residentPool.emplace();
         const auto job = residentPool->submit(
             [&computeResident, channel, recipe = std::move(recipe), tint, domain = std::string(domain),
-             alphaCoverage]() mutable {
+             alphaCoverage, colourImage]() mutable {
                 auto [source, alpha] = recipe();
-                return computeResident(channel, std::move(source), tint, domain, alphaCoverage, std::move(alpha), false, 1);
+                return computeResident(channel, std::move(source), tint, domain, alphaCoverage, std::move(alpha), false, 1,
+                                       colourImage);
             },
             bytes);
         definition["textures"][channel]["image"] = "";
@@ -6470,30 +6501,33 @@ RenderPlan PrepareRenderAssets(const std::filesystem::path &exportRoot, const Js
         }
         addLightmapMask(direct);
     };
-    // Stock Replay world materials (MW120R_STOCK_WORLD, AGENTS.md plan 1.4): Replay's own world technique set
-    // (resources/techset_template.json, stock tw/lit_3_lit_rpl_ta1_804000_...: VS d9ff726d, PS a3f48686) with the
-    // extraction's stock images, for the opaque single-layer materials of lightmapped surfaces. Replay's world shader
-    // is IW7's: its colour alpha s is a metalness ramp (metal = sat((s - .1) / .9), F0 = metal c + min(s, .1)), its
-    // gloss g reads as 1 - sqrt(1 - g), its normal is hemi-octahedral in G/A, and its lightmap is the native one
-    // (C, f, D). Layered, decal, blended and cut-out surfaces keep the generated materials.
+    // Stock Replay world materials (MW120R_STOCK_WORLD, AGENTS.md plan 1.4): Replay's own world technique sets with the
+    // extraction's stock images, for the opaque materials of lightmapped surfaces. Replay's world shaders are IW7's: the
+    // colour alpha s is a metalness ramp (metal = sat((s - .1) / .9), F0 = metal c + min(s, .1)), the gloss g reads as
+    // 1 - sqrt(1 - g), the normal is hemi-octahedral in G/A, the lightmap is the native one (C, f, D), and the layered
+    // twc4 shader (PS f7dc13c5, disassembled) blends layers by IW7's weights and reveal ramp. Single-layer materials take
+    // resources/techset_template.json (stock tw/lit_3_lit_rpl_ta1_804000_...); layered ones the stock twc4 technique set
+    // and material of their layer count, read from the game install (iw8::stock::Library). Decal, blended and cut-out
+    // surfaces keep the generated materials.
+    std::optional<iw8::stock::Library> stockLibrary;
     const auto buildStockWorldMaterials = [&](const std::set<std::string> &neededWorldMaterials) {
-        const Json stockTemplate = Json::parse(ResourceText(IDR_IW3_TECHSET_TEMPLATE));
-        // One technique set per cull mode and depth bias: the stock techniques with their cull and bias state bits.
-        std::map<unsigned, std::pair<std::string, std::string>> techsets;
-        const auto stockTechset = [&](const SourceMaterial &source) -> const std::pair<std::string, std::string> & {
-            const unsigned key = source.cullMode | (source.depthBias ? 4u : 0u);
-            auto [entry, inserted] = techsets.try_emplace(key);
+        // The stock techniques with a material's cull mode and depth bias (the back-face shadow technique, 28, culls
+        // the other side), under names of their own.
+        std::map<std::string, std::pair<std::string, std::string>> techsets;
+        const auto stockTechset = [&](const Json &stock, const std::string &family, const std::string &variant,
+                                      const SourceMaterial &source) -> const std::pair<std::string, std::string> & {
+            const std::string suffix = "_cull" + std::to_string(source.cullMode) + variant + (source.depthBias ? "_bias" : "");
+            const std::string name = family + "/mw120r_" + map + "_native_world" + suffix;
+            auto [entry, inserted] = techsets.try_emplace(name);
             if (!inserted)
                 return entry->second;
-            Json techset = stockTemplate;
-            const std::string suffix = "_cull" + std::to_string(source.cullMode) + (source.depthBias ? "_bias" : "");
-            techset["name"] = "tw/mw120r_" + map + "_native_world" + suffix;
+            Json techset = stock;
+            techset["name"] = name;
             techset["nativeReplayFixture"] = true;
             for (auto &technique : techset.at("techniques"))
             {
                 auto header = Unhex(technique.at("header").get<std::string>());
                 unsigned cull = source.cullMode;
-                // The back-face shadow technique (28) culls the other side.
                 if (At<std::uint32_t>(header, 8) == 28 && cull)
                     cull = 3 - cull;
                 Put<std::uint64_t>(header, 0xA0, (At<std::uint64_t>(header, 0xA0) & ~3ull) | cull |
@@ -6504,85 +6538,76 @@ RenderPlan PrepareRenderAssets(const std::filesystem::path &exportRoot, const Js
             }
             const std::string file = stem + ".native_world" + suffix + ".techset.json";
             WriteJson(mapDirectory / file, techset);
-            entry->second = {techset.at("name").get<std::string>(), file};
+            entry->second = {name, file};
             return entry->second;
         };
-        // A material's own pixel constants (cb3[2], cb3[3]) are also its constant table rows 0x09 and 0x36.
-        const auto setConstantRow = [](Json &direct, const std::uint32_t row, const std::array<std::uint32_t, 4> &value) {
+        // A pixel constant row of a stock material: the row of its constant buffer (cb3[row]) and of its constant table
+        // (the row's id: 0x48 the shared row, then per layer L the flags and UV transform 0x00 + L, the tint and reveal
+        // sharpness 0x09 + L, the specular, gloss and normal strength 0x36 + L).
+        const auto setRow = [](Json &direct, const std::uint32_t id, const std::size_t row,
+                               const std::array<std::uint32_t, 4> &value) {
             auto table = Unhex(direct.at("constants").get<std::string>());
             auto buffer = Unhex(direct.at("buffers").at(0).at(3).get<std::string>());
-            const std::size_t bufferOffset = row == 0x09 ? 32 : row == 0x36 ? 48 : SIZE_MAX;
             bool found = false;
             for (std::size_t offset = 0; offset + 20 <= table.size(); offset += 20)
-                if (At<std::uint32_t>(table, offset) == row)
+                if (At<std::uint32_t>(table, offset) == id)
                 {
                     for (std::size_t k = 0; k < 4; ++k)
                         Put<std::uint32_t>(table, offset + 4 + 4 * k, value[k]);
                     found = true;
                 }
-            if (!found || bufferOffset == SIZE_MAX || buffer.size() != 64)
-                throw std::runtime_error("stock world material template changed");
+            if (!found || buffer.size() < 16 * (row + 1))
+                throw std::runtime_error("stock world material has no constant row " + std::to_string(id));
             for (std::size_t k = 0; k < 4; ++k)
-                Put<std::uint32_t>(buffer, bufferOffset + 4 * k, value[k]);
+                Put<std::uint32_t>(buffer, 16 * row + 4 * k, value[k]);
             direct["constants"] = Hex(table);
             direct["buffers"][0][3] = Hex(buffer);
         };
-        std::set<std::string> layered;
-        for (const auto &name : neededWorldMaterials)
-            if (const auto at = name.find("__layer"); at != std::string::npos)
-                layered.insert(name.substr(0, at));
-        std::size_t count = 0;
-        for (const SourceMaterial &source : materials)
-        {
-            if (!neededWorldMaterials.contains(source.name) || source.replayColor.empty() ||
-                source.name.find("__layer") != std::string::npos || layered.contains(source.name))
-                continue;
-            MaterialPlan &planned = plan.materials.at(source.name);
-            if (planned.kind != SurfaceKind::opaque || planned.worldWater >= 0 || planned.worldDetail >= 0 ||
-                (source.flags & (kRevealLayerFlag | kEmissionFlag)) || source.emission != 1)
-                continue;
-            const auto &[techsetName, techsetFile] = stockTechset(source);
-            Json direct = Json::parse(ResourceText(IDR_IW3_MATERIAL_TEMPLATE));
-            direct["source"] = source.name;
-            direct["techset"] = techsetName;
-            direct["techsetDefinition"] = techsetFile;
-            direct["imageDefinitions"] = Json::array();
-            // cb3[3]: specular scale and bias (s = (alpha (scale + 1) + bias) / 256), gloss scale and bias, normal
-            // strength ((byte + 1) / 256). IW7's alpha is its s; without it, IW7's dielectric 0.04 (10 / 256). Without a
-            // packed gloss, IW7's mid gloss (128).
-            auto row = Unhex(direct.at("buffers").at(0).at(3).get<std::string>());
-            const std::uint32_t specular = source.replaySpecularAlpha ? 0x00FFu : 0x0A00u;
-            const std::uint32_t glossNormal = (source.replayGloss ? 0x00FFu : 0x8000u) | 0xFF0000u;
-            setConstantRow(direct, 0x36, {specular, glossNormal, At<std::uint32_t>(row, 56), At<std::uint32_t>(row, 60)});
-            // The colour: IW7 decodes its colour maps as c^2, Replay's sRGB ones by the sRGB curve; the colour is stored
-            // so that Replay reads IW7's c^2. Its alpha (IW7's specular) is data with a chain of its own.
+        const auto row = [](const Json &direct, const std::size_t row) {
+            const auto buffer = Unhex(direct.at("buffers").at(0).at(3).get<std::string>());
+            if (buffer.size() < 16 * (row + 1))
+                throw std::runtime_error("stock world material lacks a constant row");
+            return std::array<std::uint32_t, 4>{At<std::uint32_t>(buffer, 16 * row), At<std::uint32_t>(buffer, 16 * row + 4),
+                                                At<std::uint32_t>(buffer, 16 * row + 8),
+                                                At<std::uint32_t>(buffer, 16 * row + 12)};
+        };
+        // The specular and gloss row of a layer: specular scale and bias (s = (alpha (scale + 1) + bias) / 256), gloss
+        // scale and bias, normal strength ((byte + 1) / 256). IW7's alpha is its s; without it, IW7's dielectric 0.04
+        // (10 / 256). Without a packed gloss, IW7's mid gloss (128).
+        const auto setSpecular = [&](Json &direct, const unsigned layer, const std::size_t at, const SourceMaterial &source) {
+            auto value = row(direct, at);
+            value[0] = source.replaySpecularAlpha ? 0x00FFu : 0x0A00u;
+            value[1] = (source.replayGloss ? 0x00FFu : 0x8000u) | 0xFF0000u;
+            setRow(direct, 0x36 + layer, at, value);
+        };
+        // A colour map: IW7 decodes its colour maps as c^2, Replay's sRGB ones by the sRGB curve; the colour is stored so
+        // that Replay reads IW7's c^2. Its alpha (IW7's specular) is data with a chain of its own.
+        const auto stockColour = [&](Json &direct, const unsigned channel, const SourceMaterial &source) {
             residentImageRecipe(
-                direct, 0,
+                direct, channel,
                 [color = &image(source.replayColor).front()] {
                     const auto reencode = [](Image &level) {
                         for (std::size_t offset = 0; offset < level.rgba.size(); offset += 4)
-                            for (std::size_t channel = 0; channel < 3; ++channel)
+                        {
+                            for (std::size_t component = 0; component < 3; ++component)
                             {
-                                const float value = level.rgba[offset + channel] * (1.0f / 255.0f);
-                                level.rgba[offset + channel] = SrgbByte(value * value);
+                                const float value = level.rgba[offset + component] * (1.0f / 255.0f);
+                                level.rgba[offset + component] = SrgbByte(value * value);
                             }
+                            level.rgba[offset + 3] = 255;
+                        }
                     };
                     Image opaque = *color;
                     reencode(opaque);
                     for (auto &mip : opaque.mips)
                         reencode(mip);
-                    for (std::size_t offset = 3; offset < opaque.rgba.size(); offset += 4)
-                        opaque.rgba[offset] = 255;
-                    for (auto &mip : opaque.mips)
-                        for (std::size_t offset = 3; offset < mip.rgba.size(); offset += 4)
-                            mip.rgba[offset] = 255;
                     return std::pair{std::move(opaque), std::optional<Image>(*color)};
                 },
-                imageBytes(image(source.replayColor).front()), source.tint, "world");
-            if (!source.replayNormalGloss.empty())
-                residentImageAsync(direct, 1, image(source.replayNormalGloss).front(), {1, 1, 1, 1}, "world");
+                imageBytes(image(source.replayColor).front()), source.tint, "world", false, true);
+        };
+        const auto addMaterial = [&](Json direct, const std::string &sourceName, MaterialPlan &planned) {
             const auto sourceBytes =
-                std::span(reinterpret_cast<const std::uint8_t *>(source.name.data()), source.name.size());
+                std::span(reinterpret_cast<const std::uint8_t *>(sourceName.data()), sourceName.size());
             const auto nameDigest = Sha256(sourceBytes);
             const std::string id = Hex(std::span(nameDigest).first(8));
             const std::string materialFile = stem + ".stock." + id + ".material.json";
@@ -6591,10 +6616,132 @@ RenderPlan PrepareRenderAssets(const std::filesystem::path &exportRoot, const Js
                                                 {"material", "w/mw120r_" + map + "_stock_" + id},
                                                 {"materialDefinition", materialFile}});
             planned.stockWorldMaterialIndex = static_cast<unsigned>(plan.additionalMaterials.size());
-            ++count;
+        };
+
+        // The stock layered materials of the layer counts: the standard twc4 permutation of each (VS e2fa6708 / PS
+        // f7dc13c5 for two layers), from mp_shipment.
+        static constexpr std::array<const char *, 3> stockLayered{"twc4/145n_27n", "twc4/2n_15n_3n", "twc4/2n_15n_21n_3n"};
+        std::set<std::string> layered;
+        for (const auto &name : neededWorldMaterials)
+            if (const auto at = name.find("__layer"); at != std::string::npos)
+                layered.insert(name.substr(0, at));
+        const Json singleTechset = Json::parse(ResourceText(IDR_IW3_TECHSET_TEMPLATE));
+        std::size_t count = 0, layeredCount = 0;
+        for (const SourceMaterial &source : materials)
+        {
+            if (!neededWorldMaterials.contains(source.name) || source.replayColor.empty() ||
+                source.name.find("__layer") != std::string::npos)
+                continue;
+            MaterialPlan &planned = plan.materials.at(source.name);
+            if (planned.kind != SurfaceKind::opaque || planned.worldWater >= 0 || planned.worldDetail >= 0 ||
+                (source.flags & (kRevealLayerFlag | kEmissionFlag)) || source.emission != 1)
+                continue;
+            if (source.replayLayers.empty())
+            {
+                // A material of overlays (layers drawn as surfaces of their own) keeps the generated shader beneath them.
+                if (layered.contains(source.name))
+                    continue;
+                const auto &[techsetName, techsetFile] = stockTechset(singleTechset, "tw", "", source);
+                Json direct = Json::parse(ResourceText(IDR_IW3_MATERIAL_TEMPLATE));
+                direct["source"] = source.name;
+                direct["techset"] = techsetName;
+                direct["techsetDefinition"] = techsetFile;
+                direct["imageDefinitions"] = Json::array();
+                setSpecular(direct, 0, 3, source);
+                stockColour(direct, 0, source);
+                if (!source.replayNormalGloss.empty())
+                    residentImageAsync(direct, 1, image(source.replayNormalGloss).front(), {1, 1, 1, 1}, "world");
+                addMaterial(std::move(direct), source.name, planned);
+                ++count;
+                continue;
+            }
+
+            // A stock layered surface's material: the layers' images in the stock material's slots (colour L, normal 9 +
+            // L, alpha and reveal 0x1C + L - 1, tint mask 0x3B + L), their rows set as IW7 blends them.
+            const std::size_t layers = source.replayLayers.size() + 1;
+            if (layers < 2 || layers > stockLayered.size() + 1)
+                throw std::runtime_error("stock layered material " + source.name + " has " + std::to_string(layers) + " layers");
+            if (replayZones.empty())
+                throw std::runtime_error("stock layered materials need the Replay install (--replay)");
+            if (!stockLibrary)
+                stockLibrary.emplace(replayZones);
+            Json direct = stockLibrary->Material(stockLayered[layers - 2]);
+            const auto &[techsetName, techsetFile] =
+                stockTechset(stockLibrary->TechniqueSet(direct.at("techset").get<std::string>()), "tw",
+                             "_layers" + std::to_string(layers), source);
+            direct["source"] = source.name;
+            direct["techset"] = techsetName;
+            direct["techsetDefinition"] = techsetFile;
+            direct["imageDefinitions"] = Json::array();
+            // Without its layer materials' names (the stock material's sub-materials, info byte 0x17 its count).
+            direct.erase("subMaterials");
+            auto metadata = Unhex(direct.at("info").get<std::string>());
+            metadata.at(0x17) = 0;
+            direct["info"] = Hex(metadata);
+            std::vector<SourceMaterial> layerMaterials{source};
+            for (const auto &layer : source.replayLayers)
+                layerMaterials.push_back(ReadMaterial(exportRoot, sourcePaths, layer.material));
+            for (auto &texture : direct.at("textures"))
+            {
+                const unsigned slot = Unhex(texture.at("header").get<std::string>()).at(0);
+                texture["image"] = slot >= 0x09 && slot < 0x09 + layers ? "$identitynormalmap" : "$black";
+            }
+            for (std::size_t layer = 0; layer < layers; ++layer)
+            {
+                const SourceMaterial &material = layerMaterials[layer];
+                const auto channelOf = [&](const unsigned slot) {
+                    const auto &textures = direct.at("textures");
+                    for (std::size_t index = 0; index < textures.size(); ++index)
+                        if (Unhex(textures[index].at("header").get<std::string>()).at(0) == slot)
+                            return static_cast<unsigned>(index);
+                    throw std::runtime_error("stock layered material has no texture slot " + std::to_string(slot));
+                };
+                // A layer whose colour is an engine image (IW7's $black of a multiply layer) takes Replay's own, or a
+                // texel of its colour.
+                if (!material.replayColor.empty())
+                    stockColour(direct, channelOf(static_cast<unsigned>(layer)), material);
+                else if (material.color == "$black" || material.color == "$gray")
+                    direct["textures"][channelOf(static_cast<unsigned>(layer))]["image"] = material.color;
+                else if (material.color == "$white")
+                    residentImageRecipe(
+                        direct, channelOf(static_cast<unsigned>(layer)),
+                        [] { return std::pair{Image{1, 1, std::vector<std::uint8_t>{255, 255, 255, 255}}, std::optional<Image>{}}; },
+                        4, material.tint, "world", false, true);
+                else
+                    throw std::runtime_error("stock layer " + material.name + " has no colour");
+                if (!material.replayNormalGloss.empty())
+                    residentImageAsync(direct, channelOf(0x09 + static_cast<unsigned>(layer)),
+                                       image(material.replayNormalGloss).front(), {1, 1, 1, 1}, "world");
+                setSpecular(direct, static_cast<unsigned>(layer), 3 + 3 * layer, material);
+                if (!layer)
+                    continue;
+                const auto &info = source.replayLayers[layer - 1];
+                if (!material.replayReveal.empty())
+                    residentImageAsync(direct, channelOf(0x1C + static_cast<unsigned>(layer) - 1),
+                                       image(material.replayReveal).front(), {1, 1, 1, 1}, "world");
+                // Flags: normal (1), occlusion (2) and gloss (4) blend where the layer has its normal map; alpha (8) and
+                // reveal (16) from its alpha, reveal and thickness map; colour mode lerp or multiply (bits 7-8).
+                auto flags = row(direct, 1 + 3 * layer);
+                const bool normal = !material.replayNormalGloss.empty();
+                const bool revealMap = !material.replayReveal.empty();
+                flags[0] = (normal ? 1u | 2u : 0u) | (material.replayGloss ? 4u : 0u) |
+                           (revealMap && info.alpha ? 8u : 0u) | (revealMap && info.reveal ? 16u : 0u) |
+                           (info.multiply ? 1u << 7 : 0u);
+                setRow(direct, 0x00 + static_cast<std::uint32_t>(layer), 1 + 3 * layer, flags);
+                // Tint (white: the colour carries it) and the reveal sharpness k in the top byte.
+                auto tint = row(direct, 2 + 3 * layer);
+                const auto sharpness = static_cast<std::uint32_t>(
+                    std::clamp(std::lround(info.reveal.value_or(1.0f) * 255.0f), 0l, 255l));
+                tint[0] = 0x00FFFFFFu | (sharpness << 24);
+                setRow(direct, 0x09 + static_cast<std::uint32_t>(layer), 2 + 3 * layer, tint);
+            }
+            planned.stockLayers = static_cast<unsigned>(layers);
+            addMaterial(std::move(direct), source.name, planned);
+            ++layeredCount;
         }
-        zt::info("iw3: %zu stock Replay world materials in %zu technique sets", count, techsets.size());
-        return count;
+        zt::info("iw3: %zu stock Replay world materials and %zu stock layered ones in %zu technique sets", count,
+                 layeredCount, techsets.size());
+        return count + layeredCount;
     };
     if (nativeWorld)
     {
