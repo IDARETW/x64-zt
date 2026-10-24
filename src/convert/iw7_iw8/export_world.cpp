@@ -1491,6 +1491,25 @@ namespace zonetool::convert::iw7_iw8
 
 		first_surface[world.surfaceCount] = surfaces.size();
 
+		// IW7_DRAW_RANGES=1: IW7's draw ranges of the world's surfaces and the materials of its lit decal range.
+		if (std::getenv("IW7_DRAW_RANGES"))
+		{
+			ZONETOOL_INFO("iw7: draw ranges: opaque %u-%u, lit decals %u-%u, translucent %u-%u, emissive %u-%u of %u",
+				dpvs.litOpaqueSurfsBegin, dpvs.litOpaqueSurfsEnd, dpvs.litDecalSurfsBegin, dpvs.litDecalSurfsEnd,
+				dpvs.litTransSurfsBegin, dpvs.litTransSurfsEnd, dpvs.emissiveSurfsBegin, dpvs.emissiveSurfsEnd, world.surfaceCount);
+			std::map<std::string, std::size_t> decals;
+			for (auto i = dpvs.litDecalSurfsBegin; i < dpvs.litDecalSurfsEnd && i < world.surfaceCount; i++)
+			{
+				const auto* material = dpvs.surfaces[i].material;
+				decals[std::string(asset_name(material ? iw7::get_asset_name(iw7::ASSET_TYPE_MATERIAL, material) : nullptr))]++;
+			}
+
+			for (const auto& [name, count] : decals)
+			{
+				ZONETOOL_INFO("iw7: lit decal range: %s x%zu", name.data(), count);
+			}
+		}
+
 		// The static models whose model exported (export_models runs first).
 		auto models = json::array();
 		auto model_indices = json::array();
