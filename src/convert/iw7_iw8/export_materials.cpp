@@ -29,6 +29,9 @@ namespace zonetool::convert::iw7_iw8
 			// shader reads its "<c>&<s>" and "<n>&<g>" with IW7's own metalness ramp and gloss curve.
 			replay_color,
 			replay_normal_gloss,
+			// A stock layer's alpha, reveal and thickness map (IW7's TS_ALPHA_REVEAL_THICKNESS_MAP: red alpha, green reveal),
+			// which Replay's twc4 shader reads in the same channels.
+			replay_reveal,
 			count,
 		};
 
@@ -497,12 +500,13 @@ namespace zonetool::convert::iw7_iw8
 			}
 
 			// A packed normal map for Replay's world shader keeps IW7's channels.
-			const auto normal_data = role == image_role::normal || role == image_role::replay_normal_gloss;
+			const auto normal_data = role == image_role::normal || role == image_role::replay_normal_gloss ||
+				role == image_role::replay_reveal;
 			if (role == image_role::normal)
 			{
 				encode_normal_slopes(pixels);
 			}
-			else if (role != image_role::replay_normal_gloss)
+			else if (!normal_data)
 			{
 				// Before its alpha is replaced: the alpha that holds IW7's specular darkens the metal texels.
 				if (file.metal_alpha)
@@ -794,6 +798,11 @@ namespace zonetool::convert::iw7_iw8
 			if (const auto& replay_normal = images[static_cast<std::size_t>(image_role::replay_normal_gloss)])
 			{
 				textures.push_back(texture_json("replayNormalGlossMap", *replay_normal));
+			}
+
+			if (const auto& replay_reveal = images[static_cast<std::size_t>(image_role::replay_reveal)])
+			{
+				textures.push_back(texture_json("replayRevealMap", *replay_reveal));
 			}
 
 			// The IW3 techniques: 4 unlit, 7 lit. An unlit material has no lit pass.
@@ -1200,6 +1209,11 @@ namespace zonetool::convert::iw7_iw8
 		return layer >= 1 ? technique_layer_token(material, layer) : std::string_view{};
 	}
 
+	bool material_layer_normal_map(const iw7::Material* material, const int layer)
+	{
+		return layer_has_normal_map(material, layer);
+	}
+
 	layer_vertex_layout material_layer_vertex_layout(const iw7::Material* material)
 	{
 		const auto layers = material_layer_count(material);
@@ -1223,6 +1237,26 @@ namespace zonetool::convert::iw7_iw8
 		}
 
 		return layout;
+	}
+
+	bool material_stock_layered(const iw7::Material* material)
+	{
+		const auto layers = material_layer_count(material);
+		if (!replay_stock_world() || layers < 2 || layers > max_material_layer)
+		{
+			return false;
+		}
+
+		for (auto layer = 1; layer < layers; layer++)
+		{
+			const auto token = material_layer_token(material, layer);
+			if (token.empty() || (token[0] != 'b' && token[0] != 'm'))
+			{
+				return false;
+			}
+		}
+
+		return true;
 	}
 
 	std::optional<float> material_layer_reveal(const iw7::Material* material, const int layer)
@@ -1384,6 +1418,8 @@ namespace zonetool::convert::iw7_iw8
 		{
 			auto& roles = candidates[name];
 			const auto layer = layer_of(name);
+			// A layer of a stock layered surface (material_stock_layered).
+			const auto stock_layer = layer && output.stock_layered_materials.contains(name.substr(0, name.rfind("__layer")));
 			// The sky's cube map converts with the sky (export_sky); the sky material takes no image of its own.
 			if (classify_material(material).kind == surface_kind::sky)
 			{
@@ -1453,8 +1489,9 @@ namespace zonetool::convert::iw7_iw8
 				slot->second.limit = std::max(slot->second.limit, entry.limit);
 				roles[index].push_back(file);
 
-				// The stock world images of a world material's own (base) colour and normal map, as IW7 keeps them.
-				if (replay_stock_world() && !layer && output.world_materials.contains(name) &&
+				// The stock world images of a world material's own colour and normal map, as IW7 keeps them (of a stock layered
+				// surface's layers too).
+				if (replay_stock_world() && output.world_materials.contains(name) && (!layer || stock_layer) &&
 					(*role == image_role::color || *role == image_role::normal))
 				{
 					const auto replay_role = *role == image_role::color ? image_role::replay_color : image_role::replay_normal_gloss;
@@ -1464,6 +1501,21 @@ namespace zonetool::convert::iw7_iw8
 					const auto [replay_slot, replay_inserted] = files.try_emplace(replay_file, replay);
 					replay_slot->second.limit = std::max(replay_slot->second.limit, replay.limit);
 					roles[static_cast<std::size_t>(replay_role)].push_back(replay_file);
+				}
+			}
+
+			// A stock layer's alpha, reveal and thickness map as IW7 keeps it.
+			for (auto i = 0; stock_layer && material && i < material->textureCount; i++)
+			{
+				const auto& texture = material->textureTable[i];
+				const auto image = texture.semantic == iw7::TS_ALPHA_REVEAL_THICKNESS_MAP && texture_layer(texture) == layer
+					? source.resolve(iw7::ASSET_TYPE_IMAGE, texture.image) : nullptr;
+				if (image && image->name && !builtin_image(asset_name(image->name), image_role::color))
+				{
+					const auto file = file_name(asset_name(image->name)) + "_replay";
+					files.try_emplace(file, image_file{image, image_role::replay_reveal});
+					roles[static_cast<std::size_t>(image_role::replay_reveal)].push_back(file);
+					break;
 				}
 			}
 
@@ -1712,8 +1764,41 @@ namespace zonetool::convert::iw7_iw8
 			kinds[static_cast<std::size_t>(kind.kind)]++;
 			flags += flag_wave(material).has_value();
 			missing += material == nullptr;
-			write_json_async(output.extracted / "materials" / (name + ".json"), export_material(material, images, kind, layer,
-				light_unit_scale(source), output.decal_range_materials.contains(name)), 16);
+			auto exported = export_material(material, images, kind, layer, light_unit_scale(source),
+				output.decal_range_materials.contains(name));
+			// A stock layered surface's material names its layers: how each blends (by its weight, or multiplying), the
+			// sharpness of its reveal ramp, and whether its alpha, reveal and thickness map holds an alpha and a reveal.
+			if (const auto stock = output.stock_layered_materials.find(name); stock != output.stock_layered_materials.end())
+			{
+				auto layers = json::array();
+				for (auto stock_layer = 1; stock_layer < stock->second; stock_layer++)
+				{
+					auto entry = json{{"material", std::format("{}__layer{}", name, stock_layer)},
+						{"multiply", material_layer_token(material, stock_layer).starts_with('m')}};
+					if (const auto reveal = material_layer_reveal(material, stock_layer))
+					{
+						entry["reveal"] = *reveal;
+					}
+
+					for (auto i = 0; material && i < material->textureCount; i++)
+					{
+						const auto& texture = material->textureTable[i];
+						const auto image = texture.semantic == iw7::TS_ALPHA_REVEAL_THICKNESS_MAP && texture_layer(texture) == stock_layer
+							? source.resolve(iw7::ASSET_TYPE_IMAGE, texture.image) : nullptr;
+						if (image && image->name)
+						{
+							entry["alpha"] = packed_channel(asset_name(image->name), 'a').has_value();
+							break;
+						}
+					}
+
+					layers.push_back(std::move(entry));
+				}
+
+				exported["replayLayers"] = std::move(layers);
+			}
+
+			write_json_async(output.extracted / "materials" / (name + ".json"), std::move(exported), 16);
 		}
 
 		const auto written = std::ranges::count_if(files, [](const auto& entry)

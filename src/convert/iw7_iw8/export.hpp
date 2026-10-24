@@ -65,6 +65,9 @@ namespace zonetool::convert::iw7_iw8
 		// The layers of layered IW7 materials (techsets "..._b1..._b2..."), which convert as materials of their own: by
 		// name in the extraction, the layer (1 to 3) of the material that `materials` holds.
 		std::map<std::string, int> material_layers;
+		// The materials whose layered surfaces draw as one stock Replay layered surface (material_stock_layered), with
+		// their layer count; their layers are materials of their own (material_layers) without surfaces.
+		std::map<std::string, int> stock_layered_materials;
 		// The strings of the map's scripts that can name sound aliases (createfx loop sounds, playsound): export_sounds
 		// writes the aliases of the map's sound bank among them.
 		std::set<std::string> sound_names;
@@ -246,11 +249,23 @@ namespace zonetool::convert::iw7_iw8
 		{
 			return 8u * static_cast<unsigned int>(layer - 1);
 		}
+
+		// The tangent frame of the n-th normal-mapped layer after the material's first (n from 0), after the UVs of the
+		// layers.
+		static constexpr unsigned int tangent(const int layers, const unsigned int n)
+		{
+			return uv(layers) + 4u * n;
+		}
 	};
 	layer_vertex_layout material_layer_vertex_layout(const iw7::Material* material);
 	// The reveal sharpness of a layer (1 to max_material_layer) that blends by its reveal map (its token holds
 	// v<layer>), none for a layer that blends by its weight alone.
 	std::optional<float> material_layer_reveal(const iw7::Material* material, int layer);
+	// Whether a layered material draws as one stock Replay layered surface (MW120R_STOCK_WORLD): two to four layers, each
+	// blending over the ones before by its weight (b) or multiplying them (m), as Replay's stock twc4 world shader does.
+	bool material_stock_layered(const iw7::Material* material);
+	// Whether a layer (0 to max_material_layer) of a material has a normal map of its own (nl, nal, nbl).
+	bool material_layer_normal_map(const iw7::Material* material, int layer);
 
 	// The brush model of trigger model N of the map entities: the trigger models follow the world's brush models.
 	unsigned int trigger_brush_model(const source_map& source, unsigned int trigger);
@@ -276,6 +291,11 @@ namespace zonetool::convert::iw7_iw8
 		double binormal_sign{};
 		std::array<double, 2> uv{}, lightmap_uv{};
 		std::array<int, 4> color{};
+		// A stock layered surface's vertex (MW120R_STOCK_WORLD): the UV of each layer after the first, and the tangent
+		// transform of each (four bytes of a 2x2 matrix as Replay decodes them, byte * 2 / 255 - 1; 0 keeps the
+		// surface's own frame). Its colour holds the layers' weights.
+		std::optional<std::vector<std::array<double, 2>>> layer_uvs;
+		std::optional<std::vector<std::uint32_t>> layer_transforms;
 	};
 
 	struct glass_pane

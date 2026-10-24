@@ -310,6 +310,74 @@ namespace zonetool::convert::iw7_iw8
 				const auto at = static_cast<std::size_t>(tris.vertexLayerData) + static_cast<std::size_t>(index) * layout.size + offset;
 				return zone->vld.data && layout.size && at + size <= zone->vertexLayerDataSize ? zone->vld.data + at : nullptr;
 			};
+			const auto layer_uv = [&](const std::uint16_t index, const int layer) -> std::optional<std::array<float, 2>>
+			{
+				const auto* bytes = layer_bytes(index, layer_vertex_layout::uv(layer), 8);
+				if (!bytes)
+				{
+					return std::nullopt;
+				}
+
+				std::array<float, 2> uv{};
+				std::memcpy(uv.data(), bytes, sizeof(uv));
+				return std::isfinite(uv[0]) && std::isfinite(uv[1]) ? std::optional(uv) : std::nullopt;
+			};
+
+			// A stock layered surface (MW120R_STOCK_WORLD) draws as one surface with Replay's twc4 world shader, which blends
+			// its layers as IW7 does (weights, reveal ramp, per-layer UVs and tangent frames): its vertices keep IW7's layer
+			// weights in their colour, each layer's UV and each layer's tangent transform. IW7 keeps the transform of each
+			// normal-mapped layer after the material's first (whose frame is the vertex's own) as four bytes of a 2x2 matrix
+			// decoded byte / 127 - 1; Replay decodes byte * 2 / 255 - 1. The layers are materials of their own, for their
+			// images, without surfaces.
+			if (lightmap >= 0 && classify_material(resolved).kind == surface_kind::opaque && material_stock_layered(resolved))
+			{
+				std::array<std::optional<unsigned int>, max_material_layer> tangents{};
+				for (auto layer = 0, normal_mapped = 0; layer < layers; layer++)
+				{
+					if (material_layer_normal_map(resolved, layer))
+					{
+						if (normal_mapped++ && layer)
+						{
+							tangents[layer] = layer_vertex_layout::tangent(layers, static_cast<unsigned int>(normal_mapped - 2));
+						}
+					}
+				}
+
+				auto& merged = result.front();
+				for (std::size_t v = 0; v < merged.vertices.size(); v++)
+				{
+					const auto& source_vertex = vertex(order[v]);
+					auto& target = merged.vertices[v];
+					target.color = {source_vertex.color.array[0], source_vertex.color.array[1], source_vertex.color.array[2],
+						source_vertex.color.array[3]};
+					auto& uvs = target.layer_uvs.emplace();
+					auto& transforms = target.layer_transforms.emplace();
+					for (auto layer = 1; layer < layers; layer++)
+					{
+						const auto uv = layer_uv(order[v], layer);
+						uvs.push_back(uv ? std::array<double, 2>{(*uv)[0], (*uv)[1]} : target.uv);
+						std::uint32_t transform{};
+						if (const auto* bytes = tangents[layer] ? layer_bytes(order[v], *tangents[layer], 4) : nullptr)
+						{
+							for (auto k = 0; k < 4; k++)
+							{
+								const auto value = bytes[k] / 127.0f - 1.0f;
+								transform |= static_cast<std::uint32_t>(std::clamp(std::lround((value + 1.0f) * 127.5f), 0l, 255l)) << (8 * k);
+							}
+						}
+
+						transforms.push_back(transform);
+					}
+				}
+
+				output.stock_layered_materials.emplace(material_name, layers);
+				for (auto layer = 1; layer < layers; layer++)
+				{
+					output.world_materials.insert(output.add_material_layer(source, surface.material, layer));
+				}
+
+				return result;
+			}
 
 			for (auto layer = 1; layer < layers; layer++)
 			{
@@ -330,19 +398,6 @@ namespace zonetool::convert::iw7_iw8
 					continue;
 				}
 
-				const auto layer_uv = [&](const std::uint16_t index) -> std::optional<std::array<float, 2>>
-				{
-					const auto* bytes = layer_bytes(index, layer_vertex_layout::uv(layer), 8);
-					if (!bytes)
-					{
-						return std::nullopt;
-					}
-
-					std::array<float, 2> uv{};
-					std::memcpy(uv.data(), bytes, sizeof(uv));
-					return std::isfinite(uv[0]) && std::isfinite(uv[1]) ? std::optional(uv) : std::nullopt;
-				};
-
 				// A layer that blends by its reveal map keeps its sharpness k in red as sqrt(k / 2) (IW7 maps keep 0.015 to 1:
 				// within 1% down to 0.015): the pipeline ramps the reveal by the weight (kRevealLayerFlag), and IW7 tints no
 				// layer by its vertex colour.
@@ -354,7 +409,7 @@ namespace zonetool::convert::iw7_iw8
 				for (std::size_t v = 0; v < overlay.size(); v++)
 				{
 					overlay[v].color = {red, 255, 255, weight(order[v])};
-					if (const auto uv = layer_uv(order[v]))
+					if (const auto uv = layer_uv(order[v], layer))
 					{
 						overlay[v].uv = {(*uv)[0], (*uv)[1]};
 					}

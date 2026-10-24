@@ -42,6 +42,8 @@ struct ImportOptions
     // An extraction in the layout of the extraction cache (extracted/, skeleton/ and their complete files) that another
     // front end wrote, for example from IW7 zones. It replaces the OAT Unlinker.
     std::filesystem::path extraction;
+    // The zone folder of the Replay install (beside --replay's executable): stock technique sets and materials.
+    std::filesystem::path replayZones;
 };
 
 struct PreparedXModel

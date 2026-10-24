@@ -119,6 +119,10 @@ struct Surface
     std::vector<std::uint8_t> vertexBones;
     // The bones that each vertex blends, strongest first, with their weights (empty: every vertex on its bone alone).
     std::vector<std::vector<std::pair<std::uint8_t, float>>> vertexWeights;
+    // A stock layered surface of an extraction (its vertex colours hold the layer weights): per vertex, the UV and the
+    // tangent transform (four bytes of a 2x2 matrix; 0 keeps the surface's frame) of each layer after the first.
+    std::vector<std::vector<Vec2>> layerUvs;
+    std::vector<std::vector<std::uint32_t>> layerTransforms;
 };
 
 struct BrushModel
@@ -2158,6 +2162,8 @@ struct RawVertex
     double binormal_sign{};
     std::array<double, 2> uv{}, lightmap_uv{};
     std::optional<std::array<int, 4>> color;
+    std::optional<std::vector<std::array<double, 2>>> layer_uvs;
+    std::optional<std::vector<std::uint32_t>> layer_transforms;
 };
 
 struct RawSurface
@@ -2237,6 +2243,14 @@ RawSurface RawSurfaceFrom(const Json &source)
             for (std::size_t channel = 0; channel < 4; ++channel)
                 (*vertex.color)[channel] = color.at(channel).get<int>();
         }
+        if (item.contains("layer_uvs"))
+        {
+            auto &uvs = vertex.layer_uvs.emplace();
+            for (const auto &uv : item.at("layer_uvs"))
+                uvs.push_back(RawVector<2>(uv));
+        }
+        if (item.contains("layer_transforms"))
+            vertex.layer_transforms = item.at("layer_transforms").get<std::vector<std::uint32_t>>();
         output.vertices.push_back(vertex);
     }
     output.indices.reserve(indices.size());
@@ -2394,6 +2408,20 @@ Surface ReadWorldSurface(const RawSurface &source)
                 vertex.color[channel] = static_cast<std::uint8_t>(value);
             }
         }
+        if (item.layer_uvs)
+        {
+            if (!item.layer_transforms || item.layer_transforms->size() != item.layer_uvs->size() ||
+                item.layer_uvs->empty() || item.layer_uvs->size() > 3 ||
+                (!output.layerUvs.empty() && output.layerUvs.front().size() != item.layer_uvs->size()) ||
+                output.layerUvs.size() != output.vertices.size())
+                throw std::runtime_error("invalid stock layered surface vertex");
+            auto &uvs = output.layerUvs.emplace_back();
+            for (const auto &uv : *item.layer_uvs)
+                uvs.push_back(FloatVector(uv));
+            output.layerTransforms.push_back(*item.layer_transforms);
+        }
+        else if (!output.layerUvs.empty())
+            throw std::runtime_error("stock layered surface vertex without its layers");
         output.vertices.push_back(vertex);
     }
     output.indices.reserve(source.indices.size());
@@ -5960,7 +5988,12 @@ Json BuildRender(const Json &world, const VisibilityGroups &visibility,
             // atlas material (PrepareRenderAssets). Both read the same vertex records. A lightmapped surface of a
             // material with a stock Replay world material draws with that, from plain vertex records (layout 1) whose
             // lightmap UVs lie in the native lightmap (StockLightmapUv).
-            const bool stock = material.stockWorldMaterialIndex && surface.lightmap >= 0;
+            // A stock layered material draws its merged layered surfaces (each layer's UV and tangent transform per
+            // vertex); its other surfaces keep the generated materials and their overlays.
+            const bool stock = material.stockWorldMaterialIndex && surface.lightmap >= 0 &&
+                               (material.stockLayers ? surface.layerUvs.size() == surface.vertices.size() &&
+                                                           surface.layerUvs.front().size() + 1 == material.stockLayers
+                                                     : surface.layerUvs.empty());
             const unsigned materialIndex = stock ? material.stockWorldMaterialIndex : MaterialIndex(plan, material);
             std::ostringstream key;
             key << materialIndex;
@@ -5985,6 +6018,7 @@ Json BuildRender(const Json &world, const VisibilityGroups &visibility,
                                               {"indices", Json::array()},
                                               {"materialIndex", materialIndex},
                                               {"atlasVertexLayout", stock ? 1u : 3u},
+                                              {"stockLayers", stock ? std::max(material.stockLayers, 1u) : 0u},
                                               {"lightmapIndex", 0u},
                                               // Cut-outs draw in the opaque range, after their masked
                                               // depth prepass (the cut-out variants' coverage pass).
@@ -6064,6 +6098,12 @@ Json BuildRender(const Json &world, const VisibilityGroups &visibility,
                                                      vertex.binormalSign, vertex.authoredTangent)},
                              {"lightmapUV", encoded},
                              {"color", vertex.color}});
+                        if (stock && material.stockLayers)
+                        {
+                            auto &written = (*target)["vertices"].back();
+                            written["layerUVs"] = surface.layerUvs[sourceIndex];
+                            written["layerTransforms"] = surface.layerTransforms[sourceIndex];
+                        }
                         found = remap.emplace(sourceIndex, index).first;
                     }
                     (*target)["indices"].push_back(found->second);
@@ -11281,7 +11321,7 @@ PreparedMap PrepareFastfile(const ImportOptions &options)
                                              lightingMatch.lightUnitScale, nativeFog),
                             static_cast<unsigned>(sourceStaticModels.instances.size()),
                             entityLightVolume ? &*entityLightVolume : nullptr,
-                            lightingMatch.lightUnitScale, options.style == MapStyle::iw3);
+                            lightingMatch.lightUnitScale, options.style == MapStyle::iw3, options.replayZones);
     timing.lap("render assets");
     result.fxMaterialAliases = renderPlan.fxMaterialAliases;
     result.fxParticleMaterialData = renderPlan.fxParticleMaterialData;

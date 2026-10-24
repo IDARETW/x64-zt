@@ -56,6 +56,9 @@ struct MaterialPlan
     // Its stock Replay world material (MW120R_STOCK_WORLD: Replay's own world technique set and images,
     // additionalMaterials index + 1), 0 for none; its lightmapped surfaces draw with it.
     unsigned stockWorldMaterialIndex{};
+    // The layer count of its stock layered material (0: a single-layer one): its surfaces carry each layer's UV and
+    // tangent transform.
+    unsigned stockLayers{};
     // World surfaces with an IW3 detail map: row of RenderPlan::worldDetails
     // (a "_detail<row>" world material variant), -1 for none.
     int worldDetail{-1};
@@ -244,7 +247,8 @@ RenderPlan PrepareRenderAssets(const std::filesystem::path &exportRoot,
                                const std::string &surfaceShaderDefines = {},
                                unsigned staticModelInstances = 0,
                                const EntityLightVolume *entityLightVolume = nullptr,
-                               float lightUnitScale = 1.0f, bool iw3Effects = false);
+                               float lightUnitScale = 1.0f, bool iw3Effects = false,
+                               const std::filesystem::path &replayZones = {});
 
 // The map's IW3 loading-screen image (images/loadscreen_<map>, from its _load
 // zone or IWD) as a custom-map package preview: "MWRI", version 1, width,
