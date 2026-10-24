@@ -106,59 +106,110 @@ namespace zonetool::convert::iw7_iw8
 			return result;
 		}
 
-		// Draws a triangle, given by the directions of its corners from the viewpoint, on each face that it lies in
-		// front of. `shade` takes the face, the texel, the perspective-correct weights of the corners and the depth.
+		// Draws a triangle, given by the directions of its corners from the viewpoint, on each face of the cube: the part in
+		// front of the face, clipped at a plane just in front of the viewpoint. A large triangle that passes beside or
+		// behind the viewpoint (Breakneck's black hole rings, which reach around the map) keeps what each face sees of it;
+		// before, a triangle drew only on a face that all its corners lay in front of, and such triangles left holes with
+		// hard edges in the sky. `shade` takes the face, the texel, the perspective-correct weights of the corners and the
+		// depth.
 		template <typename Shade>
 		void rasterize(const std::array<vec3, 3>& directions, const std::size_t size, Shade&& shade)
 		{
+			struct corner
+			{
+				vec3 direction;
+				std::array<float, 3> weights;
+			};
+
 			const auto extent = static_cast<float>(size);
+			const auto plane = 1.0e-3f * std::sqrt(std::min({dot(directions[0], directions[0]), dot(directions[1], directions[1]),
+				dot(directions[2], directions[2])}));
+			const std::array<corner, 3> triangle{{{directions[0], {1.0f, 0.0f, 0.0f}}, {directions[1], {0.0f, 1.0f, 0.0f}},
+				{directions[2], {0.0f, 0.0f, 1.0f}}}};
 			for (auto f = 0u; f < cube_faces.size(); f++)
 			{
 				const auto& face = cube_faces[f];
-				std::array<float, 3> x{};
-				std::array<float, 3> y{};
-				std::array<float, 3> depth{};
-				auto in_front = true;
-				for (auto k = 0; k < 3 && in_front; k++)
+				std::vector<corner> polygon;
+				for (std::size_t k = 0; k < triangle.size(); k++)
 				{
-					const auto w = dot(directions[k], face.w);
-					in_front = w > 1.0e-4f * std::sqrt(dot(directions[k], directions[k]));
-					x[k] = in_front ? (dot(directions[k], face.u) / w + 1.0f) * 0.5f * extent : 0.0f;
-					y[k] = in_front ? (dot(directions[k], face.v) / w + 1.0f) * 0.5f * extent : 0.0f;
-					depth[k] = in_front ? 1.0f / w : 0.0f;
-				}
-
-				const auto edge = [&](const int a, const int b, const float px, const float py)
-				{
-					return (x[b] - x[a]) * (py - y[a]) - (y[b] - y[a]) * (px - x[a]);
-				};
-
-				const auto area = in_front ? edge(0, 1, x[2], y[2]) : 0.0f;
-				if (std::abs(area) < 1.0e-9f)
-				{
-					continue;
-				}
-
-				const auto last = static_cast<int>(size) - 1;
-				const auto left = std::max(0, static_cast<int>(std::floor(std::min({x[0], x[1], x[2]}))));
-				const auto right = std::min(last, static_cast<int>(std::ceil(std::max({x[0], x[1], x[2]}))));
-				const auto top = std::max(0, static_cast<int>(std::floor(std::min({y[0], y[1], y[2]}))));
-				const auto bottom = std::min(last, static_cast<int>(std::ceil(std::max({y[0], y[1], y[2]}))));
-				for (auto py = top; py <= bottom; py++)
-				{
-					for (auto px = left; px <= right; px++)
+					const auto& a = triangle[k];
+					const auto& b = triangle[(k + 1) % triangle.size()];
+					const auto da = dot(a.direction, face.w) - plane;
+					const auto db = dot(b.direction, face.w) - plane;
+					if (da >= 0.0f)
 					{
-						const auto cx = static_cast<float>(px) + 0.5f;
-						const auto cy = static_cast<float>(py) + 0.5f;
-						const std::array<float, 3> e{edge(1, 2, cx, cy) / area, edge(2, 0, cx, cy) / area, edge(0, 1, cx, cy) / area};
-						if (e[0] < 0.0f || e[1] < 0.0f || e[2] < 0.0f)
+						polygon.push_back(a);
+					}
+
+					if ((da >= 0.0f) != (db >= 0.0f))
+					{
+						const auto t = da / (da - db);
+						corner between{};
+						for (auto c = 0; c < 3; c++)
 						{
-							continue;
+							between.direction[c] = a.direction[c] + (b.direction[c] - a.direction[c]) * t;
+							between.weights[c] = a.weights[c] + (b.weights[c] - a.weights[c]) * t;
 						}
 
-						const auto inverse = e[0] * depth[0] + e[1] * depth[1] + e[2] * depth[2];
-						const std::array<float, 3> weights{e[0] * depth[0] / inverse, e[1] * depth[1] / inverse, e[2] * depth[2] / inverse};
-						shade(f, static_cast<std::size_t>(py) * size + static_cast<std::size_t>(px), weights, inverse);
+						polygon.push_back(between);
+					}
+				}
+
+				for (std::size_t fan = 1; fan + 1 < polygon.size(); fan++)
+				{
+					const std::array<const corner*, 3> part{&polygon[0], &polygon[fan], &polygon[fan + 1]};
+					std::array<float, 3> x{};
+					std::array<float, 3> y{};
+					std::array<float, 3> depth{};
+					for (auto k = 0; k < 3; k++)
+					{
+						const auto w = dot(part[k]->direction, face.w);
+						x[k] = (dot(part[k]->direction, face.u) / w + 1.0f) * 0.5f * extent;
+						y[k] = (dot(part[k]->direction, face.v) / w + 1.0f) * 0.5f * extent;
+						depth[k] = 1.0f / w;
+					}
+
+					const auto edge = [&](const int a, const int b, const float px, const float py)
+					{
+						return (x[b] - x[a]) * (py - y[a]) - (y[b] - y[a]) * (px - x[a]);
+					};
+
+					const auto area = edge(0, 1, x[2], y[2]);
+					if (std::abs(area) < 1.0e-9f)
+					{
+						continue;
+					}
+
+					const auto last = static_cast<int>(size) - 1;
+					const auto left = std::max(0, static_cast<int>(std::floor(std::min({x[0], x[1], x[2]}))));
+					const auto right = std::min(last, static_cast<int>(std::ceil(std::max({x[0], x[1], x[2]}))));
+					const auto top = std::max(0, static_cast<int>(std::floor(std::min({y[0], y[1], y[2]}))));
+					const auto bottom = std::min(last, static_cast<int>(std::ceil(std::max({y[0], y[1], y[2]}))));
+					for (auto py = top; py <= bottom; py++)
+					{
+						for (auto px = left; px <= right; px++)
+						{
+							const auto cx = static_cast<float>(px) + 0.5f;
+							const auto cy = static_cast<float>(py) + 0.5f;
+							const std::array<float, 3> e{edge(1, 2, cx, cy) / area, edge(2, 0, cx, cy) / area, edge(0, 1, cx, cy) / area};
+							if (e[0] < 0.0f || e[1] < 0.0f || e[2] < 0.0f)
+							{
+								continue;
+							}
+
+							const auto inverse = e[0] * depth[0] + e[1] * depth[1] + e[2] * depth[2];
+							std::array<float, 3> weights{};
+							for (auto k = 0; k < 3; k++)
+							{
+								const auto share = e[k] * depth[k] / inverse;
+								for (auto c = 0; c < 3; c++)
+								{
+									weights[c] += share * part[k]->weights[c];
+								}
+							}
+
+							shade(f, static_cast<std::size_t>(py) * size + static_cast<std::size_t>(px), weights, inverse);
+						}
 					}
 				}
 			}
@@ -190,8 +241,30 @@ namespace zonetool::convert::iw7_iw8
 				material_class kind{};
 				const texture* colors{};
 				std::array<float, 4> tint{};
+				// The technique multiplies the colour by the vertex colour (techsets *_vc_*, *_evc_*: the black hole's black
+				// core is a white map times black vertices).
+				bool vertex_color{};
 				std::vector<vec3> directions;
 				std::vector<vec3> normals;
+			};
+
+			const auto uses_vertex_color = [](const iw7::Material* material)
+			{
+				if (!material || !material->techniqueSet)
+				{
+					return false;
+				}
+
+				for (const auto token : std::views::split(asset_name(material->techniqueSet->name), '_'))
+				{
+					const std::string_view name(token.begin(), token.end());
+					if (name == "vc" || name == "evc")
+					{
+						return true;
+					}
+				}
+
+				return false;
 			};
 
 			std::map<std::string, std::vector<mesh_surface>> meshes;
@@ -225,6 +298,7 @@ namespace zonetool::convert::iw7_iw8
 					draw.mesh = &surface;
 					draw.kind = classify_material(surface.material);
 					draw.tint = material_color_tint(surface.material);
+					draw.vertex_color = uses_vertex_color(surface.material);
 					auto colors = textures.find(surface.material);
 					if (colors == textures.end())
 					{
@@ -314,6 +388,20 @@ namespace zonetool::convert::iw7_iw8
 							}
 
 							auto texel_color = draw.colors->sample(uv[0], uv[1]);
+							if (draw.vertex_color)
+							{
+								for (auto channel = 0; channel < 4; channel++)
+								{
+									auto value = 0.0f;
+									for (auto k = 0; k < 3; k++)
+									{
+										value += weights[k] * draw.mesh->vertices[triangle[k]].color[channel];
+									}
+
+									texel_color[channel] *= channel < 3 ? srgb_to_linear(value) : value;
+								}
+							}
+
 							if (kind == surface_kind::alpha_test && texel_color[3] < 0.5f)
 							{
 								return;
@@ -654,18 +742,22 @@ namespace zonetool::convert::iw7_iw8
 					value[c] += (values.plain[c] + (values.sunward[c] - values.plain[c]) * toward - value[c]) * amount;
 				}
 			};
-			sky_faces sky{size};
+			// A sky that draws distant models (Breakneck's black hole, Frontier's Neptune) keeps them at 1024 texels a face
+			// at least: the cube map of the sky alone samples into it.
+			const auto sky_size = output.distant_models.empty() && output.distant_surfaces.empty() ? size : std::max<std::size_t>(size, 1024);
+			const auto sky_texels = sky_size * sky_size;
+			sky_faces sky{sky_size};
 			// The faces sample on their own threads.
 			std::array<unsigned, 6> face_indices{0, 1, 2, 3, 4, 5};
 			std::for_each(std::execution::par, face_indices.begin(), face_indices.end(), [&](const unsigned face)
 			{
 				const auto& axis = cube_faces[face];
-				sky.colors[face].resize(texels);
-				sky.depths[face].assign(texels, 0.0f);
-				for (std::size_t t = 0; t < texels; t++)
+				sky.colors[face].resize(sky_texels);
+				sky.depths[face].assign(sky_texels, 0.0f);
+				for (std::size_t t = 0; t < sky_texels; t++)
 				{
-					const auto a = (static_cast<float>(t % size) + 0.5f) / static_cast<float>(size) * 2.0f - 1.0f;
-					const auto b = (static_cast<float>(t / size) + 0.5f) / static_cast<float>(size) * 2.0f - 1.0f;
+					const auto a = (static_cast<float>(t % sky_size) + 0.5f) / static_cast<float>(sky_size) * 2.0f - 1.0f;
+					const auto b = (static_cast<float>(t / sky_size) + 0.5f) / static_cast<float>(sky_size) * 2.0f - 1.0f;
 					const vec3 view{axis.w[0] + a * axis.u[0] + b * axis.v[0], axis.w[1] + a * axis.u[1] + b * axis.v[1],
 						axis.w[2] + a * axis.u[2] + b * axis.v[2]};
 					const auto sample = sample_cube(faces, {dot(view, axes[0]), dot(view, axes[1]), dot(view, axes[2])});
@@ -678,7 +770,7 @@ namespace zonetool::convert::iw7_iw8
 			draw_distant_models(source, output, sky, exposure);
 
 			DirectX::ScratchImage cube;
-			if (FAILED(cube.InitializeCube(DXGI_FORMAT_B8G8R8A8_UNORM, size, size, 1, 1)))
+			if (FAILED(cube.InitializeCube(DXGI_FORMAT_B8G8R8A8_UNORM, sky_size, sky_size, 1, 1)))
 			{
 				continue;
 			}
@@ -686,9 +778,9 @@ namespace zonetool::convert::iw7_iw8
 			for (auto face = 0u; face < 6; face++)
 			{
 				const auto& target = *cube.GetImage(0, face, 0);
-				for (std::size_t t = 0; t < texels; t++)
+				for (std::size_t t = 0; t < sky_texels; t++)
 				{
-					auto* pixel = target.pixels + (t / size) * target.rowPitch + (t % size) * 4;
+					auto* pixel = target.pixels + (t / sky_size) * target.rowPitch + (t % sky_size) * 4;
 					for (auto channel = 0; channel < 3; channel++)
 					{
 						// The masks: blue, green, red and alpha bytes.
@@ -709,7 +801,7 @@ namespace zonetool::convert::iw7_iw8
 			}
 
 			ZONETOOL_INFO("iw7: sky \"%s\": %zux%zu faces, mean luminance %g, 99.9th percentile %g, exposure %g, intensity %g %g %g, "
-				"rotation forward %g %g %g", image->name, size, size, mean, *bright, exposure, scale[0], scale[1], scale[2], axes[0][0],
+				"rotation forward %g %g %g", image->name, sky_size, sky_size, mean, *bright, exposure, scale[0], scale[1], scale[2], axes[0][0],
 				axes[0][1], axes[0][2]);
 			return name;
 		}

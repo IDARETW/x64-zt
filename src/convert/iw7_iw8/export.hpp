@@ -267,6 +267,8 @@ namespace zonetool::convert::iw7_iw8
 		std::array<float, 3> position{};
 		std::array<float, 3> normal{};
 		std::array<float, 2> uv{};
+		// RGBA from 0 to 1 (white for motion vertices, which keep no colour).
+		std::array<float, 4> color{1.0f, 1.0f, 1.0f, 1.0f};
 	};
 
 	struct mesh_surface

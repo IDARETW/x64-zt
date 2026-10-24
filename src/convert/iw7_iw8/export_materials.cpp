@@ -565,6 +565,33 @@ namespace zonetool::convert::iw7_iw8
 			return kind.kind == surface_kind::opaque || sort < 7 ? 4 : std::min(sort + 2, 63u);
 		}
 
+		// Whether IW7 draws a material with a depth bias over the surface beneath it: the polygon offset (1 or 2; 3 is the
+		// shadow maps') of the state of its emissive technique (8) or lit ones (13 to 26: the lprobe techniques). Breakneck:
+		// 258 of the decal camera region's 282 materials have it, and none of the other 5408.
+		bool iw7_decal_offset(const iw7::Material* material)
+		{
+			if (!material || !material->stateBitsTable)
+			{
+				return false;
+			}
+
+			for (auto technique = 8; technique <= 26; technique++)
+			{
+				const auto state = material->stateBitsEntry[technique];
+				if ((technique == 8 || technique >= 13) && state != 0xFF && state < material->stateBitsCount)
+				{
+					const auto offset = (material->stateBitsTable[state].loadBits[1] & iw7::GFXS1_POLYGON_OFFSET_MASK) >>
+						iw7::GFXS1_POLYGON_OFFSET_SHIFT;
+					if (offset == 1 || offset == 2)
+					{
+						return true;
+					}
+				}
+			}
+
+			return false;
+		}
+
 		// The value of a constant of a material (names keep 12 characters).
 		std::optional<std::array<float, 4>> material_constant(const iw7::Material* material, const std::string_view name)
 		{
@@ -667,12 +694,12 @@ namespace zonetool::convert::iw7_iw8
 			}
 
 			const auto shadow = !kind.unlit && kind.solid();
-			// IW7's decal camera region (2: decal sheets, stripes, signs, scrapes) draws its surfaces over the coplanar
-			// surface beneath with a depth bias; the pipeline's rank nudge alone left the wayfinding signs half hidden
-			// in the wall (owner test of 58aac89). Its lit pass takes IW3's decal polygon offset, which the pipeline draws
-			// biased; an opaque surface of the region keeps none (IW3 maps: Discovery's buried sign).
-			const auto decal_offset = !layer && material && material->cameraRegion == 2 && kind.kind != surface_kind::opaque &&
-				!kind.unlit;
+			// IW7 draws its decals (decal sheets, stripes, signs, scrapes) over the coplanar surface beneath with a depth
+			// bias: the polygon offset of the material's lit or emissive technique state. Its lit pass takes IW3's decal
+			// polygon offset, which the pipeline draws biased; the pipeline's rank nudge alone left the wayfinding signs
+			// half hidden in the wall (owner test of 58aac89). The decal camera region (2) stood in for the state before,
+			// and its opaque and unlit decals (stencils, lit signs) fought the wall under them.
+			const auto decal_offset = !layer && iw7_decal_offset(material);
 			json result =
 			{
 				{"$schema", "http://openassettools.dev/schema/material.v1.json"},
