@@ -2,6 +2,7 @@
 #include "../common/fs_util.h"
 #include "../common/log.h"
 #include "../dump/xmodel_dump.h"
+#include "../dump/xsurface_convert.h"
 #include "../iw8_focus_structs.h"
 #include "../iw8_structs.h"
 #include "../zone/iw8_zone.h"
@@ -74,7 +75,7 @@ iw8_focus::XModel buildStruct(const cx::Iw8XModelRecord &rec)
     stampPtr(xm.partClassification, rec.numBones ? PTR_FOLLOWS : PTR_NULL);
     stampPtr(xm.baseMat, rec.numBones ? PTR_FOLLOWS : PTR_NULL);
     stampPtr(xm.ikHingeAxis, PTR_NULL);
-    stampPtr(xm.reactiveMotionInfo, PTR_NULL);
+    stampPtr(xm.reactiveMotionInfo, rec.reactiveMotion ? PTR_FOLLOWS : PTR_NULL);
     stampPtr(xm.materialHandles, rec.numsurfs ? PTR_FOLLOWS : PTR_NULL); // [numsurfs] follows
     stampPtr(xm.boneInfo, rec.numBones ? PTR_FOLLOWS : PTR_NULL);
     stampPtr(xm.himipRadiusInvSq,
@@ -108,6 +109,33 @@ iw8_focus::XModel buildStruct(const cx::Iw8XModelRecord &rec)
         stampPtr(li.surfs, PTR_NULL);             // XSurface*    cross-ref (verify-phase alias)
     }
     return xm;
+}
+
+// ReactiveMotionModelInfo in Load_ReactiveMotionModelInfo's order (0xE29690, also its preload 0xE2E890): the 0x60-byte
+// record 16-aligned, then the part tweaks and the parts (numParts each, 32 bytes, 16-aligned). The record's
+// modelPartsBuffer (+0x20) stays zero: the load creates the GPU buffer of the parts. No part tweaks (flags 0).
+void writeReactiveMotion(ZoneWriter &zw, const cx::Iw8ReactiveMotion &motion)
+{
+    uint8_t info[0x60]{};
+    std::memcpy(info, motion.wind.data(), sizeof(float) * 4);
+    std::memcpy(info + 0x10, &PTR_NULL, sizeof(uint64_t));
+    std::memcpy(info + 0x18, &PTR_FOLLOWS, sizeof(uint64_t));
+    info[0x50] = static_cast<uint8_t>(motion.parts.size());
+    zw.align(15);
+    zw.write(info, sizeof(info));
+    zw.align(15);
+    for (const auto &part : motion.parts)
+    {
+        uint8_t packed[32]{};
+        const uint16_t stiffness = xsurf_conv::floatToHalf(part.stiffness);
+        const uint32_t rotation = xsurf_conv::packQuaternion(part.rotation.data());
+        std::memcpy(packed, part.center.data(), 12);
+        std::memcpy(packed + 12, &stiffness, 2);
+        std::memcpy(packed + 14, &part.parent, 2);
+        std::memcpy(packed + 16, part.pivot.data(), 12);
+        std::memcpy(packed + 28, &rotation, 4);
+        zw.write(packed, sizeof(packed));
+    }
 }
 
 // The asset body callback: struct -> TEMP_PRELOAD, trailing name+arrays -> VIRTUAL.
@@ -155,6 +183,8 @@ void emitBody(ZoneWriter &zw, const cx::Iw8XModelRecord &rec,
     writeArray(rec.skeleton.trans, 3);
     writeArray(rec.skeleton.partClassification, 0);
     writeArray(rec.skeleton.baseMat, 15);
+    if (rec.reactiveMotion)
+        writeReactiveMotion(zw, *rec.reactiveMotion);
     // materialHandles[numsurfs] : packed references to the previously emitted Material assets.
     if (rec.numsurfs)
     {
@@ -261,6 +291,24 @@ void writeXModel(ZoneWriter &zw, const cx::Iw8XModelRecord &rec)
                 throw std::runtime_error("writeXModel: negative bone extent for " + rec.name);
         if (!std::isfinite(bone.radiusSquared) || bone.radiusSquared < 0)
             throw std::runtime_error("writeXModel: invalid bone radius for " + rec.name);
+    }
+    if (rec.reactiveMotion)
+    {
+        // The reactive-motion sim turns at most 16 parts per model (its part-count field is 4 bits).
+        const auto &motion = *rec.reactiveMotion;
+        if (motion.parts.empty() || motion.parts.size() > 16)
+            throw std::runtime_error("writeXModel: reactive motion needs 1 to 16 parts for " + rec.name);
+        finite(motion.wind);
+        for (size_t index = 0; index < motion.parts.size(); ++index)
+        {
+            const auto &part = motion.parts[index];
+            finite(part.center);
+            finite(part.pivot);
+            finite(part.rotation);
+            if (!std::isfinite(part.stiffness) || part.stiffness < 0 ||
+                (part.parent != 0xFFFF && part.parent >= index))
+                throw std::runtime_error("writeXModel: invalid reactive-motion part for " + rec.name);
+        }
     }
     finite(rec.boundsMid);
     finite(rec.boundsHalf);

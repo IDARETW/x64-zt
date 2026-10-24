@@ -39,6 +39,8 @@ struct MaterialPlan
     // Model falloff layers: row of RenderPlan::modelFalloffDefines (0 = the
     // stock ramp), packed into bits 10-15 of the model vertex metadata.
     unsigned falloffIndex{};
+    // IW7 reactive foliage: its static-model surfaces bend by Replay's reactive-motion sim (XSurface flag 4).
+    bool reactiveMotion{};
     unsigned worldMaterialIndex{};
     // Atlas world surfaces with an IW3 detail map: row of RenderPlan::worldDetails
     // (a "_detail<row>" world material variant), -1 for none.

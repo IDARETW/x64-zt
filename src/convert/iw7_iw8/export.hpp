@@ -379,6 +379,9 @@ namespace zonetool::convert::iw7_iw8
 	};
 
 	std::optional<flag_wave_parameters> flag_wave(const iw7::Material* material);
+	// Whether a material bends its surfaces by reactive motion (the *_reactivemotion_* techsets, around players and
+	// explosions), which the pipeline's static models take from Replay's reactive-motion sim.
+	bool reactive_motion(const iw7::Material* material);
 	void export_loadscreen(const source_map& source, const extraction& output);
 	void export_models(const source_map& source, extraction& output);
 	// Writes the animations of the animated scriptables (IW3 XAnim dumps, extracted/xanim/<name>.iw3.json) and the

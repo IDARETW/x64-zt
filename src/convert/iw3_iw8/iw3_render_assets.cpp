@@ -90,6 +90,9 @@ struct SourceMaterial
     // shader, MAP_IW7_FLAG_WAVE; iw7FlagClassic: the flag shader's three fixed waves, MAP_IW7_FLAG_CLASSIC).
     std::optional<std::array<float, 12>> iw7FlagWave;
     bool iw7FlagClassic{};
+    // An extraction's IW7 reactive foliage (iw7ReactiveMotion): static models bend by Replay's reactive-motion sim
+    // (MAP_REACTIVE_MOTION).
+    bool reactiveMotion{};
     // IW3 wc_water (waterMap water_t, exported by OAT): the M x N wave spectrum
     // H0 (re, im pairs) with each wave vector's wTerm, and the water_l_sun
     // constants envMapParms and waterColor.
@@ -2333,6 +2336,7 @@ SourceMaterial ReadMaterial(const std::filesystem::path &root,
         material.iw7FlagClassic = source.value("iw7FlagClassic", false);
         material.flagWave = true;
     }
+    material.reactiveMotion = source.value("iw7ReactiveMotion", false);
     // caulk_shadow (Greenband's gnbr_caulk_shadow, an mc_unlit material) is
     // invisible geometry that only casts sun shadow, as shadowcaster is.
     const bool caulkShadow = name.find("caulk_shadow") != std::string::npos;
@@ -5179,6 +5183,7 @@ RenderPlan PrepareRenderAssets(const std::filesystem::path &exportRoot, const Js
         item.blend = material.blend;
         item.sourceSurfaceTypeBits = material.surfaceTypeBits;
         item.environment = material.environment;
+        item.reactiveMotion = material.reactiveMotion;
         if (atlasMaterial(material))
         {
             item.tile = tileNumbers.at(TileKey(material));
@@ -6550,15 +6555,16 @@ RenderPlan PrepareRenderAssets(const std::filesystem::path &exportRoot, const Js
             return found->second;
         };
         // Flag cloth: IW3's (mc_*_flag_*: IW3's wave, wave 0) and an extraction's
-        // IW7 flags (IW7's two waves with each material's parameters, waves 1 on):
-        // one variant per surface kind and wave whose vertex shader moves the
-        // surface. Static models only: the time is view row 4 .w of the
+        // IW7 flags (IW7's two waves with each material's parameters, waves 1 on),
+        // and IW7 reactive foliage (Replay's reactive-motion sim, alone or with a
+        // wave): one variant per surface kind and motion whose vertex shader moves
+        // the surface. Static models only: the time is view row 4 .w of the
         // static-model layout; DObj views use another layout.
         std::map<std::string, unsigned> flagWaves{{"#define MAP_FLAG_WAVE 1\n", 0u}};
         std::map<std::pair<unsigned, unsigned>, Json> flagTechsets;
         const auto waveOf = [&](const SourceMaterial &source)
             -> std::pair<unsigned, std::string> {
-            std::string defines = "#define MAP_FLAG_WAVE 1\n";
+            std::string defines = source.flagWave ? "#define MAP_FLAG_WAVE 1\n" : "";
             if (source.iw7FlagWave)
             {
                 const auto &wave = *source.iw7FlagWave;
@@ -6578,12 +6584,14 @@ RenderPlan PrepareRenderAssets(const std::filesystem::path &exportRoot, const Js
                                   wave[7], wave[8], wave[9], wave[10], wave[11]);
                 defines = text;
             }
+            if (source.reactiveMotion)
+                defines += "#define MAP_REACTIVE_MOTION 1\n";
             const auto index =
                 flagWaves.try_emplace(defines, static_cast<unsigned>(flagWaves.size())).first->second;
             return {index, defines};
         };
         const auto flagSuffix = [](const unsigned wave) {
-            return wave ? "_iw7flag" + std::to_string(wave) : std::string("_flag");
+            return wave ? "_motion" + std::to_string(wave) : std::string("_flag");
         };
         const auto flagVariant = [&](const SourceMaterial &source,
                                      const unsigned kind) -> const Json & {
@@ -6649,10 +6657,11 @@ RenderPlan PrepareRenderAssets(const std::filesystem::path &exportRoot, const Js
             const unsigned blend = source.kind == SurfaceKind::glass ? source.blend : 0u;
             const bool detailed = !source.detail.empty() && source.kind == SurfaceKind::opaque;
             const int detailIndex = detailed ? static_cast<int>(detailVariant(source).first) : -1;
-            const bool flag = source.flagWave && !detailed && geometry == TechniqueGeometry::staticModel &&
+            const bool moving = source.flagWave || source.reactiveMotion;
+            const bool flag = moving && !detailed && geometry == TechniqueGeometry::staticModel &&
                               source.kind != SurfaceKind::glass;
-            if (source.flagWave && !flag && geometry == TechniqueGeometry::staticModel)
-                zt::warn("iw3: flag material %s keeps a static surface", source.name.c_str());
+            if (moving && !flag && geometry == TechniqueGeometry::staticModel)
+                zt::warn("iw3: flag or reactive material %s keeps a static surface", source.name.c_str());
             const int wave = flag ? static_cast<int>(waveOf(source).first) : -1;
             const bool emissive = (source.flags & kEmissionFlag) != 0 && !detailed && !flag;
             const int emissionIndex =

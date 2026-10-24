@@ -2181,7 +2181,10 @@ void EmitStaticModels(ZoneWriter &writer, const StaticModels &models,
     {
         uint8_t model[16]{};
         put(model, 0x00, writer.assetAlias(ASSET_TYPE_XMODEL, models.models[index].name));
-        model[0x08] = 1; // STATIC_MODEL_FLAG_LIGHTPROBE_LIGHTING
+        // STATIC_MODEL_FLAG_LIGHTPROBE_LIGHTING, and STATIC_MODEL_FLAG_REACTIVEMOTION: R_ReactiveMotion's per-instance
+        // registration (0x1418C7300, from the visible-collection walk 0x1418D6A00) gives each visible placement of
+        // the model a sim slot.
+        model[0x08] = models.models[index].reactiveMotion ? 1 | 8 : 1;
         put(model, 0x0A, layout.firstSurface[index]);
         writer.write(model, sizeof(model));
     }

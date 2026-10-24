@@ -21,6 +21,8 @@ uint16_t floatToHalf(float f);
 // IW8 QuatDec3n stores three quaternion components (10/10/9 bits), the handedness bit,
 // and the index of the omitted largest component. Invalid or degenerate bases are rejected.
 uint32_t packTangentFrame(const float normal[3], const float tangent[3], float binormalSign);
+// A unit quaternion (x, y, z, w) as a QuatDec3n without the handedness bit (reactive-motion part rotations).
+uint32_t packQuaternion(const float quaternion[4]);
 
 // IW8 PackedTexCoords: two 16-bit half-floats packed into one u32 (lo=u, hi=v).
 uint32_t packTexCoords(const float uv[2]);

@@ -155,6 +155,8 @@ struct SourceStaticModel
     std::vector<SourceBone> bones;
     // Simulated clutter body from the IW3 physics preset (dynamic models).
     std::optional<iw8::havok::ClutterBody> clutter;
+    // Reactive motion (IW7 foliage): the wind scales and parts of Replay's reactive-motion sim.
+    std::optional<convert::xmodel::Iw8ReactiveMotion> reactiveMotion;
 };
 
 struct SourceStaticModelInstance
@@ -2892,6 +2894,17 @@ SourceStaticModel ReadSourceModel(const std::filesystem::path &root, const std::
 
     SourceStaticModel converted;
     converted.name = modelName;
+    if (model.contains("reactiveMotion"))
+    {
+        const Json &reactive = model.at("reactiveMotion");
+        convert::xmodel::Iw8ReactiveMotion motion;
+        motion.wind = reactive.at("wind").get<std::array<float, 4>>();
+        for (const Json &part : reactive.at("parts"))
+            motion.parts.push_back({part.at("center").get<std::array<float, 3>>(),
+                                    part.at("stiffness").get<float>(), 0xFFFF,
+                                    part.at("pivot").get<std::array<float, 3>>()});
+        converted.reactiveMotion = std::move(motion);
+    }
     const int collisionLod = model.value("collLod", -1);
     if (collisionLod < -1 || collisionLod >= static_cast<int>(model.at("lods").size()))
         throw std::runtime_error("IW3 model has an invalid collision LOD: " + modelName);
@@ -4342,6 +4355,7 @@ void BuildPreparedStaticModels(const SourceStaticModels &source, const RenderPla
     staticModels.models.reserve(source.models.size());
     std::vector<std::optional<std::size_t>> collisionModelIndices(source.models.size());
     std::size_t visualCollisionModels = 0;
+    std::size_t reactiveModels = 0;
     // The Havok bakes (most of the time here) run after the models, on every core with native Havok (the Replay
     // executable's baker belongs to this thread).
     struct PhysicsBake
@@ -4393,6 +4407,9 @@ void BuildPreparedStaticModels(const SourceStaticModels &source, const RenderPla
         staticModel.name = assetName;
         replaybounds::Accumulator modelBounds;
         std::uint32_t surfaceOffset = 0;
+        // Reactive motion bends static placements only (the DObj path has no reactive-motion sim).
+        const bool reactiveModel = !entityDraw && sourceModel.reactiveMotion.has_value();
+        bool reactiveSurfaces = false;
         // A model drawn only by tool surfaces (IW7's tag_origin: one nodraw triangle) keeps no
         // surface, as stock tag_player does (one LOD without surfaces or XModelSurfs): script
         // models still take it. A static placement needs a drawn surface.
@@ -4637,6 +4654,13 @@ void BuildPreparedStaticModels(const SourceStaticModels &source, const RenderPla
                 const std::uint32_t metadata = blendFlags | (layer << 4) | (row << 10) |
                                                (lowFlags << 16) | 0xFF000000u;
                 auto &destinationSurface = converted.surfaces[surfaceIndex];
+                // A reactive surface of a placed reactive model: XSurface flag 4, as on stock reactive foliage
+                // (0x45 on tm/uk_foliage_small_weeds_02_reactive; its non-reactive proxy LOD keeps 0x40).
+                if (reactiveModel && material.reactiveMotion)
+                {
+                    destinationSurface.flags |= 4;
+                    reactiveSurfaces = true;
+                }
                 constexpr std::size_t packedVertexSize = 20;
                 constexpr std::size_t selfVisibilityOffset = 8;
                 const std::size_t vertexBytes =
@@ -4891,6 +4915,14 @@ void BuildPreparedStaticModels(const SourceStaticModels &source, const RenderPla
             collisionModels->push_back(std::move(collisionModel));
         }
         staticModel.bounds = bounds;
+        // XModelFlag REACTIVE_MOTION (8), its parts and STATIC_MODEL_FLAG_REACTIVEMOTION on the placements.
+        if (reactiveSurfaces)
+        {
+            prepared.model.reactiveMotion = sourceModel.reactiveMotion;
+            prepared.model.flags |= 8;
+            staticModel.reactiveMotion = true;
+            ++reactiveModels;
+        }
         xmodels.push_back(std::move(prepared));
         staticModels.models.push_back(std::move(staticModel));
     }
@@ -4950,6 +4982,8 @@ void BuildPreparedStaticModels(const SourceStaticModels &source, const RenderPla
         zt::info("iw3: %zu static model(s) without an IW3 collision LOD collide by their visual "
                  "mesh (bullets and grenades)",
                  visualCollisionModels);
+    if (reactiveModels)
+        zt::info("iw3: %zu static model(s) bend by Replay's reactive-motion sim", reactiveModels);
 }
 
 void BuildShadowScene(const std::vector<BrushModel> &brushModels,

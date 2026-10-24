@@ -158,14 +158,18 @@ uint32_t packTangentFrame(const float normal[3], const float tangent[3], float b
         q[3] = (m[last][next] - m[next][last]) / scale;
     }
 
+    return packQuaternion(q.data()) | (binormalSign < 0 ? 1u << 29 : 0u);
+}
+
+uint32_t packQuaternion(const float quaternion[4])
+{
+    const std::array<float, 4> q{quaternion[0], quaternion[1], quaternion[2], quaternion[3]};
     size_t largest = 0;
     for (size_t axis = 1; axis < q.size(); ++axis)
         if (std::abs(q[axis]) > std::abs(q[largest]))
             largest = axis;
     const float sign = q[largest] < 0 ? -1.0f : 1.0f;
     uint32_t packed = static_cast<uint32_t>(largest) << 30;
-    if (binormalSign < 0)
-        packed |= 1u << 29;
     // Replay QuatDec3n stores the remaining components in 10/10/9 bits.
     constexpr float inverseRootTwo = 0.7071067811865475f;
     size_t component = 0;
