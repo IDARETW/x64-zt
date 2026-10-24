@@ -755,6 +755,12 @@ namespace zonetool::convert::iw7_iw8
 				result["iw7FlagClassic"] = wave->classic;
 			}
 
+			// Reactive foliage bends by Replay's reactive-motion sim (the pipeline's MAP_REACTIVE_MOTION variant).
+			if (!layer && reactive_motion(material))
+			{
+				result["iw7ReactiveMotion"] = true;
+			}
+
 			return result;
 		}
 	}
@@ -1589,6 +1595,19 @@ namespace zonetool::convert::iw7_iw8
 		}
 
 		return result;
+	}
+
+	bool reactive_motion(const iw7::Material* material)
+	{
+		if (!material || !material->techniqueSet)
+		{
+			return false;
+		}
+
+		return std::ranges::any_of(std::views::split(asset_name(material->techniqueSet->name), '_'), [](const auto token)
+		{
+			return std::string_view(token.begin(), token.end()) == "reactivemotion";
+		});
 	}
 
 	// IW7's map art of the map select (in the ui zone; IW7's own loading screen draws the minimap with the spawns): the

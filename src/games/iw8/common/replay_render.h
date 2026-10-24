@@ -207,6 +207,8 @@ struct StaticModel
     std::string name;
     replaybounds::Bounds bounds{};
     std::vector<StaticModelLod> lods;
+    // STATIC_MODEL_FLAG_REACTIVEMOTION: Replay's sim bends the placements (the XModel has reactive-motion parts).
+    bool reactiveMotion{};
 };
 struct StaticModelInstance
 {

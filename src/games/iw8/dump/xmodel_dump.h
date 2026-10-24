@@ -1,6 +1,7 @@
 #pragma once
 #include <array>
 #include <cstdint>
+#include <optional>
 #include <string>
 #include <vector>
 
@@ -115,6 +116,26 @@ struct Iw8LodInfo
     std::string surfsName; // XModelSurfs cross-ref name (lod link)
 };
 
+// One part of Replay's reactive motion (ReactiveMotionModelPart, 32 bytes): the reactive-motion sim samples the wind
+// and the pushes at its centre and turns the vertices of its piece index (vertex green) about its pivot, blended by
+// their weight (vertex blue). A root part's pivot is in model space; a child's is in its parent's rest frame.
+struct Iw8ReactiveMotionPart
+{
+    std::array<float, 3> center{};
+    float stiffness = 0.f;   // written as a half float
+    uint16_t parent = 0xFFFF; // hierarchy parent (USE_HIERARCHY models); 0xFFFF: none
+    std::array<float, 3> pivot{};
+    std::array<float, 4> rotation{0, 0, 0, 1}; // rest rotation, written as a PackedQuatDec3n
+};
+
+// Replay's ReactiveMotionModelInfo (XModel +0xD0, 0x60 bytes): the wind scales (area, amplitude, frequency, then 1)
+// and the parts. Static placements of the model bend when their GfxStaticModel carries STATIC_MODEL_FLAG_REACTIVEMOTION.
+struct Iw8ReactiveMotion
+{
+    std::array<float, 4> wind{0.1f, 0.2f, 0.3f, 1.0f};
+    std::vector<Iw8ReactiveMotionPart> parts;
+};
+
 struct Iw8XModelRecord
 {
     std::string name;
@@ -139,6 +160,7 @@ struct Iw8XModelRecord
     std::vector<Iw8LodInfo> lods;       // [numLods]  (XModel.lodInfo[6]; extras zeroed by writer)
     std::vector<std::string> materials; // [numsurfs] material cross-ref names (materialHandles)
     std::vector<float> himipRadiusInvSq; // [numsurfs] required by Replay's stream-combine builder
+    std::optional<Iw8ReactiveMotion> reactiveMotion;
 
     std::string physPresetName; // informational (PhysicsAsset cross-ref deferred)
     std::string physCollmapName;

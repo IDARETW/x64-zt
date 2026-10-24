@@ -51,6 +51,22 @@ struct ModelPlacement {
     float scale;
 };
 StructuredBuffer<ModelPlacement> modelPlacements : register(t76);
+
+#ifdef MAP_REACTIVE_MOTION
+// Replay's reactive motion, as its stock reactive static-model shaders read it
+// (techsets_mp_village2 vertex shaders 9e855b84, a9d6f10a, 437feb91): each
+// sim part's rest pivot, current rotation, moved pivot and packed rest
+// rotation (cs_reactivemotion_sim), and each placement's sim slot in its upper
+// 16 bits (0xffff: none this frame).
+struct ReactivePivot {
+    float4 pivot;
+    float4 rotation;
+    float3 movedPivot;
+    uint restRotation;
+};
+StructuredBuffer<ReactivePivot> reactivePivots : register(t72);
+StructuredBuffer<uint> reactiveSlots : register(t73);
+#endif
 #endif
 
 cbuffer ReplayView : register(b2) {
@@ -92,8 +108,9 @@ float3 Rotate(float3 value, float4 quaternion) {
                                cross(quaternion.xyz, value) + quaternion.w * value);
 }
 
-void DecodeTangentFrame(uint packed, out float3 normal, out float3 tangent,
-                        out float binormalSign) {
+// Replay's QuatDec3n: three components in 10/10/9 bits and the index of the
+// omitted largest one (bit 29, a tangent frame's handedness, is not read).
+float4 DecodeQuaternion(uint packed) {
     float3 xyz =
         (float3(packed & 1023, (packed >> 10) & 1023, (packed >> 20) & 511) *
              float3(2.0 / 1023, 2.0 / 1023, 2.0 / 511) -
@@ -101,10 +118,15 @@ void DecodeTangentFrame(uint packed, out float3 normal, out float3 tangent,
         .7071067811865475;
     float largest = sqrt(1 - min(dot(xyz, xyz), 1));
     uint largestIndex = packed >> 30;
-    float4 q = largestIndex == 0   ? float4(largest, xyz)
-               : largestIndex == 1 ? float4(xyz.x, largest, xyz.yz)
-               : largestIndex == 2 ? float4(xyz.xy, largest, xyz.z)
-                                   : float4(xyz, largest);
+    return largestIndex == 0   ? float4(largest, xyz)
+           : largestIndex == 1 ? float4(xyz.x, largest, xyz.yz)
+           : largestIndex == 2 ? float4(xyz.xy, largest, xyz.z)
+                               : float4(xyz, largest);
+}
+
+void DecodeTangentFrame(uint packed, out float3 normal, out float3 tangent,
+                        out float binormalSign) {
+    float4 q = DecodeQuaternion(packed);
     normal = float3(2 * (q.x * q.z + q.w * q.y), 2 * (q.y * q.z - q.w * q.x),
                     1 - 2 * (q.x * q.x + q.y * q.y));
     tangent = float3(1 - 2 * (q.y * q.y + q.z * q.z),
@@ -125,6 +147,16 @@ float4 EntityPosition(uint row, float3 local, int3 viewOrigin) {
                   dot(float4(local, 1), entityObject[row + 3]));
 }
 #endif
+
+// A vertex's colour bytes (RGBA, 0 to 1) from the model colour pages.
+float4 LoadVertexColor(uint drawSurface, uint id) {
+    uint colorPageStart = drawSurfaces.Load(0x00240000 + drawSurface * 4);
+    uint colorByte = (id & 0xffff) * 4;
+    uint colorPage = colorPages.Load((colorPageStart + (colorByte >> 10)) * 4);
+    uint packedColor = vertexColors.Load((colorPage << 10) | (colorByte & 1023));
+    return float4(packedColor & 255, (packedColor >> 8) & 255,
+                  (packedColor >> 16) & 255, packedColor >> 24) / 255.0;
+}
 
 // IW3 polygon offset as a pull toward the camera (fraction of the distance).
 // IW3 (R_ForceSetPolygonOffset) sets D3D9 DEPTHBIAS level * r_polygonOffsetBias
@@ -265,6 +297,25 @@ Output main(uint id : SV_VertexID) {
         modelNormal = normalize(modelNormal + slope.x * modelTangent + slope.y * binormal);
     }
 #endif
+#if defined(MAP_REACTIVE_MOTION) && !defined(MAP_ENTITY)
+    // Replay's reactive motion, as the stock shaders apply it: a draw surface's
+    // weight (its record's top byte over 254) and its placement's sim slot gate
+    // it; the vertex green picks the part and its blue blends the part's rest
+    // rotation toward its current one, about which the vertex turns from the
+    // rest pivot to the moved pivot.
+    float reactiveWeight = (surface.y >> 24) / 254.0;
+    if (reactiveWeight > 0) {
+        uint slot = reactiveSlots[surface.x] >> 16;
+        if (slot != 0xffff) {
+            float4 part = LoadVertexColor(drawSurface, id);
+            ReactivePivot pivot = reactivePivots[slot * 16 + min((uint)round(part.g * 255), 15)];
+            float4 rest = DecodeQuaternion(pivot.restRotation);
+            float4 turn = normalize(lerp(rest, pivot.rotation, part.b));
+            float3 arm = Rotate(local - pivot.pivot.xyz, float4(-rest.xyz, rest.w));
+            local = lerp(local, pivot.movedPivot + Rotate(arm, turn), reactiveWeight);
+        }
+    }
+#endif
 #ifdef MAP_ENTITY
     uint row = 2 + surface.x * MAP_BONE_ROWS;
     precise float4 relative =
@@ -336,18 +387,17 @@ Output main(uint id : SV_VertexID) {
         o.materialParameters =
             float4(falloffTable[falloffRow], falloffTable[falloffRow + 1],
                    falloffTable[falloffRow + 2], falloffTable[falloffRow + 3]);
-    uint colorPageStart = drawSurfaces.Load(0x00240000 + drawSurface * 4);
-    uint colorByte = (id & 0xffff) * 4;
-    uint colorPage = colorPages.Load((colorPageStart + (colorByte >> 10)) * 4);
-    uint packedColor = vertexColors.Load((colorPage << 10) | (colorByte & 1023));
-    float4 color = float4(packedColor & 255, (packedColor >> 8) & 255,
-                         (packedColor >> 16) & 255, packedColor >> 24) / 255.0;
+    float4 color = LoadVertexColor(drawSurface, id);
     // Replay decodes authored model RGB from sRGB; alpha remains linear.
     o.color = float4(lerp(color.rgb / 12.92, pow((color.rgb + .055) / 1.055, 2.4),
                           step(.04045, color.rgb)), color.a);
 #if defined(MAP_IW7_FLAG_WAVE) || defined(MAP_IW7_FLAG_CLASSIC)
     // An IW7 flag's vertex alpha is its wave weight, not its opacity.
     o.color.a = 1;
+#endif
+#if defined(MAP_REACTIVE_MOTION) && !defined(MAP_ENTITY)
+    // Reactive green and blue are a part and a weight, not a colour.
+    o.color.rgb = 1;
 #endif
     // IW3 zfeather near fade: alpha *= saturate(view depth * featherParms.x);
     // its additive pixel shader scales the colour by that alpha.

@@ -88,10 +88,11 @@ namespace zonetool::convert::iw7_iw8
 			return largest;
 		}
 
-		// The vertices of a flag surface keep their alpha, the weight of IW7's flag wave (flag_wave).
+		// The vertices of a flag surface keep their alpha, the weight of IW7's flag wave (flag_wave); those of a reactive-motion
+		// surface their piece index and bend weight, in the green and blue that IW7's and Replay's vertex shaders read.
 		template <typename Vertices, typename Faces>
 		model_geometry_surface export_surface(const Vertices& source_vertices, const Faces& faces, const std::string& material,
-			const bool wave_weight)
+			const bool wave_weight, const bool reactive)
 		{
 			model_geometry_surface surface;
 			surface.material = material;
@@ -104,6 +105,21 @@ namespace zonetool::convert::iw7_iw8
 					if (wave_weight)
 					{
 						surface.vertices.back().color[3] = vertex.color.array[3];
+					}
+				}
+
+				// Without motion vertices a surface of a reactive material keeps still (weight 0).
+				if (reactive)
+				{
+					if constexpr (requires { vertex.pieceIndex.array[2]; })
+					{
+						surface.vertices.back().color[1] = vertex.pieceIndex.array[1];
+						surface.vertices.back().color[2] = vertex.pieceIndex.array[2];
+					}
+					else
+					{
+						surface.vertices.back().color[1] = 0;
+						surface.vertices.back().color[2] = 0;
 					}
 				}
 			}
@@ -222,6 +238,76 @@ namespace zonetool::convert::iw7_iw8
 			return plan;
 		}
 
+		// IW7's reactive motion as Replay's ReactiveMotionModelInfo. IW7 moves the vertices of each part (their piece index)
+		// by the part's offset times their weight; Replay's sim turns each part about its pivot, blended by the same weight,
+		// and samples the wind and the pushes of players and explosions at IW7's centre of the part. Every part pivots at the
+		// model's root, where its lowest-weight vertices sit (the foot of the plant: IW7's weights grow from 0 there, while
+		// many leaf parts never reach 0 themselves), as stock grass pivots all its parts on one vertical axis; turning a
+		// small part about a distant root moves it nearly as one, as IW7's offset does. Parts rest upright (no rotation, as
+		// stock grass: Replay bends a part across its rest z), so that any horizontal push bends them. IW7 keeps no
+		// stiffness (0 on every part); stock parts take 0.1 on 3.6-unit grass blades and 0.025 on 9-unit branch segments,
+		// about 0.3 over the length from the pivot to the centre: a push moves a part about as far, whatever its size. The
+		// surfaces are the first LOD's reactive ones, whose vertex colours hold the piece index (green) and weight (blue).
+		json reactive_motion_parts(const iw7::XModel& model, const std::vector<const model_geometry_surface*>& surfaces)
+		{
+			auto lowest = 256;
+			for (const auto* surface : surfaces)
+			{
+				for (const auto& vertex : surface->vertices)
+				{
+					lowest = std::min(lowest, vertex.color[2]);
+				}
+			}
+
+			// The vertices within 4 of the lowest weight (of 255) form the root.
+			std::array<double, 3> sum{};
+			std::size_t count{};
+			for (const auto* surface : surfaces)
+			{
+				for (const auto& vertex : surface->vertices)
+				{
+					if (vertex.color[2] <= lowest + 4)
+					{
+						for (auto axis = 0; axis < 3; axis++)
+						{
+							sum[axis] += vertex.position[axis];
+						}
+
+						count++;
+					}
+				}
+			}
+
+			std::array<float, 3> pivot{};
+			for (auto axis = 0; axis < 3 && count; axis++)
+			{
+				pivot[axis] = static_cast<float>(sum[axis] / static_cast<double>(count));
+			}
+
+			auto parts = json::array();
+			for (std::size_t index = 0; index < model.numReactiveMotionParts; index++)
+			{
+				const auto& center = model.reactiveMotionParts[index].center;
+				const std::array<float, 3> arm{center[0] - pivot[0], center[1] - pivot[1], center[2] - pivot[2]};
+				const auto length = std::sqrt(arm[0] * arm[0] + arm[1] * arm[1] + arm[2] * arm[2]);
+				const auto stiffness = std::clamp(0.3f / std::max(length, 0.001f), 0.002f, 0.1f);
+				parts.push_back(
+				{
+					{"center", {center[0], center[1], center[2]}},
+					{"stiffness", stiffness},
+					{"pivot", pivot},
+				});
+			}
+
+			if (std::getenv("IW7_REACTIVE_DUMP"))
+			{
+				ZONETOOL_INFO("iw7 reactive: %s: %u parts pivot at (%g %g %g), the %zu vertices of weight %d", model.name,
+					model.numReactiveMotionParts, pivot[0], pivot[1], pivot[2], count, lowest);
+			}
+
+			return parts;
+		}
+
 		// Writes a planned model: its OAT xmodel table and its geometry (any thread).
 		void write_model(const source_map& source, const std::string& name, const iw7::XModel* model, const model_plan& plan,
 			const extraction& output)
@@ -233,41 +319,65 @@ namespace zonetool::convert::iw7_iw8
 			// The importer warns about a missing skeleton export only for models with bones to keep.
 			geometry.bone_count = model->numBones;
 			geometry.contents = static_cast<std::uint32_t>(model->contents);
+			// The first LOD's reactive-motion surfaces: those of the motion vertices (piece index and weight) and a reactive
+			// material.
+			std::vector<const model_geometry_surface*> reactive_surfaces;
 			for (std::size_t lod = 0; lod < plan.lods.size(); lod++)
 			{
 				const auto& info = model->lodInfo[lod];
 				const auto surfaces = source.resolve(iw7::ASSET_TYPE_XMODEL_SURFS, info.modelSurfs);
 				const auto streamed = info.modelSurfs ? source.streamed_surfaces(asset_name(info.modelSurfs->name)) : nullptr;
 				std::vector<model_geometry_surface> lod_surfaces;
+				std::vector<std::size_t> lod_reactive;
 				for (std::size_t i = 0; i < info.numsurfs; i++)
 				{
 					const auto& material_name = plan.lods[lod].materials[i];
 					const auto material = output.materials.find(material_name);
 					const auto weight = material != output.materials.end() && flag_wave(material->second).has_value();
+					const auto reactive = material != output.materials.end() && reactive_motion(material->second);
+					auto motion_vertices = false;
 					if (surfaces && surfaces->surfs && i < surfaces->numsurfs)
 					{
 						const auto& surface = surfaces->surfs[i];
 						const std::span faces(surface.triIndices, surface.triCount);
 						const std::span motion(surface.verts0.packedMotionVerts0, surface.vertCount);
 						const std::span packed(surface.verts0.packedVerts0, surface.vertCount);
-						lod_surfaces.push_back((surface.flags & 8) != 0 ? export_surface(motion, faces, material_name, weight)
-							: export_surface(packed, faces, material_name, weight));
+						motion_vertices = (surface.flags & 8) != 0;
+						lod_surfaces.push_back(motion_vertices ? export_surface(motion, faces, material_name, weight, reactive)
+							: export_surface(packed, faces, material_name, weight, reactive));
 					}
 					else if (streamed && i < streamed->size())
 					{
 						const auto& surface = (*streamed)[i];
+						motion_vertices = surface.motion;
 						lod_surfaces.push_back(surface.motion
-							? export_surface(std::span(surface.motion_vertices), std::span(surface.faces), material_name, weight)
-							: export_surface(std::span(surface.vertices), std::span(surface.faces), material_name, weight));
+							? export_surface(std::span(surface.motion_vertices), std::span(surface.faces), material_name, weight, reactive)
+							: export_surface(std::span(surface.vertices), std::span(surface.faces), material_name, weight, reactive));
+					}
+					else
+					{
+						continue;
+					}
+
+					if (reactive && motion_vertices)
+					{
+						lod_reactive.push_back(lod_surfaces.size() - 1);
 					}
 				}
 
 				const auto distance = plan.lods[lod].distance;
 				table_lods.push_back({{"distance", distance}, {"file", std::format("model_export/{}_lod{}.obj", name, lod)}});
 				geometry.lods.push_back({distance, std::move(lod_surfaces)});
+				if (lod == 0)
+				{
+					for (const auto index : lod_reactive)
+					{
+						reactive_surfaces.push_back(&geometry.lods.front().surfaces[index]);
+					}
+				}
 			}
 
-			write_json(output.extracted / "xmodel" / (name + ".json"),
+			json table =
 			{
 				{"$schema", "http://openassettools.dev/schema/xmodel.v1.json"},
 				{"_game", "iw3"},
@@ -281,7 +391,28 @@ namespace zonetool::convert::iw7_iw8
 				{"lods", std::move(table_lods)},
 				{"rootBoneName", ""},
 				{"type", "rigid"},
-			});
+			};
+
+			// Replay's sim turns at most 16 parts per model (as many as IW7's 16 centre constants).
+			if (model->numReactiveMotionParts > 16)
+			{
+				ZONETOOL_WARNING("iw7: model \"%s\" has %u reactive-motion parts (at most 16 convert); it keeps still", name.data(),
+					model->numReactiveMotionParts);
+			}
+			else if (model->numReactiveMotionParts && model->reactiveMotionParts && !reactive_surfaces.empty())
+			{
+				// IW7's model tweaks hold Replay's wind parameters: the area, amplitude and frequency scales, then 1 (stock grass
+				// takes 0.1, 0.2, 0.3, 1).
+				std::array<float, 4> wind{0.1f, 0.2f, 0.3f, 1.0f};
+				if (model->reactiveMotionTweaks)
+				{
+					std::ranges::copy(model->reactiveMotionTweaks->scale, wind.begin());
+				}
+
+				table["reactiveMotion"] = {{"wind", wind}, {"parts", reactive_motion_parts(*model, reactive_surfaces)}};
+			}
+
+			write_json(output.extracted / "xmodel" / (name + ".json"), table);
 
 			std::string text;
 			if (glz::write_json(geometry, text))
@@ -469,7 +600,7 @@ namespace zonetool::convert::iw7_iw8
 
 		ZONETOOL_INFO("iw7: exported %zu of %zu static models (contents %s)", written, output.models.size(), kinds.data());
 
-		// IW7's reactive motion (foliage bending around players), which does not convert: the models that carry it.
+		// The models whose foliage bends around players and explosions (IW7's reactive motion, Replay's reactive-motion sim).
 		std::string reactive;
 		std::size_t reactive_models{};
 		for (const auto& [name, model] : output.models)
@@ -484,7 +615,7 @@ namespace zonetool::convert::iw7_iw8
 
 		if (reactive_models)
 		{
-			ZONETOOL_INFO("iw7: %zu models carry reactive motion, which does not convert (e.g. %s)", reactive_models, reactive.data());
+			ZONETOOL_INFO("iw7: %zu models carry reactive motion (e.g. %s)", reactive_models, reactive.data());
 		}
 	}
 
