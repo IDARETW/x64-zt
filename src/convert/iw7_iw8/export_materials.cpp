@@ -698,8 +698,10 @@ namespace zonetool::convert::iw7_iw8
 			// bias: the polygon offset of the material's lit or emissive technique state. Its lit pass takes IW3's decal
 			// polygon offset, which the pipeline draws biased; the pipeline's rank nudge alone left the wayfinding signs
 			// half hidden in the wall (owner test of 58aac89). The decal camera region (2) stood in for the state before,
-			// and its opaque and unlit decals (stencils, lit signs) fought the wall under them.
-			const auto decal_offset = !layer && iw7_decal_offset(material);
+			// and its opaque and unlit decals (stencils, lit signs) fought the wall under them. The layers of a layered
+			// decal keep its bias over the surface beneath (their rank orders them over their own base): unbiased, they
+			// fought the layers of that surface (Scorch's ground).
+			const auto decal_offset = iw7_decal_offset(material);
 			json result =
 			{
 				{"$schema", "http://openassettools.dev/schema/material.v1.json"},
@@ -709,8 +711,10 @@ namespace zonetool::convert::iw7_iw8
 				{"cameraRegion", "lit"},
 				{"constants", std::move(constants)},
 				{"gameFlags", shadow ? json::array({"CASTS_SHADOW"}) : json::array()},
-				// A layer sorts as the first decals, which the pipeline draws with a depth bias over their surface.
-				{"sortKey", layer ? 9u : material ? iw3_sort(*material, kind) : 4u},
+				// A layer sorts as the first decals, in IW7's order (layer n at 8 + n): the pipeline pulls a coplanar surface
+				// toward the camera by its rank (sort - 8), and layers of one rank swapped with the camera (Breakneck's
+				// walls and containers showed one layer or another as the view moved).
+				{"sortKey", layer ? 8u + static_cast<unsigned>(layer) : material ? iw3_sort(*material, kind) : 4u},
 				{"stateBits", json::array({state_json(cull, false, kind.kind), state_json(cull, true, kind.kind, decal_offset)})},
 				{"stateBitsEntry", std::move(entries)},
 				{"stateFlags", 0},
