@@ -761,6 +761,13 @@ namespace zonetool::convert::iw7_iw8
 				result["iw7ReactiveMotion"] = true;
 			}
 
+			// IW7's lit pixel shaders negate the tangent frame on back faces (SV_IsFrontFace, the disassembled foliage
+			// shader of mopw_l_sm_atest_*_ssvsc_trans): two-sided leaves and fences lit from behind keep their light.
+			if (cull == "none")
+			{
+				result["iw7BackFaceNormals"] = true;
+			}
+
 			return result;
 		}
 	}

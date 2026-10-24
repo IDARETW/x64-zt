@@ -2622,6 +2622,8 @@ SourceMaterial ReadMaterial(const std::filesystem::path &root,
     // IW3 polygon offset level (flags bits 18-19), which the vertex shaders
     // turn into IW3's distance-scaled pull toward the camera.
     material.flags |= material.polygonOffset << 18;
+    if (source.value("iw7BackFaceNormals", false))
+        material.flags |= kBackFaceNormalsFlag;
     return material;
 }
 
@@ -3084,6 +3086,8 @@ enum class TechniqueGeometry
 std::string g_tileSpanDefines;
 // MAP_EMISSION when a world material emits above 1 (kEmissionFlag); IW3 maps compile without it.
 std::string g_emissionDefines;
+// MAP_BACK_FACE_NORMALS when a material lights its back faces (kBackFaceNormalsFlag); IW3 maps compile without it.
+std::string g_backFaceDefines;
 
 void ReplaceAtlasTokens(std::string &source, const unsigned columns, const unsigned atlasSize)
 {
@@ -3115,7 +3119,7 @@ Json BuildTechset(const std::string &map, const unsigned columns, const unsigned
         ApplyStaticModelTechniqueLayout(techset);
     std::string pixelSource =
         "#define MAP_SOURCE_SUN_MASK 1\n#define MAP_SOURCE_CHANNELS 1\n" + glassEnvironment +
-        g_emissionDefines;
+        g_emissionDefines + g_backFaceDefines;
     if (const char *diag = std::getenv("IW8_ZONETOOL_DIAG_NO_PROBES"); diag && *diag == '1')
         pixelSource += "#define MAP_DIAG_NO_PROBES 1\n";
     if (model)
@@ -3140,7 +3144,8 @@ Json BuildTechset(const std::string &map, const unsigned columns, const unsigned
         model ? "#define MAP_MIP_BIAS 0\n" + pixelSource : pixelSource;
     const auto pixel = Compile(pixelSource, "ps_5_0", "iw3_map_surface.hlsl");
     const std::string vertexDefines =
-        (entity ? "#define MAP_ENTITY 1\n" : "") + (model ? modelVertexDefines : std::string{});
+        (entity ? "#define MAP_ENTITY 1\n" : "") +
+        (model ? g_backFaceDefines + modelVertexDefines : std::string{});
     const char *vertexName = entity        ? "iw3_entity_vertex.hlsl"
                              : staticModel ? "iw3_model_vertex.hlsl"
                                            : "iw3_world_vertex.hlsl";
@@ -4692,6 +4697,11 @@ RenderPlan PrepareRenderAssets(const std::filesystem::path &exportRoot, const Js
                             return (material.flags & kEmissionFlag) != 0;
                         })
                             ? "#define MAP_EMISSION 1\n"
+                            : "";
+    g_backFaceDefines = std::ranges::any_of(materials, [](const SourceMaterial &material) {
+                            return (material.flags & kBackFaceNormalsFlag) != 0;
+                        })
+                            ? "#define MAP_BACK_FACE_NORMALS 1\n"
                             : "";
     // IW3 DXT5 normal maps keep Y replicated in RGB and X in alpha (red equals
     // green texel for texel). Every consumer here reads X from red, so move
@@ -6657,9 +6667,10 @@ RenderPlan PrepareRenderAssets(const std::filesystem::path &exportRoot, const Js
             const unsigned blend = source.kind == SurfaceKind::glass ? source.blend : 0u;
             const bool detailed = !source.detail.empty() && source.kind == SurfaceKind::opaque;
             const int detailIndex = detailed ? static_cast<int>(detailVariant(source).first) : -1;
+            // Blended flags (IW7's translucent tarps and tent trims) move too: flagVariant builds
+            // their glass variant as the static one is built.
             const bool moving = source.flagWave || source.reactiveMotion;
-            const bool flag = moving && !detailed && geometry == TechniqueGeometry::staticModel &&
-                              source.kind != SurfaceKind::glass;
+            const bool flag = moving && !detailed && geometry == TechniqueGeometry::staticModel;
             if (moving && !flag && geometry == TechniqueGeometry::staticModel)
                 zt::warn("iw3: flag or reactive material %s keeps a static surface", source.name.c_str());
             const int wave = flag ? static_cast<int>(waveOf(source).first) : -1;
