@@ -592,6 +592,30 @@ namespace zonetool::convert::iw7_iw8
 			return false;
 		}
 
+		// Whether a drawn technique of a material (unlit 8, emissive 10, lit 13 to 26) has no depth test: IW7's nodepth glows
+		// (Scorch's lava glare), which draw over the world while their occlusion query sees their source.
+		bool iw7_depthless(const iw7::Material* material)
+		{
+			if (!material || !material->stateBitsTable)
+			{
+				return false;
+			}
+
+			for (auto technique = 8; technique <= 26; technique++)
+			{
+				const auto state = material->stateBitsEntry[technique];
+				if ((technique == 8 || technique == 10 || technique >= 13) && state != 0xFF && state < material->stateBitsCount)
+				{
+					if (material->stateBitsTable[state].loadBits[1] & iw7::GFXS1_DEPTHTEST_DISABLE)
+					{
+						return true;
+					}
+				}
+			}
+
+			return false;
+		}
+
 		// The value of a constant of a material (names keep 12 characters).
 		std::optional<std::array<float, 4>> material_constant(const iw7::Material* material, const std::string_view name)
 		{
@@ -765,12 +789,30 @@ namespace zonetool::convert::iw7_iw8
 
 			const auto additive = !color || has("add") || has("blendadd");
 			const auto feather = has("zfeather");
-			// IW7_FXMAT_DUMP=1: each effect material's technique set and tint.
+			// IW7_FXMAT_DUMP=1: each effect material's technique set and constants.
 			if (std::getenv("IW7_FXMAT_DUMP"))
 			{
-				const auto tint = material_constant(material, "colorTint").value_or(std::array{1.0f, 1.0f, 1.0f, 1.0f});
-				ZONETOOL_INFO("iw7 effect material %s: techset %s tint %g %g %g %g", material && material->name ? material->name : "?",
-					material && material->techniqueSet ? material->techniqueSet->name : "?", tint[0], tint[1], tint[2], tint[3]);
+				std::string values;
+				for (auto i = 0; material && i < material->constantCount; i++)
+				{
+					const auto& entry = material->constantTable[i];
+					values += std::format(" {}=({:g} {:g} {:g} {:g})", std::string_view(entry.name, strnlen(entry.name, sizeof(entry.name))),
+						entry.literal[0], entry.literal[1], entry.literal[2], entry.literal[3]);
+				}
+
+				std::string depths;
+				for (auto technique = 0; material && material->stateBitsTable && technique < 34; technique++)
+				{
+					const auto state = material->stateBitsEntry[technique];
+					if (state != 0xFF && state < material->stateBitsCount)
+					{
+						depths += std::format(" t{}:{:x}", technique, material->stateBitsTable[state].loadBits[1] &
+							(iw7::GFXS1_DEPTHTEST_DISABLE | iw7::GFXS1_DEPTHTEST_MASK));
+					}
+				}
+
+				ZONETOOL_INFO("iw7 effect material %s: techset %s%s depth%s", material && material->name ? material->name : "?",
+					material && material->techniqueSet ? material->techniqueSet->name : "?", values.data(), depths.data());
 			}
 
 			auto constants = json::array();
@@ -795,7 +837,11 @@ namespace zonetool::convert::iw7_iw8
 			else
 			{
 				const auto falloff = (has("falloff") || has("psfalloff")) && material_constant(material, "falloffParms");
-				technique = std::format("effect{}{}{}", feather ? "_zfeather" : "", falloff ? "_falloff" : "", additive ? "_add" : "");
+				// IW7's eye offset (eyeOffsetParms.x: units toward the camera; Scorch's screen glows 15, its electric glows 5),
+				// as IW3's eye-offset techniques take it.
+				const auto eye_offset = has("eyeoffset") && material_constant(material, "eyeOffsetParms");
+				technique = std::format("effect{}{}{}{}", feather ? "_zfeather" : "", falloff ? "_falloff" : "", additive ? "_add" : "",
+					eye_offset ? "_eyeoffset" : "");
 				auto tint = material_constant(material, "colorTint").value_or(std::array{1.0f, 1.0f, 1.0f, 1.0f});
 				for (std::size_t c = 0; has("effectunlit") && c < 3; c++)
 				{
@@ -816,6 +862,11 @@ namespace zonetool::convert::iw7_iw8
 					constant("falloffBeginColor", "falloffBeginColor", {1.0f, 1.0f, 1.0f, 1.0f});
 					constant("falloffEndColor", "falloffEndColor", {1.0f, 1.0f, 1.0f, 1.0f});
 				}
+
+				if (eye_offset)
+				{
+					constant("eyeOffsetParms", "eyeOffsetParms", {0.0f, 0.0f, 0.0f, 0.0f});
+				}
 			}
 
 			const auto [source, destination] = additive ? std::pair{"one", "one"} : std::pair{"srcalpha", "invsrcalpha"};
@@ -827,7 +878,7 @@ namespace zonetool::convert::iw7_iw8
 				{"colorWriteAlpha", false},
 				{"colorWriteRgb", true},
 				{"cullFace", "none"},
-				{"depthTest", "less_equal"},
+				{"depthTest", iw7_depthless(material) ? "always" : "less_equal"},
 				{"depthWrite", false},
 				{"dstBlendAlpha", destination},
 				{"dstBlendRgb", destination},

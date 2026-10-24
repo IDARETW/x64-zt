@@ -156,6 +156,8 @@ struct SourceFxMaterial
     // An atlas material whose frames the extraction marks blended (IW7's textureAtlasFrameBlend; IW3 has none), drawn
     // through the stock frame-blend twin of its technique set where Replay has one.
     bool frameBlend{};
+    // A material without a depth test (IW7's nodepth glows: Scorch's lava glare), which draws over the world.
+    bool noDepth{};
     // IW3 zfeather featherParms (x = 1 / depth), falloff (falloffParms .z/.w,
     // begin/end colours) and eye offset (eyeOffsetParms.x).
     std::optional<std::array<float, 4>> feather, falloff, eyeOffset;
@@ -1808,42 +1810,45 @@ SourceFxMaterial ReadFxMaterial(const std::filesystem::path &root,
     SourceFxMaterial material;
     material.name = name;
     material.techniqueSet = source.at("techniqueSet").get<std::string>();
-    const bool noFogAlias = material.techniqueSet.ends_with("_nofog");
-    if (material.techniqueSet == "effect" || material.techniqueSet == "effect_nofog")
+    // The family follows the technique set without its eye offset, which the particle material data carries
+    // (FxParticleMaterialData): IW7's feathered eye-offset glows (effect_zfeather_add_eyeoffset) are feathered additive.
+    std::string_view technique = material.techniqueSet;
+    if (technique.ends_with("_eyeoffset"))
+        technique.remove_suffix(std::string_view("_eyeoffset").size());
+    const bool noFogAlias = technique.ends_with("_nofog");
+    if (technique == "effect" || technique == "effect_nofog")
         material.family = FxMaterialFamily::alpha;
-    else if (material.techniqueSet == "effect_zfeather" ||
-        material.techniqueSet == "effect_zfeather_nofog")
+    else if (technique == "effect_zfeather" ||
+        technique == "effect_zfeather_nofog")
         material.family = FxMaterialFamily::alphaFeather;
-    else if (material.techniqueSet == "effect_zfeather_add" ||
-             material.techniqueSet == "effect_zfeather_add_nofog")
+    else if (technique == "effect_zfeather_add" ||
+             technique == "effect_zfeather_add_nofog")
         material.family = FxMaterialFamily::additiveFeather;
     // particle_cloud_add is an additive cloud; Replay draws it as an additive sprite.
-    // The view-angle falloff and eye offset of the other additive variants have
-    // no Replay counterpart; they draw as plain additive sprites.
-    else if (material.techniqueSet == "effect_add_nofog" || material.techniqueSet == "effect_add" ||
-             material.techniqueSet == "particle_cloud_add" ||
-             material.techniqueSet == "particle_cloud_outdoor_add" ||
-             material.techniqueSet == "effect_falloff_add" ||
-             material.techniqueSet == "effect_falloff_add_nofog" ||
-             material.techniqueSet == "effect_add_eyeoffset" ||
-             material.techniqueSet == "effect_add_nofog_eyeoffset")
+    // The view-angle falloff of the other additive variants has no Replay
+    // counterpart; they draw as plain additive sprites.
+    else if (technique == "effect_add_nofog" || technique == "effect_add" ||
+             technique == "particle_cloud_add" ||
+             technique == "particle_cloud_outdoor_add" ||
+             technique == "effect_falloff_add" ||
+             technique == "effect_falloff_add_nofog")
         material.family = FxMaterialFamily::additive;
     // Likewise the falloff and spot-shadowed alpha variants draw as plain
     // (feathered) alpha sprites.
-    else if (material.techniqueSet == "effect_falloff" ||
-             material.techniqueSet == "effect_falloff_nofog")
+    else if (technique == "effect_falloff" ||
+             technique == "effect_falloff_nofog")
         material.family = FxMaterialFamily::alpha;
-    else if (material.techniqueSet == "effect_zfeather_falloff" ||
-             material.techniqueSet == "effect_zfeather_falloff_nofog" ||
-             material.techniqueSet == "effect_zfeather_spot" ||
-             material.techniqueSet == "effect_zfeather_spot_nofog")
+    else if (technique == "effect_zfeather_falloff" ||
+             technique == "effect_zfeather_falloff_nofog" ||
+             technique == "effect_zfeather_spot" ||
+             technique == "effect_zfeather_spot_nofog")
         material.family = FxMaterialFamily::alphaFeather;
     // The view-angle falloff of these additive sprites (IW3 fire roar) has no
     // Replay counterpart; the feathered additive family draws them unfaded.
-    else if (material.techniqueSet == "effect_zfeather_falloff_add" ||
-             material.techniqueSet == "effect_zfeather_falloff_add_nofog")
+    else if (technique == "effect_zfeather_falloff_add" ||
+             technique == "effect_zfeather_falloff_add_nofog")
         material.family = FxMaterialFamily::additiveFeather;
-    else if (material.techniqueSet.starts_with("distortion"))
+    else if (technique.starts_with("distortion"))
     {
         material.family = FxMaterialFamily::distortion;
         for (const auto &texture : source.value("textures", Json::array()))
@@ -1854,8 +1859,8 @@ SourceFxMaterial ReadFxMaterial(const std::filesystem::path &root,
                 material.distortionScale = FxLiteral(constant.at("literal"), "distortion scale");
         return material;
     }
-    else if (material.techniqueSet == "particle_cloud" ||
-             material.techniqueSet == "particle_cloud_outdoor")
+    else if (technique == "particle_cloud" ||
+             technique == "particle_cloud_outdoor")
         material.family = FxMaterialFamily::cloud;
     else if (std::regex_match(material.techniqueSet,
                               std::regex("[mw]c_l_sm_b0c0(n0)?(s0)?")))
@@ -1988,9 +1993,11 @@ SourceFxMaterial ReadFxMaterial(const std::filesystem::path &root,
         if (foundColorState)
             throw std::runtime_error("IW3 FX material has multiple color states: " + name);
         foundColorState = true;
+        const bool noDepth = state.at("depthTest") == "always" || state.at("depthTest") == "disabled";
         const bool shared = state.at("blendOpRgb") == "add" &&
-                            state.at("depthTest") == "less_equal" &&
+                            (state.at("depthTest") == "less_equal" || noDepth) &&
                             !state.at("depthWrite").get<bool>();
+        material.noDepth = noDepth;
         // IW3 opaque cutout particles (alphaTest ge128, one/zero, depth write)
         // draw through the alpha-blended family: their alpha is a hard mask.
         const bool cutout = state.at("alphaTest") == "ge128" &&
@@ -4120,6 +4127,11 @@ Json BuildFxMaterialDefinition(const SourceFxMaterial &source)
         "elcq/unlit_6_effect_bad_tca_802_3004_0_1_0_0_0_100060023_0_0_3_0_0";
     constexpr std::string_view litBlendTechset =
         "elcq/unlit_6_effect_bad_ta0_802_3004_0_1_0_0_0_10000020b_0_0_2_0_0";
+    // The depthless twin of the one-image alpha set (stock vfx_energy_emp_ring_wave, techsets_common_base_mp: the
+    // same texture slot, tint constant and buffer as alphaSimpleTechset's vfx_ui_precision_marker; the 803 sets of
+    // Replay's flares, laser dots and UI rings draw over the world). Like it, it adds the colour.
+    constexpr std::string_view depthlessTechset =
+        "elcq/unlit_6_effect_bad_ta0_803_24_0_1_0_0_0_100000023_0_0_2_0_0";
     const bool frameBlend = source.frameBlend && source.rows * source.columns > 1;
     if (source.family == FxMaterialFamily::decal)
     {
@@ -4142,14 +4154,21 @@ Json BuildFxMaterialDefinition(const SourceFxMaterial &source)
                 {"decalVolumeMaterial", "i/vfx_decal_surface_glass_2"}};
     }
     const bool alpha = source.family == FxMaterialFamily::alpha;
-    const bool simpleAlpha = alpha && source.rows == 1 && source.columns == 1;
-    const bool additive = source.family == FxMaterialFamily::additive ||
-                          source.family == FxMaterialFamily::additiveFeather;
-    const bool simpleAdditive = source.family == FxMaterialFamily::additive &&
-                                source.rows == 1 && source.columns == 1;
     const bool cloud = source.family == FxMaterialFamily::cloud;
-    if (!alpha && source.family != FxMaterialFamily::alphaFeather && !additive && !cloud)
+    if (!alpha && source.family != FxMaterialFamily::alphaFeather && source.family != FxMaterialFamily::additive &&
+        source.family != FxMaterialFamily::additiveFeather && !cloud)
         throw std::runtime_error("IW3 FX material family is not ready for Replay emission");
+    // A one-image unlit material without a depth test takes the depthless set in the one-image alpha layout; any other
+    // keeps its depth-tested set (Replay has no depthless twin of those).
+    const bool depthless = source.noDepth && !source.lit && !cloud && source.rows == 1 && source.columns == 1;
+    const bool simpleAlpha = (alpha && source.rows == 1 && source.columns == 1) || depthless;
+    const bool additive = !depthless && (source.family == FxMaterialFamily::additive ||
+                                         source.family == FxMaterialFamily::additiveFeather);
+    const bool simpleAdditive = !depthless && source.family == FxMaterialFamily::additive &&
+                                source.rows == 1 && source.columns == 1;
+    if (source.noDepth && !depthless)
+        zt::info("iw3: FX material %s has no depth test, which Replay's sets of its kind lack; it draws depth-tested",
+                 source.name.c_str());
 
     std::vector<std::uint8_t> info(32);
     Put<std::uint32_t>(info, 0, 1u);
@@ -4291,6 +4310,7 @@ Json BuildFxMaterialDefinition(const SourceFxMaterial &source)
             {"source", source.name},
             {"info", Hex(info)},
             {"techset", cloud ? cloudTechset
+                               : depthless ? depthlessTechset
                                : simpleAdditive ? additiveSimpleTechset : alphaSimpleTechset},
             {"textures", Json::array({{{"header", "1200000000000000"},
                                         {"image", ""}}})},

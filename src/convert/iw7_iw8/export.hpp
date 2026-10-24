@@ -354,6 +354,14 @@ namespace zonetool::convert::iw7_iw8
 	// units, in which the sun has a luminance of 1 (Frontier's sun: 9.5).
 	float light_unit_scale(const source_map& source);
 
+	// Replay's world vertices reach 100000 units (replay_render: "Position out of range").
+	constexpr float largest_world_coordinate = 100000.0f;
+	// The play space: the bounds of the spawn points (mins, then maxs), or nothing for a map without spawn points.
+	std::optional<std::array<float, 6>> spawn_bounds(const source_map& source);
+	// Whether a static model of the world reaches beyond the range of the world: the sky draws it, not the world
+	// (Breakneck's black hole sphere, placed 85000 units from the middle of the world at scale 58).
+	bool beyond_world(const iw7::GfxWorld& world, unsigned int instance);
+
 	// Adds the models of the world's static models, which export_models writes before export_world.
 	void collect_static_models(const source_map& source, extraction& output);
 	void export_world(const source_map& source, extraction& output);
