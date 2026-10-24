@@ -313,29 +313,12 @@ bool isBarrelFireFxStruct(const Entity &entity)
 
 bool isOldSchoolPickup(const std::string &classname)
 {
-    // These entities are consumed only by IW3's old-school ruleset. Replay's
+    // IW3 weapon placements (weapon_<weapon>_mp: the old-school ruleset's, and
+    // custom maps' floor weapons such as Pool Day's 162 pistols). Replay's
     // standard custom-map game mode has no equivalent native pickup contract,
     // and retaining the IW3 weapon classname would make the server instantiate
     // an unsupported gameplay entity. Keep the projection explicit and noisy.
-    static constexpr std::array<const char *, 16> classes{{
-        "weapon_ak47_mp",
-        "weapon_dragunov_mp",
-        "weapon_frag_grenade_mp",
-        "weapon_g36c_silencer_mp",
-        "weapon_g3_mp",
-        "weapon_g3_reflex_mp",
-        "weapon_m1014_grip_mp",
-        "weapon_m14_reflex_mp",
-        "weapon_m4_gl_mp",
-        "weapon_m60e4_acog_mp",
-        "weapon_m40a3_mp",
-        "weapon_mp5_silencer_mp",
-        "weapon_p90_mp",
-        "weapon_p90_silencer_mp",
-        "weapon_rpg_mp",
-        "weapon_winchester1200_grip_mp",
-    }};
-    return std::find(classes.begin(), classes.end(), classname) != classes.end();
+    return classname.starts_with("weapon_") && classname.ends_with("_mp") && classname.size() > 10;
 }
 
 const KeyValue *entityModel(const Entity &entity)
@@ -748,7 +731,7 @@ size_t iw3ToIw8EntityString(const std::string &input, std::string &output,
     }
 
     if (projectedOldSchoolPickups)
-        zt::warn("iw3: projected out %zu old-school weapon pickup entities; Replay's standard "
+        zt::warn("iw3: projected out %zu IW3 weapon pickup entities (old-school and placed weapons); Replay's standard "
                  "custom-map mode has no native IW3 pickup contract",
                  projectedOldSchoolPickups);
 

@@ -1823,15 +1823,20 @@ int writeMapPackage(const Args &args, const std::string &map, const std::string 
             collision.models.push_back(worldModel);
         }
         collision.triggers.reserve(triggers.size());
+        std::string shapeless;
         for (const auto &trigger : triggers)
         {
             if (trigger.collisionModel >= collision.models.size())
                 throw std::runtime_error("IW3 trigger references a missing collision model");
-            if (collision.models[trigger.collisionModel].shapeIndex ==
-                std::numeric_limits<uint16_t>::max())
-                throw std::runtime_error("IW3 trigger collision model has no native Havok shape");
+            const auto &model = collision.models[trigger.collisionModel];
+            if (model.shapeIndex == std::numeric_limits<uint16_t>::max())
+                shapeless += std::format("{}*{} ({:g} {:g} {:g} .. {:g} {:g} {:g}, {} hulls)", shapeless.empty() ? "" : ", ",
+                                         trigger.collisionModel, model.minimum[0], model.minimum[1], model.minimum[2],
+                                         model.maximum[0], model.maximum[1], model.maximum[2], model.hullCount);
             collision.triggers.push_back({trigger.collisionModel, trigger.staticPhysics});
         }
+        if (!shapeless.empty())
+            throw std::runtime_error("IW3 trigger collision models have no native Havok shape: " + shapeless);
         info("collision: serialized native world %zu bytes, entities %zu bytes, %zu brush models",
              collision.world.size(), collision.entities.size(), collision.models.size());
     }

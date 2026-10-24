@@ -2997,18 +2997,26 @@ SourceStaticModel ReadSourceModel(const std::filesystem::path &root, const std::
 // Replay's ladder IK advances its hand target by 12 units.  The IW3
 // com_ladder_wood render mesh has authored rung bands every 24 units.  Keep
 // the source model intact for its collision LOD, and add only the five
-// missing render rung bands to each known authored LOD.
-void AddLadderMidpointRungs(Surface &surface, const std::size_t lodIndex)
+// missing render rung bands to each known authored LOD, which its vertex and
+// triangle counts name: the copies of the lowest LOD that pad the model to
+// Replay's six LODs take that LOD's bands (Office failed on LOD 2, a copy).
+void AddLadderMidpointRungs(Surface &surface)
 {
     constexpr std::array<float, 5> sourceRungCenters{24.0f, 48.0f, 72.0f, 96.0f, 120.0f};
     constexpr std::array<std::size_t, 2> expectedVertexCounts{232, 144};
     constexpr std::array<std::size_t, 2> expectedTriangleCounts{128, 64};
     constexpr float rungHalfExtent = 4.0f;
 
-    if (lodIndex >= expectedVertexCounts.size() || surface.vertices.size() != expectedVertexCounts[lodIndex] ||
-        surface.indices.size() != expectedTriangleCounts[lodIndex] * 3)
+    std::size_t lodIndex = 0;
+    while (lodIndex < expectedVertexCounts.size() &&
+           (surface.vertices.size() != expectedVertexCounts[lodIndex] ||
+            surface.indices.size() != expectedTriangleCounts[lodIndex] * 3))
+        ++lodIndex;
+    if (lodIndex == expectedVertexCounts.size())
     {
-        throw std::runtime_error("IW3 com_ladder_wood geometry does not match the midpoint-rung contract");
+        throw std::runtime_error("IW3 com_ladder_wood geometry does not match the midpoint-rung contract (" +
+                                 std::to_string(surface.vertices.size()) + " vertices, " +
+                                 std::to_string(surface.indices.size() / 3) + " triangles)");
     }
 
     std::array<std::vector<std::array<std::uint32_t, 3>>, sourceRungCenters.size()> rungTriangles;
@@ -4430,7 +4438,7 @@ void BuildPreparedStaticModels(const SourceStaticModels &source, const RenderPla
                 if (sourceModel.name == "com_ladder_wood")
                 {
                     ladderRenderSurface = surface;
-                    AddLadderMidpointRungs(ladderRenderSurface, lodIndex);
+                    AddLadderMidpointRungs(ladderRenderSurface);
                     renderSurface = &ladderRenderSurface;
                 }
                 if (renderSurface->vertices.empty() || renderSurface->vertices.size() > UINT16_MAX ||
@@ -5011,7 +5019,7 @@ void BuildShadowScene(const std::vector<BrushModel> &brushModels,
             if (model.name == "com_ladder_wood")
             {
                 Surface corrected = surface;
-                AddLadderMidpointRungs(corrected, 0);
+                AddLadderMidpointRungs(corrected);
                 append(corrected, found->second, &instance, &axis);
             }
             else
@@ -6920,6 +6928,59 @@ CollisionData ReadCollision(const Json &collision)
 }
 
 unsigned FootstepMaterial(std::string material, const RenderPlan &renderPlan);
+
+// A trigger's brush model that owns no brushes in the IW3 clip map (mp_dr_sm64's ball and hazard hurt triggers:
+// 14 models) has no Havok shape, which Replay's trigger needs. It takes the box of its model bounds, in the
+// model's space, with the contents that the map's trigger brushes convert to (IW3 trigger material 0x8000001: 1).
+std::size_t AddBrushlessTriggerBoxes(CollisionData &collision, const std::string &entities)
+{
+    std::set<std::uint32_t> owned;
+    for (const auto &hull : collision.hulls)
+        owned.insert(hull.model);
+    for (const auto &mesh : collision.meshes)
+        owned.insert(mesh.model);
+    std::set<std::uint32_t> triggers;
+    for (const auto &entity : ParseEntityFields(entities))
+    {
+        const auto classname = entity.find("classname");
+        const auto model = entity.find("model");
+        if (classname != entity.end() && classname->second.starts_with("trigger_") && model != entity.end() &&
+            model->second.size() > 1 && model->second.front() == '*')
+            triggers.insert(static_cast<std::uint32_t>(std::stoul(model->second.substr(1))));
+    }
+    std::size_t added = 0;
+    for (const auto index : triggers)
+    {
+        if (!index || index >= collision.models.size() || owned.contains(index))
+            continue;
+        const auto &model = collision.models[index];
+        if (!(model.minimum[0] < model.maximum[0] && model.minimum[1] < model.maximum[1] &&
+              model.minimum[2] < model.maximum[2]))
+            continue;
+        std::vector<Vec4> planes;
+        for (std::size_t axis = 0; axis < 3; ++axis)
+        {
+            Vec4 low{}, high{};
+            low[axis] = -1.0f;
+            low[3] = -model.minimum[axis];
+            high[axis] = 1.0f;
+            high[3] = model.maximum[axis];
+            planes.push_back(low);
+            planes.push_back(high);
+        }
+        CollisionHull hull;
+        hull.points = HullFromPlanes(planes);
+        if (hull.points.empty())
+            continue;
+        hull.slabs = BuildTriggerSlabs(hull.points, planes);
+        hull.model = index;
+        collision.hulls.push_back(std::move(hull));
+        ++added;
+    }
+    if (added)
+        zt::info("iw3: %zu trigger brush model(s) without brushes take the box of their bounds", added);
+    return added;
+}
 
 // Replay smooths the view over every step-up (PMF_SMOOTH_STEP), so raw IW3
 // stair treads leave the camera lagging a riser behind the player. Cover each
@@ -9554,6 +9615,54 @@ std::string WithCompletedModeSpawns(const std::string &text)
     return result;
 }
 
+// Deathrun mod maps (mp_dr_sm64) place the jumpers' spawns (mp_jumper_spawn) and the activator's
+// (mp_activator_spawn, in the trap-control room), which Replay has no mode for. Without TDM spawns of their
+// own, the jumpers' spawns become the TDM respawns and team starts and the free-for-all spawns; the activator's
+// room is left out, where players would be shut in.
+std::string WithDeathrunSpawns(const std::string &text)
+{
+    std::vector<std::pair<std::size_t, std::size_t>> spans;
+    const auto entities = ParseEntityFields(text, &spans);
+    const auto classOf = [](const EntityFields &entity) {
+        const auto found = entity.find("classname");
+        return found == entity.end() ? std::string{} : found->second;
+    };
+    bool deathrun = false, tdm = false;
+    for (const auto &entity : entities)
+    {
+        const auto classname = classOf(entity);
+        deathrun = deathrun || classname == "mp_jumper_spawn" || classname == "mp_activator_spawn";
+        tdm = tdm || classname == "mp_tdm_spawn";
+    }
+    if (!deathrun)
+        return text;
+    std::string result, added;
+    std::size_t copied = 0, jumpers = 0;
+    for (std::size_t index = 0; index < entities.size(); ++index)
+    {
+        const auto classname = classOf(entities[index]);
+        if (classname != "mp_jumper_spawn" && classname != "mp_activator_spawn")
+            continue;
+        result.append(text, copied, spans[index].first - copied);
+        copied = spans[index].second;
+        if (classname != "mp_jumper_spawn" || tdm)
+            continue;
+        for (const char *target : {"mp_tdm_spawn", "mp_dm_spawn", "mp_tdm_spawn_allies_start", "mp_tdm_spawn_axis_start"})
+        {
+            added += std::string("\n{\n\"classname\" \"") + target + "\"\n";
+            for (const char *key : {"origin", "angles"})
+                if (const auto found = entities[index].find(key); found != entities[index].end())
+                    added += std::string("\"") + key + "\" \"" + found->second + "\"\n";
+            added += "}";
+        }
+        ++jumpers;
+    }
+    result.append(text, copied, text.size() - copied);
+    zt::info("iw3: deathrun spawns: %zu jumper spawn(s) became TDM, team-start and free-for-all spawns%s", jumpers,
+             tdm ? " (none: the map has TDM spawns)" : "");
+    return result + added;
+}
+
 std::string WithIw3CtfObjectives(const std::string &text, const std::string &mapScript)
 {
     std::vector<std::pair<std::size_t, std::size_t>> spans;
@@ -9959,7 +10068,7 @@ PreparedMap PrepareFastfile(const ImportOptions &options)
             worldPath.parent_path() /
             (std::filesystem::path(sourceAsset).stem().string() + ".gsc");
         zt::read_file_str(scriptPath.string(), mapScript);
-        entities = WithCompletedModeSpawns(entities);
+        entities = WithCompletedModeSpawns(WithDeathrunSpawns(entities));
         entities = WithIw3CtfObjectives(entities, mapScript);
     }
     const auto entityModelNames = convert::iw3ReplayEntityModels(entities);
@@ -11921,6 +12030,7 @@ PreparedMap PrepareFastfile(const ImportOptions &options)
     result.ladderRungDistance =
         AlignLadderEdgesToModels(nativeCollision, sourceStaticModels, renderPlan);
     AddStairRamps(nativeCollision);
+    AddBrushlessTriggerBoxes(nativeCollision, entities);
     timing.lap("collision read");
     std::set<std::uint32_t> nativeGlassModels;
     std::set<std::string> nativeGlassTargets;
