@@ -1309,6 +1309,8 @@ float4 main(Input input) : SV_TARGET0 {
     // Schlick to 1 Nuketown's near-black grass specular (21/255) read wet toward
     // the sun (owner test 2026-10-14).
     float f90 = 1;
+    // The gloss that picks the probe level (MAP_IW7_SPECULAR: IW7's own), else the lobe's.
+    float probeGloss = -1;
 #if MAP_SOURCE_CHANNELS
     if ((flags & 64) != 0) {
 #ifdef MAP_MATERIAL_TEXTURES
@@ -1316,6 +1318,16 @@ float4 main(Input input) : SV_TARGET0 {
 #else
         float4 response = sourceResponseAtlas.SampleLevel(colorSampler, sampleUV, lod);
 #endif
+#ifdef MAP_IW7_SPECULAR
+        // IW7 (its layered world PS 9423eedc, disassembled): F0 as IW7 derives it (stored gamma encoded), and its
+        // gloss g read as g' = 1 - sqrt(1 - g): Blinn-Phong power 2^(20 g') + 2 (Replay's 2^(13 gloss)) and probe
+        // mip 5 - 5 g'. IW3's quartered F0 and exponent took the reflections off IW7's glossy floors (owner test
+        // 2026-10-24).
+        f0 = lerp(response.rgb / 12.92, pow(max((response.rgb + .055) / 1.055, 0), 2.4), step(.04045, response.rgb));
+        float iw7Gloss = 1 - sqrt(saturate(1 - response.a));
+        gloss = min(log2(exp2(20 * iw7Gloss) + 2) / 13, 1);
+        probeGloss = iw7Gloss;
+#else
         // IW3 paints its specular maps far brighter than physical reflectance
         // (Nuketown wall paint 158/255 = .34 linear, garage door .23) and tamed
         // them with envMapParms and dim LDR probe captures. Read as F0 they made
@@ -1328,6 +1340,7 @@ float4 main(Input input) : SV_TARGET0 {
         // 2^(13 gloss). Read directly, asphalt (a .68) drew a ~5x tighter, hotter
         // highlight than IW3's.
         gloss = log2(exp2(response.a * 9.3775177) + 7) / 13;
+#endif
         f90 = saturate(dot(f0, 16.5));
     }
 #endif
@@ -1360,8 +1373,8 @@ float4 main(Input input) : SV_TARGET0 {
             if (input.instance != 0xffffffff)
                 fixedProbe = InstanceReflectionProbe(input.instance);
 #endif
-            float3 probes = ProbeReflection(screenPixel, input.position.w, input.relativePosition,
-                                            reflected, gloss, fixedProbe) * luminance;
+            float3 probes = ProbeReflection(screenPixel, input.position.w, input.relativePosition, reflected,
+                                            probeGloss >= 0 ? probeGloss : gloss, fixedProbe) * luminance;
             environment = lerp(probes, indirect, gate);
         }
         // Stock specular occlusion: the 3D LUT t121 at (sqrt(occlusion),

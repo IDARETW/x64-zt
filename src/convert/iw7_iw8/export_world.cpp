@@ -1774,6 +1774,9 @@ namespace zonetool::convert::iw7_iw8
 			{"bc7_images", true},
 			// Merge world surfaces only within 512-unit cells, so that GPU culling and the light shadow maps can skip them.
 			{"spatial_surfaces", true},
+			// The specular maps hold IW7's linear F0 (gamma encoded) and IW7's gloss (derive_specular): the pipeline
+			// shades them as IW7 does (MAP_IW7_SPECULAR).
+			{"iw7_specular", true},
 			{"script_models", script_models},
 			{"physics_models", std::move(physics_models)},
 			{"xanims", std::move(xanims)},
