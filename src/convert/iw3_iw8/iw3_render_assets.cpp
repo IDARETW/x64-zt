@@ -110,6 +110,9 @@ struct SourceMaterial
     // (replayRevealSharpness, replayAlpha): what a stock decal of it blends by.
     std::optional<float> replayRevealSharpness;
     bool replayAlpha{};
+    // An unlit material's emission in the units of the native lightmap (replayEmission): what a stock emissive material
+    // of it emits.
+    std::optional<std::array<float, 3>> replayEmission;
     // IW3 detailMap and detailScale.xy (lp_*d0* techsets: colour + detail - 0.5).
     std::string detail;
     std::array<float, 2> detailScale{1, 1};
@@ -2491,6 +2494,19 @@ SourceMaterial ReadMaterial(const std::filesystem::path &root,
     if (source.contains("replayRevealSharpness"))
         material.replayRevealSharpness = source.at("replayRevealSharpness").get<float>();
     material.replayAlpha = source.value("replayAlpha", false);
+    // High dynamic range: IW7 lamps emit up to 318 in their lightmaps' units.
+    if (source.contains("replayEmission"))
+    {
+        std::array<float, 3> emission{};
+        const auto &values = source.at("replayEmission");
+        for (std::size_t channel = 0; channel < 3; ++channel)
+        {
+            emission[channel] = values.at(channel).get<float>();
+            if (!std::isfinite(emission[channel]) || emission[channel] < 0 || emission[channel] > 65504)
+                throw std::runtime_error("invalid stock emission: " + name);
+        }
+        material.replayEmission = emission;
+    }
     for (const auto &constant : source.value("constants", Json::array()))
     {
         const std::string key = constant.value("name", std::string{});
@@ -6674,13 +6690,56 @@ RenderPlan PrepareRenderAssets(const std::filesystem::path &exportRoot, const Js
             if (const auto at = name.find("__layer"); at != std::string::npos)
                 layered.insert(name.substr(0, at));
         const Json singleTechset = Json::parse(ResourceText(IDR_IW3_TECHSET_TEMPLATE));
-        std::size_t count = 0, layeredCount = 0, decalCount = 0, cutoutCount = 0;
+        std::size_t count = 0, layeredCount = 0, decalCount = 0, cutoutCount = 0, emissiveCount = 0;
         for (const SourceMaterial &source : materials)
         {
             if (!neededWorldMaterials.contains(source.name) || source.replayColor.empty() ||
                 source.name.find("__layer") != std::string::npos)
                 continue;
             MaterialPlan &planned = plan.materials.at(source.name);
+            // An unlit opaque material draws as a stock emissive one (tw/uk_periph_emissive_light: the opaque permutation
+            // with its emissive map, slot 0x12, times the emission row 0x24, which Replay scales as it scales the
+            // lightmap, PS c8c1d12c): no albedo or specular, IW7's colour as the emissive map and its tint as the emission.
+            if (planned.kind == SurfaceKind::opaque && (source.flags & 128u) && source.replayEmission &&
+                !layered.contains(source.name) && source.replayLayers.empty() && planned.worldWater < 0 &&
+                planned.worldDetail < 0)
+            {
+                if (replayZones.empty())
+                    throw std::runtime_error("stock emissive materials need the Replay install (--replay)");
+                if (!stockLibrary)
+                    stockLibrary.emplace(replayZones);
+                Json direct = stockLibrary->Material("tw/uk_periph_emissive_light");
+                const auto &[techsetName, techsetFile] =
+                    stockTechset(stockLibrary->TechniqueSet(direct.at("techset").get<std::string>()), "tw", "_emissive", source);
+                direct["source"] = source.name;
+                direct["techset"] = techsetName;
+                direct["techsetDefinition"] = techsetFile;
+                direct["imageDefinitions"] = Json::array();
+                std::optional<unsigned> emissiveChannel;
+                const auto &textures = direct.at("textures");
+                for (std::size_t index = 0; index < textures.size(); ++index)
+                {
+                    const unsigned slot = Unhex(textures[index].at("header").get<std::string>()).at(0);
+                    direct["textures"][index]["image"] = "$black";
+                    if (slot == 0x12)
+                        emissiveChannel = static_cast<unsigned>(index);
+                }
+                if (!emissiveChannel)
+                    throw std::runtime_error("stock emissive material has no emissive slot");
+                SourceMaterial emissive = source;
+                emissive.tint = {1, 1, 1, 1};
+                stockColour(direct, *emissiveChannel, emissive);
+                const auto &emission = *source.replayEmission;
+                setRow(direct, 0x24, 3,
+                       {std::bit_cast<std::uint32_t>(emission[0]), std::bit_cast<std::uint32_t>(emission[1]),
+                        std::bit_cast<std::uint32_t>(emission[2]), std::bit_cast<std::uint32_t>(1.0f)});
+                auto specular = row(direct, 4);
+                specular[0] = 0;
+                setRow(direct, 0x36, 4, specular);
+                addMaterial(std::move(direct), source.name, planned);
+                ++emissiveCount;
+                continue;
+            }
             // A lit single-sided cut-out draws as a stock alpha-tested material (tw lit_3_lit_alt: its depth prepass and
             // shadow techniques test the red of slot 0x1B at 0.5, its lit technique the opaque one).
             if (planned.kind == SurfaceKind::cutout && !(source.flags & (128u | kRevealLayerFlag | kEmissionFlag)) &&
@@ -6802,7 +6861,7 @@ RenderPlan PrepareRenderAssets(const std::filesystem::path &exportRoot, const Js
                 continue;
             }
             if (planned.kind != SurfaceKind::opaque || planned.worldWater >= 0 || planned.worldDetail >= 0 ||
-                (source.flags & (kRevealLayerFlag | kEmissionFlag)) || source.emission != 1)
+                (source.flags & (128u | kRevealLayerFlag | kEmissionFlag)) || source.emission != 1)
                 continue;
             if (source.replayLayers.empty())
             {
@@ -6907,10 +6966,10 @@ RenderPlan PrepareRenderAssets(const std::filesystem::path &exportRoot, const Js
             addMaterial(std::move(direct), source.name, planned);
             ++layeredCount;
         }
-        zt::info("iw3: %zu stock Replay world materials, %zu stock layered ones, %zu stock decals and %zu stock cut-outs "
-                 "in %zu technique sets",
-                 count, layeredCount, decalCount, cutoutCount, techsets.size());
-        return count + layeredCount + decalCount + cutoutCount;
+        zt::info("iw3: %zu stock Replay world materials, %zu stock layered ones, %zu stock decals, %zu stock cut-outs and "
+                 "%zu stock emissive ones in %zu technique sets",
+                 count, layeredCount, decalCount, cutoutCount, emissiveCount, techsets.size());
+        return count + layeredCount + decalCount + cutoutCount + emissiveCount;
     };
     if (nativeWorld)
     {

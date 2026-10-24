@@ -1781,6 +1781,14 @@ namespace zonetool::convert::iw7_iw8
 				exported["replayStockOnly"] = true;
 			}
 
+			// An unlit world material's emission as IW7 keeps it (its colorTint, in the units of its lightmaps, which the
+			// native lightmap keeps): what a stock emissive material of it emits.
+			if (replay_stock_world() && !layer && output.world_materials.contains(name) && kind.unlit)
+			{
+				const auto tint = material_color_tint(material);
+				exported["replayEmission"] = {std::max(tint[0], 0.0f), std::max(tint[1], 0.0f), std::max(tint[2], 0.0f)};
+			}
+
 			// A blended material's own reveal ramp (v0) and alpha: what a stock decal of it blends by.
 			if (replay_stock_world() && !layer && images[static_cast<std::size_t>(image_role::replay_reveal)])
 			{
