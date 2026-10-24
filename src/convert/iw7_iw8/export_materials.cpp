@@ -13,6 +13,9 @@ namespace zonetool::convert::iw7_iw8
 		// with mip levels: 512 pixels keep the map zone at the size of a converted IW3 map (Frontier: 1.1 GB of model
 		// images, against 3 GB at 1024).
 		constexpr std::size_t max_image_size = 512;
+		// The colour maps of world materials keep up to 1024 texels: native world materials sample them at their own
+		// size, where the ground fills the view.
+		constexpr std::size_t world_color_size = 1024;
 		// The minimap and the loading screen are single 2D images: they keep IW7's size (1024 minimaps).
 		constexpr std::size_t hud_image_size = 4096;
 
@@ -1313,7 +1316,13 @@ namespace zonetool::convert::iw7_iw8
 					file += alpha ? std::format("_{}{:08x}", reveals ? factor ? "ra" : "r" : "a", name_hash(asset_name(alpha->name))) : "";
 				}
 
-				files.try_emplace(file, entry);
+				if (*role == image_role::color && output.world_materials.contains(name))
+				{
+					entry.limit = world_color_size;
+				}
+
+				const auto [slot, inserted] = files.try_emplace(file, entry);
+				slot->second.limit = std::max(slot->second.limit, entry.limit);
 				roles[index].push_back(file);
 			}
 
