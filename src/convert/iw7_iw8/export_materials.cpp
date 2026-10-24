@@ -297,9 +297,12 @@ namespace zonetool::convert::iw7_iw8
 			return result;
 		}
 
-		// IW3 normal maps hold the slopes x/z and y/z, which its shaders decode as xy * 4.08 - 2.08. IW7 normal maps keep x
-		// in alpha and y in green (packed ones keep the gloss in red and the occlusion in blue): read as x, the gloss
-		// tilted every normal of a map by its own amount (Frontier's floors by about 30 degrees, noisy reflections).
+		// IW3 normal maps hold the slopes x/z and y/z, which its shaders decode as xy * 4.08 - 2.08. IW7 normal maps keep
+		// a hemi-octahedral normal in green and alpha (packed ones keep the gloss in red and the occlusion in blue): with
+		// u = 2 green - 1 and v = 2 alpha - 1, x = (u + v) / 2, y = (u - v) / 2, z = max(1 - |x| - |y|, 0), normalized (IW7 lit
+		// PS 1083d076, disassembled; Replay's world PS decodes its "<n>&<g>" the same way). Read as x in alpha and y in
+		// green, every normal turned 45 degrees and leaned too far; read with the gloss as x, every normal of a map tilted
+		// by its own amount (Frontier's floors by about 30 degrees, noisy reflections).
 		void encode_normal_slopes(DirectX::ScratchImage& image)
 		{
 			const auto& metadata = image.GetMetadata();
@@ -307,9 +310,15 @@ namespace zonetool::convert::iw7_iw8
 			for (std::size_t i = 0; i < metadata.width * metadata.height; i++)
 			{
 				auto* pixel = pixels + i * 4;
-				const auto x = pixel[3] / 255.0f * 2.0f - 1.0f;
-				const auto y = pixel[1] / 255.0f * 2.0f - 1.0f;
-				const auto z = std::max(std::sqrt(std::max(0.0f, 1.0f - x * x - y * y)), 0.25f);
+				const auto u = pixel[1] / 255.0f * 2.0f - 1.0f;
+				const auto v = pixel[3] / 255.0f * 2.0f - 1.0f;
+				const auto octahedral_x = (u + v) * 0.5f;
+				const auto octahedral_y = (u - v) * 0.5f;
+				const auto octahedral_z = std::max(1.0f - std::abs(octahedral_x) - std::abs(octahedral_y), 0.0f);
+				const auto length = std::sqrt(octahedral_x * octahedral_x + octahedral_y * octahedral_y + octahedral_z * octahedral_z);
+				const auto x = length > 0.0f ? octahedral_x / length : 0.0f;
+				const auto y = length > 0.0f ? octahedral_y / length : 0.0f;
+				const auto z = std::max(length > 0.0f ? octahedral_z / length : 1.0f, 0.25f);
 				const auto encode = [](const float slope, const float scale, const float bias)
 				{
 					return static_cast<std::uint8_t>(std::clamp(std::lround((slope + bias) / scale * 255.0f), 0l, 255l));
