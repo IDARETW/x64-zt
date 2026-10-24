@@ -3998,31 +3998,66 @@ bool DrawsOnlyTools(const std::filesystem::path &root, const std::string &modelN
 }
 
 // Takes the placements of models that draw nothing (Fallen's prop_haybale_fn_shadowcaster) out of the static
-// models: Replay has no static model without surfaces, and they only cast the baked sun shadow.
-SourceStaticModels TakeShadowOnlyStaticModels(const std::filesystem::path &root, SourceStaticModels &staticModels)
+// models: Replay has no static model without surfaces, and they only cast the baked sun shadow. `kept` takes each
+// placement's new index (VisibilityGroups::Unassigned for a taken one).
+SourceStaticModels TakeShadowOnlyStaticModels(const std::filesystem::path &root, SourceStaticModels &staticModels,
+                                              std::vector<std::uint32_t> &kept)
 {
     std::vector<bool> shadowOnly(staticModels.models.size());
     for (std::size_t index = 0; index < staticModels.models.size(); ++index)
         shadowOnly[index] = OnlyToolSurfaces(root, staticModels.models[index]);
-    SourceStaticModels taken, kept;
+    SourceStaticModels taken, drawn;
     std::vector<std::size_t> remap(staticModels.models.size());
     for (std::size_t index = 0; index < staticModels.models.size(); ++index)
     {
-        auto &target = shadowOnly[index] ? taken : kept;
+        auto &target = shadowOnly[index] ? taken : drawn;
         remap[index] = target.models.size();
         target.models.push_back(std::move(staticModels.models[index]));
     }
-    for (auto &instance : staticModels.instances)
+    kept.assign(staticModels.instances.size(), VisibilityGroups::Unassigned);
+    for (std::size_t index = 0; index < staticModels.instances.size(); ++index)
     {
-        auto &target = shadowOnly.at(instance.model) ? taken : kept;
+        auto &instance = staticModels.instances[index];
+        auto &target = shadowOnly.at(instance.model) ? taken : drawn;
+        if (&target == &drawn)
+            kept[index] = static_cast<std::uint32_t>(drawn.instances.size());
         instance.model = remap[instance.model];
         target.instances.push_back(std::move(instance));
     }
-    staticModels = std::move(kept);
+    staticModels = std::move(drawn);
     if (!taken.instances.empty())
         zt::info("iw3: %zu placement(s) of %zu model(s) that draw only tool surfaces cast only the baked sun shadow",
                  taken.instances.size(), taken.models.size());
     return taken;
+}
+
+// Renumbers the static placements of the visibility trees after placements were taken out (`kept`: each placement's
+// new index, VisibilityGroups::Unassigned for a taken one). Without it the trees named the placements after a taken one
+// by their old indices: Fallen's 80 shadow casters left its last 80 indices past the end (writer: "AABB tree
+// references an invalid static model").
+void RenumberVisibilityModels(VisibilityGroups &visibility, const std::vector<std::uint32_t> &kept)
+{
+    const auto renumber = [&](const std::uint32_t index) {
+        return index < kept.size() ? kept[index] : VisibilityGroups::Unassigned;
+    };
+    for (auto &models : visibility.treeModels)
+    {
+        std::vector<std::uint32_t> renumbered;
+        renumbered.reserve(models.size());
+        for (const auto index : models)
+            if (const auto target = renumber(index); target != VisibilityGroups::Unassigned)
+                renumbered.push_back(target);
+        models = std::move(renumbered);
+    }
+    std::vector<std::uint32_t> groups;
+    for (std::size_t index = 0; index < visibility.models.size(); ++index)
+        if (const auto target = renumber(static_cast<std::uint32_t>(index)); target != VisibilityGroups::Unassigned)
+        {
+            if (groups.size() <= target)
+                groups.resize(target + 1, VisibilityGroups::Unassigned);
+            groups[target] = visibility.models[index];
+        }
+    visibility.models = std::move(groups);
 }
 
 std::vector<PromotedScriptModel> TakeUnscriptedScriptModels(std::string &text,
@@ -10316,7 +10351,7 @@ PreparedMap PrepareFastfile(const ImportOptions &options)
     }
 
     zt::LapTimer timing("iw3");
-    const VisibilityGroups visibility = ReadVisibilityGroups(world, worldSurfaces.size());
+    VisibilityGroups visibility = ReadVisibilityGroups(world, worldSurfaces.size());
     SourceStaticModels sourceStaticModels;
     std::vector<BrushModel> brushModels =
         ReadBrushModels(world, worldSurfaces, exportRoot, visibility, sourceStaticModels);
@@ -10599,7 +10634,10 @@ PreparedMap PrepareFastfile(const ImportOptions &options)
     timing.lap("map scripts");
     AddPromotedStaticModels(world, exportRoot, TakeUnscriptedScriptModels(entities, scriptStrings, exportRoot),
                             sourceStaticModels);
-    const SourceStaticModels shadowOnlyStaticModels = TakeShadowOnlyStaticModels(exportRoot, sourceStaticModels);
+    std::vector<std::uint32_t> keptPlacements;
+    const SourceStaticModels shadowOnlyStaticModels =
+        TakeShadowOnlyStaticModels(exportRoot, sourceStaticModels, keptPlacements);
+    RenumberVisibilityModels(visibility, keptPlacements);
     timing.lap("read world");
     SourceStaticModels sourceEntityModels;
     auto keptEntityModelNames = convert::iw3ReplayEntityModels(entities);
