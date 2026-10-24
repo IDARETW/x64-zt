@@ -174,6 +174,8 @@ struct RenderPlan
     unsigned instanceLightingCount{};
     std::vector<LightmapRectangle> lightmaps;
     std::array<std::size_t, 6> skyTiles{};
+    // The native sky faces' materials (additionalMaterials index + 1), 0 when the sky draws from the atlas.
+    std::array<unsigned, 6> skyMaterials{};
     // IW3 world detail maps (wc_*d0*): the detail image's own colour-atlas tile
     // and detailScale.xy, one world technique variant each.
     struct WorldDetail

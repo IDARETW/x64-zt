@@ -1037,7 +1037,18 @@ float4 main(Input input) : SV_TARGET0 {
     // the sampler's gradients continuous across repeating texture coordinates.
     float lod = 0;
     float2 sampleUV = input.uv.xy;
+#ifdef MAP_NATIVE_WORLD
+    // A sky face draws its whole image at its top level, half a texel inside its edges (the material sampler wraps).
+    if (sky) {
+        float2 size;
+        sourceAtlas.GetDimensions(size.x, size.y);
+        sampleUV = clamp(sampleUV, .5 / size, 1 - .5 / size);
+    }
+    float4 texel = sky ? sourceAtlas.SampleLevel(colorSampler, sampleUV, 0)
+                       : sourceAtlas.SampleBias(colorSampler, sampleUV, MAP_MIP_BIAS);
+#else
     float4 texel = sourceAtlas.SampleBias(colorSampler, sampleUV, MAP_MIP_BIAS);
+#endif
 #ifdef MAP_DETAIL
     // IW3 detail materials (lp_*r0c0d0*): colour + detail - 0.5 in IW3's gamma
     // space before the vertex colour, the detail map tiled by detailScale.xy
