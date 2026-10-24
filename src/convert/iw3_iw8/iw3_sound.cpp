@@ -1776,8 +1776,15 @@ std::optional<ConvertedSounds> Convert(const std::filesystem::path &exportRoot,
         if (bytes)
         {
             pcm = ReadWav(*bytes, failure);
-            if (!pcm && Lower(path).ends_with(".mp3"))
-                pcm = DecodeCompressedAudio(*bytes, failure);
+            // Compressed audio: IW3's MP3 streams, and WAV files of other encodings (mp_dr_sm64's birds: MPEG layer 3
+            // in a WAV, format 0x55), which Media Foundation decodes as well.
+            if (!pcm)
+            {
+                std::string compressed;
+                pcm = DecodeCompressedAudio(*bytes, compressed);
+                if (!pcm)
+                    failure = Lower(path).ends_with(".mp3") ? compressed : failure + "; Media Foundation: " + compressed;
+            }
         }
         else
             failure = "not found in the extracted zone, raw sound folders or IWDs";
