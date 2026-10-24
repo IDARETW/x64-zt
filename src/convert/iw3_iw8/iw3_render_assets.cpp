@@ -2624,6 +2624,8 @@ SourceMaterial ReadMaterial(const std::filesystem::path &root,
     material.flags |= material.polygonOffset << 18;
     if (source.value("iw7BackFaceNormals", false))
         material.flags |= kBackFaceNormalsFlag;
+    if (source.value("iw7RevealLayer", false))
+        material.flags |= kRevealLayerFlag;
     return material;
 }
 
@@ -3095,6 +3097,8 @@ std::string g_tileSpanDefines;
 std::string g_emissionDefines;
 // MAP_BACK_FACE_NORMALS when a material lights its back faces (kBackFaceNormalsFlag); IW3 maps compile without it.
 std::string g_backFaceDefines;
+// MAP_REVEAL_LAYERS when a world layer blends by its reveal map (kRevealLayerFlag); IW3 maps compile without it.
+std::string g_revealDefines;
 // The pixel defines of native world techsets: world surfaces that bind their material's own images (a Replay
 // material per source material) in place of their tile of the shared atlases.
 constexpr std::string_view kNativeWorldDefines = "#define MAP_NATIVE_WORLD 1\n";
@@ -3129,7 +3133,7 @@ Json BuildTechset(const std::string &map, const unsigned columns, const unsigned
         ApplyStaticModelTechniqueLayout(techset);
     std::string pixelSource =
         "#define MAP_SOURCE_SUN_MASK 1\n#define MAP_SOURCE_CHANNELS 1\n" + glassEnvironment +
-        g_emissionDefines + g_backFaceDefines;
+        g_emissionDefines + g_backFaceDefines + g_revealDefines;
     if (const char *diag = std::getenv("IW8_ZONETOOL_DIAG_NO_PROBES"); diag && *diag == '1')
         pixelSource += "#define MAP_DIAG_NO_PROBES 1\n";
     if (model)
@@ -4720,6 +4724,11 @@ RenderPlan PrepareRenderAssets(const std::filesystem::path &exportRoot, const Js
                         })
                             ? "#define MAP_BACK_FACE_NORMALS 1\n"
                             : "";
+    g_revealDefines = std::ranges::any_of(materials, [](const SourceMaterial &material) {
+                          return (material.flags & kRevealLayerFlag) != 0;
+                      })
+                          ? "#define MAP_REVEAL_LAYERS 1\n"
+                          : "";
     // IW3 DXT5 normal maps keep Y replicated in RGB and X in alpha (red equals
     // green texel for texel). Every consumer here reads X from red, so move
     // alpha into red once per image; this left one bump axis flat before.
@@ -5227,7 +5236,10 @@ RenderPlan PrepareRenderAssets(const std::filesystem::path &exportRoot, const Js
                 };
                 // Cut-out and blended colour maps: IW3 DXT5 transparent texels
                 // hold arbitrary colours that filtering pulls into visible edges.
-                const bool blendedAlpha = material.kind == SurfaceKind::glass && material.blend == 0;
+                // A reveal layer's alpha is its reveal, not coverage: its colour
+                // shows wherever the layer's weight reaches the reveal.
+                const bool blendedAlpha = material.kind == SurfaceKind::glass && material.blend == 0 &&
+                                          !(material.flags & kRevealLayerFlag);
                 if ((material.kind == SurfaceKind::cutout || blendedAlpha) &&
                     bledColors.insert(material.color).second)
                 {
@@ -6343,7 +6355,27 @@ RenderPlan PrepareRenderAssets(const std::filesystem::path &exportRoot, const Js
             // The images as static models take them, shared with the model materials of the same images: the tinted
             // colour (IW3 "ge128" cut-outs keep their alpha coverage), the normal and the response.
             const bool alphaCoverage = planned.kind == SurfaceKind::cutout && !(source.flags & 24u);
-            residentImageAsync(direct, 0, image(source.color).front(), source.tint, "model", alphaCoverage);
+            if (source.flags & kRevealLayerFlag)
+            {
+                // A reveal layer's alpha is data (its reveal): an opaque colour chain, the alpha a linear chain of its own.
+                const Image &color = image(source.color).front();
+                residentImageRecipe(
+                    direct, 0,
+                    [source = &color] {
+                        const auto opaqueAlpha = [](Image &level) {
+                            for (std::size_t offset = 3; offset < level.rgba.size(); offset += 4)
+                                level.rgba[offset] = 255;
+                        };
+                        Image opaque = *source;
+                        opaqueAlpha(opaque);
+                        for (auto &mip : opaque.mips)
+                            opaqueAlpha(mip);
+                        return std::pair{std::move(opaque), std::optional<Image>(*source)};
+                    },
+                    imageBytes(color) * 2, source.tint, "model");
+            }
+            else
+                residentImageAsync(direct, 0, image(source.color).front(), source.tint, "model", alphaCoverage);
             if (source.normal.empty())
                 residentImageOwned(direct, 1, Image{1, 1, std::vector<std::uint8_t>{128, 128, 128, 128}},
                                    {1, 1, 1, 1}, "model");

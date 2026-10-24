@@ -35,6 +35,8 @@ namespace zonetool::convert::iw7_iw8
 			image_role role{};
 			const iw7::GfxImage* alpha{};
 			std::size_t alpha_channel{};
+			// A second channel of the alpha's image that the alpha is multiplied by (a reveal layer's own alpha).
+			std::optional<std::size_t> alpha_factor_channel;
 			bool opaque{};
 			// A specular map made of the colour's alpha (IW7's F0) and the gloss in the red of a packed normal map.
 			bool derived_specular{};
@@ -58,19 +60,24 @@ namespace zonetool::convert::iw7_iw8
 			return hash;
 		}
 
-		// The channel of the alpha in a texture of TS_ALPHA_REVEAL_THICKNESS_MAP, which its name gives after
-		// "_packed_": its channels in order ("a" alpha, "r" reveal, "t" thickness).
-		std::optional<std::size_t> alpha_channel(const std::string_view image)
+		// The channel of a map in a texture of TS_ALPHA_REVEAL_THICKNESS_MAP: alpha in red, reveal in green, thickness in
+		// blue, the ones it holds named after "_packed_" ("a", "r", "t"); the others keep their defaults (Afghan's
+		// rock_wall_mars_01_c_3411a269_packed_r, BC1: red and blue 255, the reveal in green, as IW7's layered pixel shader
+		// reads it).
+		std::optional<std::size_t> packed_channel(const std::string_view image, const char map)
 		{
 			const auto packed = image.rfind("_packed_");
-			if (packed == std::string_view::npos)
+			if (packed == std::string_view::npos || image.substr(packed + 8).find(map) == std::string_view::npos)
 			{
 				return {};
 			}
 
-			const auto channels = image.substr(packed + 8);
-			const auto alpha = channels.find('a');
-			return alpha != std::string_view::npos && alpha < 4 ? std::optional(alpha) : std::nullopt;
+			return map == 'a' ? 0u : map == 'r' ? 1u : 2u;
+		}
+
+		std::optional<std::size_t> alpha_channel(const std::string_view image)
+		{
+			return packed_channel(image, 'a');
 		}
 
 		// The pixels of an image at one size, with the mip levels below it.
@@ -374,7 +381,9 @@ namespace zonetool::convert::iw7_iw8
 		}
 
 		// Replaces the alpha of a colour image: with the channel of an alpha texture (at the colour's size), or opaque.
-		bool replace_alpha(DirectX::ScratchImage& pixels, const iw7::GfxImage* alpha, const std::size_t channel)
+		// The alpha of an image from a channel of another (none: opaque), times a second channel of it when one is given.
+		bool replace_alpha(DirectX::ScratchImage& pixels, const iw7::GfxImage* alpha, const std::size_t channel,
+			const std::optional<std::size_t> factor = std::nullopt)
 		{
 			const auto& metadata = pixels.GetMetadata();
 			DirectX::ScratchImage resized;
@@ -409,7 +418,9 @@ namespace zonetool::convert::iw7_iw8
 				const auto* alpha_row = source ? source->pixels + y * source->rowPitch : nullptr;
 				for (std::size_t x = 0; x < metadata.width; x++)
 				{
-					row[x * 4 + 3] = alpha_row ? alpha_row[x * 4 + channel] : 0xFF;
+					row[x * 4 + 3] = !alpha_row ? 0xFF : factor
+						? static_cast<std::uint8_t>((alpha_row[x * 4 + channel] * alpha_row[x * 4 + *factor] + 127) / 255)
+						: alpha_row[x * 4 + channel];
 				}
 			}
 
@@ -438,7 +449,7 @@ namespace zonetool::convert::iw7_iw8
 			{
 				encode_normal_slopes(pixels);
 			}
-			else if ((file.alpha || file.opaque) && !replace_alpha(pixels, file.alpha, file.alpha_channel))
+			else if ((file.alpha || file.opaque) && !replace_alpha(pixels, file.alpha, file.alpha_channel, file.alpha_factor_channel))
 			{
 				return false;
 			}
@@ -772,6 +783,13 @@ namespace zonetool::convert::iw7_iw8
 				result["iw7BackFaceNormals"] = true;
 			}
 
+			// A layer that blends by its reveal map ramps its colour's alpha (the reveal) by the weight and sharpness in its
+			// vertex colours (export_surface).
+			if (layer && material_layer_reveal(material, layer))
+			{
+				result["iw7RevealLayer"] = true;
+			}
+
 			return result;
 		}
 	}
@@ -1077,6 +1095,32 @@ namespace zonetool::convert::iw7_iw8
 		return 8 + (has("nl") || has("nal") || has("nbl") ? 4 : 0);
 	}
 
+	std::optional<float> material_layer_reveal(const iw7::Material* material, const int layer)
+	{
+		const auto token = material_layer_token(material, layer);
+		if (token.find(std::format("v{}", layer)) == std::string_view::npos)
+		{
+			return std::nullopt;
+		}
+
+		// revealParams<layer>.x (IW7's layered pixel shader reads only x), found by its name hash: the 13-character names
+		// fill the 12 characters that a constant keeps. IW7's hashes of these names differ by the code of their last
+		// character alone (colorTint1 to 3: 0x7793A24B, 0x7793A248, 0x7793A249), which places revealParams1 to 3 (Afghan
+		// keeps all three) at 0x1963B944, 0x1963B947 and 0x1963B946. A material without the constant takes 1, the value
+		// that every revealParams of Afghan holds.
+		static constexpr std::array<std::uint32_t, 3> hashes{0x1963B944, 0x1963B947, 0x1963B946};
+		for (auto i = 0; material && i < material->constantCount; i++)
+		{
+			const auto& constant = material->constantTable[i];
+			if (constant.nameHash == hashes[layer - 1] && std::isfinite(constant.literal[0]))
+			{
+				return std::max(constant.literal[0], 0.0f);
+			}
+		}
+
+		return 1.0f;
+	}
+
 	std::vector<DirectX::ScratchImage> load_image_faces(const iw7::GfxImage& image, const DXGI_FORMAT format,
 		const std::size_t limit)
 	{
@@ -1216,19 +1260,26 @@ namespace zonetool::convert::iw7_iw8
 				continue;
 			}
 
-			// The alpha of the layer's colour: the first texture of its alpha, reveal and thickness maps that holds one.
+			// The alpha of the layer's colour: the first texture of its alpha, reveal and thickness maps that holds one; for a
+			// layer that blends by its reveal map, the reveal (the pipeline ramps it by the layer's weight: kRevealLayerFlag).
+			const auto reveals = layer && material_layer_reveal(material, layer);
 			const iw7::GfxImage* alpha{};
 			std::size_t channel{};
+			// A reveal layer with an alpha of its own (packed "ar") blends by the reveal ramp times that alpha in IW7; the
+			// colour keeps one alpha, so the alpha scales the reveal: exact where it is 0 or 1 (inside a decal and its
+			// holes), its soft edges erode a little as the weight falls.
+			std::optional<std::size_t> factor;
 			for (auto i = 0; material && i < material->textureCount && !alpha; i++)
 			{
 				const auto& texture = material->textureTable[i];
 				const auto image = texture.semantic == iw7::TS_ALPHA_REVEAL_THICKNESS_MAP && texture_layer(texture) == layer
 					? source.resolve(iw7::ASSET_TYPE_IMAGE, texture.image) : nullptr;
-				const auto found = image && image->name ? alpha_channel(asset_name(image->name)) : std::nullopt;
+				const auto found = image && image->name ? packed_channel(asset_name(image->name), reveals ? 'r' : 'a') : std::nullopt;
 				if (found)
 				{
 					alpha = image;
 					channel = *found;
+					factor = reveals ? packed_channel(asset_name(image->name), 'a') : std::nullopt;
 				}
 			}
 
@@ -1254,11 +1305,12 @@ namespace zonetool::convert::iw7_iw8
 				image_file entry{image, *role};
 				if (*role == image_role::color && texture.semantic == iw7::TS_COLOR_SPECULAR_MAP)
 				{
-					// The colour of each alpha is a file of its own; without one, the colour is opaque.
+					// The colour of each alpha (or reveal) is a file of its own; without one, the colour is opaque.
 					entry.alpha = alpha;
 					entry.alpha_channel = channel;
+					entry.alpha_factor_channel = factor;
 					entry.opaque = !alpha;
-					file += alpha ? std::format("_a{:08x}", name_hash(asset_name(alpha->name))) : "";
+					file += alpha ? std::format("_{}{:08x}", reveals ? factor ? "ra" : "r" : "a", name_hash(asset_name(alpha->name))) : "";
 				}
 
 				files.try_emplace(file, entry);

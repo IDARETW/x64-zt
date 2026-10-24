@@ -1107,6 +1107,20 @@ float4 main(Input input) : SV_TARGET0 {
     }
 #endif
 #endif
+#ifdef MAP_REVEAL_LAYERS
+    // IW7 layers that blend by their reveal map (flag bit 22; disassembled lmap_specenv layered PS 9423eedc): coverage
+    // ramps from the layer's weight w (vertex alpha) and sharpness k (2 * vertex red^2) across the reveal (colour alpha):
+    // saturate((reveal - low) / (high - low)), low = saturate(1 - w - k sqrt(w)), high = saturate(1 - w + k sqrt(1 - w)).
+    // IW7 does not tint a layer by the vertex colour.
+    if ((flags & 4194304) != 0) {
+        float weight = input.color.a;
+        float sharpness = 2 * input.color.r * input.color.r;
+        float low = saturate(1 - weight - sharpness * sqrt(weight));
+        float high = saturate(1 - weight + sharpness * sqrt(1 - weight));
+        texel.a = saturate((texel.a - low) / max(high - low, 1e-4));
+    }
+    else
+#endif
     texel *= input.color;
     uint alphaTest = (flags >> 3) & 3;
     if (kind == 3 && alphaTest == 1)
