@@ -675,7 +675,7 @@ namespace zonetool::convert::iw7_iw8
 		// The IW3 material of a material, with the images of its roles (the pipeline's defaults for the missing ones).
 		json export_material(const iw7::Material* material,
 			const std::array<std::optional<std::string>, image_role_count>& images, const material_class& kind, const int layer,
-			const float light_scale)
+			const float light_scale, const bool decal_range)
 		{
 			// An unlit material emits its tint in the units of the converted lights (the sun's level is 1): one that emits
 			// below it keeps the tint, one above it the hue of its tint and gives the pipeline its gain (Frontier's lamps:
@@ -743,7 +743,10 @@ namespace zonetool::convert::iw7_iw8
 			// and its opaque and unlit decals (stencils, lit signs) fought the wall under them. The layers of a layered
 			// decal keep its bias over the surface beneath (their rank orders them over their own base): unbiased, they
 			// fought the layers of that surface (Scorch's ground).
-			const auto decal_offset = iw7_decal_offset(material);
+			// IW7 also draws the surfaces of its lit decal range after the opaque ones beneath them, whatever their state
+			// (Frontier's light-pool decals decal_light_ies_fluorescent_101 on the ops room carpet: no polygon offset, and
+			// they fought the carpet, owner test 2026-10-24).
+			const auto decal_offset = iw7_decal_offset(material) || decal_range;
 			json result =
 			{
 				{"$schema", "http://openassettools.dev/schema/material.v1.json"},
@@ -1572,7 +1575,7 @@ namespace zonetool::convert::iw7_iw8
 			flags += flag_wave(material).has_value();
 			missing += material == nullptr;
 			write_json_async(output.extracted / "materials" / (name + ".json"), export_material(material, images, kind, layer,
-				light_unit_scale(source)), 16);
+				light_unit_scale(source), output.decal_range_materials.contains(name)), 16);
 		}
 
 		const auto written = std::ranges::count_if(files, [](const auto& entry)

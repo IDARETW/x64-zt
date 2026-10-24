@@ -1558,8 +1558,14 @@ namespace zonetool::convert::iw7_iw8
 		for (auto i = 0u; i < world.surfaceCount; i++)
 		{
 			first_surface[i] = surfaces.size();
+			const auto decal_range = i >= dpvs.litDecalSurfsBegin && i < dpvs.litDecalSurfsEnd;
 			for (auto& surface : export_surface(source, world, dpvs.surfaces[i], lightmaps.entries.size(), probes, output))
 			{
+				if (decal_range)
+				{
+					output.decal_range_materials.insert(surface.material);
+				}
+
 				surface_indices.push_back(surfaces.size());
 				surfaces.push_back(std::move(surface));
 			}
