@@ -751,7 +751,7 @@ namespace zonetool::convert::iw7_iw8
 		{
 			const auto& instance = world.dpvs.smodelDrawInsts[i];
 			const auto name = output.add_model(source, instance.model);
-			if (output.exported_models.contains(name))
+			if (output.exported_models.contains(name) && !beyond_world(world, i))
 			{
 				static_models.push_back({{"model", name}, {"origin", vector_json(instance.placement.origin, 3)}});
 			}

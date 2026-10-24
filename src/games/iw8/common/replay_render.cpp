@@ -124,10 +124,17 @@ bool nativeLitEffectTechset(const std::string_view name)
            name == "elcq/unlit_6_effect_bad_ta0_802_3004_0_1_0_0_0_10000020b_0_0_2_0_0";
 }
 
+// The one-image alpha set and its depthless twin (stock vfx_energy_emp_ring_wave, techsets_common_base_mp), which
+// takes the same material layout.
+bool nativeSimpleAlphaEffectTechset(const std::string_view name)
+{
+    return name == "elcq/unlit_6_effect_bad_ta0_802_4_0_1_0_0_0_100000023_0_0_2_0_0" ||
+           name == "elcq/unlit_6_effect_bad_ta0_803_24_0_1_0_0_0_100000023_0_0_2_0_0";
+}
+
 bool nativeEffectTechset(const std::string_view name)
 {
-    return nativeLitEffectTechset(name) || name ==
-               "elcq/unlit_6_effect_bad_ta0_802_4_0_1_0_0_0_100000023_0_0_2_0_0" ||
+    return nativeLitEffectTechset(name) || nativeSimpleAlphaEffectTechset(name) ||
            name ==
                "elcq/unlit_6_effect_bad_ta0_802_1004_0_1_0_0_0_100000023_0_0_2_0_0" ||
            name ==
@@ -145,11 +152,6 @@ bool nativeEffectTechset(const std::string_view name)
 bool nativeDistortionEffectTechset(const std::string_view name)
 {
     return name == "elcq/dist_10_distortion_rpl_ta1_0_12_0_0_0";
-}
-
-bool nativeSimpleAlphaEffectTechset(const std::string_view name)
-{
-    return name == "elcq/unlit_6_effect_bad_ta0_802_4_0_1_0_0_0_100000023_0_0_2_0_0";
 }
 
 bool nativeCloudEffectTechset(const std::string_view name)
@@ -1902,11 +1904,14 @@ Mesh Load(const std::string &path, const nlohmann::json &j)
         // decal quads 0-1.4 units off their wall culled out with view angle and
         // distance (owner, Discovery round 89; inferred cause). A wider margin
         // keeps them conservative.
+        // The sky box draws around the camera (the world vertex shader projects its view
+        // directions only), so its culling bounds take the range of the world, where the
+        // camera can be.
         const float margin = opaque ? 1.0f : 16.0f;
         for (unsigned k = 0; k < 3; ++k)
         {
-            put(bounds, 4 * k, (mins[k] + maxs[k]) * 0.5f);
-            put(bounds, 12 + 4 * k, (maxs[k] - mins[k]) * 0.5f + margin);
+            put(bounds, 4 * k, sky ? 0.0f : (mins[k] + maxs[k]) * 0.5f);
+            put(bounds, 12 + 4 * k, sky ? 100000.0f : (maxs[k] - mins[k]) * 0.5f + margin);
         }
         auto *gpu = m.surfData.data() + 88 * i;
         put(gpu, 4, uint32_t(surfaceLayout == 3 ? 4 : surfaceLayout));

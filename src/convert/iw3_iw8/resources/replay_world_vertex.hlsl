@@ -98,6 +98,15 @@ Output main(uint id : SV_VertexID) {
     o.lightmapUV = s.lightmapOffset ? asfloat(attributes.Load2(s.lightmapOffset + id * 8)) : 0;
     uint packed = attributes.Load(s.tangentOffset + id * 4);
 #endif
+    // Sky surfaces (kind 1) lie at infinity, as Replay's own sky does (its vertex shader projects
+    // view directions only): the sky box is around the camera wherever it is. Placed around the
+    // world's origin, the box showed its walls to a camera away from the origin: IW7 Breakneck's
+    // spawns are 40000 units out, beyond the box's 32768.
+    bool sky = (uint)o.metadata.y % 4 == 1;
+    if (sky) {
+        relative.xyz = p;
+        o.relativePosition = p;
+    }
     // IW3 layer rank (flags bits 12-17, sort - 8): decal and blended layers move
     // toward the camera along their own view ray by rank * 1.2e-5 of their distance, so
     // coplanar layers keep IW3's order at any distance and view angle.
@@ -123,11 +132,10 @@ Output main(uint id : SV_VertexID) {
     o.position.y = dot(projected, replayView[1]);
     o.position.z = dot(projected, replayView[2]);
     o.position.w = dot(projected, replayView[3]);
-    // Sky surfaces (kind 1) lie at infinity, as Replay's own sky does (its vertex shader projects
-    // view directions only). At their place, effects beyond the sky geometry were cut where they
-    // passed behind it: IW7 Scorch's sun, 28160 units away and up to 21000 wide, behind its sky box
-    // walls. Depth is reversed, so a z/w of 1e-7 is farther than any geometry.
-    if ((uint)o.metadata.y % 4 == 1)
+    // At their distance, effects beyond the sky box were cut where they passed behind it: IW7
+    // Scorch's sun, 28160 units away and up to 21000 wide. Depth is reversed, so a z/w of 1e-7 is
+    // farther than any geometry.
+    if (sky)
         o.position.z = o.position.w * 1e-7;
 #ifdef GLASS_PANE
     uint color = vertex.color;

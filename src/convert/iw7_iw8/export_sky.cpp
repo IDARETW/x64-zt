@@ -215,19 +215,59 @@ namespace zonetool::convert::iw7_iw8
 			}
 		}
 
-		// Draws the models that are too large for the world (planets) into the sky as the centre of the world sees them:
-		// lit by the sun, the opaque surfaces first and the blended ones over them. Unlit surfaces emit their colour map
-		// times their tint in IW7's units, which `scale` takes to the sky's.
+		// Whether the technique set of a material has a token ("vc", "evc").
+		bool technique_has(const iw7::Material* material, const std::string_view token)
+		{
+			if (!material || !material->techniqueSet)
+			{
+				return false;
+			}
+
+			for (const auto part : std::views::split(asset_name(material->techniqueSet->name), '_'))
+			{
+				if (std::string_view(part.begin(), part.end()) == token)
+				{
+					return true;
+				}
+			}
+
+			return false;
+		}
+
+		// Draws the models that are too large for the world (planets) and the static models beyond its range into the sky
+		// as the play space sees them: the sky lies at infinity, where the middle of the spawn points sees it (Breakneck's
+		// spawns are 81000 units from the middle of its world bounds, which its distant hulls stretch; from there the
+		// black hole drew at twice its size and 6 degrees off the sphere at its heart). They are lit by the sun, the opaque
+		// surfaces first and the blended ones over them. They take no distance fog: they are part of the sky, which takes
+		// IW7's sky fog (by angle), and IW7's distance fog would leave 3% of the black hole at its 167000 units. Unlit
+		// surfaces emit their colour map times their tint in IW7's units, which `scale` takes to the sky's.
 		void draw_distant_models(const source_map& source, const extraction& output, sky_faces& sky, const float scale)
 		{
-			if (output.distant_models.empty() && output.distant_surfaces.empty())
+			const auto& world = *source.world();
+			std::vector<unsigned int> instances;
+			for (auto i = 0u; i < world.dpvs.smodelCount; i++)
+			{
+				const auto& instance = world.dpvs.smodelDrawInsts[i];
+				const auto name = file_name(asset_name(instance.model ? iw7::get_asset_name(iw7::ASSET_TYPE_XMODEL, instance.model) : nullptr));
+				const auto model = output.models.find(name);
+				if ((output.distant_models.contains(name) || beyond_world(world, i)) && model != output.models.end() && model->second)
+				{
+					instances.push_back(i);
+				}
+			}
+
+			if (instances.empty() && output.distant_surfaces.empty())
 			{
 				return;
 			}
 
-			const auto& world = *source.world();
 			const auto& bounds = world.modelCount ? world.models[0].bounds : world.bounds;
-			const vec3 center{bounds.midPoint[0], bounds.midPoint[1], bounds.midPoint[2]};
+			vec3 center{bounds.midPoint[0], bounds.midPoint[1], bounds.midPoint[2]};
+			if (const auto play = spawn_bounds(source))
+			{
+				center = {((*play)[0] + (*play)[3]) * 0.5f, ((*play)[1] + (*play)[4]) * 0.5f, ((*play)[2] + (*play)[5]) * 0.5f};
+			}
+
 			auto sun = vec3{0.0f, 0.0f, 1.0f};
 			if (const auto com_world = source.com_world(); com_world && com_world->primaryLightCount > sun_light)
 			{
@@ -248,38 +288,14 @@ namespace zonetool::convert::iw7_iw8
 				std::vector<vec3> normals;
 			};
 
-			const auto uses_vertex_color = [](const iw7::Material* material)
-			{
-				if (!material || !material->techniqueSet)
-				{
-					return false;
-				}
-
-				for (const auto token : std::views::split(asset_name(material->techniqueSet->name), '_'))
-				{
-					const std::string_view name(token.begin(), token.end());
-					if (name == "vc" || name == "evc")
-					{
-						return true;
-					}
-				}
-
-				return false;
-			};
-
 			std::map<std::string, std::vector<mesh_surface>> meshes;
 			std::map<const iw7::Material*, texture> textures;
 			std::vector<surface_draw> draws;
-			for (auto i = 0u; i < world.dpvs.smodelCount; i++)
+			for (const auto i : instances)
 			{
 				const auto& instance = world.dpvs.smodelDrawInsts[i];
-				const auto name = file_name(asset_name(instance.model ? iw7::get_asset_name(iw7::ASSET_TYPE_XMODEL, instance.model) : nullptr));
+				const auto name = file_name(asset_name(iw7::get_asset_name(iw7::ASSET_TYPE_XMODEL, instance.model)));
 				const auto model = output.models.find(name);
-				if (!output.distant_models.contains(name) || model == output.models.end() || !model->second)
-				{
-					continue;
-				}
-
 				auto mesh = meshes.find(name);
 				if (mesh == meshes.end())
 				{
@@ -290,7 +306,7 @@ namespace zonetool::convert::iw7_iw8
 				const vec3 origin{placement.origin[0], placement.origin[1], placement.origin[2]};
 				const auto offset = vec3{origin[0] - center[0], origin[1] - center[1], origin[2] - center[2]};
 				const auto distance = std::sqrt(dot(offset, offset));
-				ZONETOOL_INFO("iw7: the sky draws \"%s\" %.0f units from the centre of the world (azimuth %.0f, elevation %.0f)",
+				ZONETOOL_INFO("iw7: the sky draws \"%s\" %.0f units from the play space (azimuth %.0f, elevation %.0f)",
 					name.data(), distance, std::atan2(offset[1], offset[0]) * 57.2957795f, std::asin(offset[2] / distance) * 57.2957795f);
 				for (const auto& surface : mesh->second)
 				{
@@ -298,7 +314,9 @@ namespace zonetool::convert::iw7_iw8
 					draw.mesh = &surface;
 					draw.kind = classify_material(surface.material);
 					draw.tint = material_color_tint(surface.material);
-					draw.vertex_color = uses_vertex_color(surface.material);
+					draw.vertex_color = technique_has(surface.material, "vc") || technique_has(surface.material, "evc");
+					ZONETOOL_INFO("iw7: the sky draws \"%s\" of \"%s\" (%s)", surface.material ? surface.material->name : "?", name.data(),
+						surface.material && surface.material->techniqueSet ? surface.material->techniqueSet->name : "?");
 					auto colors = textures.find(surface.material);
 					if (colors == textures.end())
 					{

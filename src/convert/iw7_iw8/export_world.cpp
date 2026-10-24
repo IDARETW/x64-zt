@@ -199,9 +199,8 @@ namespace zonetool::convert::iw7_iw8
 				return {};
 			}
 
-			// Replay's world vertices reach 100000 units (replay_render: "Position out of range"): a surface beyond them
-			// (Parkour's mountains) is drawn into the sky, as the distant models are. The sky's own surface stays.
-			constexpr float largest_world_coordinate = 100000.0f;
+			// A surface beyond the range of the world (Parkour's mountains) is drawn into the sky, as the distant models
+			// are. The sky's own surface stays.
 			const auto beyond = std::ranges::any_of(order, [&](const std::uint16_t index)
 			{
 				const auto& xyz = vertex(index).xyz;
@@ -1060,26 +1059,16 @@ namespace zonetool::convert::iw7_iw8
 		{
 			// The grid covers the play space: the spawn points with a margin. The world reaches far beyond it (set
 			// dressing in the distance), which would take more points than Replay's light grid holds.
-			const auto& spawns = source.map_ents()->spawnList;
-			std::array<float, 6> play{FLT_MAX, FLT_MAX, FLT_MAX, -FLT_MAX, -FLT_MAX, -FLT_MAX};
-			for (auto i = 0u; i < spawns.spawnsCount; i++)
-			{
-				for (auto axis = 0; axis < 3; axis++)
-				{
-					play[axis] = std::min(play[axis], spawns.spawns[i].origin[axis]);
-					play[axis + 3] = std::max(play[axis + 3], spawns.spawns[i].origin[axis]);
-				}
-			}
-
+			const auto play = spawn_bounds(source);
 			auto area = floors.floor_area();
-			if (spawns.spawnsCount)
+			if (play)
 			{
-				area = {std::max(area[0], play[0] - play_margin), std::max(area[1], play[1] - play_margin),
-					std::min(area[2], play[3] + play_margin), std::min(area[3], play[4] + play_margin)};
+				area = {std::max(area[0], (*play)[0] - play_margin), std::max(area[1], (*play)[1] - play_margin),
+					std::min(area[2], (*play)[3] + play_margin), std::min(area[3], (*play)[4] + play_margin)};
 			}
 
-			const auto lowest = spawns.spawnsCount ? play[2] - 256.0f : -FLT_MAX;
-			const auto highest = spawns.spawnsCount ? play[5] + 768.0f : FLT_MAX;
+			const auto lowest = play ? (*play)[2] - 256.0f : -FLT_MAX;
+			const auto highest = play ? (*play)[5] + 768.0f : FLT_MAX;
 			if (area[0] > area[2] || area[1] > area[3])
 			{
 				ZONETOOL_WARNING("iw7: the world has no floors for a light grid");
@@ -1299,6 +1288,42 @@ namespace zonetool::convert::iw7_iw8
 		return name;
 	}
 
+	std::optional<std::array<float, 6>> spawn_bounds(const source_map& source)
+	{
+		const auto* map_ents = source.map_ents();
+		if (!map_ents || !map_ents->spawnList.spawnsCount)
+		{
+			return std::nullopt;
+		}
+
+		const auto& spawns = map_ents->spawnList;
+		std::array<float, 6> bounds{FLT_MAX, FLT_MAX, FLT_MAX, -FLT_MAX, -FLT_MAX, -FLT_MAX};
+		for (auto i = 0u; i < spawns.spawnsCount; i++)
+		{
+			for (auto axis = 0; axis < 3; axis++)
+			{
+				bounds[axis] = std::min(bounds[axis], spawns.spawns[i].origin[axis]);
+				bounds[axis + 3] = std::max(bounds[axis + 3], spawns.spawns[i].origin[axis]);
+			}
+		}
+
+		return bounds;
+	}
+
+	bool beyond_world(const iw7::GfxWorld& world, const unsigned int instance)
+	{
+		const auto& bounds = world.dpvs.smodelInsts[instance].bounds;
+		for (auto axis = 0; axis < 3; axis++)
+		{
+			if (std::abs(bounds.midPoint[axis]) + bounds.halfSize[axis] > largest_world_coordinate)
+			{
+				return true;
+			}
+		}
+
+		return false;
+	}
+
 	void collect_static_models(const source_map& source, extraction& output)
 	{
 		const auto& world = *source.world();
@@ -1477,6 +1502,12 @@ namespace zonetool::convert::iw7_iw8
 		std::map<unsigned, std::tuple<std::size_t, std::size_t, std::size_t, std::string>> other_lighting;
 		for (auto i = 0u; i < dpvs.smodelCount; i++)
 		{
+			// The sky draws the static models beyond the range of the world.
+			if (beyond_world(world, i))
+			{
+				continue;
+			}
+
 			const auto& draw = dpvs.smodelDrawInsts[i];
 			const auto flags = draw.flags;
 			const auto lighting = (flags & iw7::STATIC_MODEL_FLAG_LIGHTGRID_LIGHTING) ? 0 : (flags & iw7::STATIC_MODEL_FLAG_VERTEXLIT_LIGHTING) ? 1
