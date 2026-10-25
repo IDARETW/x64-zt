@@ -11,6 +11,7 @@
 #include <iw8/common/scratch_files.h>
 #include <iw8/dump/xsurface_convert.h>
 #include <BC.h>
+#include <DirectXTex.h>
 
 #include <Windows.h>
 #include <bcrypt.h>
@@ -63,6 +64,8 @@ struct Image
     std::vector<std::uint8_t> rgba;
     // Authored source levels in largest-to-smallest order, excluding this level.
     std::vector<Image> mips;
+    std::vector<std::uint8_t> nativeBc7;
+    unsigned nativeBc7Levels{};
 };
 
 struct Cubemap
@@ -706,6 +709,37 @@ std::vector<Image> DecodeDds(const std::filesystem::path &path)
     const unsigned width = Read<std::uint32_t>(data, 16);
     const unsigned mipCount = std::max(1u, Read<std::uint32_t>(data, 28));
     const std::uint32_t fourCC = Read<std::uint32_t>(data, 84);
+    if (fourCC == 0x30315844u)
+    {
+        DirectX::ScratchImage source;
+        DirectX::TexMetadata metadata{};
+        if (FAILED(DirectX::LoadFromDDSMemory(data.data(), data.size(), DirectX::DDS_FLAGS_NONE, &metadata, source)) ||
+            metadata.format != DXGI_FORMAT_BC7_UNORM || metadata.dimension != DirectX::TEX_DIMENSION_TEXTURE2D ||
+            metadata.arraySize != 1 || metadata.IsCubemap() || !width || !height || width > 8192 || height > 8192 ||
+            mipCount > 14)
+            throw std::runtime_error("unsupported DDS DX10 image " + path.string());
+        DirectX::ScratchImage decoded;
+        if (FAILED(DirectX::Decompress(source.GetImages(), source.GetImageCount(), metadata,
+                                      DXGI_FORMAT_R8G8B8A8_UNORM, decoded)))
+            throw std::runtime_error("cannot decode DDS BC7 image " + path.string());
+        const auto level = [&](const unsigned index) {
+            const auto &input = *decoded.GetImage(index, 0, 0);
+            Image output{static_cast<unsigned>(input.width), static_cast<unsigned>(input.height),
+                         std::vector<std::uint8_t>(input.width * input.height * 4)};
+            for (std::size_t row = 0; row < input.height; ++row)
+                std::memcpy(output.rgba.data() + row * input.width * 4,
+                            input.pixels + row * input.rowPitch, input.width * 4);
+            return output;
+        };
+        Image image = level(0);
+        for (unsigned index = 1; index < metadata.mipLevels; ++index)
+            image.mips.push_back(level(index));
+        image.nativeBc7.assign(source.GetPixels(), source.GetPixels() + source.GetPixelsSize());
+        image.nativeBc7Levels = static_cast<unsigned>(metadata.mipLevels);
+        std::vector<Image> result;
+        result.push_back(std::move(image));
+        return result;
+    }
     const unsigned bits = Read<std::uint32_t>(data, 88);
     const std::array<std::uint32_t, 4> masks{
         Read<std::uint32_t>(data, 92), Read<std::uint32_t>(data, 96),
@@ -4272,6 +4306,8 @@ std::string ImageName(const std::string &map, const unsigned channel,
 Image ReplaySpecularIntensity(Image specular)
 {
     specular.mips.clear();
+    specular.nativeBc7.clear();
+    specular.nativeBc7Levels = 0;
     static const auto reflectance = [] {
         std::array<std::uint8_t, 256> table{};
         for (unsigned value = 0; value < table.size(); ++value)
@@ -4819,14 +4855,13 @@ RenderPlan PrepareRenderAssets(const std::filesystem::path &exportRoot, const Js
     std::vector<SourceMaterial> materials;
     materials.reserve(unique.size());
     std::unordered_map<std::string, std::vector<Image>> images;
+    const bool iw7Images = world.value("iw7_specular", false);
     auto image = [&](const std::string &name) -> const std::vector<Image> & {
         auto found = images.find(name);
         if (found == images.end())
             found = images.emplace(name, LoadImage(exportRoot, sourcePaths, name)).first;
         return found->second;
     };
-    // The materials and the images that they name are read on every core (IW7 maps name thousands); the loops
-    // below find them loaded. An image that does not load is left to the loop that uses it, which reports it.
     const auto parallelFor = [](const std::size_t count, const auto &body) {
         std::atomic<std::size_t> next{0};
         std::exception_ptr failure;
@@ -4866,7 +4901,7 @@ RenderPlan PrepareRenderAssets(const std::filesystem::path &exportRoot, const Js
             if (material.kind != SurfaceKind::skipped)
                 for (const std::string *name : {&material.color, &material.normal, &material.response, &material.detail,
                                                  &material.replayColor, &material.replayNormalGloss})
-                    if (!name->empty())
+                    if (!name->empty() && (!iw7Images || name == &material.color))
                         imageNames.insert(*name);
         const std::vector<std::string> names(imageNames.begin(), imageNames.end());
         std::vector<std::optional<std::vector<Image>>> loaded(names.size());
@@ -4962,7 +4997,7 @@ RenderPlan PrepareRenderAssets(const std::filesystem::path &exportRoot, const Js
     std::size_t movedNormals = 0;
     for (const SourceMaterial &material : materials)
     {
-        if (material.normal.empty() || material.normal == "$identitynormalmap" ||
+        if (iw7Images || material.normal.empty() || material.normal == "$identitynormalmap" ||
             !swizzledNormals.insert(material.normal).second)
             continue;
         image(material.normal);
@@ -4981,6 +5016,8 @@ RenderPlan PrepareRenderAssets(const std::filesystem::path &exportRoot, const Js
         if (levels.empty() || !replicatedY(levels.front()))
             continue;
         const auto swizzle = [](Image &level) {
+            level.nativeBc7.clear();
+            level.nativeBc7Levels = 0;
             for (std::size_t offset = 0; offset < level.rgba.size(); offset += 4)
             {
                 level.rgba[offset] = level.rgba[offset + 3];
@@ -5896,6 +5933,9 @@ RenderPlan PrepareRenderAssets(const std::filesystem::path &exportRoot, const Js
         // colours are colour maps in later textures (colourImage).
         auto lapStart = std::chrono::steady_clock::now();
         const bool colour = (channel == 0 || colourImage) && !linearData;
+        const bool nativeBc7 = bc7Images && !colour && !alphaCoverage && !alphaChannel &&
+                               tint == std::array<float, 4>{1, 1, 1, 1} && !source.nativeBc7.empty();
+        auto nativePixels = nativeBc7 ? std::move(source.nativeBc7) : std::vector<std::uint8_t>{};
         if (colour)
         {
             for (auto &mip : source.mips)
@@ -5913,6 +5953,8 @@ RenderPlan PrepareRenderAssets(const std::filesystem::path &exportRoot, const Js
             height = std::max(1u, height / 2);
             ++levels;
         }
+        if (nativeBc7)
+            levels = source.nativeBc7Levels;
         const unsigned sourceWidth = source.width, sourceHeight = source.height;
         residentLap(0, lapStart);
         auto pixels = MipChain(std::move(source), levels, colour);
@@ -5921,6 +5963,8 @@ RenderPlan PrepareRenderAssets(const std::filesystem::path &exportRoot, const Js
             // Color mips weight texels by alpha as coverage, so a data channel
             // stored in alpha gets its own chain and replaces alpha afterwards.
             Image data = Resize(*alphaChannel, sourceWidth, sourceHeight, false);
+            if (sourceWidth == alphaChannel->width && sourceHeight == alphaChannel->height)
+                data.mips = alphaChannel->mips;
             const auto dataPixels = MipChain(std::move(data), levels, false);
             if (dataPixels.size() != pixels.size())
                 throw std::runtime_error("alpha data chain does not match its color chain");
@@ -5943,6 +5987,21 @@ RenderPlan PrepareRenderAssets(const std::filesystem::path &exportRoot, const Js
             }
             WriteBytes(mapDirectory / filename, bytes);
         };
+        if (nativeBc7)
+        {
+            // BC7 mip payloads already meet Replay format 44's 16-byte alignment.
+            const std::string filename = stemName + "_native.bc7";
+            writeOnce(filename, nativePixels);
+            result.considered = true;
+            result.compressed = true;
+            result.psnr = 200.0;
+            result.rawBytes = pixels.size();
+            result.packedBytes = nativePixels.size();
+            result.definition = {{"name", result.name}, {"width", sourceWidth}, {"height", sourceHeight},
+                                 {"bc7", filename}, {"format", 44}, {"mipCount", levels}};
+            residentLap(4, lapStart);
+            return result;
+        }
         if (bc7Images && (domain == "world" || domain == "model") && sourceWidth >= 4 && sourceHeight >= 4 &&
             sourceWidth % 4 == 0 && sourceHeight % 4 == 0)
         {
