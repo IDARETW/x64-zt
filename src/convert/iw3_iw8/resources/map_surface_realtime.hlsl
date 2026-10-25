@@ -1063,16 +1063,17 @@ float4 main(Input input) : SV_TARGET0 {
     }
     float4 texel = sky ? sourceAtlas.SampleLevel(colorSampler, sampleUV, 0)
                        : sourceAtlas.SampleBias(colorSampler, sampleUV, MAP_MIP_BIAS);
-#if defined(MAP_SKY_OBJECTS) && !defined(MAP_COVERAGE)
-    // A sky surface's mask (IW7's mask_mua techsets) rides in the response image: its alpha multiplies the colour's, at
-    // the surface's own UV; the surface then has no response.
-    if (skyObject && (flags & 64) != 0) {
+#else
+    float4 texel = sourceAtlas.SampleBias(colorSampler, sampleUV, MAP_MIP_BIAS);
+#endif
+#if defined(MAP_UNLIT_MASKS) && !defined(MAP_COVERAGE)
+    // An unlit surface's mask (IW7's mask / mask_mua techsets: effect quads, glows, light cards, sky discs) rides in the
+    // response image: its alpha multiplies the colour's, at the surface's own UV (IW7's masked unlit PS 88cc5ec2); the
+    // surface then has no response.
+    if ((flags & 128) != 0 && (flags & 64) != 0) {
         texel.a *= sourceResponseAtlas.SampleBias(colorSampler, input.uv.xy, MAP_MIP_BIAS).a;
         flags &= ~64u;
     }
-#endif
-#else
-    float4 texel = sourceAtlas.SampleBias(colorSampler, sampleUV, MAP_MIP_BIAS);
 #endif
 #ifdef MAP_DETAIL
     // IW3 detail materials (lp_*r0c0d0*): colour + detail - 0.5 in IW3's gamma
