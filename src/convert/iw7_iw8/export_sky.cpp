@@ -785,7 +785,11 @@ namespace zonetool::convert::iw7_iw8
 				}
 			});
 
-			draw_distant_models(source, output, sky, exposure);
+			// With runtime_sky they draw in the sky at run time (export_world).
+			if (!runtime_sky())
+			{
+				draw_distant_models(source, output, sky, exposure);
+			}
 
 			DirectX::ScratchImage cube;
 			if (FAILED(cube.InitializeCube(DXGI_FORMAT_B8G8R8A8_UNORM, sky_size, sky_size, 1, 1)))

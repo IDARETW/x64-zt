@@ -123,6 +123,9 @@ struct Surface
     // tangent transform (four bytes of a 2x2 matrix; 0 keeps the surface's frame) of each layer after the first.
     std::vector<std::vector<Vec2>> layerUvs;
     std::vector<std::vector<std::uint32_t>> layerTransforms;
+    // A surface of the sky: its vertices are directions from the play space, which the world vertex shader draws at
+    // infinity (flag bit 23).
+    bool skyObject{};
 };
 
 struct BrushModel
@@ -2171,6 +2174,8 @@ struct RawSurface
     std::string material;
     std::optional<int> lightmap;
     unsigned reflection_probe{};
+    // A surface of the sky (an extraction's runtime sky): its vertices are directions, drawn at infinity.
+    std::optional<bool> sky_object;
     std::optional<bool> deformed;
     std::vector<RawVertex> vertices;
     std::vector<std::uint32_t> indices;
@@ -2365,6 +2370,7 @@ Surface ReadWorldSurface(const RawSurface &source)
     Surface output;
     output.material = source.material;
     output.lightmap = source.lightmap.value_or(-1);
+    output.skyObject = source.sky_object.value_or(false);
     // IW3 reserves the five-bit value 31 for an unlightmapped world surface.
     // Keep real indices range-checked later, but do not treat this sentinel as
     // a reference to a missing atlas entry.
@@ -5938,8 +5944,8 @@ Json BuildRender(const Json &world, const VisibilityGroups &visibility,
         std::stable_sort(ordered.begin(), ordered.end(), [&](const Surface *a, const Surface *b) {
             const auto &ma = plan.materials.at(a->material);
             const auto &mb = plan.materials.at(b->material);
-            const bool ag = ma.kind == SurfaceKind::glass;
-            const bool bg = mb.kind == SurfaceKind::glass;
+            const bool ag = ma.kind == SurfaceKind::glass || a->skyObject;
+            const bool bg = mb.kind == SurfaceKind::glass || b->skyObject;
             if (ag != bg)
                 return !ag;
             // Replay draws blended decals (depth bias: IW7's decal region, IW3's
@@ -5947,8 +5953,16 @@ Json BuildRender(const Json &world, const VisibilityGroups &visibility,
             // (R_AddAllBspDrawSurfacesCamera 0x18D19C0): stock Shipment keeps 19
             // such surfaces between its opaque and translucent ones. In the
             // translucent range they depth-fought the wall under them.
-            if (ag && ma.depthBias != mb.depthBias)
-                return ma.depthBias;
+            const bool ad = ag && ma.depthBias && !a->skyObject;
+            const bool bd = bg && mb.depthBias && !b->skyObject;
+            if (ad != bd)
+                return ad;
+            // The sky's surfaces draw first in the translucent range, over the sky box: the opaque ones, then the
+            // blended ones over them.
+            if (a->skyObject != b->skyObject)
+                return a->skyObject;
+            if (a->skyObject && (ma.kind == SurfaceKind::glass) != (mb.kind == SurfaceKind::glass))
+                return mb.kind == SurfaceKind::glass;
             // Blended world layers share a few materials and one sort key, and
             // Replay draws its translucent range in surface order: keep IW3's
             // layer order (rank = IW3 sort - 8, flags bits 12-17).
@@ -5977,7 +5991,7 @@ Json BuildRender(const Json &world, const VisibilityGroups &visibility,
         {
             const Surface &surface = *source;
             const MaterialPlan &material = plan.materials.at(surface.material);
-            if (material.kind == SurfaceKind::glass && !skyAdded)
+            if ((material.kind == SurfaceKind::glass || surface.skyObject) && !skyAdded)
             {
                 appendSky();
                 skyAdded = true;
@@ -6029,12 +6043,20 @@ Json BuildRender(const Json &world, const VisibilityGroups &visibility,
                                               {"lightmapIndex", 0u},
                                               // Cut-outs draw in the opaque range, after their masked
                                               // depth prepass (the cut-out variants' coverage pass).
-                                              {"opaque", material.kind == SurfaceKind::opaque ||
-                                                             material.kind == SurfaceKind::cutout},
-                                              {"decal", material.kind == SurfaceKind::glass && material.depthBias},
+                                              // Surfaces of the sky draw over the sky box, after the opaque
+                                              // range.
+                                              {"opaque", !surface.skyObject && (material.kind == SurfaceKind::opaque ||
+                                                                                material.kind == SurfaceKind::cutout)},
+                                              {"infinite", surface.skyObject},
+                                              {"decal", material.kind == SurfaceKind::glass && material.depthBias &&
+                                                            !surface.skyObject},
                                               {"sunShadowMask", material.castsShadow ? sunShadowMask : 0u},
                                               {"reflectionProbe", surface.reflectionProbe},
-                                              {"materialParameters", material.environment}});
+                                              // A sky surface's parameters: its UV animation, then its emission.
+                                              {"materialParameters",
+                                               surface.skyObject ? std::array{material.uvAnimation[0], material.uvAnimation[1],
+                                                                              material.uvAnimation[2], material.environment[3]}
+                                                                 : material.environment}});
                 // Shipped translucent world surfaces are not Umbra occluders (mp_hideout's glass: flags 7, its
                 // opaque surfaces 0x47). Extractions that draw blended surfaces translucent opt in.
                 if (material.kind != SurfaceKind::opaque && world.value("translucent_glass", false))
@@ -6102,11 +6124,12 @@ Json BuildRender(const Json &world, const VisibilityGroups &visibility,
                         // fraction keeps its precision.
                         if (material.tile >= 0x10000)
                             throw std::runtime_error("IW3 atlas tile exceeds the 16-bit tile word");
+                        // Sky surfaces carry flag bit 23 (2^23 in the flag word).
                         const Json encoded = stock ? Json::array({lightmap[0], lightmap[1]})
                                                    : Json::array(
                             {lightmap[0] + 65536.0 * ReflectionProbeTag(surface.reflectionProbe,
                                                                         geometryProbeBounds.size()),
-                             lightmap[1]});
+                             lightmap[1] + (surface.skyObject ? 8388608.0 : 0.0)});
                         (*target)["vertices"].push_back(
                             {{"position", vertex.position},
                              {"uv", vertex.uv},

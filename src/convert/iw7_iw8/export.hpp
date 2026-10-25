@@ -71,6 +71,8 @@ namespace zonetool::convert::iw7_iw8
 		// The world materials of a surface without a lightmap: Replay's stock world materials draw lightmapped surfaces
 		// only, so these keep their converted material beside a stock one.
 		std::set<std::string> lightless_world_materials;
+		// The materials of the surfaces that draw in the sky at run time (runtime_sky).
+		std::set<std::string> sky_object_materials;
 		// The strings of the map's scripts that can name sound aliases (createfx loop sounds, playsound): export_sounds
 		// writes the aliases of the map's sound bank among them.
 		std::set<std::string> sound_names;
@@ -232,6 +234,14 @@ namespace zonetool::convert::iw7_iw8
 	inline bool replay_stock_world()
 	{
 		static const bool enabled = [] { const char* value = std::getenv("MW120R_STOCK_WORLD"); return value && *value == '1'; }();
+		return enabled;
+	}
+
+	// MW120R_RUNTIME_SKY=1: the distant models and world surfaces draw in the sky at run time with their own materials
+	// (AGENTS.md plan 2.1), where they were drawn into the sky's cube map.
+	inline bool runtime_sky()
+	{
+		static const bool enabled = [] { const char* value = std::getenv("MW120R_RUNTIME_SKY"); return value && *value == '1'; }();
 		return enabled;
 	}
 	int material_layer_count(const iw7::Material* material);

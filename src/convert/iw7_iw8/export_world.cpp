@@ -17,6 +17,9 @@ namespace zonetool::convert::iw7_iw8
 		int reflection_probe{};
 		std::vector<geometry_vertex> vertices;
 		std::vector<std::uint32_t> indices;
+		// A surface of the sky (runtime_sky): its vertices are directions from the play space, which the world vertex
+		// shader draws at infinity.
+		bool sky_object{};
 	};
 
 	namespace
@@ -426,6 +429,131 @@ namespace zonetool::convert::iw7_iw8
 					std::move(overlay), indices});
 			}
 
+			return result;
+		}
+
+		// The distant models (too large for the world, or static models beyond its range) and the world surfaces beyond its
+		// range as surfaces of the sky (runtime_sky), with their own materials: the sky lies at infinity, where the middle
+		// of the spawn points sees it (export_sky drew them into the cube map from there). Each keeps its directions from
+		// there, scaled into the world's range; the world vertex shader draws them at infinity, as the sky.
+		std::vector<world_geometry_surface> export_sky_objects(const source_map& source, const iw7::GfxWorld& world, extraction& output)
+		{
+			constexpr double sky_object_range = 60000.0;
+			const auto& bounds = world.modelCount ? world.models[0].bounds : world.bounds;
+			std::array<double, 3> center{bounds.midPoint[0], bounds.midPoint[1], bounds.midPoint[2]};
+			if (const auto play = spawn_bounds(source))
+			{
+				center = {((*play)[0] + (*play)[3]) * 0.5, ((*play)[1] + (*play)[4]) * 0.5, ((*play)[2] + (*play)[5]) * 0.5};
+			}
+
+			std::vector<world_geometry_surface> result;
+			const auto add = [&](const mesh_surface& mesh, const std::vector<std::array<double, 3>>& directions,
+				const std::vector<std::array<double, 3>>& normals)
+			{
+				const auto kind = classify_material(mesh.material).kind;
+				if (!mesh.material || kind == surface_kind::sky || kind == surface_kind::distortion || mesh.triangles.empty())
+				{
+					return;
+				}
+
+				auto farthest = 1.0;
+				for (const auto& direction : directions)
+				{
+					farthest = std::max(farthest, std::sqrt(direction[0] * direction[0] + direction[1] * direction[1] + direction[2] * direction[2]));
+				}
+
+				const auto scale = sky_object_range / farthest;
+				auto& surface = result.emplace_back();
+				surface.material = output.add_material(source, const_cast<iw7::Material*>(mesh.material));
+				surface.lightmap = -1;
+				surface.sky_object = true;
+				output.world_materials.insert(surface.material);
+				output.lightless_world_materials.insert(surface.material);
+				output.sky_object_materials.insert(surface.material);
+				for (std::size_t v = 0; v < mesh.vertices.size() && v < directions.size(); v++)
+				{
+					const auto& source_vertex = mesh.vertices[v];
+					auto& vertex = surface.vertices.emplace_back();
+					vertex.position = {directions[v][0] * scale, directions[v][1] * scale, directions[v][2] * scale};
+					vertex.normal = normals[v];
+					// Any tangent across the normal: these surfaces take no normal maps.
+					const auto& n = normals[v];
+					vertex.tangent = std::abs(n[2]) < 0.9 ? std::array<double, 3>{-n[1], n[0], 0.0} : std::array<double, 3>{0.0, -n[2], n[1]};
+					vertex.binormal_sign = 1.0;
+					vertex.uv = {source_vertex.uv[0], source_vertex.uv[1]};
+					for (auto channel = 0; channel < 4; channel++)
+					{
+						vertex.color[channel] = static_cast<int>(std::lround(std::clamp(source_vertex.color[channel], 0.0f, 1.0f) * 255.0f));
+					}
+				}
+
+				for (const auto& triangle : mesh.triangles)
+				{
+					if (std::ranges::all_of(triangle, [&](const std::uint16_t index) { return index < surface.vertices.size(); }))
+					{
+						surface.indices.insert(surface.indices.end(), triangle.begin(), triangle.end());
+					}
+				}
+			};
+
+			std::map<std::string, std::vector<mesh_surface>> meshes;
+			for (auto i = 0u; i < world.dpvs.smodelCount; i++)
+			{
+				const auto& instance = world.dpvs.smodelDrawInsts[i];
+				const auto name = file_name(asset_name(instance.model ? iw7::get_asset_name(iw7::ASSET_TYPE_XMODEL, instance.model) : nullptr));
+				const auto model = output.models.find(name);
+				if (!(output.distant_models.contains(name) || beyond_world(world, i)) || model == output.models.end() || !model->second)
+				{
+					continue;
+				}
+
+				auto mesh = meshes.find(name);
+				if (mesh == meshes.end())
+				{
+					mesh = meshes.emplace(name, model_mesh(source, *model->second)).first;
+				}
+
+				const auto& placement = instance.placement;
+				for (const auto& surface : mesh->second)
+				{
+					std::vector<std::array<double, 3>> directions, normals;
+					for (const auto& vertex : surface.vertices)
+					{
+						std::array<double, 3> position{}, normal{};
+						for (auto axis = 0; axis < 3; axis++)
+						{
+							for (auto row = 0; row < 3; row++)
+							{
+								position[axis] += vertex.position[row] * placement.axis[row][axis];
+								normal[axis] += vertex.normal[row] * placement.axis[row][axis];
+							}
+
+							position[axis] = placement.origin[axis] + position[axis] * placement.scale - center[axis];
+						}
+
+						const auto length = std::sqrt(normal[0] * normal[0] + normal[1] * normal[1] + normal[2] * normal[2]);
+						directions.push_back(position);
+						normals.push_back(length > 0.0 ? std::array{normal[0] / length, normal[1] / length, normal[2] / length}
+							: std::array{0.0, 0.0, 1.0});
+					}
+
+					add(surface, directions, normals);
+				}
+			}
+
+			for (const auto& surface : output.distant_surfaces)
+			{
+				std::vector<std::array<double, 3>> directions, normals;
+				for (const auto& vertex : surface.vertices)
+				{
+					directions.push_back({vertex.position[0] - center[0], vertex.position[1] - center[1], vertex.position[2] - center[2]});
+					normals.push_back({vertex.normal[0], vertex.normal[1], vertex.normal[2]});
+				}
+
+				add(surface, directions, normals);
+			}
+
+			ZONETOOL_INFO("iw7: %zu sky surfaces draw at run time (distant models and world surfaces)", result.size());
 			return result;
 		}
 
@@ -1641,6 +1769,34 @@ namespace zonetool::convert::iw7_iw8
 		}
 
 		first_surface[world.surfaceCount] = surfaces.size();
+		// The sky's surfaces (runtime_sky) belong to the world model: they go after its surfaces, before the brush models'.
+		if (runtime_sky() && world.modelCount)
+		{
+			auto sky_objects = export_sky_objects(source, world, output);
+			const auto world_end = std::min<std::size_t>(world.models[0].startSurfIndex + world.models[0].surfaceCount, world.surfaceCount);
+			const auto at = first_surface[world_end];
+			const auto count = sky_objects.size();
+			for (auto& index : surface_indices)
+			{
+				if (index.get<std::size_t>() >= at)
+				{
+					index = index.get<std::size_t>() + count;
+				}
+			}
+
+			for (auto i = world_end; i <= world.surfaceCount; i++)
+			{
+				first_surface[i] += count;
+			}
+
+			for (std::size_t k = 0; k < count; k++)
+			{
+				surface_indices.push_back(at + k);
+			}
+
+			surfaces.insert(surfaces.begin() + static_cast<std::ptrdiff_t>(at), std::make_move_iterator(sky_objects.begin()),
+				std::make_move_iterator(sky_objects.end()));
+		}
 
 		// IW7_DRAW_RANGES=1: IW7's draw ranges of the world's surfaces and the materials of its lit decal range.
 		if (std::getenv("IW7_DRAW_RANGES"))
