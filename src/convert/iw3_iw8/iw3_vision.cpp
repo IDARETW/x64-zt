@@ -615,7 +615,7 @@ std::vector<std::uint8_t> BuildGradingClutPixels(const std::vector<std::uint8_t>
 std::string BuildReplayVision(const std::optional<ExpFog> &fog, const std::string &gradingClut,
                               const MapStyle style, const std::array<float, 3> &sunDirection,
                               const Iw8LightingReference *exposure, const float lightUnitScale,
-                              const std::optional<NativeFog> &nativeFog)
+                              const std::optional<NativeFog> &nativeFog, const nlohmann::json *iw7Tonemap)
 {
     std::map<std::string_view, std::string> overrides;
     if (style == MapStyle::iw8)
@@ -671,6 +671,34 @@ std::string BuildReplayVision(const std::optional<ExpFog> &fog, const std::strin
               "LRPSSPPPPT", "NMKNKNMKNN"})
             overrides.erase(token);
         overrides["LPKQPKSRKQ"] = Number(10.0f + std::log2(std::max(lightUnitScale, 1e-3f))); // tonemapExposure
+        // An extraction in IW7's light units keeps IW7's own exposure: Replay's vision has IW7's tonemap exposure
+        // fields (63-82, with IW7's values as its defaults). Replay's tone curve (tonemapMode 3) stays: IW7's mode 2
+        // takes curve fields that Replay's vision does not have.
+        if (iw7Tonemap)
+        {
+            static constexpr std::pair<std::string_view, std::string_view> kTonemapFields[] = {
+                {"tonemapAuto", "NLMSSPLMPK"},
+                {"tonemapAutoExposureAdjustCurve", "MRKQQMPTKN"},
+                {"tonemapExposure", "LPKQPKSRKQ"},
+                {"tonemapAutoExposureAdjust", "NOOTTPORTQ"},
+                {"tonemapMaxExposure", "LTNRTLQOKQ"},
+                {"tonemapExposureAdjust", "NNRKNLLSQN"},
+                {"tonemapAdaptSpeed", "MMQMQKSTS"},
+                {"tonemapDarkEv", "LSLPLPRQNO"},
+                {"tonemapMidEv", "NLPRMSTSMM"},
+                {"tonemapLightEv", "MOPORNQOTQ"},
+                {"tonemapDarkExposureAdjust", "MTPSRMRRLP"},
+                {"tonemapMidExposureAdjust", "LRPSSPPPPT"},
+                {"tonemapLightExposureAdjust", "NMKNKNMKNN"},
+                {"tonemapMinExposureAdjust", "MOSRNQNQTN"},
+                {"tonemapMaxExposureAdjust", "NSROSTQOSN"},
+                {"tonemapGrainStrength", "LNQNRRPNPP"},
+                {"toneWhitePoint", "LRROOOSOMM"},
+            };
+            for (const auto &[name, token] : kTonemapFields)
+                if (const auto found = iw7Tonemap->find(std::string(name)); found != iw7Tonemap->end())
+                    overrides[token] = found->get<std::string>();
+        }
         // Fog: IW3's own, baked by the surface shader exactly as --style iw3
         // does it (below); the native fog pass stays off.
     }

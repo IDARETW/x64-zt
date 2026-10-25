@@ -10122,7 +10122,9 @@ PreparedMap PrepareFastfile(const ImportOptions &options)
     // --style iw8 light units and exposure matched to the shipped maps from the
     // compiled IW3 sun (iw3::MatchIw8Lighting); --style iw3 keeps IW3 units.
     Iw8LightingMatch lightingMatch;
-    if (options.style == MapStyle::iw8)
+    // An extraction in IW7's light units with IW7's own exposure (iw7_tonemap) keeps its units.
+    const auto *iw7Tonemap = world.contains("iw7_tonemap") && !world.at("iw7_tonemap").empty() ? &world.at("iw7_tonemap") : nullptr;
+    if (options.style == MapStyle::iw8 && !iw7Tonemap)
     {
         const auto sunIndex = world.at("sun_primary_light_index").get<std::size_t>();
         const auto &lights = commonWorld.at("primary_lights");
@@ -10365,7 +10367,7 @@ PreparedMap PrepareFastfile(const ImportOptions &options)
     {
         const std::string vision = BuildReplayVision(expFog, result.gradingClutName, options.style,
                                                      SunDirection(world, entities), lightingMatch.exposure,
-                                                     lightingMatch.lightUnitScale, nativeFog);
+                                                     lightingMatch.lightUnitScale, nativeFog, iw7Tonemap);
         result.rawFiles.push_back(
             {"vision/" + options.map + ".vision",
              std::vector<std::uint8_t>(vision.begin(), vision.end())});

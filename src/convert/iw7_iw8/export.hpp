@@ -239,6 +239,15 @@ namespace zonetool::convert::iw7_iw8
 
 	// MW120R_RUNTIME_SKY=1: the distant models and world surfaces draw in the sky at run time with their own materials
 	// (AGENTS.md plan 2.1), where they were drawn into the sky's cube map.
+	// MW120R_IW7_EXPOSURE=1: the map keeps IW7's light units throughout (the sun, lights, emission, fog and sky as the
+	// lightmaps keep them) and Replay meters it with IW7's own auto exposure (AGENTS.md plan 3.4): Replay's vision
+	// keeps IW7's tonemap exposure fields, with IW7's defaults.
+	inline bool iw7_exposure()
+	{
+		static const bool enabled = [] { const char* value = std::getenv("MW120R_IW7_EXPOSURE"); return value && *value == '1'; }();
+		return enabled;
+	}
+
 	inline bool runtime_sky()
 	{
 		static const bool enabled = [] { const char* value = std::getenv("MW120R_RUNTIME_SKY"); return value && *value == '1'; }();
@@ -462,6 +471,8 @@ namespace zonetool::convert::iw7_iw8
 	std::string export_default_probe(extraction& output);
 	// Writes the sky cube map of the world and returns its image name, or an empty name (the pipeline's dark sky).
 	std::string export_sky(const source_map& source, extraction& output);
+	// The tonemap fields of the map's vision file (tonemap*, toneWhitePoint) as it keeps them.
+	json iw7_tonemap(const source_map& source);
 	// The settings of the map's vision file (vision/<map>.vision, a raw file of the map zone) by name, values unquoted.
 	std::map<std::string, std::string> vision_settings(const source_map& source);
 	// The map's fog for the pipeline's world export: IW7's vision fog fields, which Replay's vision has under the same

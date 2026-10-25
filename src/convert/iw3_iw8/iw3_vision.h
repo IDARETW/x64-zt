@@ -7,6 +7,8 @@
 #include <string>
 #include <vector>
 
+#include <json.hpp>
+
 namespace iw3
 {
 // setExpFog(startDist, halfwayDist, r, g, b, transition) from the map's main script.
@@ -129,5 +131,6 @@ std::string BuildReplayVision(const std::optional<ExpFog> &fog, const std::strin
                               MapStyle style, const std::array<float, 3> &sunDirection,
                               const Iw8LightingReference *exposure = nullptr,
                               float lightUnitScale = 1.0f,
-                              const std::optional<NativeFog> &nativeFog = std::nullopt);
+                              const std::optional<NativeFog> &nativeFog = std::nullopt,
+                              const nlohmann::json *iw7Tonemap = nullptr);
 } // namespace iw3
