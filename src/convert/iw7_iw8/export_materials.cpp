@@ -3,6 +3,8 @@
 #include "images.hpp"
 
 #include <execution>
+#include <bit>
+#include <limits>
 #include <utils/compression.hpp>
 
 namespace zonetool::convert::iw7_iw8
@@ -13,9 +15,7 @@ namespace zonetool::convert::iw7_iw8
 		// with mip levels: 512 pixels keep the map zone at the size of a converted IW3 map (Frontier: 1.1 GB of model
 		// images, against 3 GB at 1024).
 		constexpr std::size_t max_image_size = 512;
-		// The colour maps of world materials keep up to 1024 texels: native world materials sample them at their own
-		// size, where the ground fills the view.
-		constexpr std::size_t world_color_size = 1024;
+		constexpr auto source_image_size = std::numeric_limits<std::size_t>::max();
 		// The minimap and the loading screen are single 2D images: they keep IW7's size (1024 minimaps).
 		constexpr std::size_t hud_image_size = 4096;
 
@@ -64,6 +64,7 @@ namespace zonetool::convert::iw7_iw8
 			bool hdr_expand{};
 			// The largest size that the file keeps (HUD images keep theirs).
 			std::size_t limit{max_image_size};
+			bool source_mips{};
 		};
 
 		// FNV-1a: a short name for a combination of images, the same in each run.
@@ -104,6 +105,7 @@ namespace zonetool::convert::iw7_iw8
 			std::vector<std::uint8_t> data;
 			std::size_t width{};
 			std::size_t height{};
+			std::size_t mip_count{1};
 		};
 
 		// The reads of a game file source that cannot read on several threads at once, and the paks found missing.
@@ -155,7 +157,8 @@ namespace zonetool::convert::iw7_iw8
 		std::map<std::string, std::set<std::string>> missing_paks;
 
 		// The resident pixels of an image, or the largest stream that the atlas can use.
-		std::optional<image_pixels> read_pixels(const iw7::GfxImage& image, const std::size_t limit)
+		std::optional<image_pixels> read_pixels(const iw7::GfxImage& image, const std::size_t limit,
+			const bool source_mips = false)
 		{
 			if (!image.streamed)
 			{
@@ -164,7 +167,8 @@ namespace zonetool::convert::iw7_iw8
 					return {};
 				}
 
-				return image_pixels{{image.pixelData, image.pixelData + image.dataLen1}, image.width, image.height};
+				return image_pixels{{image.pixelData, image.pixelData + image.dataLen1}, image.width, image.height,
+					source_mips ? std::max<std::size_t>(image.levelCount, 1) : 1};
 			}
 
 			// The streams hold the image at growing sizes: the largest one that the atlas can use decodes fastest.
@@ -176,12 +180,12 @@ namespace zonetool::convert::iw7_iw8
 				first--;
 			}
 
-			for (auto i = first; i >= 0; i--)
+			const auto read_stream = [&](const int index) -> std::vector<std::uint8_t>
 			{
-				const auto& file = files[i];
+				const auto& file = files[index];
 				if (!file.offset || file.offsetEnd <= file.offset)
 				{
-					continue;
+					return {};
 				}
 
 				std::string compressed(file.offsetEnd - file.offset, '\0');
@@ -207,12 +211,21 @@ namespace zonetool::convert::iw7_iw8
 						}
 
 						images.insert(image.name ? image.name : "?");
-						continue;
+						return {};
 					}
 				}
 
-				auto pixels = iw7::decompress_lz4_block(compressed.data() + sizeof(iw7::XFileCompressorHeader),
+				if (compressed.size() < sizeof(iw7::XFileCompressorHeader))
+				{
+					return {};
+				}
+				return iw7::decompress_lz4_block(compressed.data() + sizeof(iw7::XFileCompressorHeader),
 					compressed.size() - sizeof(iw7::XFileCompressorHeader));
+			};
+
+			for (auto i = first; i >= 0; i--)
+			{
+				auto pixels = read_stream(i);
 				if (!pixels.empty())
 				{
 					// Some images' stream tables leave the top stream's size zero, and their own size 1x1 (Prime's
@@ -229,7 +242,54 @@ namespace zonetool::convert::iw7_iw8
 						}
 					}
 
-					return image_pixels{std::move(pixels), width, height};
+					if (!source_mips)
+					{
+						return image_pixels{std::move(pixels), width, height};
+					}
+
+					auto mip_count = static_cast<std::size_t>(image.streams[i].levelCountAndSize.levelCount);
+					if (!mip_count)
+					{
+						mip_count = std::bit_width(std::max(width, height));
+					}
+					const auto faces = image.mapType == iw7::MAPTYPE_CUBE ? 6u
+						: image.mapType == iw7::MAPTYPE_CUBE_ARRAY ? 6u * std::max<unsigned int>(image.numElements, 1) : 1u;
+					DirectX::ScratchImage layout;
+					if (FAILED(layout.Initialize2D(image.imageFormat, width, height, faces, mip_count)))
+					{
+						return {};
+					}
+					const auto expected = layout.GetPixelsSize();
+					std::vector<std::vector<std::uint8_t>> parts;
+					auto bytes = pixels.size();
+					parts.push_back(std::move(pixels));
+					// Stream sizes are cumulative. The higher streams hold only the newly added mip levels.
+					for (auto below = i - 1; bytes < expected && below >= 0; below--)
+					{
+						auto part = read_stream(below);
+						if (part.empty())
+						{
+							return {};
+						}
+						bytes += part.size();
+						parts.push_back(std::move(part));
+					}
+					if (bytes != expected || std::ranges::any_of(parts, [faces](const auto& part) { return part.size() % faces; }))
+					{
+						ZONETOOL_WARNING("iw7: image \"%s\" mip payload has %zu bytes, expected %zu", image.name, bytes, expected);
+						return {};
+					}
+					pixels.clear();
+					pixels.reserve(expected);
+					for (auto face = 0u; face < faces; face++)
+					{
+						for (const auto& part : parts)
+						{
+							const auto stride = part.size() / faces;
+							pixels.insert(pixels.end(), part.begin() + face * stride, part.begin() + (face + 1) * stride);
+						}
+					}
+					return image_pixels{std::move(pixels), width, height, mip_count};
 				}
 			}
 
@@ -239,7 +299,7 @@ namespace zonetool::convert::iw7_iw8
 		// The top level of each face of an image (one, the six of a cube map, or six for each cube map of an array) in a
 		// format that DirectXTex processes, at most `limit` pixels.
 		std::vector<DirectX::ScratchImage> load_faces(const iw7::GfxImage& image, const DXGI_FORMAT format,
-			const std::size_t limit = max_image_size)
+			const std::size_t limit = max_image_size, const bool source_mips = false)
 		{
 			// A cube map array holds the six faces of each of its cube maps in turn.
 			const auto faces = image.mapType == iw7::MAPTYPE_CUBE ? 6u
@@ -249,7 +309,7 @@ namespace zonetool::convert::iw7_iw8
 				return {};
 			}
 
-			auto pixels = read_pixels(image, limit);
+			auto pixels = read_pixels(image, limit, source_mips);
 			if (!pixels || pixels->data.empty() || !pixels->width || !pixels->height)
 			{
 				return {};
@@ -268,20 +328,22 @@ namespace zonetool::convert::iw7_iw8
 			std::vector<DirectX::ScratchImage> result;
 			for (auto face = 0u; face < faces; face++)
 			{
-				DirectX::Image source{};
-				source.width = pixels->width;
-				source.height = pixels->height;
-				source.format = image.imageFormat;
-				source.rowPitch = row_pitch;
-				source.slicePitch = slice_pitch;
-				source.pixels = pixels->data.data() + face * stride;
+				DirectX::ScratchImage source;
+				if (FAILED(source.Initialize2D(image.imageFormat, pixels->width, pixels->height, 1, pixels->mip_count)) ||
+					source.GetPixelsSize() > stride || (source_mips && source.GetPixelsSize() != stride))
+				{
+					return {};
+				}
+				std::memcpy(source.GetPixels(), pixels->data.data() + face * stride, source.GetPixelsSize());
 
 				// DirectXTex does not convert an image to its own format (E_INVALIDARG: Scorch's RGBA8 LED dots and heat
 				// shimmer): those copy.
 				DirectX::ScratchImage decoded;
-				const auto decoded_result = source.format == format ? decoded.InitializeFromImage(source)
-					: DirectX::IsCompressed(source.format) ? DirectX::Decompress(source, format, decoded)
-					: DirectX::Convert(source, format, DirectX::TEX_FILTER_FORCE_NON_WIC, DirectX::TEX_THRESHOLD_DEFAULT, decoded);
+				const auto decoded_result = image.imageFormat == format ? (decoded = std::move(source), S_OK)
+					: DirectX::IsCompressed(image.imageFormat) ? DirectX::Decompress(source.GetImages(), source.GetImageCount(),
+						source.GetMetadata(), format, decoded)
+					: DirectX::Convert(source.GetImages(), source.GetImageCount(), source.GetMetadata(), format,
+						DirectX::TEX_FILTER_FORCE_NON_WIC, DirectX::TEX_THRESHOLD_DEFAULT, decoded);
 				if (FAILED(decoded_result))
 				{
 					ZONETOOL_WARNING("iw7: image \"%s\" does not decode (format %d, HRESULT 0x%08X)", image.name, image.imageFormat,
@@ -319,9 +381,8 @@ namespace zonetool::convert::iw7_iw8
 		// by its own amount (Frontier's floors by about 30 degrees, noisy reflections).
 		void encode_normal_slopes(DirectX::ScratchImage& image)
 		{
-			const auto& metadata = image.GetMetadata();
 			auto* pixels = image.GetPixels();
-			for (std::size_t i = 0; i < metadata.width * metadata.height; i++)
+			for (std::size_t i = 0; i < image.GetPixelsSize() / 4; i++)
 			{
 				auto* pixel = pixels + i * 4;
 				const auto u = pixel[1] / 255.0f * 2.0f - 1.0f;
@@ -345,6 +406,22 @@ namespace zonetool::convert::iw7_iw8
 			}
 		}
 
+		const DirectX::Image* matching_mip(const DirectX::ScratchImage& image, const DirectX::Image& target)
+		{
+			auto* source = image.GetImage(0, 0, 0);
+			for (auto level = 1u; level < image.GetImageCount(); level++)
+			{
+				const auto* next = image.GetImage(level, 0, 0);
+				if (next->width < target.width || next->height < target.height)
+				{
+					break;
+				}
+				source = next;
+			}
+			return source;
+		}
+
+
 		// An IW3 specular map of an IW7 colour map of TS_COLOR_SPECULAR_MAP. IW7's lit pixel shaders (layered world PS
 		// 9423eedc, disassembled) read its alpha a as a metalness ramp: metal = saturate((a - 0.1) / 0.9), F0 = metal x
 		// albedo + min(a, 0.1) with albedo the colour squared (dielectric F0 up to 0.1: plastics and tiles 10/255, floors
@@ -352,30 +429,15 @@ namespace zonetool::convert::iw7_iw8
 		// MAP_IW7_SPECULAR) and the gloss in alpha, which is the red of IW7's packed normal maps (128 without one).
 		// Without it every converted surface was matte and glass, which shows only by its reflection, was missing
 		// (Frontier's patterned roof glass).
-		bool derive_specular(DirectX::ScratchImage& pixels, const iw7::GfxImage* gloss)
+
+		bool derive_specular(DirectX::ScratchImage& pixels, const iw7::GfxImage* gloss, const bool source_mips)
 		{
-			const auto& metadata = pixels.GetMetadata();
-			DirectX::ScratchImage resized;
-			const DirectX::Image* source{};
 			std::vector<DirectX::ScratchImage> faces;
 			if (gloss)
 			{
-				faces = load_faces(*gloss, DXGI_FORMAT_R8G8B8A8_UNORM);
-				if (faces.size() == 1)
-				{
-					source = faces.front().GetImage(0, 0, 0);
-					if (source->width != metadata.width || source->height != metadata.height)
-					{
-						if (FAILED(DirectX::Resize(*source, metadata.width, metadata.height, DirectX::TEX_FILTER_LINEAR |
-							DirectX::TEX_FILTER_FORCE_NON_WIC, resized)))
-						{
-							return false;
-						}
-
-						source = resized.GetImage(0, 0, 0);
-					}
-				}
-				else
+				faces = load_faces(*gloss, DXGI_FORMAT_R8G8B8A8_UNORM,
+					source_mips ? source_image_size : max_image_size, source_mips);
+				if (faces.size() != 1)
 				{
 					ZONETOOL_WARNING("iw7: gloss image \"%s\" cannot be read: %s", gloss->name, image_read_failure(*gloss).data());
 				}
@@ -394,24 +456,38 @@ namespace zonetool::convert::iw7_iw8
 				return table;
 			}();
 
-			const auto* target = pixels.GetImage(0, 0, 0);
-			for (std::size_t y = 0; y < metadata.height; y++)
+			for (auto level = 0u; level < pixels.GetImageCount(); level++)
 			{
-				auto* row = target->pixels + y * target->rowPitch;
-				const auto* gloss_row = source ? source->pixels + y * source->rowPitch : nullptr;
-				for (std::size_t x = 0; x < metadata.width; x++)
+				const auto* target = pixels.GetImage(level, 0, 0);
+				const DirectX::Image* source = faces.size() == 1 ? matching_mip(faces.front(), *target) : nullptr;
+				DirectX::ScratchImage resized;
+				if (source && (source->width != target->width || source->height != target->height))
 				{
-					auto* pixel = row + x * 4;
-					const auto alpha = pixel[3] / 255.0f;
-					const auto metal = std::clamp((alpha - 0.1f) / 0.9f, 0.0f, 1.0f);
-					for (auto c = 0; c < 3; c++)
+					if (FAILED(DirectX::Resize(*source, target->width, target->height, DirectX::TEX_FILTER_LINEAR |
+						DirectX::TEX_FILTER_FORCE_NON_WIC, resized)))
 					{
-						const auto albedo = pixel[c] / 255.0f;
-						const auto f0 = metal * albedo * albedo + std::min(alpha, 0.1f);
-						pixel[c] = encoded[std::clamp(std::lround(f0 * 255.0f), 0l, 255l)];
+						return false;
 					}
+					source = resized.GetImage(0, 0, 0);
+				}
+				for (std::size_t y = 0; y < target->height; y++)
+				{
+					auto* row = target->pixels + y * target->rowPitch;
+					const auto* gloss_row = source ? source->pixels + y * source->rowPitch : nullptr;
+					for (std::size_t x = 0; x < target->width; x++)
+					{
+						auto* pixel = row + x * 4;
+						const auto alpha = pixel[3] / 255.0f;
+						const auto metal = std::clamp((alpha - 0.1f) / 0.9f, 0.0f, 1.0f);
+						for (auto c = 0; c < 3; c++)
+						{
+							const auto albedo = pixel[c] / 255.0f;
+							const auto f0 = metal * albedo * albedo + std::min(alpha, 0.1f);
+							pixel[c] = encoded[std::clamp(std::lround(f0 * 255.0f), 0l, 255l)];
+						}
 
-					pixel[3] = gloss_row ? gloss_row[x * 4] : 128;
+						pixel[3] = gloss_row ? gloss_row[x * 4] : 128;
+					}
 				}
 			}
 
@@ -422,20 +498,14 @@ namespace zonetool::convert::iw7_iw8
 		// squared times 1 - metal, which the colour times sqrt(1 - metal) gives.
 		void darken_metal(DirectX::ScratchImage& pixels)
 		{
-			const auto& metadata = pixels.GetMetadata();
-			const auto* target = pixels.GetImage(0, 0, 0);
-			for (std::size_t y = 0; y < metadata.height; y++)
+			for (std::size_t i = 0; i < pixels.GetPixelsSize() / 4; i++)
 			{
-				auto* row = target->pixels + y * target->rowPitch;
-				for (std::size_t x = 0; x < metadata.width; x++)
+				auto* pixel = pixels.GetPixels() + i * 4;
+				const auto metal = std::clamp((pixel[3] / 255.0f - 0.1f) / 0.9f, 0.0f, 1.0f);
+				const auto scale = std::sqrt(1.0f - metal);
+				for (auto c = 0; c < 3; c++)
 				{
-					auto* pixel = row + x * 4;
-					const auto metal = std::clamp((pixel[3] / 255.0f - 0.1f) / 0.9f, 0.0f, 1.0f);
-					const auto scale = std::sqrt(1.0f - metal);
-					for (auto c = 0; c < 3; c++)
-					{
-						pixel[c] = static_cast<std::uint8_t>(std::lround(pixel[c] * scale));
-					}
+					pixel[c] = static_cast<std::uint8_t>(std::lround(pixel[c] * scale));
 				}
 			}
 		}
@@ -447,20 +517,14 @@ namespace zonetool::convert::iw7_iw8
 		constexpr auto hdr_expansion = 4.60517019f;
 		void expand_hdr(DirectX::ScratchImage& pixels)
 		{
-			const auto& metadata = pixels.GetMetadata();
-			const auto* target = pixels.GetImage(0, 0, 0);
-			for (std::size_t y = 0; y < metadata.height; y++)
+			for (std::size_t i = 0; i < pixels.GetPixelsSize() / 4; i++)
 			{
-				auto* row = target->pixels + y * target->rowPitch;
-				for (std::size_t x = 0; x < metadata.width; x++)
+				auto* pixel = pixels.GetPixels() + i * 4;
+				for (auto c = 0; c < 3; c++)
 				{
-					auto* pixel = row + x * 4;
-					for (auto c = 0; c < 3; c++)
-					{
-						const auto linear = std::min(pixel[c] * pixel[c] / (255.0f * 255.0f), 0.99f);
-						const auto expanded = -std::log(1.0f - linear) / hdr_expansion;
-						pixel[c] = static_cast<std::uint8_t>(std::lround(std::sqrt(expanded) * 255.0f));
-					}
+					const auto linear = std::min(pixel[c] * pixel[c] / (255.0f * 255.0f), 0.99f);
+					const auto expanded = -std::log(1.0f - linear) / hdr_expansion;
+					pixel[c] = static_cast<std::uint8_t>(std::lround(std::sqrt(expanded) * 255.0f));
 				}
 			}
 		}
@@ -468,44 +532,44 @@ namespace zonetool::convert::iw7_iw8
 		// Replaces the alpha of a colour image: with the channel of an alpha texture (at the colour's size), or opaque.
 		// The alpha of an image from a channel of another (none: opaque), times a second channel of it when one is given.
 		bool replace_alpha(DirectX::ScratchImage& pixels, const iw7::GfxImage* alpha, const std::size_t channel,
-			const std::optional<std::size_t> factor = std::nullopt)
+			const std::optional<std::size_t> factor, const bool source_mips)
 		{
-			const auto& metadata = pixels.GetMetadata();
-			DirectX::ScratchImage resized;
-			const DirectX::Image* source{};
 			std::vector<DirectX::ScratchImage> faces;
 			if (alpha)
 			{
-				faces = load_faces(*alpha, DXGI_FORMAT_R8G8B8A8_UNORM);
+				faces = load_faces(*alpha, DXGI_FORMAT_R8G8B8A8_UNORM,
+					source_mips ? source_image_size : max_image_size, source_mips);
 				if (faces.size() != 1)
 				{
 					ZONETOOL_WARNING("iw7: alpha image \"%s\" cannot be read: %s", alpha->name, image_read_failure(*alpha).data());
 					return false;
 				}
+			}
 
-				source = faces.front().GetImage(0, 0, 0);
-				if (source->width != metadata.width || source->height != metadata.height)
+			for (auto level = 0u; level < pixels.GetImageCount(); level++)
+			{
+				const auto* target = pixels.GetImage(level, 0, 0);
+				const DirectX::Image* source = alpha ? matching_mip(faces.front(), *target) : nullptr;
+				DirectX::ScratchImage resized;
+				if (source && (source->width != target->width || source->height != target->height))
 				{
-					if (FAILED(DirectX::Resize(*source, metadata.width, metadata.height, DirectX::TEX_FILTER_LINEAR |
+					if (FAILED(DirectX::Resize(*source, target->width, target->height, DirectX::TEX_FILTER_LINEAR |
 						DirectX::TEX_FILTER_FORCE_NON_WIC, resized)))
 					{
 						return false;
 					}
-
 					source = resized.GetImage(0, 0, 0);
 				}
-			}
-
-			const auto* target = pixels.GetImage(0, 0, 0);
-			for (std::size_t y = 0; y < metadata.height; y++)
-			{
-				auto* row = target->pixels + y * target->rowPitch;
-				const auto* alpha_row = source ? source->pixels + y * source->rowPitch : nullptr;
-				for (std::size_t x = 0; x < metadata.width; x++)
+				for (std::size_t y = 0; y < target->height; y++)
 				{
-					row[x * 4 + 3] = !alpha_row ? 0xFF : factor
-						? static_cast<std::uint8_t>((alpha_row[x * 4 + channel] * alpha_row[x * 4 + *factor] + 127) / 255)
-						: alpha_row[x * 4 + channel];
+					auto* row = target->pixels + y * target->rowPitch;
+					const auto* alpha_row = source ? source->pixels + y * source->rowPitch : nullptr;
+					for (std::size_t x = 0; x < target->width; x++)
+					{
+						row[x * 4 + 3] = !alpha_row ? 0xFF : factor
+							? static_cast<std::uint8_t>((alpha_row[x * 4 + channel] * alpha_row[x * 4 + *factor] + 127) / 255)
+							: alpha_row[x * 4 + channel];
+					}
 				}
 			}
 
@@ -517,7 +581,26 @@ namespace zonetool::convert::iw7_iw8
 		{
 			const auto& image = *file.image;
 			const auto role = file.role;
-			auto faces = load_faces(image, DXGI_FORMAT_R8G8B8A8_UNORM, file.limit);
+			if (file.source_mips && image.imageFormat == DXGI_FORMAT_BC7_UNORM &&
+				(role == image_role::replay_normal_gloss || role == image_role::replay_reveal))
+			{
+				auto faces = load_faces(image, image.imageFormat, file.limit, true);
+				if (faces.size() != 1)
+				{
+					return false;
+				}
+				const auto& source = faces.front();
+				if (FAILED(DirectX::SaveToDDSFile(source.GetImages(), source.GetImageCount(), source.GetMetadata(),
+					DirectX::DDS_FLAGS_NONE, path.wstring().data())))
+				{
+					return false;
+				}
+				const auto& metadata = source.GetMetadata();
+				ZONETOOL_INFO("iw7: source mip chain %s -> %s: %zux%zu, %zu levels (BC7 blocks unchanged)", image.name,
+					path.filename().string().data(), metadata.width, metadata.height, metadata.mipLevels);
+				return true;
+			}
+			auto faces = load_faces(image, DXGI_FORMAT_R8G8B8A8_UNORM, file.limit, file.source_mips);
 			if (faces.size() != 1)
 			{
 				ZONETOOL_WARNING("iw7: image \"%s\" cannot be read: %s", image.name, image_read_failure(image).data());
@@ -525,7 +608,7 @@ namespace zonetool::convert::iw7_iw8
 			}
 
 			auto& pixels = faces.front();
-			if (file.derived_specular && !derive_specular(pixels, file.gloss))
+			if (file.derived_specular && !derive_specular(pixels, file.gloss, file.source_mips))
 			{
 				return false;
 			}
@@ -550,17 +633,17 @@ namespace zonetool::convert::iw7_iw8
 					expand_hdr(pixels);
 				}
 
-				if ((file.alpha || file.opaque) && !replace_alpha(pixels, file.alpha, file.alpha_channel, file.alpha_factor_channel))
+				if ((file.alpha || file.opaque) && !replace_alpha(pixels, file.alpha, file.alpha_channel,
+					file.alpha_factor_channel, file.source_mips))
 				{
 					return false;
 				}
 			}
 
-			// The pipeline decodes the files and encodes the zone's images itself: block compression keeps the
-			// extraction small. A normal map stays uncompressed (its slopes would band in BC1 colours) at half the size.
+			// Native world images keep the source levels without an intermediate lossy encode.
 			auto top = pixels.GetImage(0, 0, 0);
 			DirectX::ScratchImage smaller;
-			if (normal_data && std::max(top->width, top->height) > max_image_size / 2)
+			if (!file.source_mips && normal_data && std::max(top->width, top->height) > max_image_size / 2)
 			{
 				if (FAILED(DirectX::Resize(*top, std::max<std::size_t>(1, top->width / 2), std::max<std::size_t>(1, top->height / 2),
 					DirectX::TEX_FILTER_BOX | DirectX::TEX_FILTER_FORCE_NON_WIC, smaller)))
@@ -574,7 +657,11 @@ namespace zonetool::convert::iw7_iw8
 			// The box filter takes only sizes of powers of two (the map art of the map select is 16:9): other sizes filter
 			// linearly.
 			DirectX::ScratchImage mips;
-			if (FAILED(DirectX::GenerateMipMaps(*top, DirectX::TEX_FILTER_BOX | DirectX::TEX_FILTER_FORCE_NON_WIC, 0, mips)) &&
+			if (file.source_mips)
+			{
+				mips = std::move(pixels);
+			}
+			else if (FAILED(DirectX::GenerateMipMaps(*top, DirectX::TEX_FILTER_BOX | DirectX::TEX_FILTER_FORCE_NON_WIC, 0, mips)) &&
 				FAILED(DirectX::GenerateMipMaps(*top, DirectX::TEX_FILTER_LINEAR | DirectX::TEX_FILTER_FORCE_NON_WIC, 0, mips)))
 			{
 				ZONETOOL_WARNING("iw7: image \"%s\" has no mip chain", image.name);
@@ -582,7 +669,8 @@ namespace zonetool::convert::iw7_iw8
 			}
 
 			DirectX::ScratchImage stored;
-			if (normal_data)
+			file.opaque_alpha = mips.IsAlphaAllOpaque();
+			if (normal_data || file.source_mips)
 			{
 				// The A8R8G8B8 masks: blue, green, red and alpha bytes.
 				if (FAILED(DirectX::Convert(mips.GetImages(), mips.GetImageCount(), mips.GetMetadata(), DXGI_FORMAT_B8G8R8A8_UNORM,
@@ -595,7 +683,6 @@ namespace zonetool::convert::iw7_iw8
 			{
 				// DirectXTex compresses on several threads only with OpenMP, which the build leaves out: the images
 				// convert on several threads instead.
-				file.opaque_alpha = mips.IsAlphaAllOpaque();
 				const auto format = file.opaque_alpha ? DXGI_FORMAT_BC1_UNORM : DXGI_FORMAT_BC3_UNORM;
 				if (const auto compressed = DirectX::Compress(mips.GetImages(), mips.GetImageCount(), mips.GetMetadata(), format,
 					DirectX::TEX_COMPRESS_DEFAULT, DirectX::TEX_THRESHOLD_DEFAULT, stored); FAILED(compressed))
@@ -611,6 +698,12 @@ namespace zonetool::convert::iw7_iw8
 			{
 				ZONETOOL_WARNING("iw7: cannot write %s", path.string().data());
 				return false;
+			}
+			if (file.source_mips)
+			{
+				const auto& metadata = stored.GetMetadata();
+				ZONETOOL_INFO("iw7: source mip chain %s -> %s: %zux%zu, %zu levels", image.name,
+					path.filename().string().data(), metadata.width, metadata.height, metadata.mipLevels);
 			}
 
 			return true;
@@ -1613,9 +1706,10 @@ namespace zonetool::convert::iw7_iw8
 					file += alpha ? std::format("_{}{:08x}", reveals ? factor ? "ra" : "r" : "a", name_hash(asset_name(alpha->name))) : "";
 				}
 
-				if (*role == image_role::color && output.world_materials.contains(name))
+				if (output.world_materials.contains(name))
 				{
-					entry.limit = world_color_size;
+					entry.limit = source_image_size;
+					entry.source_mips = true;
 				}
 
 				// The tinted effect techniques only (clouds and distortion take no tint).
@@ -1628,6 +1722,7 @@ namespace zonetool::convert::iw7_iw8
 
 				const auto [slot, inserted] = files.try_emplace(file, entry);
 				slot->second.limit = std::max(slot->second.limit, entry.limit);
+				slot->second.source_mips |= entry.source_mips;
 				roles[index].push_back(file);
 
 				// The stock world images of a world material's own colour and normal map, as IW7 keeps them (of a stock layered
@@ -1638,9 +1733,11 @@ namespace zonetool::convert::iw7_iw8
 					const auto replay_role = *role == image_role::color ? image_role::replay_color : image_role::replay_normal_gloss;
 					image_file replay{image, replay_role};
 					replay.limit = entry.limit;
+					replay.source_mips = entry.source_mips;
 					const auto replay_file = file_name(asset_name(image->name)) + "_replay";
 					const auto [replay_slot, replay_inserted] = files.try_emplace(replay_file, replay);
 					replay_slot->second.limit = std::max(replay_slot->second.limit, replay.limit);
+					replay_slot->second.source_mips |= replay.source_mips;
 					roles[static_cast<std::size_t>(replay_role)].push_back(replay_file);
 				}
 			}
@@ -1654,7 +1751,10 @@ namespace zonetool::convert::iw7_iw8
 				if (image && image->name && !builtin_image(asset_name(image->name), image_role::color))
 				{
 					const auto file = file_name(asset_name(image->name)) + "_replay";
-					files.try_emplace(file, image_file{image, image_role::replay_reveal});
+					image_file entry{image, image_role::replay_reveal};
+					entry.limit = source_image_size;
+					entry.source_mips = true;
+					files.try_emplace(file, entry);
 					roles[static_cast<std::size_t>(image_role::replay_reveal)].push_back(file);
 					break;
 				}
@@ -1701,7 +1801,14 @@ namespace zonetool::convert::iw7_iw8
 				image_file entry{specular_color, image_role::specular};
 				entry.derived_specular = true;
 				entry.gloss = gloss;
-				files.try_emplace(file, entry);
+				if (output.world_materials.contains(name))
+				{
+					entry.limit = source_image_size;
+					entry.source_mips = true;
+				}
+				const auto [slot, inserted] = files.try_emplace(file, entry);
+				slot->second.limit = std::max(slot->second.limit, entry.limit);
+				slot->second.source_mips |= entry.source_mips;
 				roles[static_cast<std::size_t>(image_role::specular)].push_back(file);
 			}
 		}
