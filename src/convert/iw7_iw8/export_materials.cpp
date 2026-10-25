@@ -765,6 +765,24 @@ namespace zonetool::convert::iw7_iw8
 				});
 		}
 
+		// The axes along which a layer's colour sampler clamps: bit 0 U, bit 1 V. IW7's sampler state byte keeps the
+		// filter and mip mode below bit 5 and clamps U, V and W in bits 5 to 7 (0x13 wraps, 0x53 clamps V, 0xF3 all: the
+		// blood hand prints and wall_stain5).
+		unsigned int color_clamp_axes(const iw7::Material* material, const int layer)
+		{
+			for (auto i = 0; material && i < material->textureCount; i++)
+			{
+				const auto& texture = material->textureTable[i];
+				if (texture_layer(texture) == layer &&
+					(texture.semantic == iw7::TS_COLOR_MAP || texture.semantic == iw7::TS_COLOR_SPECULAR_MAP))
+				{
+					return (texture.samplerState >> 5) & 3u;
+				}
+			}
+
+			return 0;
+		}
+
 		// Every constant of a material as " name#hash=(x y z w)", for the dump switches.
 		std::string material_constants_text(const iw7::Material* material)
 		{
@@ -971,6 +989,13 @@ namespace zonetool::convert::iw7_iw8
 			if (const auto reveal = material_reveal_ramp(material, layer))
 			{
 				result["iw7RevealSharpness"] = *reveal;
+			}
+
+			// A colour sampler that clamps (decal prints drawn once): Replay's world and model samplers wrap, so the shaders
+			// clamp the UV instead.
+			if (const auto axes = color_clamp_axes(material, layer))
+			{
+				result["iw7ClampAxes"] = axes;
 			}
 
 			// What the stock world images hold: the colour's alpha is IW7's specular (TS_COLOR_SPECULAR_MAP), and the normal

@@ -98,9 +98,11 @@ SamplerState gtaoSampler : register(s8);
 cbuffer ReplayView : register(b2) {
     float4 replayView[8];
 };
-#if (defined(MAP_UV_ANIMATION) || defined(MAP_TRANSMISSION) || defined(MAP_REVEAL_LAYERS)) && !defined(MAP_COVERAGE)
+#if (defined(MAP_UV_ANIMATION) || defined(MAP_TRANSMISSION) || defined(MAP_REVEAL_LAYERS) || defined(MAP_UV_CLAMP)) && \
+    !defined(MAP_COVERAGE)
 // The material's pixel constants (cb3, the converter's stamp): row 1 holds its transmission (MAP_TRANSMISSION) and its
-// reveal ramp's sharpness (w, MAP_REVEAL_LAYERS), row 3 its UV animation and row 2 its mask's (MAP_UV_ANIMATION).
+// reveal ramp's sharpness (w, MAP_REVEAL_LAYERS), row 3 its UV animation and row 2 its mask's (MAP_UV_ANIMATION), row
+// 3.w the axes its colour sampler clamps (MAP_UV_CLAMP: bit 0 U, bit 1 V).
 cbuffer MaterialConstants : register(b3) {
     float4 materialConstants[4];
 };
@@ -1065,6 +1067,19 @@ float4 main(Input input) : SV_TARGET0 {
     // IW7's UV animation (its unlit VS bbc5b543, disassembled; uvAnimParms in the material's constants, row 3): turned
     // about the texture's middle by t * z radians and scrolled by t * xy, with t the game time in seconds.
     sampleUV = AnimatedUv(sampleUV, materialConstants[3].xyz, replayView[4].w);
+#endif
+#if defined(MAP_UV_CLAMP) && !defined(MAP_COVERAGE)
+    // IW7's clamping samplers (decal prints drawn once): Replay's material sampler wraps, so the UV stops half a texel
+    // inside the clamped edges.
+    {
+        uint clampAxes = (uint)materialConstants[3].w;
+        if (clampAxes != 0) {
+            float2 size;
+            sourceAtlas.GetDimensions(size.x, size.y);
+            float2 clamped = clamp(sampleUV, .5 / size, 1 - .5 / size);
+            sampleUV = float2((clampAxes & 1) != 0 ? clamped.x : sampleUV.x, (clampAxes & 2) != 0 ? clamped.y : sampleUV.y);
+        }
+    }
 #endif
 #ifdef MAP_NATIVE_WORLD
     // A sky face draws its whole image at its top level, half a texel inside its edges (the material sampler wraps).
