@@ -406,17 +406,11 @@ namespace zonetool::convert::iw7_iw8
 					continue;
 				}
 
-				// A layer that blends by its reveal map keeps its sharpness k in red as sqrt(k / 2) (IW7 maps keep 0.015 to 1:
-				// within 1% down to 0.015): the pipeline ramps the reveal by the weight (kRevealLayerFlag), and IW7 tints no
-				// layer by its vertex colour.
-				const auto reveal = material_layer_reveal(resolved, layer);
-				const auto red = reveal
-					? static_cast<std::uint8_t>(std::lround(std::sqrt(std::clamp(*reveal / 2.0f, 0.0f, 1.0f)) * 255.0f))
-					: std::uint8_t{255};
+				// The layer's weight in its vertex alpha; IW7 tints no layer by its vertex colour.
 				auto overlay = vertices;
 				for (std::size_t v = 0; v < overlay.size(); v++)
 				{
-					overlay[v].color = {red, 255, 255, weight(order[v])};
+					overlay[v].color = {255, 255, 255, weight(order[v])};
 					if (const auto uv = layer_uv(order[v], layer))
 					{
 						overlay[v].uv = {(*uv)[0], (*uv)[1]};

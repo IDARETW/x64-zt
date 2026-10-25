@@ -120,6 +120,8 @@ struct SourceMaterial
     std::array<float, 3> maskUvAnimation{};
     // The light that passes through the material to the side facing away (transmission.rgb: IW7's *_trans techsets).
     std::array<float, 3> transmission{};
+    // The sharpness of an IW7 layer's or decal's reveal ramp (iw7RevealSharpness, kRevealLayerFlag).
+    float revealSharpness{};
     // An unlit material's mask (maskMap) and whether an extraction gives unlit materials theirs (unlitMask).
     std::string mask;
     bool unlitMask{};
@@ -2782,8 +2784,12 @@ SourceMaterial ReadMaterial(const std::filesystem::path &root,
     material.flags |= material.polygonOffset << 18;
     if (source.value("iw7BackFaceNormals", false))
         material.flags |= kBackFaceNormalsFlag;
-    if (source.value("iw7RevealLayer", false))
+    if (source.contains("iw7RevealSharpness"))
+    {
         material.flags |= kRevealLayerFlag;
+        // Kept above 0: the shaders find a reveal ramp by its sharpness (MAP_REVEAL_LAYERS).
+        material.revealSharpness = std::max(source.at("iw7RevealSharpness").get<float>(), 1e-6f);
+    }
     return material;
 }
 
@@ -3268,7 +3274,8 @@ std::string g_unlitMaskDefines;
 // signatures of our techniques bind and our shaders otherwise leave unread); IW3 maps compile without it.
 std::string g_uvAnimationDefines;
 // MAP_TRANSMISSION when a material passes light to its far side (an extraction's transmission): each generated material
-// keeps it in row 1 of its pixel constants; IW3 maps compile without it.
+// keeps it in row 1 of its pixel constants (and a reveal ramp's sharpness in row 1.w: MAP_REVEAL_LAYERS); IW3 maps compile
+// without it.
 std::string g_transmissionDefines;
 // MAP_IW7_SPECULAR when the extraction's specular maps hold IW7's F0 and gloss ("iw7_specular"); IW3 maps compile
 // without it.
@@ -4916,14 +4923,19 @@ RenderPlan PrepareRenderAssets(const std::filesystem::path &exportRoot, const Js
     g_unlitMaskDefines = std::ranges::any_of(materials, [](const SourceMaterial &material) { return material.unlitMask; })
                              ? "#define MAP_UNLIT_MASKS 1\n"
                              : "";
-    // The rows a material stamps into its pixel constants: transmission (row 1), mask UV animation (row 2), UV animation
-    // (row 3).
-    std::unordered_map<std::string, std::array<std::array<float, 3>, 3>> materialRows;
+    // The rows a material stamps into its pixel constants: transmission and reveal sharpness (row 1), mask UV animation
+    // (row 2), UV animation (row 3).
+    std::unordered_map<std::string, std::array<std::array<float, 4>, 3>> materialRows;
     for (const SourceMaterial &material : materials)
         if (material.uvAnimation != std::array<float, 3>{} || material.maskUvAnimation != std::array<float, 3>{} ||
-            material.transmission != std::array<float, 3>{})
-            materialRows.emplace(material.name,
-                                 std::array{material.transmission, material.maskUvAnimation, material.uvAnimation});
+            material.transmission != std::array<float, 3>{} || material.revealSharpness != 0)
+        {
+            const auto row = [](const std::array<float, 3> &xyz, const float w) {
+                return std::array{xyz[0], xyz[1], xyz[2], w};
+            };
+            materialRows.emplace(material.name, std::array{row(material.transmission, material.revealSharpness),
+                                                           row(material.maskUvAnimation, 0), row(material.uvAnimation, 0)});
+        }
     const auto anyMaterial = [&](const auto &field) {
         return std::ranges::any_of(materials, [&](const SourceMaterial &material) {
             return material.*field != std::array<float, 3>{};
@@ -6043,12 +6055,12 @@ RenderPlan PrepareRenderAssets(const std::filesystem::path &exportRoot, const Js
             [source = std::move(owned)]() mutable { return std::pair{std::move(source), std::optional<Image>{}}; },
             bytes, tint, domain);
     };
-    // With MAP_UV_ANIMATION or MAP_TRANSMISSION every generated material keeps its rows (or zeros) in its pixel
-    // constants: transmission in row 1, mask UV animation in row 2, UV animation in row 3; Replay's stock world materials
-    // keep their own rows.
+    // With MAP_UV_ANIMATION, MAP_TRANSMISSION or MAP_REVEAL_LAYERS every generated material keeps its rows (or zeros) in
+    // its pixel constants: transmission and reveal sharpness in row 1, mask UV animation in row 2, UV animation in row 3;
+    // Replay's stock world materials keep their own rows.
     const auto stampMaterialRows = [&](Json &definition) {
-        if ((g_uvAnimationDefines.empty() && g_transmissionDefines.empty()) || !definition.contains("buffers") ||
-            definition.at("buffers").empty() ||
+        if ((g_uvAnimationDefines.empty() && g_transmissionDefines.empty() && g_revealDefines.empty()) ||
+            !definition.contains("buffers") || definition.at("buffers").empty() ||
             definition.value("techset", std::string{}).find("_native_world_cull") != std::string::npos)
             return;
         auto &stage = definition["buffers"][0][3];
@@ -6056,13 +6068,10 @@ RenderPlan PrepareRenderAssets(const std::filesystem::path &exportRoot, const Js
         if (constants.size() < 64)
             return;
         const auto found = materialRows.find(definition.value("source", std::string{}));
-        const auto rows = found != materialRows.end() ? found->second : std::array<std::array<float, 3>, 3>{};
+        const auto rows = found != materialRows.end() ? found->second : std::array<std::array<float, 4>, 3>{};
         for (std::size_t row = 0; row < 3; ++row)
-        {
-            for (std::size_t k = 0; k < 3; ++k)
+            for (std::size_t k = 0; k < 4; ++k)
                 Put<float>(constants, 16 * (row + 1) + 4 * k, rows[row][k]);
-            Put<float>(constants, 16 * (row + 1) + 12, 0.0f);
-        }
         stage = Hex(constants);
     };
     const auto writeMaterial = [&](const std::filesystem::path &path, Json definition) {
