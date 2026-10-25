@@ -103,6 +103,11 @@ Output main(uint id : SV_VertexID) {
     // world's origin, the box showed its walls to a camera away from the origin: IW7 Breakneck's
     // spawns are 40000 units out, beyond the box's 32768.
     bool sky = (uint)o.metadata.y % 4 == 1;
+#ifdef MAP_SKY_OBJECTS
+    // The sky's other surfaces (flag bit 23: an extraction's distant models) keep their directions from the play space
+    // as positions, drawn at infinity as the sky box is.
+    sky = sky || ((uint)o.metadata.y & 8388608) != 0;
+#endif
     if (sky) {
         relative.xyz = p;
         o.relativePosition = p;

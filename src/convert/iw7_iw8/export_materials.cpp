@@ -32,6 +32,9 @@ namespace zonetool::convert::iw7_iw8
 			// A stock layer's alpha, reveal and thickness map (IW7's TS_ALPHA_REVEAL_THICKNESS_MAP: red alpha, green reveal),
 			// which Replay's twc4 shader reads in the same channels.
 			replay_reveal,
+			// The mask of an unlit material (a colour semantic whose shader name opens with m: Breakneck's black hole discs),
+			// whose alpha the colour's alpha is multiplied by.
+			mask,
 			count,
 		};
 
@@ -112,7 +115,8 @@ namespace zonetool::convert::iw7_iw8
 			{
 			case iw7::TS_COLOR_MAP:
 			case iw7::TS_COLOR_SPECULAR_MAP:
-				return texture.nameStart == 'c' ? std::optional(image_role::color) : std::nullopt;
+				return texture.nameStart == 'c' ? std::optional(image_role::color)
+					: texture.nameStart == 'm' ? std::optional(image_role::mask) : std::nullopt;
 			case iw7::TS_NORMAL_MAP:
 			case iw7::TS_NORMAL_OCCLUSSION_GLOSS_MAP:
 				return texture.nameStart == 'n' ? std::optional(image_role::normal) : std::nullopt;
@@ -501,7 +505,7 @@ namespace zonetool::convert::iw7_iw8
 
 			// A packed normal map for Replay's world shader keeps IW7's channels.
 			const auto normal_data = role == image_role::normal || role == image_role::replay_normal_gloss ||
-				role == image_role::replay_reveal;
+				role == image_role::replay_reveal || role == image_role::mask;
 			if (role == image_role::normal)
 			{
 				encode_normal_slopes(pixels);
@@ -803,6 +807,18 @@ namespace zonetool::convert::iw7_iw8
 			if (const auto& replay_reveal = images[static_cast<std::size_t>(image_role::replay_reveal)])
 			{
 				textures.push_back(texture_json("replayRevealMap", *replay_reveal));
+			}
+
+			if (const auto& mask = images[static_cast<std::size_t>(image_role::mask)])
+			{
+				textures.push_back(texture_json("maskMap", *mask));
+			}
+
+			// IW7's UV animation (techset token ua: uvAnimParms, the u and v scroll and the turn about the middle of the
+			// texture per second; the unlit VS bbc5b543, disassembled).
+			if (const auto animation = material_constant(material, "uvAnimParms"))
+			{
+				constants.push_back({{"name", "uvAnimParms"}, {"literal", *animation}});
 			}
 
 			// The IW3 techniques: 4 unlit, 7 lit. An unlit material has no lit pass.
@@ -1779,6 +1795,12 @@ namespace zonetool::convert::iw7_iw8
 				!output.lightless_world_materials.contains(name))
 			{
 				exported["replayStockOnly"] = true;
+			}
+
+			// A material of the surfaces that draw in the sky at run time (runtime_sky): no distance fog, its UV animation.
+			if (output.sky_object_materials.contains(name))
+			{
+				exported["skyObject"] = true;
 			}
 
 			// An unlit world material's emission as IW7 keeps it (its colorTint, in the units of its lightmaps, which the

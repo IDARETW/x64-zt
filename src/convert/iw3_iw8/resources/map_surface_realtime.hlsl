@@ -1030,6 +1030,13 @@ float4 main(Input input) : SV_TARGET0 {
 #endif
     uint kind = flags % 4;
     bool sky = kind == 1;
+    // The sky's other surfaces (flag bit 23, MAP_SKY_OBJECTS: an extraction's distant models) lie at infinity, past the
+    // distance fog.
+    bool skyPlaced = sky;
+#ifdef MAP_SKY_OBJECTS
+    bool skyObject = (flags & 8388608) != 0;
+    skyPlaced = sky || skyObject;
+#endif
     float2 mappedUv = input.uv.xy;
     float2 local = sky ? saturate(mappedUv) : frac(mappedUv);
 #ifdef MAP_MATERIAL_TEXTURES
@@ -1037,6 +1044,16 @@ float4 main(Input input) : SV_TARGET0 {
     // the sampler's gradients continuous across repeating texture coordinates.
     float lod = 0;
     float2 sampleUV = input.uv.xy;
+#ifdef MAP_SKY_OBJECTS
+    // IW7's UV animation (its unlit VS bbc5b543, disassembled): turned about the texture's middle by t * z radians and
+    // scrolled by t * xy, with t the game time in seconds (material parameters xyz).
+    if (skyObject) {
+        float turn = replayView[4].w * input.materialParameters.z;
+        float2 centred = sampleUV - .5;
+        sampleUV = float2(cos(turn) * centred.x - sin(turn) * centred.y, sin(turn) * centred.x + cos(turn) * centred.y) +
+                   .5 + input.materialParameters.xy * replayView[4].w;
+    }
+#endif
 #ifdef MAP_NATIVE_WORLD
     // A sky face draws its whole image at its top level, half a texel inside its edges (the material sampler wraps).
     if (sky) {
@@ -1046,6 +1063,14 @@ float4 main(Input input) : SV_TARGET0 {
     }
     float4 texel = sky ? sourceAtlas.SampleLevel(colorSampler, sampleUV, 0)
                        : sourceAtlas.SampleBias(colorSampler, sampleUV, MAP_MIP_BIAS);
+#if defined(MAP_SKY_OBJECTS) && !defined(MAP_COVERAGE)
+    // A sky surface's mask (IW7's mask_mua techsets) rides in the response image: its alpha multiplies the colour's, at
+    // the surface's own UV; the surface then has no response.
+    if (skyObject && (flags & 64) != 0) {
+        texel.a *= sourceResponseAtlas.SampleBias(colorSampler, input.uv.xy, MAP_MIP_BIAS).a;
+        flags &= ~64u;
+    }
+#endif
 #else
     float4 texel = sourceAtlas.SampleBias(colorSampler, sampleUV, MAP_MIP_BIAS);
 #endif
@@ -1546,7 +1571,7 @@ float4 main(Input input) : SV_TARGET0 {
     // sun (between the end and begin fade angles); the colour lerps the same way.
     float fogSun = saturate((dot(normalize(input.relativePosition), MAP_FOG_SUN_DIR) - MAP_FOG_SUN_FADE.x) *
                             MAP_FOG_SUN_FADE.y);
-    if (!sky)
+    if (!skyPlaced)
     {
         float fogDistance = length(input.relativePosition) - MAP_FOG_START;
         float fogPlain = max(saturate(exp(-MAP_FOG_DENSITY * fogDistance)), 1 - MAP_FOG_MAX_OPACITY);
@@ -1554,7 +1579,7 @@ float4 main(Input input) : SV_TARGET0 {
         fogFactor = lerp(fogPlain, fogSunward, fogSun);
     }
 #else
-    if (!sky)
+    if (!skyPlaced)
         fogFactor = saturate(exp(-MAP_FOG_DENSITY * (length(input.relativePosition) - MAP_FOG_START)));
 #endif
 #endif
@@ -1588,11 +1613,11 @@ float4 main(Input input) : SV_TARGET0 {
 #if defined(MAP_FOG) && MAP_DEBUG_MODE == 0
 #if defined(MAP_FOG_LINEAR)
     // IW7 blends toward its HDR fog colour in linear light.
-    if (!sky)
+    if (!skyPlaced)
         color = lerp(lerp(MAP_FOG_COLOR, MAP_FOG_SUN_COLOR, fogSun), color, fogFactor);
 #else
     // Blended toward the fog colour in CoD4's gamma-encoded framebuffer.
-    if (!sky)
+    if (!skyPlaced)
     {
         float3 encoded = pow(max(color, 0), 1.0 / 2.2);
         color = pow(lerp(MAP_FOG_COLOR, encoded, fogFactor), 2.2);

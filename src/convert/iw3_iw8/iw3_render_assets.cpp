@@ -113,6 +113,9 @@ struct SourceMaterial
     // An unlit material's emission in the units of the native lightmap (replayEmission): what a stock emissive material
     // of it emits.
     std::optional<std::array<float, 3>> replayEmission;
+    // A material of the sky's surfaces (skyObject) and its UV animation (uvAnimParms.xyz).
+    bool skyObject{};
+    std::array<float, 3> uvAnimation{};
     // IW3 detailMap and detailScale.xy (lp_*d0* techsets: colour + detail - 0.5).
     std::string detail;
     std::array<float, 2> detailScale{1, 1};
@@ -2482,7 +2485,11 @@ SourceMaterial ReadMaterial(const std::filesystem::path &root,
             material.replayNormalGloss = texture.at("image").get<std::string>();
         else if (semantic == "replayRevealMap")
             material.replayReveal = texture.at("image").get<std::string>();
+        // The mask of a sky surface's material rides in its response image (its alpha multiplies the colour's).
+        else if (semantic == "maskMap" && source.value("skyObject", false))
+            material.response = texture.at("image").get<std::string>();
     }
+    material.skyObject = source.value("skyObject", false);
     for (const auto &layer : source.value("replayLayers", Json::array()))
     {
         SourceMaterial::ReplayLayer entry;
@@ -2534,6 +2541,12 @@ SourceMaterial ReadMaterial(const std::filesystem::path &root,
             material.environment = Literal<4>(constant.at("literal"), material.environment);
         else if (key == "emissionScale")
             material.emission = Literal<4>(constant.at("literal"), {1, 1, 1, 1})[0];
+        else if (key == "uvAnimParms")
+        {
+            const auto &literal = constant.at("literal");
+            for (std::size_t axis = 0; axis < 3; ++axis)
+                material.uvAnimation[axis] = literal.at(axis).get<float>();
+        }
     }
     for (const auto &state : source.value("stateBits", Json::array()))
     {
@@ -3228,6 +3241,9 @@ std::string g_emissionDefines;
 std::string g_backFaceDefines;
 // MAP_REVEAL_LAYERS when a world layer blends by its reveal map (kRevealLayerFlag); IW3 maps compile without it.
 std::string g_revealDefines;
+// MAP_SKY_OBJECTS when surfaces draw in the sky at run time (skyObject materials, flag bit 23); IW3 maps compile without
+// it.
+std::string g_skyObjectDefines;
 // MAP_IW7_SPECULAR when the extraction's specular maps hold IW7's F0 and gloss ("iw7_specular"); IW3 maps compile
 // without it.
 std::string g_iw7SpecularDefines;
@@ -3265,7 +3281,7 @@ Json BuildTechset(const std::string &map, const unsigned columns, const unsigned
         ApplyStaticModelTechniqueLayout(techset);
     std::string pixelSource =
         "#define MAP_SOURCE_SUN_MASK 1\n#define MAP_SOURCE_CHANNELS 1\n" + glassEnvironment +
-        g_emissionDefines + g_backFaceDefines + g_revealDefines + g_iw7SpecularDefines;
+        g_emissionDefines + g_backFaceDefines + g_revealDefines + g_iw7SpecularDefines + g_skyObjectDefines;
     if (const char *diag = std::getenv("IW8_ZONETOOL_DIAG_NO_PROBES"); diag && *diag == '1')
         pixelSource += "#define MAP_DIAG_NO_PROBES 1\n";
     if (model)
@@ -3288,13 +3304,14 @@ Json BuildTechset(const std::string &map, const unsigned columns, const unsigned
     pixelSource += pixelDefines;
     pixelSource += ResourceText(IDR_IW3_PIXEL_SHADER);
     ReplaceAtlasTokens(pixelSource, columns, atlasSize);
-    // Coverage passes of material-texture surfaces bind no view mip bias; sample with the gradients alone.
+    // Coverage passes of material-texture surfaces bind no view mip bias; sample with the gradients alone. They bind
+    // only the colour (MAP_COVERAGE: the sky surfaces' masks stay out of them).
     const std::string coverageSource =
-        model || nativeWorld ? "#define MAP_MIP_BIAS 0\n" + pixelSource : pixelSource;
+        "#define MAP_COVERAGE 1\n" + (model || nativeWorld ? "#define MAP_MIP_BIAS 0\n" + pixelSource : pixelSource);
     const auto pixel = Compile(pixelSource, "ps_5_0", "iw3_map_surface.hlsl");
     const std::string vertexDefines =
         (entity ? "#define MAP_ENTITY 1\n" : "") +
-        (model ? g_backFaceDefines + modelVertexDefines : std::string{});
+        (model ? g_backFaceDefines + modelVertexDefines : g_skyObjectDefines);
     const char *vertexName = entity        ? "iw3_entity_vertex.hlsl"
                              : staticModel ? "iw3_model_vertex.hlsl"
                                            : "iw3_world_vertex.hlsl";
@@ -4866,6 +4883,9 @@ RenderPlan PrepareRenderAssets(const std::filesystem::path &exportRoot, const Js
                       })
                           ? "#define MAP_REVEAL_LAYERS 1\n"
                           : "";
+    g_skyObjectDefines = std::ranges::any_of(materials, [](const SourceMaterial &material) { return material.skyObject; })
+                             ? "#define MAP_SKY_OBJECTS 1\n"
+                             : "";
     // IW3 DXT5 normal maps keep Y replicated in RGB and X in alpha (red equals
     // green texel for texel). Every consumer here reads X from red, so move
     // alpha into red once per image; this left one bump axis flat before.
@@ -5462,6 +5482,8 @@ RenderPlan PrepareRenderAssets(const std::filesystem::path &exportRoot, const Js
             plan.hasOpaqueBias |= item.kind == SurfaceKind::opaque && item.depthBias;
             plan.hasGlass |= item.kind == SurfaceKind::glass;
         }
+        item.skyObject = material.skyObject;
+        item.uvAnimation = material.uvAnimation;
         plan.materials.emplace(material.name, item);
     }
     {

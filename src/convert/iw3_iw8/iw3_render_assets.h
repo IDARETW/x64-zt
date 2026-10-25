@@ -59,6 +59,10 @@ struct MaterialPlan
     // The layer count of its stock layered material (0: a single-layer one): its surfaces carry each layer's UV and
     // tangent transform.
     unsigned stockLayers{};
+    // A material of the sky's surfaces (skyObject): drawn at infinity without distance fog; its UV animation (IW7's
+    // uvAnimParms: u and v scroll and a turn about the texture's middle per second) and its mask in the response image.
+    bool skyObject{};
+    std::array<float, 3> uvAnimation{};
     // World surfaces with an IW3 detail map: row of RenderPlan::worldDetails
     // (a "_detail<row>" world material variant), -1 for none.
     int worldDetail{-1};

@@ -1709,6 +1709,9 @@ Mesh Load(const std::string &path, const nlohmann::json &j)
         if (lightmapIndex > 511)
             throw std::runtime_error("Invalid Replay surface lightmap index");
         const bool sky = s.value("renderClass", std::string{}) == "sky";
+        // A surface of the sky that is not the sky box (an extraction's distant models): drawn at infinity, it takes the
+        // sky's culling bounds, stays out of the scene bounds and occludes nothing.
+        const bool infinite = s.value("infinite", false);
         if (sky)
         {
             if (!material || vertices.empty() || !vertices[0].contains("lightmapUV") ||
@@ -1771,7 +1774,7 @@ Mesh Load(const std::string &path, const nlohmann::json &j)
             }
             if (activeModel == 0)
                 drawBounds.Add(point);
-            if (!sky && activeModel == 0)
+            if (!sky && !infinite && activeModel == 0)
                 sceneBounds.Add(point);
             append(m.aux, v.at("normal").get<uint32_t>());
         }
@@ -1937,7 +1940,7 @@ Mesh Load(const std::string &path, const nlohmann::json &j)
         if (sunShadowMask & ~0x3Eu)
             throw std::runtime_error("Surface sun-shadow mask exceeds Replay flags");
         put(sf, 32, uint8_t(castsSunShadow | sunShadowMask |
-                            (sky || !s.value("umbraOccluder", true) ? 0 : umbraOccluder)));
+                            (sky || infinite || !s.value("umbraOccluder", true) ? 0 : umbraOccluder)));
         auto *bounds = m.bounds.data() + 56 * i;
         // Culling bounds. Translucent surfaces write no depth, so the GPU
         // occlusion pass tests them against the wall they sit on: IW3 signs and
@@ -1950,8 +1953,8 @@ Mesh Load(const std::string &path, const nlohmann::json &j)
         const float margin = opaque ? 1.0f : 16.0f;
         for (unsigned k = 0; k < 3; ++k)
         {
-            put(bounds, 4 * k, sky ? 0.0f : (mins[k] + maxs[k]) * 0.5f);
-            put(bounds, 12 + 4 * k, sky ? 100000.0f : (maxs[k] - mins[k]) * 0.5f + margin);
+            put(bounds, 4 * k, sky || infinite ? 0.0f : (mins[k] + maxs[k]) * 0.5f);
+            put(bounds, 12 + 4 * k, sky || infinite ? 100000.0f : (maxs[k] - mins[k]) * 0.5f + margin);
         }
         auto *gpu = m.surfData.data() + 88 * i;
         put(gpu, 4, uint32_t(stockLayers > 1 ? stockLayers : surfaceLayout == 3 ? 4 : surfaceLayout));
