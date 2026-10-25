@@ -771,6 +771,18 @@ template <typename Buffer> Iw8WriteParams writeParams(const Buffer &buffer)
     return params;
 }
 
+// Replay's preload places the map script's stream (6) right after block 2 (TEMP_POSTLOAD): a block-2 peak past the
+// declared size overwrites the script, which then fails to link ("unknown function": Greenband, 2026-10-16; Scorch,
+// 2026-10-25, with 32 bytes of slack by ACTS's measure). The map zone declares this much more block 2 than its
+// writers reserve, as memory only (no file payload).
+constexpr uint64_t kMapPostloadMargin = 64 * 1024;
+
+Iw8WriteParams withPostloadMargin(Iw8WriteParams params)
+{
+    params.postloadMargin = kMapPostloadMargin;
+    return params;
+}
+
 template <> Iw8WriteParams writeParams(const iw8::ZoneBuffer &buffer)
 {
     Iw8WriteParams params;
@@ -787,7 +799,14 @@ template <> Iw8WriteParams writeParams(const iw8::ZoneBuffer &buffer)
 bool writeZone(const std::string &outputPath, std::vector<uint8_t> body, const Iw8WriteParams &params)
 {
     if (g_converterLayout)
-        return iw8_write(outputPath, body, params);
+    {
+        // The margin is memory without file payload: a calc reservation.
+        auto layout = params;
+        layout.blockSize[iw8::XFILE_BLOCK_TEMP_POSTLOAD] += params.postloadMargin;
+        layout.totalDecompressed += params.postloadMargin;
+        layout.calcSize += params.postloadMargin;
+        return iw8_write(outputPath, body, layout);
+    }
 
     try
     {
@@ -799,8 +818,9 @@ bool writeZone(const std::string &outputPath, std::vector<uint8_t> body, const I
         file.xfile_version = params.xfileVersion;
         file.transient = params.transientFileType != 0;
         file.preload_walk_size = params.preloadWalkSize;
-        const auto written = zonetool::iw8::rewrite_fastfile(
+        auto written = zonetool::iw8::rewrite_fastfile(
             std::filesystem::path(outputPath).stem().string(), std::move(file));
+        written.block_sizes[iw8::XFILE_BLOCK_TEMP_POSTLOAD] += params.postloadMargin;
         zonetool::xfile::write(outputPath, zonetool::iw8::definition().format, written);
         info("iw8: wrote %s (%zu bytes of zone data)", outputPath.c_str(), written.payload.size());
         // Stock zones stay under 1.1 GB and IW7 Frontier (2.06 GB) loads, but nothing above 2 GiB
@@ -2133,7 +2153,7 @@ int writeMapPackage(const Args &args, const std::string &map, const std::string 
             result = 1;
         }
 
-        const auto mapParams = writeParams(writer);
+        const auto mapParams = withPostloadMargin(writeParams(writer));
         if (!writeZone(path_join(outputDirectory, map + ".ff"), writer.takeBody(), mapParams))
         {
             result = 1;

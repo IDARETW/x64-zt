@@ -19,6 +19,8 @@ struct Iw8WriteParams
     // mp_donetsk 804228); 0 overflowed a 16-byte buffer and crashed bigger maps in
     // postload. Validation measures the real plan through Replay's own preload.
     uint64_t preloadWalkSize{256 * 1024};
+    // Block 2 (TEMP_POSTLOAD) declared beyond the laid-out zone's peak, as memory only (writeZone applies it).
+    uint64_t postloadMargin{};
 };
 
 bool iw8_write(const std::string &outputPath, const std::vector<uint8_t> &zoneBody,
