@@ -9,6 +9,7 @@
 
 #include <algorithm>
 #include <cstring>
+#include <cstdlib>
 #include <array>
 #include <cctype>
 #include <deque>
@@ -803,9 +804,54 @@ std::vector<std::uint8_t> Compile(const std::string &gsc, const std::filesystem:
 {
     std::filesystem::create_directories(workDirectory);
     const auto source = workDirectory / (stem + ".gsc");
+    std::string traced;
+    if (const char *traceMap = std::getenv("IW8_SCRIPT_TRACE_MAP"); traceMap && stem == traceMap)
+    {
+        const std::string entry = "main()\n{\n";
+        const size_t main = gsc.find(entry);
+        if (main == std::string::npos)
+            throw std::runtime_error("script startup trace requires the generated main function");
+        size_t at = main + entry.size();
+        traced = gsc.substr(0, at);
+        const auto stage = [&](const std::string &value) {
+            return "    setdvar( \"mw120r_map_startup\", \"" + stem + ": " + value + "\" );\n";
+        };
+        traced += stage("entry");
+        while (at < gsc.size())
+        {
+            const size_t end = gsc.find('\n', at);
+            if (end == std::string::npos)
+                break;
+            const std::string_view line(gsc.data() + at, end - at);
+            const size_t first = line.find_first_not_of(" \t\r");
+            if (first == std::string_view::npos)
+            {
+                traced.append(line);
+                traced += '\n';
+                at = end + 1;
+                continue;
+            }
+            const size_t open = line.find('(', first);
+            if (open == std::string_view::npos)
+                break;
+            const size_t nameEnd = line.find_last_not_of(" \t", open - 1) + 1;
+            const std::string name(line.substr(first, nameEnd - first));
+            if (name.empty() || name.find_first_not_of("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_") != std::string::npos ||
+                line.find_first_not_of(" \t();\r", nameEnd) != std::string_view::npos)
+                break;
+            traced += stage("before " + name);
+            traced.append(line);
+            traced += '\n';
+            traced += stage("after " + name);
+            at = end + 1;
+        }
+        traced += stage("startup prefix complete");
+        traced.append(gsc, at);
+        zt::info("scripts: startup trace for %s; query mw120r_map_startup after map load", stem.c_str());
+    }
     {
         std::ofstream file(source, std::ios::binary);
-        file << gsc;
+        file << (traced.empty() ? gsc : traced);
         if (!file)
             throw std::runtime_error("cannot write " + source.string());
     }
