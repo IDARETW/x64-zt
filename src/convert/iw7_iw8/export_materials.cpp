@@ -1322,9 +1322,10 @@ namespace zonetool::convert::iw7_iw8
 
 	std::optional<float> material_reveal_ramp(const iw7::Material* material, const int layer)
 	{
-		// A single-layer decal ramps by its vertex alpha (the decal PS 3bc5ba09); the base of a layered material keeps its
-		// plain blend (its weight's channel is not established).
-		return layer || material_layer_count(material) <= 1 ? material_layer_reveal(material, layer) : std::nullopt;
+		// A decal ramps by its vertex alpha (the decal PS 3bc5ba09), a blended layered material's base by the vertex red
+		// that export_surface moves there (the layered PS dc9617f7).
+		return layer || material_layer_count(material) <= 1 || classify_material(material).kind == surface_kind::blend
+			? material_layer_reveal(material, layer) : std::nullopt;
 	}
 
 	std::optional<float> material_layer_reveal(const iw7::Material* material, const int layer)

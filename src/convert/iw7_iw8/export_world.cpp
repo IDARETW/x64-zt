@@ -219,6 +219,11 @@ namespace zonetool::convert::iw7_iw8
 				return zone->vd.vertices[tris.firstVertex + index];
 			};
 
+			// A layered material's base takes no tint from its vertex colour; a blended one is weighted by the vertex's red
+			// (IW7's layered PSs f027dbbc and dc9617f7: the base's alpha x red, or its reveal ramp by red), which the
+			// pipeline reads from the vertex alpha.
+			const auto weighted_base = layers > 1 && classify_material(resolved).kind == surface_kind::blend;
+
 			// The probe of a surface is the probe at the centre of its vertices.
 			float center[3]{};
 			for (std::size_t t = 0; t < index_count; t += 3)
@@ -238,7 +243,7 @@ namespace zonetool::convert::iw7_iw8
 						order.push_back(triangle[corner]);
 						if (layers > 1)
 						{
-							vertices.back().color = {255, 255, 255, 255};
+							vertices.back().color = {255, 255, 255, weighted_base ? vertex(triangle[corner]).color.array[0] : std::uint8_t{255}};
 						}
 
 						for (auto axis = 0; axis < 3; axis++)
