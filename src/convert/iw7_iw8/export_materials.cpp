@@ -1797,6 +1797,14 @@ namespace zonetool::convert::iw7_iw8
 				exported["replayStockOnly"] = true;
 			}
 
+			// An unlit material's mask (IW7's mask / mask_mua techsets: effect quads, glows, light cards, the black hole's
+			// discs): the pipeline multiplies the colour's alpha by the mask's (MAP_UNLIT_MASKS); one without takes no
+			// response image, which the mask stands in for.
+			if (kind.unlit)
+			{
+				exported["unlitMask"] = images[static_cast<std::size_t>(image_role::mask)].has_value();
+			}
+
 			// A material of the surfaces that draw in the sky at run time (runtime_sky): no distance fog, its UV animation.
 			if (output.sky_object_materials.contains(name))
 			{
