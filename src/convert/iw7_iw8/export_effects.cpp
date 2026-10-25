@@ -2016,6 +2016,39 @@ iw7_unsupported( a, b, c, d, e, f )
 {
 }
 
+iw7_bullettrace( start, end, characters, ignore )
+{
+	// Replay global_mp ScriptFile 1805: _bullet_trace, ray_trace and their result helpers.
+	contents = [ "physicscontents_solid", "physicscontents_sky", "physicscontents_water",
+		"physicscontents_vehicle", "physicscontents_item" ];
+	if ( characters )
+	{
+		contents[ contents.size ] = "physicscontents_player";
+		contents[ contents.size ] = "physicscontents_actor";
+	}
+	contents[ contents.size ] = "physicscontents_clipshot";
+	contents[ contents.size ] = "physicscontents_glass";
+	hits = physics_raycast( start, end, physics_createcontents( contents ), ignore, 0, "physicsquery_closest", 0, undefined );
+	if ( hits.size )
+		trace = hits[ 0 ];
+	else
+	{
+		trace = [];
+		trace[ "fraction" ] = 1;
+		trace[ "surfaceflags" ] = 0;
+		trace[ "distance" ] = 0;
+		trace[ "position" ] = end;
+		trace[ "shape_position" ] = end;
+		trace[ "normal" ] = ( 0, 0, 0 );
+		trace[ "contact_normal" ] = ( 0, 0, 0 );
+		trace[ "hittype" ] = "hittype_none";
+	}
+	surface = physics_getsurfacetypefromflags( trace[ "surfaceflags" ] );
+	trace[ "surfaceindex" ] = surface[ "index" ];
+	trace[ "surfacetype" ] = surface[ "name" ];
+	return trace;
+}
+
 iw7_istrue( value )
 {
 	return isdefined( value ) && value;
@@ -2615,7 +2648,7 @@ iw7_scriptable_force( part, fall, point, vector )
 
 	if ( fall )
 	{
-		trace = scripts\engine\trace::_bullet_trace( self.origin + ( 0, 0, 4 ), self.origin - ( 0, 0, 4096 ), 0, self );
+		trace = iw7_bullettrace( self.origin + ( 0, 0, 4 ), self.origin - ( 0, 0, 4096 ), 0, self );
 		if ( isdefined( trace ) && isdefined( trace["position"] ) && self.origin[2] - trace["position"][2] > 1 )
 		{
 			time = sqrt( 2 * ( self.origin[2] - trace["position"][2] ) / 800 );
@@ -3041,11 +3074,9 @@ iw7_out_of_bounds_clear()
 					return "iw7_exploder( " + arguments.front() + " )";
 				});
 
-				// Replay has no bullettrace builtin; its scripts trace bullets with scripts\engine\trace::_bullet_trace( start,
-				// end, characters, ignore ), whose further arguments add contents that IW7's do not name.
 				body = rewrite_calls(body, "bullettrace", [](const std::vector<std::string>& arguments)
 				{
-					return R"(scripts\engine\trace::_bullet_trace( )" +
+					return "iw7_bullettrace( " +
 						join(std::vector<std::string>(arguments.begin(), arguments.begin() + std::min<std::size_t>(arguments.size(), 4))) + " )";
 				});
 
