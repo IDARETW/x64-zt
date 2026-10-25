@@ -283,7 +283,7 @@ namespace zonetool::convert::iw7_iw8
 	// The reveal sharpness of a layer (0 to max_material_layer) that blends by its reveal map (its token holds
 	// v<layer>), none for a layer that blends by its weight alone.
 	std::optional<float> material_layer_reveal(const iw7::Material* material, int layer);
-	// The reveal sharpness that our shader ramps a layer or a single-layer decal by (kRevealLayerFlag).
+	// The reveal sharpness that our shader ramps a layer, a decal or a blended layered base by (kRevealLayerFlag).
 	std::optional<float> material_reveal_ramp(const iw7::Material* material, int layer);
 	// Whether a layered material draws as one stock Replay layered surface (MW120R_STOCK_WORLD): two to four layers, each
 	// blending over the ones before by its weight (b) or multiplying them (m), as Replay's stock twc4 world shader does.
