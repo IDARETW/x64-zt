@@ -3256,6 +3256,10 @@ std::string g_skyObjectDefines;
 // MAP_UNLIT_MASKS when an extraction's unlit materials carry their masks in the response image (unlitMask); IW3 maps
 // compile without it.
 std::string g_unlitMaskDefines;
+// MAP_UV_ANIMATION when a material animates its UVs (an extraction's uvAnimParms): each generated material keeps its
+// animation in row 3 of its pixel constants (cb3, which the stock root signatures of our techniques bind and our shaders
+// otherwise leave unread); IW3 maps compile without it.
+std::string g_uvAnimationDefines;
 // MAP_IW7_SPECULAR when the extraction's specular maps hold IW7's F0 and gloss ("iw7_specular"); IW3 maps compile
 // without it.
 std::string g_iw7SpecularDefines;
@@ -3294,7 +3298,7 @@ Json BuildTechset(const std::string &map, const unsigned columns, const unsigned
     std::string pixelSource =
         "#define MAP_SOURCE_SUN_MASK 1\n#define MAP_SOURCE_CHANNELS 1\n" + glassEnvironment +
         g_emissionDefines + g_backFaceDefines + g_revealDefines + g_iw7SpecularDefines + g_skyObjectDefines +
-        g_unlitMaskDefines;
+        g_unlitMaskDefines + g_uvAnimationDefines;
     if (const char *diag = std::getenv("IW8_ZONETOOL_DIAG_NO_PROBES"); diag && *diag == '1')
         pixelSource += "#define MAP_DIAG_NO_PROBES 1\n";
     if (model)
@@ -4902,6 +4906,11 @@ RenderPlan PrepareRenderAssets(const std::filesystem::path &exportRoot, const Js
     g_unlitMaskDefines = std::ranges::any_of(materials, [](const SourceMaterial &material) { return material.unlitMask; })
                              ? "#define MAP_UNLIT_MASKS 1\n"
                              : "";
+    std::unordered_map<std::string, std::array<float, 3>> uvAnimations;
+    for (const SourceMaterial &material : materials)
+        if (material.uvAnimation != std::array<float, 3>{})
+            uvAnimations.emplace(material.name, material.uvAnimation);
+    g_uvAnimationDefines = uvAnimations.empty() ? "" : "#define MAP_UV_ANIMATION 1\n";
     // IW3 DXT5 normal maps keep Y replicated in RGB and X in alpha (red equals
     // green texel for texel). Every consumer here reads X from red, so move
     // alpha into red once per image; this left one bump axis flat before.
@@ -6012,7 +6021,25 @@ RenderPlan PrepareRenderAssets(const std::filesystem::path &exportRoot, const Js
             [source = std::move(owned)]() mutable { return std::pair{std::move(source), std::optional<Image>{}}; },
             bytes, tint, domain);
     };
+    // With MAP_UV_ANIMATION every generated material keeps its UV animation (or none) in row 3 of its pixel constants;
+    // Replay's stock world materials keep their own rows.
+    const auto stampUvAnimation = [&](Json &definition) {
+        if (g_uvAnimationDefines.empty() || !definition.contains("buffers") || definition.at("buffers").empty() ||
+            definition.value("techset", std::string{}).find("_native_world_cull") != std::string::npos)
+            return;
+        auto &stage = definition["buffers"][0][3];
+        auto constants = Unhex(stage.get<std::string>());
+        if (constants.size() < 64)
+            return;
+        const auto found = uvAnimations.find(definition.value("source", std::string{}));
+        const std::array<float, 3> animation = found != uvAnimations.end() ? found->second : std::array<float, 3>{};
+        for (std::size_t k = 0; k < 3; ++k)
+            Put<float>(constants, 48 + 4 * k, animation[k]);
+        Put<float>(constants, 60, 0.0f);
+        stage = Hex(constants);
+    };
     const auto writeMaterial = [&](const std::filesystem::path &path, Json definition) {
+        stampUvAnimation(definition);
         if (pendingImages.empty())
         {
             WriteJson(path, definition);
