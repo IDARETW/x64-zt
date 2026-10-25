@@ -821,6 +821,12 @@ namespace zonetool::convert::iw7_iw8
 				constants.push_back({{"name", "uvAnimParms"}, {"literal", *animation}});
 			}
 
+			// The mask's own UV animation (mask_mua techsets: maskUvAnimParms, the same terms for the mask's UV).
+			if (const auto animation = material_constant(material, "maskUvAnimParms"))
+			{
+				constants.push_back({{"name", "maskUvAnimParms"}, {"literal", *animation}});
+			}
+
 			// The IW3 techniques: 4 unlit, 7 lit. An unlit material has no lit pass.
 			auto entries = json::array();
 			for (auto i = 0; i < 34; i++)

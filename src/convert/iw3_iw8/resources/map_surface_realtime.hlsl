@@ -99,7 +99,14 @@ cbuffer ReplayView : register(b2) {
     float4 replayView[8];
 };
 #if defined(MAP_UV_ANIMATION) && !defined(MAP_COVERAGE)
-// The material's pixel constants (cb3): row 3 holds its UV animation (MAP_UV_ANIMATION, the converter's stamp).
+// The material's pixel constants (cb3): row 3 holds its UV animation, row 2 its mask's (MAP_UV_ANIMATION, the
+// converter's stamp).
+float2 AnimatedUv(float2 uv, float3 animation, float t) {
+    float turn = t * animation.z;
+    float2 centred = uv - .5;
+    return float2(cos(turn) * centred.x - sin(turn) * centred.y, sin(turn) * centred.x + cos(turn) * centred.y) + .5 +
+           animation.xy * t;
+}
 cbuffer MaterialConstants : register(b3) {
     float4 materialConstants[4];
 };
@@ -1053,13 +1060,7 @@ float4 main(Input input) : SV_TARGET0 {
 #if defined(MAP_UV_ANIMATION) && !defined(MAP_COVERAGE)
     // IW7's UV animation (its unlit VS bbc5b543, disassembled; uvAnimParms in the material's constants, row 3): turned
     // about the texture's middle by t * z radians and scrolled by t * xy, with t the game time in seconds.
-    {
-        float4 animation = materialConstants[3];
-        float turn = replayView[4].w * animation.z;
-        float2 centred = sampleUV - .5;
-        sampleUV = float2(cos(turn) * centred.x - sin(turn) * centred.y, sin(turn) * centred.x + cos(turn) * centred.y) +
-                   .5 + animation.xy * replayView[4].w;
-    }
+    sampleUV = AnimatedUv(sampleUV, materialConstants[3].xyz, replayView[4].w);
 #endif
 #ifdef MAP_NATIVE_WORLD
     // A sky face draws its whole image at its top level, half a texel inside its edges (the material sampler wraps).
@@ -1078,7 +1079,11 @@ float4 main(Input input) : SV_TARGET0 {
     // response image: its alpha multiplies the colour's, at the surface's own UV (IW7's masked unlit PS 88cc5ec2); the
     // surface then has no response.
     if ((flags & 128) != 0 && (flags & 64) != 0) {
-        texel.a *= sourceResponseAtlas.SampleBias(colorSampler, input.uv.xy, MAP_MIP_BIAS).a;
+        float2 maskUV = input.uv.xy;
+#ifdef MAP_UV_ANIMATION
+        maskUV = AnimatedUv(maskUV, materialConstants[2].xyz, replayView[4].w);
+#endif
+        texel.a *= sourceResponseAtlas.SampleBias(colorSampler, maskUV, MAP_MIP_BIAS).a;
         flags &= ~64u;
     }
 #endif

@@ -113,9 +113,11 @@ struct SourceMaterial
     // An unlit material's emission in the units of the native lightmap (replayEmission): what a stock emissive material
     // of it emits.
     std::optional<std::array<float, 3>> replayEmission;
-    // A material of the sky's surfaces (skyObject) and its UV animation (uvAnimParms.xyz).
+    // A material of the sky's surfaces (skyObject) and its UV animation (uvAnimParms.xyz) and its mask's
+    // (maskUvAnimParms.xyz).
     bool skyObject{};
     std::array<float, 3> uvAnimation{};
+    std::array<float, 3> maskUvAnimation{};
     // An unlit material's mask (maskMap) and whether an extraction gives unlit materials theirs (unlitMask).
     std::string mask;
     bool unlitMask{};
@@ -2550,11 +2552,12 @@ SourceMaterial ReadMaterial(const std::filesystem::path &root,
             material.environment = Literal<4>(constant.at("literal"), material.environment);
         else if (key == "emissionScale")
             material.emission = Literal<4>(constant.at("literal"), {1, 1, 1, 1})[0];
-        else if (key == "uvAnimParms")
+        else if (key == "uvAnimParms" || key == "maskUvAnimParms")
         {
+            auto &animation = key == "uvAnimParms" ? material.uvAnimation : material.maskUvAnimation;
             const auto &literal = constant.at("literal");
             for (std::size_t axis = 0; axis < 3; ++axis)
-                material.uvAnimation[axis] = literal.at(axis).get<float>();
+                animation[axis] = literal.at(axis).get<float>();
         }
     }
     for (const auto &state : source.value("stateBits", Json::array()))
@@ -3256,9 +3259,9 @@ std::string g_skyObjectDefines;
 // MAP_UNLIT_MASKS when an extraction's unlit materials carry their masks in the response image (unlitMask); IW3 maps
 // compile without it.
 std::string g_unlitMaskDefines;
-// MAP_UV_ANIMATION when a material animates its UVs (an extraction's uvAnimParms): each generated material keeps its
-// animation in row 3 of its pixel constants (cb3, which the stock root signatures of our techniques bind and our shaders
-// otherwise leave unread); IW3 maps compile without it.
+// MAP_UV_ANIMATION when a material animates its UVs (an extraction's uvAnimParms, maskUvAnimParms): each generated
+// material keeps its animation in row 3 of its pixel constants and its mask's in row 2 (cb3, which the stock root
+// signatures of our techniques bind and our shaders otherwise leave unread); IW3 maps compile without it.
 std::string g_uvAnimationDefines;
 // MAP_IW7_SPECULAR when the extraction's specular maps hold IW7's F0 and gloss ("iw7_specular"); IW3 maps compile
 // without it.
@@ -4906,10 +4909,10 @@ RenderPlan PrepareRenderAssets(const std::filesystem::path &exportRoot, const Js
     g_unlitMaskDefines = std::ranges::any_of(materials, [](const SourceMaterial &material) { return material.unlitMask; })
                              ? "#define MAP_UNLIT_MASKS 1\n"
                              : "";
-    std::unordered_map<std::string, std::array<float, 3>> uvAnimations;
+    std::unordered_map<std::string, std::array<std::array<float, 3>, 2>> uvAnimations;
     for (const SourceMaterial &material : materials)
-        if (material.uvAnimation != std::array<float, 3>{})
-            uvAnimations.emplace(material.name, material.uvAnimation);
+        if (material.uvAnimation != std::array<float, 3>{} || material.maskUvAnimation != std::array<float, 3>{})
+            uvAnimations.emplace(material.name, std::array{material.uvAnimation, material.maskUvAnimation});
     g_uvAnimationDefines = uvAnimations.empty() ? "" : "#define MAP_UV_ANIMATION 1\n";
     // IW3 DXT5 normal maps keep Y replicated in RGB and X in alpha (red equals
     // green texel for texel). Every consumer here reads X from red, so move
@@ -6032,10 +6035,14 @@ RenderPlan PrepareRenderAssets(const std::filesystem::path &exportRoot, const Js
         if (constants.size() < 64)
             return;
         const auto found = uvAnimations.find(definition.value("source", std::string{}));
-        const std::array<float, 3> animation = found != uvAnimations.end() ? found->second : std::array<float, 3>{};
+        const auto animations = found != uvAnimations.end() ? found->second : std::array<std::array<float, 3>, 2>{};
         for (std::size_t k = 0; k < 3; ++k)
-            Put<float>(constants, 48 + 4 * k, animation[k]);
+        {
+            Put<float>(constants, 48 + 4 * k, animations[0][k]);
+            Put<float>(constants, 32 + 4 * k, animations[1][k]);
+        }
         Put<float>(constants, 60, 0.0f);
+        Put<float>(constants, 44, 0.0f);
         stage = Hex(constants);
     };
     const auto writeMaterial = [&](const std::filesystem::path &path, Json definition) {
