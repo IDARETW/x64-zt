@@ -357,6 +357,9 @@ struct LightmapLayerEncoding
     float logScale = 0.0f;
     float logMaximum = 0.0f;
     bool constantAmbient = false;
+    // The light units of Replay's shaders (--style iw8's lightUnitScale, as the native light grid takes it): the native
+    // lightmap's colour is stored in them when stock world materials read it.
+    float unitScale = 1.0f;
 
     float Decode(const std::uint8_t byte) const
     {
@@ -420,7 +423,8 @@ NativeLightmapPixel EncodeNativeLightmapPixel(const std::array<std::uint8_t, 4> 
         const float total = luminance(irradiance);
         const float fraction = total > 0.0f ? std::clamp(luminance(ambient) / total, 0.0f, 1.0f) : 1.0f;
         const auto direction = EncodeOctDirection(slopeX, slopeY);
-        return {EncodeR11G11B10(irradiance[0], irradiance[1], irradiance[2]),
+        return {EncodeR11G11B10(irradiance[0] * encoding.unitScale, irradiance[1] * encoding.unitScale,
+                                irradiance[2] * encoding.unitScale),
                 static_cast<std::uint8_t>(std::lround(fraction * 255.0f)), direction[0], direction[1]};
     }
     // IW3 lights A N.z + B sat(N.D): with no ambient (f = 0), the shared direction is fitted to the three colour
@@ -436,8 +440,9 @@ NativeLightmapPixel EncodeNativeLightmapPixel(const std::array<std::uint8_t, 4> 
                             ? directionZ * directionalDot / irradianceSquared
                             : 0.0f;
     const auto direction = EncodeOctDirection(slopeX * ratio, slopeY * ratio);
-    return {EncodeR11G11B10(irradiance[0], irradiance[1], irradiance[2]), 0, direction[0],
-            direction[1]};
+    return {EncodeR11G11B10(irradiance[0] * encoding.unitScale, irradiance[1] * encoding.unitScale,
+                            irradiance[2] * encoding.unitScale),
+            0, direction[0], direction[1]};
 }
 
 Image EncodeNativeWorldNormal(Image source)
@@ -5595,7 +5600,9 @@ RenderPlan PrepareRenderAssets(const std::filesystem::path &exportRoot, const Js
         lightmapRight = std::max(lightmapRight, rectangle.x + rectangle.width);
         lightmapBottom = std::max(lightmapBottom, rectangle.y + rectangle.height);
     }
-    const LightmapLayerEncoding lightmapEncoding = ReadLightmapLayerEncoding(world);
+    LightmapLayerEncoding lightmapEncoding = ReadLightmapLayerEncoding(world);
+    if (world.value("replay_stock_world", false))
+        lightmapEncoding.unitScale = lightUnitScale;
     Image lightmapPrimary, lightmapSecondary;
     // The primary-light visibility mask over the same region, for native world surfaces, which bind their own
     // colour images where atlas surfaces read the mask from the colour atlas.
@@ -6729,10 +6736,12 @@ RenderPlan PrepareRenderAssets(const std::filesystem::path &exportRoot, const Js
                 SourceMaterial emissive = source;
                 emissive.tint = {1, 1, 1, 1};
                 stockColour(direct, *emissiveChannel, emissive);
+                // In Replay's light units, as the native lightmap.
                 const auto &emission = *source.replayEmission;
                 setRow(direct, 0x24, 3,
-                       {std::bit_cast<std::uint32_t>(emission[0]), std::bit_cast<std::uint32_t>(emission[1]),
-                        std::bit_cast<std::uint32_t>(emission[2]), std::bit_cast<std::uint32_t>(1.0f)});
+                       {std::bit_cast<std::uint32_t>(emission[0] * lightUnitScale),
+                        std::bit_cast<std::uint32_t>(emission[1] * lightUnitScale),
+                        std::bit_cast<std::uint32_t>(emission[2] * lightUnitScale), std::bit_cast<std::uint32_t>(1.0f)});
                 auto specular = row(direct, 4);
                 specular[0] = 0;
                 setRow(direct, 0x36, 4, specular);
