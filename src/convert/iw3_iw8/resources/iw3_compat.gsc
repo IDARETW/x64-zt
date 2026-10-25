@@ -99,7 +99,7 @@ iw3compat_precache()
     level.mw120r_fx["sparks"] = iw3compat_fx( "impacts/small_metalhit_1", "vfx/iw8_mp/equipment/flashbang/vfx_spark_crack_npop" );
     // IW3's own explosion carries its fire; only the stock stand-in needs one.
     if ( iw3compat_slot_stock( "veh_explosion" ) )
-        level.mw120r_fx["veh_fire_linger"] = loadfx( "vfx/iw8/veh/scriptables/vfx_veh_fire_linger_med" );
+        level.mw120r_fx["veh_fire_linger"] = loadfx( "vfx/iw8/veh/scriptables/shared/vfx_veh_fire_linger_med" );
 }
 
 iw3compat_has_iw3fx( iw3name )
@@ -689,7 +689,8 @@ iw3compat_createfx_play()
         self.looper = spawnfx( fx, origin, forward, up );
         if ( delay > 0 )
             delay = 0;
-        triggerfx( self.looper, delay );
+        // Replay takes an absolute game time in seconds, not a relative delay.
+        triggerfx( self.looper, gettime() * 0.001 + delay );
     }
     else if ( type == "loopfx" )
     {
