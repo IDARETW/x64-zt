@@ -831,6 +831,12 @@ namespace zonetool::convert::iw7_iw8
 
 	float light_unit_scale(const source_map& source)
 	{
+		// With IW7's own exposure the map keeps IW7's units.
+		if (iw7_exposure())
+		{
+			return 1.0f;
+		}
+
 		const auto com_world = source.com_world();
 		if (!com_world || com_world->primaryLightCount <= sun_light)
 		{

@@ -560,6 +560,20 @@ namespace zonetool::convert::iw7_iw8
 		}
 	}
 
+	json iw7_tonemap(const source_map& source)
+	{
+		auto result = json::object();
+		for (const auto& [key, value] : vision_settings(source))
+		{
+			if (key.starts_with("tonemap") || key == "toneWhitePoint")
+			{
+				result[key] = value;
+			}
+		}
+
+		return result;
+	}
+
 	std::map<std::string, std::string> vision_settings(const source_map& source)
 	{
 		std::map<std::string, std::string> result;
