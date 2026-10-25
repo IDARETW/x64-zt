@@ -60,6 +60,8 @@ namespace zonetool::convert::iw7_iw8
 			std::optional<bool> written;
 			// The written colour's alpha is 1 everywhere.
 			bool opaque_alpha{};
+			// The colour of an effect drawn in high dynamic range (mkhdr techsets): stored expanded (expand_hdr).
+			bool hdr_expand{};
 			// The largest size that the file keeps (HUD images keep theirs).
 			std::size_t limit{max_image_size};
 		};
@@ -438,6 +440,31 @@ namespace zonetool::convert::iw7_iw8
 			}
 		}
 
+		// IW7's effect pixel shaders of the mkhdr techsets (the flow PS bfc071e2, disassembled) expand their colour into high
+		// dynamic range: -ln(1 - min(c^2, 0.99)) x tint, up to ln(100) where the colour is white. The stock effect shaders
+		// take the colour as it is, so the colour is stored expanded and divided by ln(100) (export_effect_material scales
+		// the tint by it).
+		constexpr auto hdr_expansion = 4.60517019f;
+		void expand_hdr(DirectX::ScratchImage& pixels)
+		{
+			const auto& metadata = pixels.GetMetadata();
+			const auto* target = pixels.GetImage(0, 0, 0);
+			for (std::size_t y = 0; y < metadata.height; y++)
+			{
+				auto* row = target->pixels + y * target->rowPitch;
+				for (std::size_t x = 0; x < metadata.width; x++)
+				{
+					auto* pixel = row + x * 4;
+					for (auto c = 0; c < 3; c++)
+					{
+						const auto linear = std::min(pixel[c] * pixel[c] / (255.0f * 255.0f), 0.99f);
+						const auto expanded = -std::log(1.0f - linear) / hdr_expansion;
+						pixel[c] = static_cast<std::uint8_t>(std::lround(std::sqrt(expanded) * 255.0f));
+					}
+				}
+			}
+		}
+
 		// Replaces the alpha of a colour image: with the channel of an alpha texture (at the colour's size), or opaque.
 		// The alpha of an image from a channel of another (none: opaque), times a second channel of it when one is given.
 		bool replace_alpha(DirectX::ScratchImage& pixels, const iw7::GfxImage* alpha, const std::size_t channel,
@@ -516,6 +543,11 @@ namespace zonetool::convert::iw7_iw8
 				if (file.metal_alpha)
 				{
 					darken_metal(pixels);
+				}
+
+				if (file.hdr_expand)
+				{
+					expand_hdr(pixels);
 				}
 
 				if ((file.alpha || file.opaque) && !replace_alpha(pixels, file.alpha, file.alpha_channel, file.alpha_factor_channel))
@@ -1049,9 +1081,9 @@ namespace zonetool::convert::iw7_iw8
 				technique = std::format("effect{}{}{}{}", feather ? "_zfeather" : "", falloff ? "_falloff" : "", additive ? "_add" : "",
 					eye_offset ? "_eyeoffset" : "");
 				auto tint = material_constant(material, "colorTint").value_or(std::array{1.0f, 1.0f, 1.0f, 1.0f});
-				for (std::size_t c = 0; has("effectunlit") && c < 3; c++)
+				for (std::size_t c = 0; c < 3; c++)
 				{
-					tint[c] *= light_scale;
+					tint[c] *= (has("effectunlit") ? light_scale : 1.0f) * (has("mkhdr") ? hdr_expansion : 1.0f);
 				}
 
 				constants.push_back({{"name", "colorTint"}, {"literal", tint}});
@@ -1559,6 +1591,14 @@ namespace zonetool::convert::iw7_iw8
 				if (*role == image_role::color && output.world_materials.contains(name))
 				{
 					entry.limit = world_color_size;
+				}
+
+				// The tinted effect techniques only (clouds and distortion take no tint).
+				if (*role == image_role::color && output.effect_materials.contains(name) && techset_has_token(material, "mkhdr") &&
+					!techset_has_token(material, "cloud") && !techset_has_token(material, "distortion"))
+				{
+					entry.hdr_expand = true;
+					file += "_hdr";
 				}
 
 				const auto [slot, inserted] = files.try_emplace(file, entry);
