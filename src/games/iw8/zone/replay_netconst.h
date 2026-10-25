@@ -1,12 +1,19 @@
 #pragma once
+#include "../structs.hpp"
 #include <cstddef>
 // Exact Replay type/tag table at RVA 0x4598378 (41 records, 24-byte stride).
-// The older reference branch uses different ordinals; do not copy its enum.
 namespace replayncs
 {
 inline constexpr unsigned AssetType = 61;
-inline constexpr size_t BodySize = 0x20;
-inline constexpr unsigned LevelSource = 2;
+inline constexpr size_t BodySize = sizeof(zonetool::iw8::NetConstStrings);
+inline constexpr auto LevelSource = zonetool::iw8::NETCONSTSTRINGSOURCE_MAP;
+static_assert(BodySize == 0x20);
+static_assert(offsetof(zonetool::iw8::NetConstStrings, stringType) == 0x08);
+static_assert(offsetof(zonetool::iw8::NetConstStrings, sourceType) == 0x0C);
+static_assert(offsetof(zonetool::iw8::NetConstStrings, flags) == 0x10);
+static_assert(offsetof(zonetool::iw8::NetConstStrings, entryCount) == 0x14);
+static_assert(offsetof(zonetool::iw8::NetConstStrings, stringList) == 0x18);
+static_assert(LevelSource == 3); // Shipped Replay level tables use MAP, not PRE_MAP (2).
 inline constexpr const char *Tags[] = {
     "mdl", // 0
     "mat", // 1
@@ -52,4 +59,5 @@ inline constexpr const char *Tags[] = {
 };
 inline constexpr unsigned Count = sizeof(Tags) / sizeof(Tags[0]);
 static_assert(Count == 41);
+static_assert(Count == zonetool::iw8::NETCONSTSTRINGTYPE_COUNT);
 } // namespace replayncs

@@ -1292,16 +1292,16 @@ inline void emitLevelNetConstStrings(ZoneBuffer &zb, unsigned type,
                                      const std::vector<std::string> &strings)
 {
     const std::string name = std::string("ncs_") + replayncs::Tags[type] + "_level";
-    uint8_t body[replayncs::BodySize]{};
-    stamp64(body, 0, PTR_FOLLOWS);
-    stamp32(body, 8, type);
-    stamp32(body, 12, replayncs::LevelSource);
-    stamp32(body, 20, static_cast<uint32_t>(strings.size()));
-    stamp64(body, 24, strings.empty() ? PTR_NULL : PTR_FOLLOWS);
+    zonetool::iw8::NetConstStrings body{};
+    body.name = reinterpret_cast<const char *>(PTR_FOLLOWS);
+    body.stringType = static_cast<zonetool::iw8::NetConstStringType>(type);
+    body.sourceType = replayncs::LevelSource;
+    body.entryCount = static_cast<uint32_t>(strings.size());
+    body.stringList = strings.empty() ? nullptr : reinterpret_cast<const char **>(PTR_FOLLOWS);
     // ZoneWriter reserves the top-level DB_InsertPointer slot.
     zb.pushStream(XFILE_BLOCK_TEMP_PRELOAD);
     zb.align(7);
-    zb.write(body, sizeof(body));
+    zb.writeT(body);
     zb.pushStream(XFILE_BLOCK_VIRTUAL);
     zb.writeStr(name.c_str());
     if (!strings.empty())
