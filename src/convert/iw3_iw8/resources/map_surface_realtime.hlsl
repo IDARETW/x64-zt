@@ -98,6 +98,12 @@ SamplerState gtaoSampler : register(s8);
 cbuffer ReplayView : register(b2) {
     float4 replayView[8];
 };
+#if defined(MAP_UV_ANIMATION) && !defined(MAP_COVERAGE)
+// The material's pixel constants (cb3): row 3 holds its UV animation (MAP_UV_ANIMATION, the converter's stamp).
+cbuffer MaterialConstants : register(b3) {
+    float4 materialConstants[4];
+};
+#endif
 cbuffer ReplayLighting : register(b7) {
     float4 replayLighting[MAP_LIGHTING_ROWS];
 };
@@ -1044,14 +1050,15 @@ float4 main(Input input) : SV_TARGET0 {
     // the sampler's gradients continuous across repeating texture coordinates.
     float lod = 0;
     float2 sampleUV = input.uv.xy;
-#ifdef MAP_SKY_OBJECTS
-    // IW7's UV animation (its unlit VS bbc5b543, disassembled): turned about the texture's middle by t * z radians and
-    // scrolled by t * xy, with t the game time in seconds (material parameters xyz).
-    if (skyObject) {
-        float turn = replayView[4].w * input.materialParameters.z;
+#if defined(MAP_UV_ANIMATION) && !defined(MAP_COVERAGE)
+    // IW7's UV animation (its unlit VS bbc5b543, disassembled; uvAnimParms in the material's constants, row 3): turned
+    // about the texture's middle by t * z radians and scrolled by t * xy, with t the game time in seconds.
+    {
+        float4 animation = materialConstants[3];
+        float turn = replayView[4].w * animation.z;
         float2 centred = sampleUV - .5;
         sampleUV = float2(cos(turn) * centred.x - sin(turn) * centred.y, sin(turn) * centred.x + cos(turn) * centred.y) +
-                   .5 + input.materialParameters.xy * replayView[4].w;
+                   .5 + animation.xy * replayView[4].w;
     }
 #endif
 #ifdef MAP_NATIVE_WORLD
