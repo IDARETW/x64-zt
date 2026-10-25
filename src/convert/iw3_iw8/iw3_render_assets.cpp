@@ -118,6 +118,8 @@ struct SourceMaterial
     bool skyObject{};
     std::array<float, 3> uvAnimation{};
     std::array<float, 3> maskUvAnimation{};
+    // The light that passes through the material to the side facing away (transmission.rgb: IW7's *_trans techsets).
+    std::array<float, 3> transmission{};
     // An unlit material's mask (maskMap) and whether an extraction gives unlit materials theirs (unlitMask).
     std::string mask;
     bool unlitMask{};
@@ -2552,12 +2554,14 @@ SourceMaterial ReadMaterial(const std::filesystem::path &root,
             material.environment = Literal<4>(constant.at("literal"), material.environment);
         else if (key == "emissionScale")
             material.emission = Literal<4>(constant.at("literal"), {1, 1, 1, 1})[0];
-        else if (key == "uvAnimParms" || key == "maskUvAnimParms")
+        else if (key == "uvAnimParms" || key == "maskUvAnimParms" || key == "transmission")
         {
-            auto &animation = key == "uvAnimParms" ? material.uvAnimation : material.maskUvAnimation;
+            auto &values = key == "uvAnimParms"       ? material.uvAnimation
+                           : key == "maskUvAnimParms" ? material.maskUvAnimation
+                                                      : material.transmission;
             const auto &literal = constant.at("literal");
             for (std::size_t axis = 0; axis < 3; ++axis)
-                animation[axis] = literal.at(axis).get<float>();
+                values[axis] = literal.at(axis).get<float>();
         }
     }
     for (const auto &state : source.value("stateBits", Json::array()))
@@ -3263,6 +3267,9 @@ std::string g_unlitMaskDefines;
 // material keeps its animation in row 3 of its pixel constants and its mask's in row 2 (cb3, which the stock root
 // signatures of our techniques bind and our shaders otherwise leave unread); IW3 maps compile without it.
 std::string g_uvAnimationDefines;
+// MAP_TRANSMISSION when a material passes light to its far side (an extraction's transmission): each generated material
+// keeps it in row 1 of its pixel constants; IW3 maps compile without it.
+std::string g_transmissionDefines;
 // MAP_IW7_SPECULAR when the extraction's specular maps hold IW7's F0 and gloss ("iw7_specular"); IW3 maps compile
 // without it.
 std::string g_iw7SpecularDefines;
@@ -3301,7 +3308,7 @@ Json BuildTechset(const std::string &map, const unsigned columns, const unsigned
     std::string pixelSource =
         "#define MAP_SOURCE_SUN_MASK 1\n#define MAP_SOURCE_CHANNELS 1\n" + glassEnvironment +
         g_emissionDefines + g_backFaceDefines + g_revealDefines + g_iw7SpecularDefines + g_skyObjectDefines +
-        g_unlitMaskDefines + g_uvAnimationDefines;
+        g_unlitMaskDefines + g_uvAnimationDefines + g_transmissionDefines;
     if (const char *diag = std::getenv("IW8_ZONETOOL_DIAG_NO_PROBES"); diag && *diag == '1')
         pixelSource += "#define MAP_DIAG_NO_PROBES 1\n";
     if (model)
@@ -4909,11 +4916,23 @@ RenderPlan PrepareRenderAssets(const std::filesystem::path &exportRoot, const Js
     g_unlitMaskDefines = std::ranges::any_of(materials, [](const SourceMaterial &material) { return material.unlitMask; })
                              ? "#define MAP_UNLIT_MASKS 1\n"
                              : "";
-    std::unordered_map<std::string, std::array<std::array<float, 3>, 2>> uvAnimations;
+    // The rows a material stamps into its pixel constants: transmission (row 1), mask UV animation (row 2), UV animation
+    // (row 3).
+    std::unordered_map<std::string, std::array<std::array<float, 3>, 3>> materialRows;
     for (const SourceMaterial &material : materials)
-        if (material.uvAnimation != std::array<float, 3>{} || material.maskUvAnimation != std::array<float, 3>{})
-            uvAnimations.emplace(material.name, std::array{material.uvAnimation, material.maskUvAnimation});
-    g_uvAnimationDefines = uvAnimations.empty() ? "" : "#define MAP_UV_ANIMATION 1\n";
+        if (material.uvAnimation != std::array<float, 3>{} || material.maskUvAnimation != std::array<float, 3>{} ||
+            material.transmission != std::array<float, 3>{})
+            materialRows.emplace(material.name,
+                                 std::array{material.transmission, material.maskUvAnimation, material.uvAnimation});
+    const auto anyMaterial = [&](const auto &field) {
+        return std::ranges::any_of(materials, [&](const SourceMaterial &material) {
+            return material.*field != std::array<float, 3>{};
+        });
+    };
+    g_uvAnimationDefines = anyMaterial(&SourceMaterial::uvAnimation) || anyMaterial(&SourceMaterial::maskUvAnimation)
+                               ? "#define MAP_UV_ANIMATION 1\n"
+                               : "";
+    g_transmissionDefines = anyMaterial(&SourceMaterial::transmission) ? "#define MAP_TRANSMISSION 1\n" : "";
     // IW3 DXT5 normal maps keep Y replicated in RGB and X in alpha (red equals
     // green texel for texel). Every consumer here reads X from red, so move
     // alpha into red once per image; this left one bump axis flat before.
@@ -6024,29 +6043,30 @@ RenderPlan PrepareRenderAssets(const std::filesystem::path &exportRoot, const Js
             [source = std::move(owned)]() mutable { return std::pair{std::move(source), std::optional<Image>{}}; },
             bytes, tint, domain);
     };
-    // With MAP_UV_ANIMATION every generated material keeps its UV animation (or none) in row 3 of its pixel constants;
-    // Replay's stock world materials keep their own rows.
-    const auto stampUvAnimation = [&](Json &definition) {
-        if (g_uvAnimationDefines.empty() || !definition.contains("buffers") || definition.at("buffers").empty() ||
+    // With MAP_UV_ANIMATION or MAP_TRANSMISSION every generated material keeps its rows (or zeros) in its pixel
+    // constants: transmission in row 1, mask UV animation in row 2, UV animation in row 3; Replay's stock world materials
+    // keep their own rows.
+    const auto stampMaterialRows = [&](Json &definition) {
+        if ((g_uvAnimationDefines.empty() && g_transmissionDefines.empty()) || !definition.contains("buffers") ||
+            definition.at("buffers").empty() ||
             definition.value("techset", std::string{}).find("_native_world_cull") != std::string::npos)
             return;
         auto &stage = definition["buffers"][0][3];
         auto constants = Unhex(stage.get<std::string>());
         if (constants.size() < 64)
             return;
-        const auto found = uvAnimations.find(definition.value("source", std::string{}));
-        const auto animations = found != uvAnimations.end() ? found->second : std::array<std::array<float, 3>, 2>{};
-        for (std::size_t k = 0; k < 3; ++k)
+        const auto found = materialRows.find(definition.value("source", std::string{}));
+        const auto rows = found != materialRows.end() ? found->second : std::array<std::array<float, 3>, 3>{};
+        for (std::size_t row = 0; row < 3; ++row)
         {
-            Put<float>(constants, 48 + 4 * k, animations[0][k]);
-            Put<float>(constants, 32 + 4 * k, animations[1][k]);
+            for (std::size_t k = 0; k < 3; ++k)
+                Put<float>(constants, 16 * (row + 1) + 4 * k, rows[row][k]);
+            Put<float>(constants, 16 * (row + 1) + 12, 0.0f);
         }
-        Put<float>(constants, 60, 0.0f);
-        Put<float>(constants, 44, 0.0f);
         stage = Hex(constants);
     };
     const auto writeMaterial = [&](const std::filesystem::path &path, Json definition) {
-        stampUvAnimation(definition);
+        stampMaterialRows(definition);
         if (pendingImages.empty())
         {
             WriteJson(path, definition);

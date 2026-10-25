@@ -723,6 +723,30 @@ namespace zonetool::convert::iw7_iw8
 			return std::nullopt;
 		}
 
+		// Whether a material's technique set name holds a token (its names join tokens with '_').
+		bool techset_has_token(const iw7::Material* material, const std::string_view token)
+		{
+			return material && material->techniqueSet &&
+				std::ranges::any_of(std::views::split(asset_name(material->techniqueSet->name), '_'), [&](const auto part)
+				{
+					return std::string_view(part.begin(), part.end()) == token;
+				});
+		}
+
+		// Every constant of a material as " name#hash=(x y z w)", for the dump switches.
+		std::string material_constants_text(const iw7::Material* material)
+		{
+			std::string values;
+			for (auto i = 0; material && i < material->constantCount; i++)
+			{
+				const auto& entry = material->constantTable[i];
+				values += std::format(" {}#{:08X}=({:g} {:g} {:g} {:g})", std::string_view(entry.name, strnlen(entry.name, sizeof(entry.name))),
+					entry.nameHash, entry.literal[0], entry.literal[1], entry.literal[2], entry.literal[3]);
+			}
+
+			return values;
+		}
+
 		// The tint of a layer of a material (colorTint, colorTint1 to colorTint4): lit materials keep albedo tints up to
 		// 1, unlit ones (high dynamic range emission) the hue of theirs.
 		std::array<float, 4> material_tint(const iw7::Material* material, const int layer, const material_class& kind)
@@ -744,6 +768,14 @@ namespace zonetool::convert::iw7_iw8
 			const std::array<std::optional<std::string>, image_role_count>& images, const material_class& kind, const int layer,
 			const float light_scale, const bool decal_range)
 		{
+			// IW7_MAT_DUMP=<text>: the technique set and constants of each material whose name holds the text.
+			if (const auto* dump = std::getenv("IW7_MAT_DUMP"); dump && !layer && material && material->name &&
+				std::string_view(material->name).contains(dump))
+			{
+				ZONETOOL_INFO("iw7 material %s: techset %s%s", material->name,
+					material->techniqueSet ? material->techniqueSet->name : "?", material_constants_text(material).data());
+			}
+
 			// An unlit material emits its tint in the units of the converted lights (the sun's level is 1): one that emits
 			// below it keeps the tint, one above it the hue of its tint and gives the pipeline its gain (Frontier's lamps:
 			// tint 318, 33 times the sun). Unlit overlays (screen dots over screens of tint 15) then keep IW7's balance.
@@ -825,6 +857,20 @@ namespace zonetool::convert::iw7_iw8
 			if (const auto animation = material_constant(material, "maskUvAnimParms"))
 			{
 				constants.push_back({{"name", "maskUvAnimParms"}, {"literal", *animation}});
+			}
+
+			// Light through thin leaves (the *_trans techsets; disassembled PS 9a683b7e of mo_l_sm_atest_*_ssvsc_trans,
+			// its arguments: cb3[1] = absorptionScale, cb3[2].x = subsurfaceParms.x): the sun and every local light also
+			// light the side facing away by albedo x saturate(-N.L) x absorptionScale.rgb x saturate(subsurfaceParms.x).
+			if (!kind.unlit && !layer && techset_has_token(material, "trans"))
+			{
+				if (const auto absorption = material_constant(material, "absorptionScale"))
+				{
+					const auto thickness = std::clamp(material_constant(material, "subsurfaceParms").value_or(std::array{0.0f, 0.0f, 0.0f, 0.0f})[0],
+						0.0f, 1.0f);
+					constants.push_back({{"name", "transmission"}, {"literal", {(*absorption)[0] * thickness,
+						(*absorption)[1] * thickness, (*absorption)[2] * thickness, 0.0f}}});
+				}
 			}
 
 			// The IW3 techniques: 4 unlit, 7 lit. An unlit material has no lit pass.
@@ -959,14 +1005,7 @@ namespace zonetool::convert::iw7_iw8
 			// IW7_FXMAT_DUMP=1: each effect material's technique set and constants.
 			if (std::getenv("IW7_FXMAT_DUMP"))
 			{
-				std::string values;
-				for (auto i = 0; material && i < material->constantCount; i++)
-				{
-					const auto& entry = material->constantTable[i];
-					values += std::format(" {}=({:g} {:g} {:g} {:g})", std::string_view(entry.name, strnlen(entry.name, sizeof(entry.name))),
-						entry.literal[0], entry.literal[1], entry.literal[2], entry.literal[3]);
-				}
-
+				const auto values = material_constants_text(material);
 				std::string depths;
 				for (auto technique = 0; material && material->stateBitsTable && technique < 34; technique++)
 				{
@@ -1943,15 +1982,7 @@ namespace zonetool::convert::iw7_iw8
 
 	bool reactive_motion(const iw7::Material* material)
 	{
-		if (!material || !material->techniqueSet)
-		{
-			return false;
-		}
-
-		return std::ranges::any_of(std::views::split(asset_name(material->techniqueSet->name), '_'), [](const auto token)
-		{
-			return std::string_view(token.begin(), token.end()) == "reactivemotion";
-		});
+		return techset_has_token(material, "reactivemotion");
 	}
 
 	// IW7's map art of the map select (in the ui zone; IW7's own loading screen draws the minimap with the spawns): the

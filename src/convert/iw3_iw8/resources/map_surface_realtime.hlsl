@@ -98,18 +98,20 @@ SamplerState gtaoSampler : register(s8);
 cbuffer ReplayView : register(b2) {
     float4 replayView[8];
 };
+#if (defined(MAP_UV_ANIMATION) || defined(MAP_TRANSMISSION)) && !defined(MAP_COVERAGE)
+// The material's pixel constants (cb3, the converter's stamp): row 1 holds its transmission (MAP_TRANSMISSION), row 3
+// its UV animation and row 2 its mask's (MAP_UV_ANIMATION).
+cbuffer MaterialConstants : register(b3) {
+    float4 materialConstants[4];
+};
+#endif
 #if defined(MAP_UV_ANIMATION) && !defined(MAP_COVERAGE)
-// The material's pixel constants (cb3): row 3 holds its UV animation, row 2 its mask's (MAP_UV_ANIMATION, the
-// converter's stamp).
 float2 AnimatedUv(float2 uv, float3 animation, float t) {
     float turn = t * animation.z;
     float2 centred = uv - .5;
     return float2(cos(turn) * centred.x - sin(turn) * centred.y, sin(turn) * centred.x + cos(turn) * centred.y) + .5 +
            animation.xy * t;
 }
-cbuffer MaterialConstants : register(b3) {
-    float4 materialConstants[4];
-};
 #endif
 cbuffer ReplayLighting : register(b7) {
     float4 replayLighting[MAP_LIGHTING_ROWS];
@@ -910,9 +912,10 @@ float4 LocalShadowRow(uint slot, uint offset) {
     return asfloat(localLightShadows.Load4(slot * 96 + offset));
 }
 
-// Diffuse irradiance (to multiply by albedo) and specular radiance.
+// Diffuse irradiance (to multiply by albedo) and specular radiance; transmission: the share of each light that passes
+// to the side facing away (IW7's *_trans techsets, PS 9a683b7e: saturate(-N.L) x transmission).
 void LocalLighting(float2 screenPixel, float viewDepth, float3 relativePosition, float3 normal,
-                   float3 view, float3 f0, float gloss, out float3 diffuse, out float3 specular) {
+                   float3 view, float3 f0, float gloss, float3 transmission, out float3 diffuse, out float3 specular) {
     diffuse = 0;
     specular = 0;
     uint words = asuint(replayLighting[52].x);
@@ -1017,7 +1020,8 @@ void LocalLighting(float2 screenPixel, float viewDepth, float3 relativePosition,
             float formFactor = h * h < 1 ? pow(saturate(sinSquared * (.5 * h + .5)), 1.5)
                                          : saturate(ndotl * sinSquared);
             float3 irradiance = LocalLightFloat3(light, 0) * attenuation * shadow * formFactor;
-            diffuse += irradiance;
+            diffuse += irradiance + LocalLightFloat3(light, 0) * attenuation * shadow * saturate(-ndotl) * sinSquared *
+                                        transmission;
             float3 halfway = normalize(view + direction);
             float distribution = (power + 2) * .5 * pow(saturate(dot(normal, halfway)), power);
             float3 fresnel = f0 + (1 - f0) * pow(1 - saturate(dot(view, halfway)), 5);
@@ -1208,6 +1212,14 @@ float4 main(Input input) : SV_TARGET0 {
     float3 sun = max(0, replayLighting[57].xyz) / MAP_LIGHT_UNIT_SCALE;
     bool nativeSun = replayLighting[56].w != 0;
     float ndotl = nativeSun ? saturate(dot(shadingNormal, direction)) : 0;
+    // The sun through thin leaves (MAP_TRANSMISSION, IW7's *_trans techsets): the side facing away takes
+    // saturate(-N.L) x the material's transmission, shadowed like the lit side.
+    float3 transmission = 0;
+#if defined(MAP_TRANSMISSION) && !defined(MAP_COVERAGE)
+    transmission = materialConstants[1].rgb;
+#endif
+    float3 transmitted = nativeSun ? saturate(-dot(shadingNormal, direction)) * transmission : 0;
+    bool sunReaches = ndotl > 0 || any(transmitted > 0);
     float visibility = 1;
     // Glass has no opaque depth coverage. Solid and masked surfaces both
     // contribute matching depth and normals before the shadow resolve.
@@ -1235,7 +1247,7 @@ float4 main(Input input) : SV_TARGET0 {
     // shadows of moving casters: players, script models and dynamic props.
     float bakedVisibility = -1;
 #ifdef MAP_BAKED_SUN
-    if (!sky && surfaceLit && nativeSun && ndotl > 0)
+    if (!sky && surfaceLit && nativeSun && sunReaches)
         bakedVisibility =
             BakedSunVisibility(input.relativePosition + replayView[4].xyz, normalize(input.normal));
     if (bakedVisibility >= 0)
@@ -1432,7 +1444,7 @@ float4 main(Input input) : SV_TARGET0 {
     }
 #endif
     indirect *= replayLighting[43].z * gtao / max(bounce, 1e-3);
-    float3 light = indirect + visibility * ndotl * sun;
+    float3 light = indirect + visibility * (ndotl + transmitted) * sun;
     // Sky and IW3 unlit materials (flag 128) show their colour unlit.
     bool unlit = sky || layer || (flags & 128) != 0;
     if (unlit)
@@ -1469,10 +1481,10 @@ float4 main(Input input) : SV_TARGET0 {
         float3 localDiffuse, localSpecular;
 #ifdef MAP_IW8_LIGHTING
         LocalLighting(screenPixel, input.position.w, input.relativePosition, shadingNormal,
-                      normalize(-input.relativePosition), f0, gloss, localDiffuse, localSpecular);
+                      normalize(-input.relativePosition), f0, gloss, transmission, localDiffuse, localSpecular);
 #else
         LocalLighting(screenPixel, input.position.w, input.relativePosition, shadingNormal,
-                      normalize(-input.relativePosition), .04, .3, localDiffuse, localSpecular);
+                      normalize(-input.relativePosition), .04, .3, transmission, localDiffuse, localSpecular);
 #endif
         color += (texel.rgb * localDiffuse + localSpecular) / MAP_LIGHT_UNIT_SCALE;
     }
