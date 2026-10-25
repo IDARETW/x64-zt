@@ -934,11 +934,11 @@ namespace zonetool::convert::iw7_iw8
 				result["iw7BackFaceNormals"] = true;
 			}
 
-			// A layer that blends by its reveal map ramps its colour's alpha (the reveal) by the weight and sharpness in its
-			// vertex colours (export_surface).
-			if (layer && material_layer_reveal(material, layer))
+			// A layer or decal that blends by its reveal map ramps its colour's alpha (the reveal) by the weight in its vertex
+			// alpha and its sharpness revealParams<n>.x (the layered PS 9423eedc; the decals' own, v0, the decal PS 3bc5ba09).
+			if (const auto reveal = material_reveal_ramp(material, layer))
 			{
-				result["iw7RevealLayer"] = true;
+				result["iw7RevealSharpness"] = *reveal;
 			}
 
 			// What the stock world images hold: the colour's alpha is IW7's specular (TS_COLOR_SPECULAR_MAP), and the normal
@@ -1320,6 +1320,13 @@ namespace zonetool::convert::iw7_iw8
 		return true;
 	}
 
+	std::optional<float> material_reveal_ramp(const iw7::Material* material, const int layer)
+	{
+		// A single-layer decal ramps by its vertex alpha (the decal PS 3bc5ba09); the base of a layered material keeps its
+		// plain blend (its weight's channel is not established).
+		return layer || material_layer_count(material) <= 1 ? material_layer_reveal(material, layer) : std::nullopt;
+	}
+
 	std::optional<float> material_layer_reveal(const iw7::Material* material, const int layer)
 	{
 		const auto token = technique_layer_token(material, layer);
@@ -1495,8 +1502,8 @@ namespace zonetool::convert::iw7_iw8
 			}
 
 			// The alpha of the layer's colour: the first texture of its alpha, reveal and thickness maps that holds one; for a
-			// layer that blends by its reveal map, the reveal (the pipeline ramps it by the layer's weight: kRevealLayerFlag).
-			const auto reveals = layer && material_layer_reveal(material, layer);
+			// layer or decal that blends by its reveal map, the reveal (the pipeline ramps it by the weight: kRevealLayerFlag).
+			const auto reveals = material_reveal_ramp(material, layer).has_value();
 			const iw7::GfxImage* alpha{};
 			std::size_t channel{};
 			// A reveal layer with an alpha of its own (packed "ar") blends by the reveal ramp times that alpha in IW7; the

@@ -98,9 +98,9 @@ SamplerState gtaoSampler : register(s8);
 cbuffer ReplayView : register(b2) {
     float4 replayView[8];
 };
-#if (defined(MAP_UV_ANIMATION) || defined(MAP_TRANSMISSION)) && !defined(MAP_COVERAGE)
-// The material's pixel constants (cb3, the converter's stamp): row 1 holds its transmission (MAP_TRANSMISSION), row 3
-// its UV animation and row 2 its mask's (MAP_UV_ANIMATION).
+#if (defined(MAP_UV_ANIMATION) || defined(MAP_TRANSMISSION) || defined(MAP_REVEAL_LAYERS)) && !defined(MAP_COVERAGE)
+// The material's pixel constants (cb3, the converter's stamp): row 1 holds its transmission (MAP_TRANSMISSION) and its
+// reveal ramp's sharpness (w, MAP_REVEAL_LAYERS), row 3 its UV animation and row 2 its mask's (MAP_UV_ANIMATION).
 cbuffer MaterialConstants : register(b3) {
     float4 materialConstants[4];
 };
@@ -1160,17 +1160,19 @@ float4 main(Input input) : SV_TARGET0 {
     }
 #endif
 #endif
-#ifdef MAP_REVEAL_LAYERS
-    // IW7 layers that blend by their reveal map (flag bit 22; disassembled lmap_specenv layered PS 9423eedc): coverage
-    // ramps from the layer's weight w (vertex alpha) and sharpness k (2 * vertex red^2) across the reveal (colour alpha):
-    // saturate((reveal - low) / (high - low)), low = saturate(1 - w - k sqrt(w)), high = saturate(1 - w + k sqrt(1 - w)).
-    // IW7 does not tint a layer by the vertex colour.
-    if ((flags & 4194304) != 0) {
+#if defined(MAP_REVEAL_LAYERS) && !defined(MAP_COVERAGE)
+    // IW7 layers and decals that blend by their reveal map (a sharpness above 0 in row 1.w, models included; disassembled
+    // lmap_specenv layered PS 9423eedc and decal PS 3bc5ba09): coverage ramps from the weight w (vertex alpha) and the
+    // material's sharpness k (revealParams.x) across the reveal (colour alpha): saturate((reveal - low) / (high - low)),
+    // low = saturate(1 - w - k sqrt(w)), high = saturate(1 - w + k sqrt(1 - w)). Decals take the vertex colour squared
+    // as their tint (layers keep white).
+    if (materialConstants[1].w > 0) {
         float weight = input.color.a;
-        float sharpness = 2 * input.color.r * input.color.r;
+        float sharpness = materialConstants[1].w;
         float low = saturate(1 - weight - sharpness * sqrt(weight));
         float high = saturate(1 - weight + sharpness * sqrt(1 - weight));
         texel.a = saturate((texel.a - low) / max(high - low, 1e-4));
+        texel.rgb *= input.color.rgb * input.color.rgb;
     }
     else
 #endif
