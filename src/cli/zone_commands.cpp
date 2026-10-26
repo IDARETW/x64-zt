@@ -213,6 +213,12 @@ namespace zonetool::cli
 			return;
 		}
 
+		if (*converter && !(*converter)->dump_asset)
+		{
+			throw std::runtime_error(std::format("converter {} -> {} does not support zone conversion",
+				settings.game->name, (*converter)->target));
+		}
+
 		settings.game->dump_zone(settings.zone_folder(), *path, *converter);
 	}
 
@@ -237,6 +243,12 @@ namespace zonetool::cli
 		if (!converter)
 		{
 			return;
+		}
+
+		if (*converter && !(*converter)->dump_asset)
+		{
+			throw std::runtime_error(std::format("converter {} -> {} does not support single-asset conversion",
+				settings.game->name, (*converter)->target));
 		}
 
 		settings.game->dump_asset(settings.zone_folder(), *path, args[0], args[1], *converter);
