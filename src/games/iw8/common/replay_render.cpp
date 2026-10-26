@@ -366,8 +366,11 @@ Image LoadImageDefinition(const std::string &path, const nlohmann::json &source,
     const char *pixelField = bc6h ? "bc6h" : bc7 ? "bc7" : bc4 ? "bc4" : "rgba8";
     const auto pixels = source.at(pixelField).get<std::string>();
     const uint32_t mapType = image.flags & 0x38000u;
+    // Match the material DDS reader's 8192-pixel 2D limit. Replay carries resident
+    // image dimensions through to its native resource descriptor for these formats too.
+    const unsigned maxDimension = bc7 || (!cubemap && !array && depth == 1) ? 8192u : 4096u;
     if (!image.name.starts_with("mw120r/") || image.name.size() > 128 || !width || !height ||
-        width > (bc7 ? 8192u : 4096u) || height > (bc7 ? 8192u : 4096u) || !depth ||
+        width > maxDimension || height > maxDimension || !depth ||
         !numElements || depth > 4096 ||
         numElements > 2048 || semantic > UINT8_MAX || category > UINT8_MAX || !image.mipCount ||
         image.mipCount > 14 || (image.format != 6 && image.format != 7 && !blocks) ||
