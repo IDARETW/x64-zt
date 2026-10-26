@@ -7990,7 +7990,8 @@ namespace zonetool::iw8
 					}
 				}
 			}
-			if (const auto items_39 = stream.array(data.childParts, 7, data.numChildParts))
+			// These pointer fields indicate inline data; Replay does not resolve packed aliases for them.
+			if (const auto items_39 = stream.inline_array(data.childParts, 7, data.numChildParts))
 			{
 				if (data.numChildParts != 0)
 				{
@@ -8000,7 +8001,7 @@ namespace zonetool::iw8
 					}
 				}
 			}
-			if (const auto items_49 = stream.array(data.damageTagOverrides, 7, data.numDamageTagOverrides))
+			if (const auto items_49 = stream.inline_array(data.damageTagOverrides, 7, data.numDamageTagOverrides))
 			{
 				if (data.numDamageTagOverrides != 0)
 				{
