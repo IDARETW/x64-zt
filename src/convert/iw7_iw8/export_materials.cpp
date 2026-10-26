@@ -511,10 +511,10 @@ namespace zonetool::convert::iw7_iw8
 		}
 
 		// IW7's effect pixel shaders of the mkhdr techsets (the flow PS bfc071e2, disassembled) expand their colour into high
-		// dynamic range: -ln(1 - min(c^2, 0.99)) x tint, up to ln(100) where the colour is white. The stock effect shaders
-		// take the colour as it is, so the colour is stored expanded and divided by ln(100) (export_effect_material scales
+		// dynamic range: -log2(1 - min(c^2, 0.99)) x tint, up to log2(100) where the colour is white. DXBC's log opcode
+		// is base 2. The stock effect shaders take the colour as it is, so it is stored divided by log2(100) (the exporter scales
 		// the tint by it).
-		constexpr auto hdr_expansion = 4.60517019f;
+		constexpr auto hdr_expansion = 6.64385619f;
 		void expand_hdr(DirectX::ScratchImage& pixels)
 		{
 			for (std::size_t i = 0; i < pixels.GetPixelsSize() / 4; i++)
@@ -523,7 +523,7 @@ namespace zonetool::convert::iw7_iw8
 				for (auto c = 0; c < 3; c++)
 				{
 					const auto linear = std::min(pixel[c] * pixel[c] / (255.0f * 255.0f), 0.99f);
-					const auto expanded = -std::log(1.0f - linear) / hdr_expansion;
+					const auto expanded = -std::log2(1.0f - linear) / hdr_expansion;
 					pixel[c] = static_cast<std::uint8_t>(std::lround(std::sqrt(expanded) * 255.0f));
 				}
 			}
