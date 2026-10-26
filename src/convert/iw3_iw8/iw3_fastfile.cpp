@@ -126,6 +126,7 @@ struct Surface
     // A surface of the sky: its vertices are directions from the play space, which the world vertex shader draws at
     // infinity (flag bit 23).
     bool skyObject{};
+    std::optional<std::vector<std::uint32_t>> shadowLights;
 };
 
 struct BrushModel
@@ -183,6 +184,7 @@ struct SourceStaticModelInstance
     // A script model placed through the static-model path: the compiler gave it no
     // lighting inputs, so it lights from the grid at its bounds centre.
     bool promoted{};
+    std::optional<std::vector<std::uint32_t>> shadowLights;
 };
 
 struct SourceStaticModels
@@ -2179,6 +2181,7 @@ struct RawSurface
     std::optional<bool> deformed;
     std::vector<RawVertex> vertices;
     std::vector<std::uint32_t> indices;
+    std::optional<std::vector<std::uint32_t>> shadow_lights;
 };
 
 struct RawGeometryLod
@@ -2221,6 +2224,8 @@ RawSurface RawSurfaceFrom(const Json &source)
     output.reflection_probe = source.at("reflection_probe").get<unsigned>();
     if (source.contains("deformed"))
         output.deformed = source.at("deformed").get<bool>();
+    if (source.contains("shadow_lights") && !source.at("shadow_lights").is_null())
+        output.shadow_lights = source.at("shadow_lights").get<std::vector<std::uint32_t>>();
     const auto &vertices = source.at("vertices");
     const auto &indices = source.at("indices");
     if (!vertices.is_array() || !indices.is_array())
@@ -2371,6 +2376,7 @@ Surface ReadWorldSurface(const RawSurface &source)
     output.material = source.material;
     output.lightmap = source.lightmap.value_or(-1);
     output.skyObject = source.sky_object.value_or(false);
+    output.shadowLights = source.shadow_lights;
     // IW3 reserves the five-bit value 31 for an unlightmapped world surface.
     // Keep real indices range-checked later, but do not treat this sentinel as
     // a reference to a missing atlas entry.
@@ -3581,6 +3587,8 @@ std::vector<BrushModel> ReadBrushModels(const Json &world, const std::vector<Raw
 
         SourceStaticModelInstance converted;
         converted.model = found->second;
+        if (instance.contains("shadow_lights") && !instance.at("shadow_lights").is_null())
+            converted.shadowLights = instance.at("shadow_lights").get<std::vector<std::uint32_t>>();
         const auto reflectionProbe = instance.at("reflection_probe").get<unsigned>();
         const auto sourceProbeCount = world.at("reflection_probes").size();
         if (reflectionProbe >= sourceProbeCount || reflectionProbe > UINT16_MAX)
@@ -5024,7 +5032,7 @@ void BuildPreparedStaticModels(const SourceStaticModels &source, const RenderPla
         }
         staticModels.instances.push_back(
             {static_cast<unsigned>(sourceInstance.model), sourceInstance.origin,
-             QuaternionFromBasis(axis[0], axis[1], axis[2]), sourceInstance.scale});
+             QuaternionFromBasis(axis[0], axis[1], axis[2]), sourceInstance.scale, sourceInstance.shadowLights});
         if (collisionModels && collisionModelIndices.at(sourceInstance.model))
         {
             auto &collisionModel = collisionModels->at(*collisionModelIndices.at(sourceInstance.model));
@@ -5977,6 +5985,8 @@ Json BuildRender(const Json &world, const VisibilityGroups &visibility,
                 return a->visibilityGroup < b->visibilityGroup;
             if (a->reflectionProbe != b->reflectionProbe)
                 return a->reflectionProbe < b->reflectionProbe;
+            if (a->shadowLights != b->shadowLights)
+                return a->shadowLights < b->shadowLights;
             if (spatial && cells.at(a) != cells.at(b))
                 return cells.at(a) < cells.at(b);
             return a->material < b->material;
@@ -6026,6 +6036,12 @@ Json BuildRender(const Json &world, const VisibilityGroups &visibility,
             // Several IW3 materials share one Replay fallback material. Keep
             // their caster eligibility separate when merging fixed and entity brushes.
             key << ':' << material.castsShadow;
+            if (surface.shadowLights)
+            {
+                key << ":shadow";
+                for (const auto light : *surface.shadowLights)
+                    key << ':' << light;
+            }
             if (spatial)
             {
                 const auto &cell = cells.at(source);
@@ -6059,6 +6075,8 @@ Json BuildRender(const Json &world, const VisibilityGroups &visibility,
                 if (material.kind != SurfaceKind::opaque && world.value("translucent_glass", false))
                     output["surfaces"].back()["umbraOccluder"] = false;
                 target = &output["surfaces"].back();
+                if (surface.shadowLights)
+                    (*target)["shadowLights"] = *surface.shadowLights;
                 targetVertices = targetIndices = 0;
                 activeKey = key.str();
             }

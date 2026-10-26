@@ -306,6 +306,20 @@ replaybounds::Bounds Union(const replaybounds::Bounds &a, const replaybounds::Bo
 Data Build(const std::vector<Light> &lights, const uint32_t lastSunPrimaryLightIndex,
            const replayrender::Mesh &mesh, const replayrender::StaticModels &staticModels)
 {
+    const auto validateMembership = [&](const std::optional<std::vector<uint32_t>> &membership) {
+        if (membership &&
+            (!std::ranges::is_sorted(*membership) ||
+             std::adjacent_find(membership->begin(), membership->end()) != membership->end() ||
+             (!membership->empty() && membership->back() >= lights.size())))
+            throw std::runtime_error("invalid authored local-shadow light membership");
+    };
+    if (!mesh.surfaceShadowLights.empty() && mesh.surfaceShadowLights.size() != mesh.count)
+        throw std::runtime_error("authored local-shadow surfaces do not match the world");
+    for (const auto &membership : mesh.surfaceShadowLights)
+        validateMembership(membership);
+    for (const auto &instance : staticModels.instances)
+        validateMembership(instance.shadowLights);
+    const std::optional<std::vector<uint32_t>> noMembership;
     Data data;
     data.lightCount = static_cast<uint32_t>(lights.size());
     data.indexOffsets.assign(lights.size(), 0);
@@ -351,13 +365,32 @@ Data Build(const std::vector<Light> &lights, const uint32_t lastSunPrimaryLightI
             replaybounds::Bounds box;
             std::memcpy(box.midpoint.data(), mesh.bounds.data() + 56 * size_t(surface), 12);
             std::memcpy(box.halfSize.data(), mesh.bounds.data() + 56 * size_t(surface) + 12, 12);
-            if (shadow.surfaces.size() < UINT16_MAX && Reaches(light, box))
+            const auto &authored = mesh.surfaceShadowLights.empty()
+                                       ? noMembership : mesh.surfaceShadowLights.at(surface);
+            const bool casts = authored
+                                   ? std::binary_search(authored->begin(), authored->end(), index)
+                                   : Reaches(light, box);
+            if (casts)
+            {
+                if (shadow.surfaces.size() == UINT16_MAX)
+                    throw std::runtime_error("local-light surface caster count exceeds native width");
                 shadow.surfaces.push_back(surface);
+            }
         }
+        // Native model caster IDs name collections. EmitStaticModels writes one collection
+        // per final instance, in this same order.
         for (size_t instance = 0; instance < staticModels.instances.size(); ++instance)
-            if (shadow.models.size() < UINT16_MAX &&
-                Reaches(light, replayrender::StaticModelWorldBounds(staticModels, instance)))
+        {
+            const auto &authored = staticModels.instances[instance].shadowLights;
+            const bool casts = authored ? std::binary_search(authored->begin(), authored->end(), index)
+                                       : Reaches(light, replayrender::StaticModelWorldBounds(staticModels, instance));
+            if (casts)
+            {
+                if (instance > UINT16_MAX || shadow.models.size() == UINT16_MAX)
+                    throw std::runtime_error("local-light model caster index/count exceeds native width");
                 shadow.models.push_back(static_cast<uint16_t>(instance));
+            }
+        }
     }
     if (data.umbraLights.empty())
         return data;

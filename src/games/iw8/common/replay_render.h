@@ -3,6 +3,7 @@
 #include "replay_bounds.h"
 #include <array>
 #include <memory>
+#include <optional>
 #include <string>
 #include <vector>
 namespace replayrender
@@ -216,6 +217,8 @@ struct StaticModelInstance
     std::array<float, 3> origin{};
     std::array<float, 4> quaternion{0, 0, 0, 1};
     float scale{1};
+    // Absent: derive local casters geometrically. Empty: authored exclusion from every local light.
+    std::optional<std::vector<uint32_t>> shadowLights;
 };
 struct StaticModels
 {
@@ -253,6 +256,8 @@ struct Mesh : Material
     std::vector<float> solidTriangles;
     // The same surfaces by index: static casters for local-light shadow lists.
     std::vector<uint32_t> shadowCasterSurfaces;
+    // Per-surface local caster membership, with the same absent/empty distinction as instances.
+    std::vector<std::optional<std::vector<uint32_t>>> surfaceShadowLights;
     unsigned count = 0;
     unsigned words() const
     {
