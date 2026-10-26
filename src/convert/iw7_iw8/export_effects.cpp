@@ -3705,6 +3705,11 @@ iw7_destructible_think( model, effect, sound, health )
 					for (const auto& event : events)
 					{
 						const auto t = event.value("t", std::string{});
+						const auto omitted = [&](const char* reason)
+						{
+							ZONETOOL_WARNING("iw7: scriptable event \"%s\" omitted in \"%s\": %s", t.c_str(),
+								machine.value("def", std::string{}).c_str(), reason);
+						};
 						const auto str = [&](const char* key) { return quote(event.value(key, std::string{})); };
 						const auto num = [&](const char* key) { return number(event.contains(key) ? event.at(key) : json(0)); };
 						std::string args;
@@ -3722,6 +3727,7 @@ iw7_destructible_think( model, effect, sound, health )
 						{
 							if (event.value("part", -1) < 0 || event.value("index", -1) < 0)
 							{
+								omitted("invalid part or state reference");
 								continue;
 							}
 
@@ -3740,6 +3746,7 @@ iw7_destructible_think( model, effect, sound, health )
 							const auto effect = event.value("effect", std::string{});
 							if (effect.empty())
 							{
+								omitted("missing effect");
 								continue;
 							}
 
@@ -3753,6 +3760,7 @@ iw7_destructible_think( model, effect, sound, health )
 						{
 							if (event.value("alias", std::string{}).empty())
 							{
+								omitted("missing sound alias");
 								continue;
 							}
 
@@ -3762,6 +3770,7 @@ iw7_destructible_think( model, effect, sound, health )
 						{
 							if (event.value("anim", std::string{}).empty())
 							{
+								omitted("missing animation");
 								continue;
 							}
 
@@ -3796,6 +3805,7 @@ iw7_destructible_think( model, effect, sound, health )
 						{
 							if (event.value("part", -1) < 0)
 							{
+								omitted("invalid part reference");
 								continue;
 							}
 
@@ -3805,6 +3815,7 @@ iw7_destructible_think( model, effect, sound, health )
 						{
 							if (event.value("notify", std::string{}).empty())
 							{
+								omitted("missing notification");
 								continue;
 							}
 
@@ -3812,6 +3823,7 @@ iw7_destructible_think( model, effect, sound, health )
 						}
 						else
 						{
+							omitted("no converted handler");
 							continue;
 						}
 
