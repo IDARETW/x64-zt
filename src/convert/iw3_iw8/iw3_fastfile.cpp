@@ -5924,7 +5924,8 @@ Json BuildRender(const Json &world, const VisibilityGroups &visibility,
             const auto found = plan.materials.find(surface.material);
             if (found == plan.materials.end())
                 throw std::runtime_error("IW3 render plan omitted material " + surface.material);
-            if (found->second.kind != SurfaceKind::skipped)
+            if (found->second.kind != SurfaceKind::skipped ||
+                (found->second.shadowOnly && found->second.castsShadow))
                 ordered.push_back(&surface);
         }
         // Extractions that opt in ("spatial_surfaces") merge only surfaces of one 512-unit cell, up to 4096 triangles:
@@ -6002,6 +6003,9 @@ Json BuildRender(const Json &world, const VisibilityGroups &visibility,
         {
             const Surface &surface = *source;
             const MaterialPlan &material = plan.materials.at(surface.material);
+            const bool shadowOnly = material.shadowOnly && material.castsShadow;
+            if (shadowOnly && !material.stockWorldMaterialIndex)
+                throw std::runtime_error("IW3 render plan omitted a native shadow-only world material");
             if ((material.kind == SurfaceKind::glass || surface.skyObject) && !skyAdded)
             {
                 appendSky();
@@ -6015,10 +6019,11 @@ Json BuildRender(const Json &world, const VisibilityGroups &visibility,
             // lightmap UVs lie in the native lightmap (StockLightmapUv).
             // A stock layered material draws its merged layered surfaces (each layer's UV and tangent transform per
             // vertex); its other surfaces keep the generated materials and their overlays.
-            const bool stock = material.stockWorldMaterialIndex && surface.lightmap >= 0 &&
-                               (material.stockLayers ? surface.layerUvs.size() == surface.vertices.size() &&
-                                                           surface.layerUvs.front().size() + 1 == material.stockLayers
-                                                     : surface.layerUvs.empty());
+            const bool stock = material.stockWorldMaterialIndex &&
+                               (shadowOnly || (surface.lightmap >= 0 &&
+                                   (material.stockLayers ? surface.layerUvs.size() == surface.vertices.size() &&
+                                                               surface.layerUvs.front().size() + 1 == material.stockLayers
+                                                         : surface.layerUvs.empty())));
             // Replay's world is single-sided (its stock world shaders light back faces with the front's normal): a stock
             // surface of a two-sided material also draws its back face, mirrored with its tangent frame turned as IW7's
             // shaders turn it on back faces (N, T and B negated).
@@ -6063,7 +6068,8 @@ Json BuildRender(const Json &world, const VisibilityGroups &visibility,
                                               // Surfaces of the sky draw over the sky box, after the opaque
                                               // range.
                                               {"opaque", !surface.skyObject && (material.kind == SurfaceKind::opaque ||
-                                                                                material.kind == SurfaceKind::cutout)},
+                                                                                material.kind == SurfaceKind::cutout ||
+                                                                                shadowOnly)},
                                               {"infinite", surface.skyObject},
                                               {"decal", material.kind == SurfaceKind::glass && material.depthBias &&
                                                             !surface.skyObject},
@@ -6072,7 +6078,7 @@ Json BuildRender(const Json &world, const VisibilityGroups &visibility,
                                               {"materialParameters", material.environment}});
                 // Shipped translucent world surfaces are not Umbra occluders (mp_hideout's glass: flags 7, its
                 // opaque surfaces 0x47). Extractions that draw blended surfaces translucent opt in.
-                if (material.kind != SurfaceKind::opaque && world.value("translucent_glass", false))
+                if (shadowOnly || (material.kind != SurfaceKind::opaque && world.value("translucent_glass", false)))
                     output["surfaces"].back()["umbraOccluder"] = false;
                 target = &output["surfaces"].back();
                 if (surface.shadowLights)
@@ -6131,8 +6137,9 @@ Json BuildRender(const Json &world, const VisibilityGroups &visibility,
                                 "IW3 surface references an invalid reflection probe");
                         addProbePoint(surface.reflectionProbe, vertex.position);
                         const std::uint32_t index = static_cast<std::uint32_t>(targetVertices++);
-                        const auto lightmap = stock ? StockLightmapUv(vertex, surface, plan)
-                                                    : EncodedLightmap(vertex, surface, material, plan);
+                        const auto lightmap = shadowOnly ? std::array<double, 2>{}
+                                              : stock ? StockLightmapUv(vertex, surface, plan)
+                                                      : EncodedLightmap(vertex, surface, material, plan);
                         // The tile word carries the surface's IW3 reflection probe
                         // as converted slot + 1 above bit 16 (the shader reflects
                         // that probe alone); added in double so the lightmap
