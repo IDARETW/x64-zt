@@ -530,7 +530,7 @@ CollisionInput ReadCollision(const std::filesystem::path &path)
             hull.ladderRungOffset = Read<float>(bytes.data() + cursor);
             cursor += 4;
         }
-        if (vertexCount < 4 || vertexCount > 252 || hull.contents == 0 ||
+        if (vertexCount < 4 || vertexCount > zonetool::iw8::havok::max_convex_shape_vertices || hull.contents == 0 ||
             hull.model >= result.models.size() ||
             (hull.glassId ? hull.contents != kBreakableGlassContents
                           : (hull.contents & ~supportedContents) != 0) ||
@@ -2118,7 +2118,7 @@ PhysicsAsset BakePhysicsAssetNative(std::string name, const Mesh &mesh, const Ph
         // convex shape keeps (the first LOD of an IW7 model) welds its own vertices, from a quarter of a game unit up,
         // until it fits.
         auto polytope = hk::convex_hull(vertices, 0.0f);
-        for (float weld = 0.25f / 32.0f; polytope.vertices.size() > 256; weld *= 2.0f)
+        for (float weld = 0.25f / 32.0f; polytope.vertices.size() > hk::max_convex_shape_vertices; weld *= 2.0f)
             polytope = hk::convex_hull(polytope.vertices, weld);
         shape = hk::add_convex_polytope_shape(builder, polytope, {.user_data = shapeUserData});
         hk::add_mass_properties(builder, shape, hk::convex_mass_properties(polytope, clutter->mass));
