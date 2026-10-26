@@ -1232,52 +1232,6 @@ void dropEnclosedShadowedSpots(iw8::MapSun &lighting, const std::vector<float> &
         info("local lights: %zu shadowed spot(s) enclosed by their fixture keep no shadow map", dropped);
 }
 
-// Replay picks the shadowed spots of each frame (sub_141959080): R_AddPotentiallyShadowedLight
-// keeps the best scores of the spots in the view cone (radius * intensity / distance) in a list
-// of at most 64 (0x10C794F4, 0x40 at init) less the dynamic lights. Each listed spot holds one of
-// 64 shadow-map cache entries (0x11740FA0, 0x70 bytes, per-light entry byte at +0x1C18), and every
-// entry is in the frame's shadow list with its atlas slot (sub_1419860D0), rendered or not. A spot
-// whose entry is not valid is rendered only when it is among the first 16 of the score order (an
-// int dvar of default and maximum 16, 0x1055A448); a later one is deferred (flag 0x400) and its
-// entry stays invalid, but it keeps its slot in the list: the shader samples a slot that holds no
-// shadow of that light (inferred from the code; the slot contents were not traced). Every Umbra
-// object of a converted world spans the scene, so every shadowed spot in the view cone competes,
-// walls or not: with more than 16 shadowed spots the ones past the 16th went dark or lit as the view
-// turned (owner tests of IW7 Frontier, 40 of 90 kept). Keep 16, the most important; the others
-// keep their light without a shadow map.
-void limitShadowedSpotLights(iw8::MapSun &lighting)
-{
-    constexpr size_t kMaxShadowedSpots = 16;
-    std::vector<size_t> shadowed;
-    for (size_t index = 0; index < lighting.primaryLights.size(); ++index)
-    {
-        const auto &light = lighting.primaryLights[index];
-        if (light.type == 2 && light.canUseShadowMap && index != lighting.sunPrimaryLightIndex)
-            shadowed.push_back(index);
-    }
-    if (shadowed.size() <= kMaxShadowedSpots)
-        return;
-    const auto importance = [&](const size_t index) {
-        const auto &light = lighting.primaryLights[index];
-        const double luminance =
-            0.2126 * light.color[0] + 0.7152 * light.color[1] + 0.0722 * light.color[2];
-        return double(light.intensity) * luminance * double(light.radius) * light.radius;
-    };
-    // Spots that shadow entities come first (IW7 marks them per light; IW3's all are): the
-    // players' shadows need them.
-    std::ranges::stable_sort(shadowed, [&](const size_t a, const size_t b) {
-        const bool dynamicA = lighting.primaryLights[a].needsDynamicShadows;
-        const bool dynamicB = lighting.primaryLights[b].needsDynamicShadows;
-        if (dynamicA != dynamicB)
-            return dynamicA;
-        return importance(a) > importance(b);
-    });
-    for (size_t rank = kMaxShadowedSpots; rank < shadowed.size(); ++rank)
-        lighting.primaryLights[shadowed[rank]].canUseShadowMap = false;
-    info("local lights: shadow maps for %zu of %zu shadowed spots (Replay's per-frame budget)",
-         kMaxShadowedSpots, shadowed.size());
-}
-
 // The attenuation strip of an IW3 light def (raw/lights/<def>: a sampler byte and the image name; the image a
 // luminance, RGB or RGBA .iwi whose first row runs from the light to its radius), from the IW3 roots. Empty when
 // the files are not there.
@@ -1710,7 +1664,7 @@ int writeMapPackage(const Args &args, const std::string &map, const std::string 
     timing.lap("render load");
     calibrateLocalLights(args, lighting, renderMesh.solidTriangles);
     dropEnclosedShadowedSpots(lighting, renderMesh.solidTriangles, prepared ? &prepared->shadowScene : nullptr);
-    limitShadowedSpotLights(lighting);
+    // Keep map-wide shadow eligibility; Replay budgets shadow updates per view.
     timing.lap("local lights");
     // Use the final ComWorld sun vector, including any requested profile.
     // Replay rejects compressed shadows whose stored direction differs from
