@@ -35,6 +35,8 @@ namespace zonetool::convert::iw7_iw8
 			// The mask of an unlit material (a colour semantic whose shader name opens with m: Breakneck's black hole discs),
 			// whose alpha the colour's alpha is multiplied by.
 			mask,
+			flow,
+			flow_surface,
 			count,
 		};
 
@@ -615,7 +617,8 @@ namespace zonetool::convert::iw7_iw8
 
 			// A packed normal map for Replay's world shader keeps IW7's channels.
 			const auto normal_data = role == image_role::normal || role == image_role::replay_normal_gloss ||
-				role == image_role::replay_reveal || role == image_role::mask;
+				role == image_role::replay_reveal || role == image_role::mask ||
+				role == image_role::flow || role == image_role::flow_surface;
 			if (role == image_role::normal)
 			{
 				encode_normal_slopes(pixels);
@@ -1124,6 +1127,13 @@ namespace zonetool::convert::iw7_iw8
 
 	namespace
 	{
+		bool flow_effect_material(const iw7::Material* material)
+		{
+			// The source PS bfc071e2 is the pinned flow/HDR contract; other flow permutations remain separate adapters.
+			return material && material->techniqueSet && asset_name(material->techniqueSet->name) ==
+				"eq_effectunlit_blend_lin_ct_ndw_flow_nocast_mkhdr_evc";
+		}
+
 		// An effect material as the pipeline reads IW3 effect materials: an emissive sprite material of one colour map in
 		// the IW3 effect technique set of its blend (feathered, faded edge on), a cloud or a distortion. Without its colour
 		// map (an image of a pak that is not there) it adds black: white drew the table hologram's dot grid of Frontier as a
@@ -1133,9 +1143,12 @@ namespace zonetool::convert::iw7_iw8
 		// units (Scorch x23.9) as it does the world, and with IW7's raw tints those effects drew 1 / light unit (Scorch: 24.5x)
 		// too bright; their additive sprites saturated into white polygons across the screen (owner tests of cbf4948: Scorch
 		// flicker). A lit one's tint (smoke, steam: 1) is a colour, which the pipeline treats as IW3's.
-		json export_effect_material(const iw7::Material* material, const std::optional<std::string>& color, const float light_scale,
+		json export_effect_material(const iw7::Material* material,
+			const std::array<std::optional<std::string>, image_role_count>& images, const float light_scale,
 			const bool atlas)
 		{
+			const auto& color = images[static_cast<std::size_t>(image_role::color)];
+			const auto flow = flow_effect_material(material);
 			std::vector<std::string_view> tokens;
 			if (material && material->techniqueSet)
 			{
@@ -1201,7 +1214,7 @@ namespace zonetool::convert::iw7_iw8
 				auto tint = material_constant(material, "colorTint").value_or(std::array{1.0f, 1.0f, 1.0f, 1.0f});
 				for (std::size_t c = 0; c < 3; c++)
 				{
-					tint[c] *= (has("effectunlit") ? light_scale : 1.0f) * (has("mkhdr") ? hdr_expansion : 1.0f);
+					tint[c] *= (has("effectunlit") ? light_scale : 1.0f) * (has("mkhdr") && !flow ? hdr_expansion : 1.0f);
 				}
 
 				constants.push_back({{"name", "colorTint"}, {"literal", tint}});
@@ -1257,7 +1270,7 @@ namespace zonetool::convert::iw7_iw8
 			// Frontier's fireballs, smoke billows and dust bursts), as Replay's frame-blend effect techniques do.
 			const auto frame_blend = material && material->info.textureAtlasFrameBlend && std::has_single_bit(columns) &&
 				rows * columns > 1;
-			return
+			auto result = json
 			{
 				{"$schema", "http://openassettools.dev/schema/material.v1.json"},
 				{"_game", "iw3"},
@@ -1286,6 +1299,18 @@ namespace zonetool::convert::iw7_iw8
 							{"clampW", clamped}}},
 					}})},
 			};
+			if (flow)
+			{
+				const auto& map = images[static_cast<std::size_t>(image_role::flow)];
+				const auto& surface = images[static_cast<std::size_t>(image_role::flow_surface)];
+				const auto scale = material_constant(material, "flowMapConst");
+				const auto period = material_constant(material, "flowMapPeriod");
+				if (!color || !map || !surface || !scale || !period)
+					throw std::runtime_error(std::format("IW7 flow material {} lacks an image or its flow constants", material->name));
+				result["iw7Flow"] = {{"map", *map}, {"surface", *surface}, {"scale", *scale}, {"period", *period},
+					{"hdr", has("mkhdr")}};
+			}
+			return result;
 		}
 	}
 
@@ -1638,6 +1663,7 @@ namespace zonetool::convert::iw7_iw8
 		for (const auto& [name, material] : output.materials)
 		{
 			auto& roles = candidates[name];
+			const auto flow = output.effect_materials.contains(name) && flow_effect_material(material);
 			const auto layer = layer_of(name);
 			// A layer of a stock layered surface (material_stock_layered), or a lit blended or alpha-tested world material
 			// that draws as a stock decal or cut-out: their alpha, reveal and thickness maps go to Replay's shaders as IW7
@@ -1678,7 +1704,11 @@ namespace zonetool::convert::iw7_iw8
 			for (auto i = 0; material && i < material->textureCount; i++)
 			{
 				const auto& texture = material->textureTable[i];
-				const auto role = texture_layer(texture) == layer ? texture_role(texture) : std::nullopt;
+				auto role = texture_layer(texture) == layer ? texture_role(texture) : std::nullopt;
+				if (flow && texture.nameHash == 0x06592A6Eu)
+					role = image_role::flow;
+				else if (flow && texture.nameHash == 0x65F8D867u)
+					role = image_role::flow_surface;
 				const auto image = role ? source.resolve(iw7::ASSET_TYPE_IMAGE, texture.image) : nullptr;
 				if (!image || !image->name)
 				{
@@ -1695,6 +1725,14 @@ namespace zonetool::convert::iw7_iw8
 
 				auto file = file_name(asset_name(image->name)) + (*role == image_role::normal ? "_slopes" : "");
 				image_file entry{image, *role};
+				if (flow && (*role == image_role::color || *role == image_role::flow || *role == image_role::flow_surface))
+				{
+					if (texture.samplerState & 0xE0)
+						throw std::runtime_error(std::format("IW7 flow material {} needs clamped flow sampling", name));
+					entry.limit = source_image_size;
+					entry.source_mips = true;
+					file += "_flow_raw";
+				}
 				if (*role == image_role::color && texture.semantic == iw7::TS_COLOR_SPECULAR_MAP)
 				{
 					// The colour of each alpha (or reveal) is a file of its own; without one, the colour is opaque.
@@ -1714,7 +1752,7 @@ namespace zonetool::convert::iw7_iw8
 
 				// The tinted effect techniques only (clouds and distortion take no tint).
 				if (*role == image_role::color && output.effect_materials.contains(name) && techset_has_token(material, "mkhdr") &&
-					!techset_has_token(material, "cloud") && !techset_has_token(material, "distortion"))
+					!techset_has_token(material, "cloud") && !techset_has_token(material, "distortion") && !flow)
 				{
 					entry.hdr_expand = true;
 					file += "_hdr";
@@ -1976,7 +2014,7 @@ namespace zonetool::convert::iw7_iw8
 					ZONETOOL_WARNING("iw7: effect material \"%s\" has no colour map and adds nothing", name.data());
 				}
 
-				write_json_async(output.extracted / "materials" / (name + ".json"), export_effect_material(material, color,
+				write_json_async(output.extracted / "materials" / (name + ".json"), export_effect_material(material, images,
 					light_unit_scale(source), output.atlas_materials.contains(name)), 16);
 				continue;
 			}

@@ -5,6 +5,7 @@
 #include "resources.h"
 
 #include <iw8/assets/replay_stock_library.h>
+#include <iw8/structs.hpp>
 
 #include <iw8/common/fs_util.h>
 #include <iw8/common/log.h>
@@ -217,6 +218,13 @@ struct SourceFxMaterial
     // IW3 distortion_* (heat haze): world-unit displacement along the particle
     // tangent/binormal per unit of the colour map's xy * 2 - 1.
     std::array<float, 4> distortionScale{};
+    struct Flow
+    {
+        std::string map, surface;
+        std::array<float, 4> scale{}, period{};
+        bool hdr{};
+    };
+    std::optional<Flow> flow;
 };
 
 std::vector<std::uint8_t> ReadBytes(const std::filesystem::path &path)
@@ -2022,6 +2030,18 @@ SourceFxMaterial ReadFxMaterial(const std::filesystem::path &root,
     material.lit = source.value("lit", false) &&
                    (material.family == FxMaterialFamily::alpha || material.family == FxMaterialFamily::alphaFeather);
     material.frameBlend = source.value("frame_blend", false);
+    if (source.contains("iw7Flow"))
+    {
+        const auto &flow = source.at("iw7Flow");
+        material.flow = SourceFxMaterial::Flow{flow.at("map").get<std::string>(),
+                                              flow.at("surface").get<std::string>(),
+                                              FxLiteral(flow.at("scale"), "flow scale"),
+                                              FxLiteral(flow.at("period"), "flow period"),
+                                              flow.at("hdr").get<bool>()};
+        if (material.lit || material.frameBlend || material.family != FxMaterialFamily::alpha ||
+            !(material.flow->period[0] > 0) || !(material.flow->period[2] > 0))
+            throw std::runtime_error("unsupported IW7 flow material contract: " + name);
+    }
     if (!material.rows || !material.columns || material.rows > 255 || material.columns > 255 ||
         !std::has_single_bit(material.columns) ||
         static_cast<std::uint64_t>(material.rows) * material.columns > 65535)
@@ -2104,6 +2124,8 @@ SourceFxMaterial ReadFxMaterial(const std::filesystem::path &root,
     material.image = texture.at("image").get<std::string>();
     if (!validImageName(material.image))
         throw std::runtime_error("IW3 FX material has an invalid image name: " + name);
+    if (material.flow && (!validImageName(material.flow->map) || !validImageName(material.flow->surface)))
+        throw std::runtime_error("IW7 flow material has an invalid image name: " + name);
     const auto &sampler = texture.at("samplerState");
     const std::string filter = sampler.at("filter").get<std::string>();
     const std::string mipMap = sampler.at("mipMap").get<std::string>();
@@ -4573,6 +4595,137 @@ Json BuildFxMaterialDefinition(const SourceFxMaterial &source)
             {"bufferIndices", Hex(bufferIndices)},
             {"buffers", Json::array({Json::array({"", "", "", Hex(pixelConstants)})})},
             {"imageDefinitions", Json::array()}};
+}
+
+Json BuildFlowFxTechset(const Json &stock, const std::string &name)
+{
+    using NativeTechnique = zonetool::iw8::MaterialTechnique;
+    using NativeArgument = zonetool::iw8::MaterialShaderArgument;
+    using enum zonetool::iw8::MaterialArgumentType;
+    constexpr auto emissive = zonetool::iw8::TECHNIQUE_EMISSIVE;
+    static_assert(sizeof(NativeTechnique) == 184 && sizeof(NativeArgument) == 6);
+    Json result = stock;
+    result["name"] = name;
+    auto setHeader = Unhex(result.at("header").get<std::string>());
+    auto nativeSet = At<zonetool::iw8::MaterialTechniqueSet>(setHeader, 0);
+    std::fill(std::begin(nativeSet.techniqueMask.mask), std::end(nativeSet.techniqueMask.mask), 0);
+    nativeSet.techniqueMask.mask[0] = 1ull << emissive;
+    Put(setHeader, 0, nativeSet);
+    result["header"] = Hex(setHeader);
+    const auto pixel = Shader(17, "iw7_fx_flow", "iw7_effect_flow.hlsl",
+        Compile(ResourceText(IDR_IW3_EFFECT_FLOW_PIXEL_SHADER), "ps_5_0", "iw7_effect_flow.hlsl"));
+    for (auto technique : stock.at("techniques"))
+    {
+        auto header = Unhex(technique.at("header").get<std::string>());
+        auto native = At<NativeTechnique>(header, 0);
+        if (native.type != emissive)
+            continue;
+        // Keep the native stable bindings. Row4 is viewOrigin; request gameTime in free row8.
+        const auto original = Unhex(technique.at("args").get<std::string>());
+        if (native.perPrimArgCount || native.perObjArgCount || native.stableArgCount != 13 ||
+            native.neverArgCount != 4 || original.size() != 17 * sizeof(NativeArgument))
+            throw std::runtime_error("Replay flow template has an unexpected argument layout");
+        std::vector<std::uint8_t> args;
+        const auto argument = [&](const zonetool::iw8::MaterialArgumentType type, const std::uint8_t stage,
+                                  const std::uint16_t dest, const std::uint16_t index) {
+            const auto offset = args.size();
+            args.resize(offset + sizeof(NativeArgument));
+            Put(args, offset, NativeArgument{type, stage, dest, index});
+        };
+        for (unsigned index = 0; index < 13; ++index)
+        {
+            if (index == 4)
+                argument(MTL_ARG_CODE_CONST, 16, 8, 2); // gameTime -> pixel CB2[8]
+            if (index == 12)
+            {
+                argument(MTL_ARG_MATERIAL_TEXTURE, 16, 6, 57); // native MaterialTextureID_flowMap
+                argument(MTL_ARG_MATERIAL_TEXTURE, 16, 7, 58); // native MaterialTextureID_flowSurfaceParamsMap
+            }
+            args.insert(args.end(), original.begin() + index * sizeof(NativeArgument),
+                        original.begin() + (index + 1) * sizeof(NativeArgument));
+        }
+        argument(MTL_ARG_MATERIAL_CONST, 16, 0, 36); // emissiveParams0: source tint
+        argument(MTL_ARG_MATERIAL_CONST, 16, 1, 90); // flowMapConsts
+        argument(MTL_ARG_MATERIAL_CONST, 16, 2, 37); // emissiveParams1: source period
+        argument(MTL_ARG_MATERIAL_CONST, 16, 3, 38); // emissiveParams2: HDR mode
+        argument(MTL_ARG_MATERIAL_CONST, 2, 8, 94);
+        argument(MTL_ARG_MATERIAL_CONST, 2, 9, 95);
+        native.stableArgCount = 16;
+        native.neverArgCount = 6;
+        native.stableArgSize = 144;
+        Put(header, 0, native);
+        technique["header"] = Hex(header);
+        technique["args"] = Hex(args);
+        technique["name"] = name + "_emissive";
+        technique["shaders"][3] = pixel.at("name");
+        PatchStateIdentity(technique, header);
+        result["techniques"] = Json::array({technique});
+        const std::string vertexKey = "14:" + technique["shaders"][0].get<std::string>();
+        result["shaders"] = {{vertexKey, stock.at("shaders").at(vertexKey)},
+                              {"17:" + pixel.at("name").get<std::string>(), pixel}};
+        return result;
+    }
+    throw std::runtime_error("Replay flow template has no emissive technique");
+}
+
+Json BuildFlowFxMaterialDefinition(const SourceFxMaterial &source, const std::string &techset)
+{
+    using NativeMaterial = zonetool::iw8::Material;
+    using NativeConstant = zonetool::iw8::MaterialConstantDef;
+    using NativeTexture = zonetool::iw8::MaterialTextureDef;
+    static_assert(offsetof(NativeMaterial, drawSurf) - offsetof(NativeMaterial, contents) == 32);
+    static_assert(sizeof(NativeConstant) == 20 && offsetof(NativeTexture, image) == 8);
+    Json direct = BuildFxMaterialDefinition(source);
+    auto info = Unhex(direct.at("info").get<std::string>());
+    NativeMaterial native{};
+    if (info.size() != 32)
+        throw std::runtime_error("Replay flow material has an unexpected metadata layout");
+    std::memcpy(&native.contents, info.data(), info.size());
+    native.textureCount = 3;
+    native.constantCount = 6;
+    native.constantBufferCount = 1;
+    std::memcpy(info.data(), &native.contents, info.size());
+    const std::array<float, 4> atlas{static_cast<float>(source.columns), static_cast<float>(source.rows),
+                                    1.0f / source.columns, 1.0f / source.rows};
+    const std::array<std::uint32_t, 4> atlasBits{source.rows * source.columns, source.columns - 1,
+                                               static_cast<unsigned>(std::countr_zero(source.columns)), 0};
+    const std::array<float, 4> hdr{source.flow->hdr ? 1.0f : 0.0f, 0, 0, 0};
+    std::vector<std::uint8_t> constants, vertex(160), pixel(64), indices(zonetool::iw8::TECHNIQUE_COUNT, 0xFF);
+    const auto append = [&](const std::uint8_t id, const auto &value) {
+        const auto offset = constants.size();
+        constants.resize(offset + sizeof(NativeConstant));
+        NativeConstant constant{};
+        constant.index = id;
+        std::memcpy(&constant.literal, value.data(), sizeof(constant.literal));
+        Put(constants, offset, constant);
+    };
+    append(36, source.tint);
+    append(37, source.flow->period);
+    append(38, hdr);
+    append(90, source.flow->scale);
+    append(94, atlas);
+    append(95, atlasBits);
+    std::memcpy(vertex.data() + 128, atlas.data(), 16);
+    std::memcpy(vertex.data() + 144, atlasBits.data(), 16);
+    std::memcpy(pixel.data(), source.tint.data(), 16);
+    std::memcpy(pixel.data() + 16, source.flow->scale.data(), 16);
+    std::memcpy(pixel.data() + 32, source.flow->period.data(), 16);
+    std::memcpy(pixel.data() + 48, hdr.data(), 16);
+    indices[zonetool::iw8::TECHNIQUE_EMISSIVE] = 0;
+    direct["info"] = Hex(info);
+    direct["techset"] = techset;
+    direct["textures"] = Json::array();
+    for (const auto id : std::array<std::uint8_t, 3>{18, 57, 58})
+    {
+        NativeTexture texture{};
+        texture.index = id;
+        const auto bytes = std::span(reinterpret_cast<const std::uint8_t *>(&texture), offsetof(NativeTexture, image));
+        direct["textures"].push_back({{"header", Hex(bytes)}, {"image", ""}});
+    }
+    direct["constants"] = Hex(constants);
+    direct["bufferIndices"] = Hex(indices);
+    direct["buffers"] = Json::array({Json::array({Hex(vertex), "", "", Hex(pixel)})});
+    return direct;
 }
 } // namespace
 
@@ -7627,6 +7780,7 @@ RenderPlan PrepareRenderAssets(const std::filesystem::path &exportRoot, const Js
     timing.lap("entity materials");
 
     std::size_t blendedFrames = 0, unblendedFrames = 0;
+    std::optional<iw8::stock::Library> flowLibrary;
     for (const std::string &name : fxMaterials)
     {
         SourceFxMaterial source = ReadFxMaterial(exportRoot, sourcePaths, name);
@@ -7732,7 +7886,28 @@ RenderPlan PrepareRenderAssets(const std::filesystem::path &exportRoot, const Js
         if (source.frameBlend)
             ++(direct.value("techset", std::string{}).find("_3004_") != std::string::npos ? blendedFrames
                                                                                         : unblendedFrames);
-        if (source.family == FxMaterialFamily::decal)
+        if (source.flow)
+        {
+            if (!flowLibrary)
+                flowLibrary.emplace(replayZones, "common");
+            const std::string techsetName = "tw/mw120r_fx_" + id + "_flow";
+            const std::string techsetFile = stem + ".fx." + id + ".techset.json";
+            const auto stock = flowLibrary->TechniqueSet(
+                "elcq/unlit_6_effect_bad_ta0_802_1004_0_1_0_0_0_100000023_0_0_2_0_0");
+            WriteJson(mapDirectory / techsetFile, BuildFlowFxTechset(stock, techsetName));
+            direct = BuildFlowFxMaterialDefinition(source, techsetName);
+            direct["techsetDefinition"] = techsetFile;
+            const std::array<std::string, 3> inputs{source.image, source.flow->map, source.flow->surface};
+            for (unsigned channel = 0; channel < inputs.size(); ++channel)
+            {
+                const auto &faces = image(inputs[channel]);
+                if (faces.size() != 1)
+                    throw std::runtime_error("IW7 flow material needs 2D images: " + name);
+                residentImage(direct, channel, faces.front(), {1, 1, 1, 1}, "fxflow", false, nullptr, true);
+            }
+            zt::info("iw7: FX material %s keeps native animated flow and shader HDR expansion", name.c_str());
+        }
+        else if (source.family == FxMaterialFamily::decal)
         {
             // Replay decal volume material in the stock 0x44C layout: channel 0
             // "<c>&<s>" (colour, Replay specular intensity in alpha), channel 1
