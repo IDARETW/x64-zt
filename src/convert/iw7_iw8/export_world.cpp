@@ -5,7 +5,9 @@
 #pragma warning(push, 0)
 #include <glaze/json.hpp>
 #pragma warning(pop)
+#include <algorithm>
 #include <future>
+#include <optional>
 
 namespace zonetool::convert::iw7_iw8
 {
@@ -20,6 +22,7 @@ namespace zonetool::convert::iw7_iw8
 		// A surface of the sky (runtime_sky): its vertices are directions from the play space, which the world vertex
 		// shader draws at infinity.
 		bool sky_object{};
+		std::optional<std::vector<std::uint32_t>> shadow_lights;
 	};
 
 	namespace
@@ -99,7 +102,8 @@ namespace zonetool::convert::iw7_iw8
 		// the weight of the layer in vertex alpha. The vertex colours of a layered material hold the weights of its
 		// layers, not colours.
 		std::vector<world_geometry_surface> export_surface(const source_map& source, const iw7::GfxWorld& world, const iw7::GfxSurface& surface,
-			const std::size_t lightmap_count, const reflection_probes& probes, extraction& output)
+			const std::size_t lightmap_count, const reflection_probes& probes, const std::vector<std::uint32_t>* shadow_lights,
+			extraction& output)
 		{
 			const auto& tris = surface.tris;
 			if (surface.transientZone >= world.draw.transientZoneCount)
@@ -309,6 +313,10 @@ namespace zonetool::convert::iw7_iw8
 			const auto probe = probes.find(center);
 			std::vector<world_geometry_surface> result;
 			result.push_back({material_name, lightmap, static_cast<int>(probe), vertices, indices});
+			if (shadow_lights)
+			{
+				result.back().shadow_lights = *shadow_lights;
+			}
 
 			// The weight of layer 4 is the x of its c2 colour (B8G8R8A8: the third byte); the other bytes hold 0 on Carnage.
 			constexpr std::size_t fourth_weight_byte = 2;
@@ -426,6 +434,10 @@ namespace zonetool::convert::iw7_iw8
 				output.world_materials.insert(layer_name);
 				result.push_back({layer_name, lightmap, static_cast<int>(probe),
 					std::move(overlay), indices});
+				if (shadow_lights)
+				{
+					result.back().shadow_lights = *shadow_lights;
+				}
 			}
 
 			return result;
@@ -1166,8 +1178,75 @@ namespace zonetool::convert::iw7_iw8
 			return scales[flags & iw7::STATIC_MODEL_FLAG_SCALE_MODIFIER_MASK];
 		}
 
+		struct authored_shadow_membership
+		{
+			std::vector<std::vector<std::uint32_t>> surfaces;
+			std::vector<std::vector<std::uint32_t>> smodels;
+		};
+
+		std::optional<authored_shadow_membership> export_shadow_membership(const iw7::GfxWorld& world)
+		{
+			if (!world.shadowGeomOptimized)
+			{
+				return std::nullopt;
+			}
+
+			if ((world.surfaceCount && !world.dpvs.surfaces) || (world.dpvs.smodelCount && !world.dpvs.smodelDrawInsts))
+			{
+				throw std::runtime_error("shadow geometry exists without world surface or static-model arrays");
+			}
+
+			authored_shadow_membership result{
+				std::vector<std::vector<std::uint32_t>>(world.surfaceCount),
+				std::vector<std::vector<std::uint32_t>>(world.dpvs.smodelCount),
+			};
+			for (std::uint32_t light = 0; light < world.primaryLightCount; ++light)
+			{
+				const auto& geometry = world.shadowGeomOptimized[light];
+				if ((geometry.surfaceCount && !geometry.sortedSurfIndex) || (geometry.smodelCount && !geometry.smodelIndex))
+				{
+					throw std::runtime_error(std::format("shadow geometry for light {} has a missing index array", light));
+				}
+
+				for (std::uint32_t i = 0; i < geometry.surfaceCount; ++i)
+				{
+					const auto surface = geometry.sortedSurfIndex[i];
+					if (surface >= result.surfaces.size())
+					{
+						throw std::runtime_error(std::format("shadow geometry for light {} names surface {} out of range", light, surface));
+					}
+
+					result.surfaces[surface].push_back(light);
+				}
+
+				for (std::uint32_t i = 0; i < geometry.smodelCount; ++i)
+				{
+					const auto smodel = geometry.smodelIndex[i];
+					if (smodel >= result.smodels.size())
+					{
+						throw std::runtime_error(std::format("shadow geometry for light {} names static model {} out of range", light, smodel));
+					}
+
+					result.smodels[smodel].push_back(light);
+				}
+			}
+
+			const auto sort_unique = [](auto& memberships)
+			{
+				for (auto& lights : memberships)
+				{
+					std::ranges::sort(lights);
+					lights.erase(std::unique(lights.begin(), lights.end()), lights.end());
+				}
+			};
+			sort_unique(result.surfaces);
+			sort_unique(result.smodels);
+			return result;
+		}
+
 		json export_static_model(const source_map& source, const iw7::GfxWorld& world, const unsigned int index,
-			const reflection_probes& probes, const floor_light& floors, iw7_light_grid& grid, extraction& output)
+			const reflection_probes& probes, const floor_light& floors, iw7_light_grid& grid,
+			const std::vector<std::uint32_t>* shadow_lights, extraction& output)
 		{
 			const auto& instance = world.dpvs.smodelDrawInsts[index];
 			const auto ground = floors.ground_lighting(world.dpvs.smodelInsts[index].bounds.midPoint);
@@ -1198,6 +1277,10 @@ namespace zonetool::convert::iw7_iw8
 				{"primary_light", 0},
 				{"reflection_probe", probes.find(instance.placement.origin)},
 			};
+			if (shadow_lights)
+			{
+				result["shadow_lights"] = *shadow_lights;
+			}
 
 			if (const auto vertex = vertex_lighting_colors(source, instance))
 			{
@@ -1702,6 +1785,7 @@ namespace zonetool::convert::iw7_iw8
 		auto probes = export_reflection_probes(source, output);
 		const floor_light floors(source, world, lightmaps);
 		iw7_light_grid grid(world.lightGrid.probeData, output.light_grid_intensity);
+		const auto shadow_membership = export_shadow_membership(world);
 		export_light_grid(source, floors, grid, output);
 		export_gpu_light_grid(source, output);
 
@@ -1755,7 +1839,9 @@ namespace zonetool::convert::iw7_iw8
 		{
 			first_surface[i] = surfaces.size();
 			const auto decal_range = i >= dpvs.litDecalSurfsBegin && i < dpvs.litDecalSurfsEnd;
-			for (auto& surface : export_surface(source, world, dpvs.surfaces[i], lightmaps.entries.size(), probes, output))
+			const auto* shadow_lights = shadow_membership ? &shadow_membership->surfaces[i] : nullptr;
+			for (auto& surface : export_surface(source, world, dpvs.surfaces[i], lightmaps.entries.size(), probes,
+				shadow_lights, output))
 			{
 				if (decal_range)
 				{
@@ -1849,7 +1935,8 @@ namespace zonetool::convert::iw7_iw8
 				vertex_lit += draw.vertexLightingInfo.numLightingValues != 0;
 				example = example.empty() && draw.model ? std::string(asset_name(draw.model->name)) : example;
 			}
-			auto model = export_static_model(source, world, i, probes, floors, grid, output);
+			const auto* shadow_lights = shadow_membership ? &shadow_membership->smodels[i] : nullptr;
+			auto model = export_static_model(source, world, i, probes, floors, grid, shadow_lights, output);
 			grid_lit += model.contains("lighting_colors");
 			if (output.exported_models.contains(model.at("model").get<std::string>()))
 			{

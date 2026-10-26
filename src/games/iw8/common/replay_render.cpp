@@ -1676,6 +1676,7 @@ Mesh Load(const std::string &path, const nlohmann::json &j)
     m.bounds.resize(m.count * 56);
     m.drawSurfs.resize(m.count * 16);
     m.surfData.resize(m.count * 88);
+    m.surfaceShadowLights.resize(m.count);
     // Native buffers reserve offset zero. Stock first surface starts at byte four.
     m.positions.resize(4);
     m.aux.resize(4);
@@ -1921,6 +1922,8 @@ Mesh Load(const std::string &path, const nlohmann::json &j)
         // layers and brush models excluded) feed the GfxWorld heightfield.
         if (opaque && !sky && activeModel == 0)
             m.shadowCasterSurfaces.push_back(i);
+        if (s.contains("shadowLights"))
+            m.surfaceShadowLights[i] = s.at("shadowLights").get<std::vector<uint32_t>>();
         if (opaque && !sky && activeModel == 0)
             for (size_t ix = 0; ix < indices.size(); ++ix)
             {
