@@ -26,8 +26,8 @@ std::vector<uint8_t> toReplayCodeOffsets(std::vector<uint8_t> bytecode);
 // Emits a ScriptFile from a gsc-tool iw8 .gscbin ("GSC\0", compressed stack
 // length, stack length, bytecode length, zlib stack, bytecode). The bytecode
 // goes through toReplayCodeOffsets; the stack is rewritten so names gsc-tool
-// knows above Replay's compiled-in strings (0xE2C0) are stored by name, and
-// checked against the game loader's reads.
+// knows above Replay's compiled-in strings (0xE2C0) use the native named-field
+// marker and a stack name. Checks the result against the game loader's reads.
 void emitCompiledScript(ZoneWriter &writer, const std::string &assetName,
                         const std::vector<uint8_t> &gscbin);
 } // namespace iw8::replay_script
