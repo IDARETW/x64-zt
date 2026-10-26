@@ -11,10 +11,8 @@ namespace zonetool::convert::iw7_iw8
 {
 	namespace
 	{
-		// The atlas of the map pipeline draws 256-pixel tiles, and the pipeline keeps model images as 8-bit colours
-		// with mip levels: 512 pixels keep the map zone at the size of a converted IW3 map (Frontier: 1.1 GB of model
-		// images, against 3 GB at 1024).
-		constexpr std::size_t max_image_size = 512;
+		// Sky/probe sampling uses working faces independently of the source-sized material files.
+		constexpr std::size_t sampled_face_size = 512;
 		constexpr auto source_image_size = std::numeric_limits<std::size_t>::max();
 		// The minimap and the loading screen are single 2D images: they keep IW7's size (1024 minimaps).
 		constexpr std::size_t hud_image_size = 4096;
@@ -64,9 +62,9 @@ namespace zonetool::convert::iw7_iw8
 			bool opaque_alpha{};
 			// The colour of an effect drawn in high dynamic range (mkhdr techsets): stored expanded (expand_hdr).
 			bool hdr_expand{};
-			// The largest size that the file keeps (HUD images keep theirs).
-			std::size_t limit{max_image_size};
-			bool source_mips{};
+			// Material images keep their source dimensions and authored levels, including linked alpha/gloss inputs.
+			std::size_t limit{source_image_size};
+			bool source_mips{true};
 		};
 
 		// FNV-1a: a short name for a combination of images, the same in each run.
@@ -228,6 +226,11 @@ namespace zonetool::convert::iw7_iw8
 			for (auto i = first; i >= 0; i--)
 			{
 				auto pixels = read_stream(i);
+				if (source_mips && pixels.empty() && files[i].offset && files[i].offsetEnd > files[i].offset)
+				{
+					// A required source part failed; a smaller readable part is not the authored image.
+					return {};
+				}
 				if (!pixels.empty())
 				{
 					// Some images' stream tables leave the top stream's size zero, and their own size 1x1 (Prime's
@@ -301,7 +304,7 @@ namespace zonetool::convert::iw7_iw8
 		// The top level of each face of an image (one, the six of a cube map, or six for each cube map of an array) in a
 		// format that DirectXTex processes, at most `limit` pixels.
 		std::vector<DirectX::ScratchImage> load_faces(const iw7::GfxImage& image, const DXGI_FORMAT format,
-			const std::size_t limit = max_image_size, const bool source_mips = false)
+			const std::size_t limit = sampled_face_size, const bool source_mips = false)
 		{
 			// A cube map array holds the six faces of each of its cube maps in turn.
 			const auto faces = image.mapType == iw7::MAPTYPE_CUBE ? 6u
@@ -438,10 +441,11 @@ namespace zonetool::convert::iw7_iw8
 			if (gloss)
 			{
 				faces = load_faces(*gloss, DXGI_FORMAT_R8G8B8A8_UNORM,
-					source_mips ? source_image_size : max_image_size, source_mips);
+					source_mips ? source_image_size : sampled_face_size, source_mips);
 				if (faces.size() != 1)
 				{
 					ZONETOOL_WARNING("iw7: gloss image \"%s\" cannot be read: %s", gloss->name, image_read_failure(*gloss).data());
+					return false;
 				}
 			}
 
@@ -540,7 +544,7 @@ namespace zonetool::convert::iw7_iw8
 			if (alpha)
 			{
 				faces = load_faces(*alpha, DXGI_FORMAT_R8G8B8A8_UNORM,
-					source_mips ? source_image_size : max_image_size, source_mips);
+					source_mips ? source_image_size : sampled_face_size, source_mips);
 				if (faces.size() != 1)
 				{
 					ZONETOOL_WARNING("iw7: alpha image \"%s\" cannot be read: %s", alpha->name, image_read_failure(*alpha).data());
@@ -643,19 +647,8 @@ namespace zonetool::convert::iw7_iw8
 				}
 			}
 
-			// Native world images keep the source levels without an intermediate lossy encode.
+			// Material images keep the source levels without an intermediate lossy encode.
 			auto top = pixels.GetImage(0, 0, 0);
-			DirectX::ScratchImage smaller;
-			if (!file.source_mips && normal_data && std::max(top->width, top->height) > max_image_size / 2)
-			{
-				if (FAILED(DirectX::Resize(*top, std::max<std::size_t>(1, top->width / 2), std::max<std::size_t>(1, top->height / 2),
-					DirectX::TEX_FILTER_BOX | DirectX::TEX_FILTER_FORCE_NON_WIC, smaller)))
-				{
-					return false;
-				}
-
-				top = smaller.GetImage(0, 0, 0);
-			}
 
 			// The box filter takes only sizes of powers of two (the map art of the map select is 16:9): other sizes filter
 			// linearly.
@@ -1534,7 +1527,7 @@ namespace zonetool::convert::iw7_iw8
 	std::vector<DirectX::ScratchImage> load_image_faces(const iw7::GfxImage& image, const DXGI_FORMAT format,
 		const std::size_t limit)
 	{
-		return load_faces(image, format, limit ? limit : max_image_size);
+		return load_faces(image, format, limit ? limit : sampled_face_size);
 	}
 
 	std::string image_read_failure(const iw7::GfxImage& image)
@@ -2238,6 +2231,7 @@ namespace zonetool::convert::iw7_iw8
 		image_file entry{image, image_role::color};
 		entry.opaque = true;
 		entry.limit = hud_image_size;
+		entry.source_mips = false;
 		if (!image)
 		{
 			ZONETOOL_WARNING("iw7: the ui zone holds no map art %s; the map loads with the default loading screen", name.data());
@@ -2266,6 +2260,7 @@ namespace zonetool::convert::iw7_iw8
 
 		image_file entry{image, image_role::color};
 		entry.limit = hud_image_size;
+		entry.source_mips = false;
 		if (!image)
 		{
 			ZONETOOL_WARNING("iw7: the map has no minimap (%s); the HUD compass keeps the default", name.data());
