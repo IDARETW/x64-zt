@@ -27,6 +27,7 @@ constexpr uint32_t kStartupExport = 0x254;
 // stack entry: a nonzero u32 is used as the canonical id, 0 is followed by the
 // name. Function-header and far-call names use the same {u32, name} entries.
 constexpr uint32_t kReplayMaxCanonicalId = 0xE2C0;
+constexpr uint32_t kNamedFieldToken = 0xFFFFFFFF;
 // gsc-tool -g iw8 writes a stack name only above its own table (max_string_id),
 // so a name it knows between the two limits ("stage" = 0x10FC6) had no entry.
 // The loader then read the next entries one slot early and every later string
@@ -514,14 +515,23 @@ size_t walkScriptStack(const std::vector<uint8_t> &code, const std::vector<uint8
     return in.position();
 }
 
-// Rewrites gsc-tool's stack in Replay's encoding and checks that the game's
-// loader consumes exactly the result.
-std::vector<uint8_t> toReplayStack(const std::vector<uint8_t> &code, const std::vector<uint8_t> &stack)
+// A named field uses the native unknown-token marker. Its name entry must remain
+// explicit even when a consumer extends the compiled-in canonical string table.
+std::vector<uint8_t> toReplayStack(std::vector<uint8_t> &code, const std::vector<uint8_t> &stack)
 {
     std::vector<uint8_t> replay;
     replay.reserve(stack.size() + 256);
     if (walkScriptStack(code, stack, true, &replay) != stack.size())
         throw std::invalid_argument("gsc-tool's script stack does not match its bytecode");
+    for (size_t at = 1; at < code.size(); at += 1 + replayOperandSize(code, at))
+    {
+        if (!isFieldTokenOpcode(code[at]))
+            continue;
+        uint32_t id;
+        std::memcpy(&id, &code[at + 1], sizeof(id));
+        if (id > kReplayMaxCanonicalId)
+            std::memcpy(&code[at + 1], &kNamedFieldToken, sizeof(kNamedFieldToken));
+    }
     if (walkScriptStack(code, replay, false, nullptr) != replay.size())
         throw std::logic_error("rewritten script stack does not match Replay's loader");
     return replay;
@@ -709,8 +719,8 @@ void emitCompiledScript(ZoneWriter &writer, const std::string &assetName,
     if (size_t(16) + compressed + bytecode != gscbin.size() || !stack || !bytecode)
         throw std::invalid_argument("gscbin lengths do not match its payload");
 
-    const std::vector<uint8_t> gscCode(gscbin.begin() + 16 + compressed,
-                                       gscbin.begin() + 16 + compressed + bytecode);
+    std::vector<uint8_t> gscCode(gscbin.begin() + 16 + compressed,
+                                gscbin.begin() + 16 + compressed + bytecode);
     const std::vector<uint8_t> gscStack = Inflater(gscbin.data() + 16, compressed).run();
     if (gscStack.size() != stack)
         throw std::invalid_argument("gscbin stack length does not match its payload");
