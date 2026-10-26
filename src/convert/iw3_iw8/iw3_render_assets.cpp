@@ -163,6 +163,8 @@ struct SourceMaterial
     SurfaceKind kind{SurfaceKind::opaque};
     bool castsShadow{true};
     bool shadowOnly{};
+    bool staticModelShadowOnly{};
+    bool entityNoDraw{};
     unsigned flags{};
     unsigned cullMode{1}; // Replay: none=0, back=1, front=2.
     bool depthBias{};     // IW3 polygonOffset on the color pass, or a decal sort.
@@ -2504,6 +2506,9 @@ SourceMaterial ReadMaterial(const std::filesystem::path &root,
     // caulk_shadow (Greenband's gnbr_caulk_shadow, an mc_unlit material) is
     // invisible geometry that only casts sun shadow, as shadowcaster is.
     const bool caulkShadow = name.find("caulk_shadow") != std::string::npos;
+    material.entityNoDraw = source.value("iw7ShadowOnly", false);
+    material.staticModelShadowOnly = material.entityNoDraw || techset == "shadowcaster" ||
+                                    techset == "mc_shadowcaster" || caulkShadow;
     if (caulkShadow)
         material.castsShadow = true;
     if (techset == "shadowcaster" || caulkShadow)
@@ -4985,6 +4990,14 @@ void UseBc7Images(const int mode)
     g_bc7Images = mode;
 }
 
+bool HasStaticModelSurface(const std::filesystem::path &exportRoot,
+                           const std::vector<std::filesystem::path> &sourcePaths,
+                           const std::string &name)
+{
+    const auto material = ReadMaterial(exportRoot, sourcePaths, name);
+    return material.staticModelShadowOnly ? material.castsShadow : material.kind != SurfaceKind::skipped;
+}
+
 RenderPlan PrepareRenderAssets(const std::filesystem::path &exportRoot, const Json &world,
                                const std::vector<std::string> &surfaceMaterials,
                                const std::vector<std::string> &worldMaterials,
@@ -5636,6 +5649,8 @@ RenderPlan PrepareRenderAssets(const std::filesystem::path &exportRoot, const Js
         item.kind = material.kind;
         item.castsShadow = material.castsShadow;
         item.shadowOnly = material.shadowOnly;
+        item.staticModelShadowOnly = material.staticModelShadowOnly;
+        item.entityNoDraw = material.entityNoDraw;
         item.flags = material.flags;
         item.cullMode = material.cullMode;
         item.depthBias = material.depthBias;
@@ -7687,11 +7702,19 @@ RenderPlan PrepareRenderAssets(const std::filesystem::path &exportRoot, const Js
             techsetFiles;
         for (const SourceMaterial &source : materials)
         {
-            if (!neededMaterials.contains(source.name) || source.kind == SurfaceKind::skipped)
+            if (!neededMaterials.contains(source.name) || (entity && source.entityNoDraw) ||
+                (!entity && source.staticModelShadowOnly ? !source.castsShadow : source.kind == SurfaceKind::skipped))
                 continue;
-            const unsigned kind = static_cast<unsigned>(source.kind);
+            const unsigned kind = static_cast<unsigned>(
+                source.kind == SurfaceKind::skipped ? SurfaceKind::opaque : source.kind);
             if (kind >= modelTechsets.size() || modelTechsets[kind].empty())
                 throw std::runtime_error("IW3 render plan omitted a model technique variant");
+            const auto sourceBytes = std::span(
+                reinterpret_cast<const std::uint8_t *>(source.name.data()), source.name.size());
+            const auto nameDigest = Sha256(sourceBytes);
+            const std::string id = Hex(std::span(nameDigest).first(8));
+            const std::string materialName = "w/mw120r_" + map + "_" + usage + "_" + id;
+            const std::string materialFile = stem + "." + usage + "." + id + ".material.json";
             const unsigned blend = source.kind == SurfaceKind::glass ? source.blend : 0u;
             const bool detailed = !source.detail.empty() && source.kind == SurfaceKind::opaque;
             const int detailIndex = detailed ? static_cast<int>(detailVariant(source).first) : -1;
@@ -7741,12 +7764,6 @@ RenderPlan PrepareRenderAssets(const std::filesystem::path &exportRoot, const Js
                 techsetEntry->second = {variant.at("name").get<std::string>(), file};
                 WriteJson(mapDirectory / file, variant);
             }
-            const auto sourceBytes = std::span(
-                reinterpret_cast<const std::uint8_t *>(source.name.data()), source.name.size());
-            const auto nameDigest = Sha256(sourceBytes);
-            const std::string id = Hex(std::span(nameDigest).first(8));
-            const std::string materialName = "w/mw120r_" + map + "_" + usage + "_" + id;
-            const std::string materialFile = stem + "." + usage + "." + id + ".material.json";
             Json direct = modelMaterialTemplate;
             direct["source"] = source.name;
             if (!entity)
@@ -7771,8 +7788,9 @@ RenderPlan PrepareRenderAssets(const std::filesystem::path &exportRoot, const Js
             direct["imageDefinitions"] = Json::array();
             // IW3 "ge128" cutouts (flags 8/16 select gt0/lt128) clip at alpha 0.5.
             const bool alphaCoverage =
-                source.kind == SurfaceKind::cutout && !(source.flags & 24u);
-            residentImageAsync(direct, 0, image(source.color).front(), source.tint, "model",
+                source.kind == SurfaceKind::cutout && !(source.flags & 24u) &&
+                (entity || !source.staticModelShadowOnly);
+            residentImageAsync(direct, 0, image(source.color.empty() ? "$white" : source.color).front(), source.tint, "model",
                           alphaCoverage);
             if (source.normal.empty())
                 residentImageOwned(direct, 1, Image{1, 1, std::vector<std::uint8_t>{128, 128, 128, 128}}, {1, 1, 1, 1},
