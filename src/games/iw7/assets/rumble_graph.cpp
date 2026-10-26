@@ -26,7 +26,7 @@ namespace zonetool::iw7
 		for (auto i = 0; i < 16; i++)
 		{
 			asset->knots[i][0] = data["knots"][i][0].get<float>();
-			asset->knots[i][1] = data["knots"][i][0].get<float>();
+			asset->knots[i][1] = data["knots"][i][1].get<float>();
 		}
 		asset->knotCount = data["knotCount"].get<unsigned short>();
 
