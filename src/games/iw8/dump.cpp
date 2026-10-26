@@ -1398,6 +1398,49 @@ namespace zonetool::iw8
 		void verify_mesh(const std::filesystem::path& zone_folder, const loaded_zone& zone)
 		{
 			const auto& compendium = replay_compendium(zone_folder);
+			const auto packed_boundary = []
+			{
+				havok::compressed_mesh mesh;
+				mesh.vertices.reserve(256);
+				mesh.triangles.reserve(128);
+				for (std::uint32_t y = 0; y < 8; y++)
+				{
+					for (std::uint32_t x = 0; x < 8; x++)
+					{
+						const auto first = static_cast<std::uint32_t>(mesh.vertices.size());
+						const auto left = static_cast<float>(x) * 0.125f;
+						const auto bottom = static_cast<float>(y) * 0.125f;
+						mesh.vertices.insert(mesh.vertices.end(), {{left, bottom, 0.0f}, {left + 0.1f, bottom, 0.0f},
+							{left + 0.1f, bottom + 0.1f, 0.0f}, {left, bottom + 0.1f, 0.0f}});
+						const auto tag = static_cast<std::uint16_t>(y * 8 + x);
+						mesh.triangles.push_back({{first, first + 1, first + 2}, tag});
+						mesh.triangles.push_back({{first, first + 2, first + 3}, tag});
+					}
+				}
+				return mesh;
+			}();
+			havok::object_builder boundary_builder(compendium);
+			havok::compressed_mesh_stats boundary_stats;
+			const auto boundary_shape = havok::add_compressed_mesh_shape(boundary_builder, packed_boundary, &boundary_stats);
+			const auto boundary = boundary_builder.finish("20180200", havok::replay_compendium_signature, boundary_shape);
+			const auto boundary_bytes = havok::write_compact_tagfile(boundary, compendium);
+			const auto boundary_file = havok::read_tagfile(boundary_bytes, &compendium);
+			const auto boundary_readback = havok::read_compressed_mesh_shape(boundary_file, compendium, boundary_shape, true);
+			havok::decoded_mesh boundary_expected;
+			for (const auto& triangle : packed_boundary.triangles)
+			{
+				boundary_expected.triangles.push_back({packed_boundary.vertices[triangle.vertices[0]], packed_boundary.vertices[triangle.vertices[1]],
+					packed_boundary.vertices[triangle.vertices[2]]});
+				boundary_expected.triangle_tags.push_back(triangle.shape_tag);
+			}
+			if (boundary_stats.sections != 1 || boundary_stats.packed_vertices != 255 || boundary_stats.shared_vertices != 1 ||
+				boundary_stats.collapsed != 0 ||
+				boundary_readback.triangles.size() != 128 || matching_triangles(boundary_expected, boundary_readback,
+					boundary_stats.largest_error * 1.01f + 1e-6f) != 128)
+			{
+				throw std::runtime_error("the 256-entry compressed-mesh packed-vertex boundary did not round-trip");
+			}
+
 			const auto mesh_type = *compendium.find("hknpCompressedMeshShape");
 			std::set<asset_key> seen;
 			std::size_t meshes{};
