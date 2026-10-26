@@ -406,6 +406,61 @@ namespace zonetool::iw8
 		{
 			const auto& compendium = replay_compendium(zone_folder);
 			const auto convex_type = *compendium.find("hknpConvexPolytopeShape");
+			const auto bipyramid = [](const std::size_t ring_vertices)
+			{
+				constexpr double pi = 3.14159265358979323846;
+				std::vector<havok::vector3> points;
+				points.reserve(ring_vertices + 2);
+				for (std::size_t i = 0; i < ring_vertices; i++)
+				{
+					const auto angle = 2.0 * pi * static_cast<double>(i) / static_cast<double>(ring_vertices);
+					points.push_back({static_cast<float>(100.0 * std::cos(angle)), static_cast<float>(100.0 * std::sin(angle)), 0.0f});
+				}
+				points.push_back({0.0f, 0.0f, 100.0f});
+				points.push_back({0.0f, 0.0f, -100.0f});
+				auto result = havok::convex_hull(points, 0.0f);
+				if (result.vertices.size() != points.size() || result.faces.size() != ring_vertices * 2)
+				{
+					throw std::runtime_error("the convex vertex-limit fixture did not produce a full bipyramid");
+				}
+
+				return result;
+			};
+
+			const auto boundary = bipyramid(250);
+			havok::object_builder boundary_builder(compendium);
+			const auto boundary_shape = havok::add_convex_polytope_shape(boundary_builder, boundary);
+			const auto boundary_tag = havok::write_compact_tagfile(
+				boundary_builder.finish("20180200", havok::replay_compendium_signature), compendium);
+			const auto boundary_readback = havok::read_tagfile(boundary_tag, &compendium);
+			const auto boundary_polytope = havok::read_convex_polytope_shape(boundary_readback, compendium, boundary_shape);
+			if (boundary_shape != 1 || boundary_polytope.vertices != boundary.vertices || boundary_polytope.faces != boundary.faces ||
+				boundary_polytope.planes != boundary.planes)
+			{
+				throw std::runtime_error("the valid 252-vertex convex boundary fixture did not round-trip");
+			}
+
+			for (const auto ring_vertices : {251u, 254u})
+			{
+				const auto oversized = bipyramid(ring_vertices);
+				havok::object_builder oversized_builder(compendium);
+				bool rejected = false;
+				try
+				{
+					havok::add_convex_polytope_shape(oversized_builder, oversized);
+				}
+				catch (const std::runtime_error&)
+				{
+					rejected = true;
+				}
+
+				if (!rejected)
+				{
+					throw std::runtime_error(std::format("the {}-vertex convex boundary fixture was not rejected by the native limit",
+						oversized.vertices.size()));
+				}
+			}
+
 			std::set<asset_key> seen;
 			std::size_t shapes{};
 			std::size_t same_counts{};

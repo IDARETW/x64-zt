@@ -222,9 +222,14 @@ namespace zonetool::iw8::havok
 
 	std::uint32_t add_convex_polytope_shape(object_builder& builder, const polytope& shape, const convex_options& options)
 	{
-		if (shape.vertices.size() > 256 || shape.faces.size() > 0xFFFF)
+		if (shape.vertices.size() > max_convex_shape_vertices)
 		{
-			throw std::runtime_error("a convex polytope has more than 256 vertices");
+			throw std::runtime_error(std::format("a convex polytope exceeds the native {}-vertex limit", max_convex_shape_vertices));
+		}
+
+		if (shape.faces.size() > 0xFFFF)
+		{
+			throw std::runtime_error("a convex polytope has more than 65535 faces");
 		}
 
 		const auto connectivity = connect(shape);
@@ -244,9 +249,9 @@ namespace zonetool::iw8::havok
 		// Havok reads the vertices in groups of four: the last vertex repeats, with its index, to fill the last group (every
 		// convex shape of the stock zones has a multiple of four vertices), and so does its vertex edge.
 		const auto padded = (shape.vertices.size() + 3) & ~std::size_t{3};
-		if (shape.vertices.empty() || padded > 256)
+		if (shape.vertices.empty() || padded > max_convex_shape_vertices)
 		{
-			throw std::runtime_error("a convex polytope has more than 256 vertices");
+			throw std::runtime_error(std::format("a convex polytope exceeds the native {}-vertex limit", max_convex_shape_vertices));
 		}
 
 		std::vector<std::uint8_t> vertices;

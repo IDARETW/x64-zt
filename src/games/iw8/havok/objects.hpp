@@ -5,6 +5,9 @@
 
 namespace zonetool::iw8::havok
 {
+	// Replay 1.20 hknpConvexPolytopeShape::createHullFromVertices clamps maxNumVertices to 252.
+	inline constexpr std::uint32_t max_convex_shape_vertices = 252;
+
 	// Builds the items of a tagfile from compendium types. The first object is the root.
 	class object_builder
 	{
