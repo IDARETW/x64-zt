@@ -46,7 +46,7 @@ void RegisterGradingClut(ZoneWriter &writer, const std::string &name, const unsi
         image[0x2E] = 1; // semantic
         image[0x2F] = 1; // category
         image[0x30] = 1; // levelCount
-        image[0x31] = 8; // streamedPartCount, as stock
+        image[0x31] = 8; // stock resident CLUT byte; Replay's streamedPartCount is at +0x32
         Store(image.data(), 0xE0, PTR_FOLLOWS);
         out.write(image.data(), image.size());
         out.pushStream(XFILE_BLOCK_VIRTUAL);
