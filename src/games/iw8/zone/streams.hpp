@@ -59,6 +59,13 @@ namespace zonetool::iw8
 		}
 
 		template <typename T>
+		T* inline_array(T*& field, const std::size_t alignment, const std::size_t count)
+		{
+			this->note(field, false);
+			return this->reader_.read_inline_array(field, alignment, count);
+		}
+
+		template <typename T>
 		T* single(T*& field, const std::size_t alignment)
 		{
 			this->note(field, false);
@@ -220,6 +227,25 @@ namespace zonetool::iw8
 			this->writer_.set_pointer(&field, marker.value_or(following));
 			this->writer_.align(alignment);
 			this->writer_.write_copy(field, size);
+			return field;
+		}
+
+		template <typename T>
+		T* inline_array(T*& field, const std::size_t alignment, const std::size_t count)
+		{
+			if (!field)
+			{
+				return nullptr;
+			}
+
+			const auto marker = this->marker_of(&field).value_or(following);
+			if (!marker)
+			{
+				throw std::runtime_error("a present inline array cannot carry a null marker");
+			}
+			this->writer_.set_pointer(&field, marker);
+			this->writer_.align(alignment);
+			this->writer_.write_copy(field, sizeof(T) * count);
 			return field;
 		}
 
@@ -446,6 +472,13 @@ namespace zonetool::iw8
 		}
 
 		template <typename T>
+		T* inline_array(T*& field, const std::size_t, const std::size_t count)
+		{
+			this->clear_field(&field, sizeof(field));
+			return static_cast<T*>(this->array_bytes(field, sizeof(T) * count, false));
+		}
+
+		template <typename T>
 		T* single(T*& field, const std::size_t alignment)
 		{
 			return this->array(field, alignment, 1);
@@ -587,7 +620,7 @@ namespace zonetool::iw8
 			}
 		}
 
-		void* array_bytes(const void* field, const std::size_t size)
+		void* array_bytes(const void* field, const std::size_t size, const bool allow_offset = true)
 		{
 			if (!field)
 			{
@@ -595,7 +628,7 @@ namespace zonetool::iw8
 				return nullptr;
 			}
 
-			if (this->add_offset(field, size))
+			if (allow_offset && this->add_offset(field, size))
 			{
 				return nullptr;
 			}
@@ -739,6 +772,13 @@ namespace zonetool::iw8
 		{
 			return static_cast<T*>(this->array_bytes(reinterpret_cast<void*&>(const_cast<std::remove_const_t<T>*&>(field)),
 				sizeof(T) * count));
+		}
+
+		template <typename T>
+		T* inline_array(T*& field, const std::size_t alignment, const std::size_t count)
+		{
+			// Earlier IW8D dumps may still represent shared in-memory data with an offset record.
+			return this->array(field, alignment, count);
 		}
 
 		template <typename T>

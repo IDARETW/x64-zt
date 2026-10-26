@@ -148,6 +148,20 @@ namespace zonetool
 			return field;
 		}
 
+		// Some native fields use the pointer only as a presence flag, even when its bits resemble an offset.
+		template <typename T>
+		T* read_inline_array(T*& field, const std::size_t alignment, const std::size_t count = 1)
+		{
+			if (!field)
+			{
+				return nullptr;
+			}
+
+			this->align(alignment);
+			field = this->read<T>(count);
+			return field;
+		}
+
 		template <typename T>
 		T* read_aliased_array(T*& field, const std::size_t alignment, const std::size_t count = 1)
 		{
