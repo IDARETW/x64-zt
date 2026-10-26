@@ -1,5 +1,7 @@
 #pragma once
 
+#include <optional>
+
 namespace zonetool::iw8
 {
 	// A dump file of an asset. Raw files, script files, string tables, localized strings, Lua files and fonts use the
@@ -27,7 +29,7 @@ namespace zonetool::iw8
 	class asset_parser
 	{
 	public:
-		void* parse(std::string_view data);
+		void* parse(std::string_view data, std::optional<std::int32_t> expected_type = std::nullopt);
 		// The asset from the first of its files in the search paths, or nullptr when there is no file.
 		void* parse_file(std::int32_t type, const std::string& name);
 		void* parse_asset_file(std::int32_t type, const std::string& name, const asset_file& file);
