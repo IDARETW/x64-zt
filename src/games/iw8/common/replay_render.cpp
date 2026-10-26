@@ -2927,15 +2927,63 @@ void RegisterMaterialReference(ZoneWriter &writer, const std::string &name)
         EmitMaterial(out, reference, false);
     });
 }
-void RegisterMapMaterials(ZoneWriter &main, ZoneWriter &techsets, const Mesh &mesh)
+void RegisterMapMaterials(ZoneWriter &main, ZoneWriter &techsets, const Mesh &mesh,
+                          const uint64_t mainImageBudget)
 {
+    if (mainImageBudget > UINT32_MAX)
+        throw std::runtime_error("Main image budget exceeds Replay's resident zone range");
     std::set<std::pair<unsigned, std::string>> mainRegistered;
     std::set<std::pair<unsigned, std::string>> techsetRegistered;
+    std::map<std::string, const Image *> images;
+    const auto collectImages = [&](const Material &material) {
+        if (!material.techset.empty())
+            for (const auto &image : material.imageDefinitions)
+                images.try_emplace(image.name, &image);
+    };
+    collectImages(mesh);
+    for (const auto &material : mesh.additionalMaterials)
+        collectImages(material);
+    for (const auto &material : mesh.assetMaterials)
+        collectImages(material);
+    uint64_t imageBytes = 0;
+    for (const auto &[name, image] : images)
+    {
+        if (image->pixels.size() > UINT64_MAX - imageBytes)
+            throw std::runtime_error("Resident material image byte count overflows");
+        imageBytes += image->pixels.size();
+    }
+    std::set<std::string> providerImages;
+    if (imageBytes > mainImageBudget)
+    {
+        std::vector<const Image *> largest;
+        for (const auto &[name, image] : images)
+            largest.push_back(image);
+        std::sort(largest.begin(), largest.end(), [](const Image *a, const Image *b) {
+            return a->pixels.size() != b->pixels.size() ? a->pixels.size() > b->pixels.size()
+                                                       : a->name < b->name;
+        });
+        // Replay queues and finishes techsets_<map> before the parent, with the
+        // same level lifetime. Its images precede the materials' comma references.
+        const uint64_t target = std::max(mainImageBudget, imageBytes / 2 + imageBytes % 2);
+        uint64_t mainBytes = imageBytes;
+        for (const auto *image : largest)
+        {
+            if (mainBytes <= target)
+                break;
+            providerImages.insert(image->name);
+            RegisterImageDefinition(techsets, *image, techsetRegistered);
+            mainBytes -= image->pixels.size();
+        }
+        zt::info("resident images: %llu main bytes, %llu techsets bytes (%zu provider images)",
+                 static_cast<unsigned long long>(mainBytes),
+                 static_cast<unsigned long long>(imageBytes - mainBytes), providerImages.size());
+    }
     const auto registerOne = [&](const Material &material) {
         if (material.techset.empty())
             return;
         for (const auto &image : material.imageDefinitions)
-            RegisterImageDefinition(main, image, mainRegistered);
+            if (!providerImages.contains(image.name))
+                RegisterImageDefinition(main, image, mainRegistered);
         if (mainRegistered.emplace(ASSET_TYPE_MATERIAL, material.material).second)
             RegisterMaterialReference(main, material.material);
         RegisterMaterialDefinition(techsets, material, techsetRegistered, false);

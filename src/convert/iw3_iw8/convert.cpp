@@ -2098,8 +2098,7 @@ int writeMapPackage(const Args &args, const std::string &map, const std::string 
             prepared ? prepared->clientTriggers : nullptr);
         timing.lap("asset registration");
         techsets.build();
-        writer.build();
-        timing.lap("zone build");
+        timing.lap("techsets zone build");
 
         const auto techsetParams = writeParams(techsets);
         if (!writeZone(path_join(outputDirectory, "techsets_" + map + ".ff"), techsets.takeBody(), techsetParams))
@@ -2107,6 +2106,9 @@ int writeMapPackage(const Args &args, const std::string &map, const std::string 
             result = 1;
         }
 
+        // Release the companion's resident body before building the main one.
+        writer.build();
+        timing.lap("main zone build");
         const auto mapParams = withPostloadMargin(writeParams(writer));
         if (!writeZone(path_join(outputDirectory, map + ".ff"), writer.takeBody(), mapParams))
         {
