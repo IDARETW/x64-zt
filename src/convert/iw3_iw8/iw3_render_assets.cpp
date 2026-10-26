@@ -5635,6 +5635,7 @@ RenderPlan PrepareRenderAssets(const std::filesystem::path &exportRoot, const Js
         }
         item.kind = material.kind;
         item.castsShadow = material.castsShadow;
+        item.shadowOnly = material.shadowOnly;
         item.flags = material.flags;
         item.cullMode = material.cullMode;
         item.depthBias = material.depthBias;
@@ -6868,7 +6869,11 @@ RenderPlan PrepareRenderAssets(const std::filesystem::path &exportRoot, const Js
     // and material of their layer count, read from the game install (iw8::stock::Library). Decal, blended and cut-out
     // surfaces keep the generated materials.
     std::optional<iw8::stock::Library> stockLibrary;
-    const auto buildStockWorldMaterials = [&](const std::set<std::string> &neededWorldMaterials) {
+    const bool shadowWorld = std::ranges::any_of(materials, [&](const SourceMaterial &source) {
+        return source.shadowOnly && source.castsShadow && worldSurfaceMaterials.contains(source.name);
+    });
+    const auto buildStockWorldMaterials = [&](const std::set<std::string> &neededWorldMaterials,
+                                              const bool visibleMaterials) {
         // The stock techniques with a material's cull mode and depth bias (the back-face shadow technique, 28, culls
         // the other side), under names of their own. A two-sided material culls back faces: its surfaces draw their
         // back faces as faces of their own (the writer mirrors them), as Replay's single-sided world does.
@@ -7021,13 +7026,41 @@ RenderPlan PrepareRenderAssets(const std::filesystem::path &exportRoot, const Js
             if (const auto at = name.find("__layer"); at != std::string::npos)
                 layered.insert(name.substr(0, at));
         const Json singleTechset = Json::parse(ResourceText(IDR_IW3_TECHSET_TEMPLATE));
-        std::size_t count = 0, layeredCount = 0, decalCount = 0, cutoutCount = 0, emissiveCount = 0;
+        std::size_t count = 0, layeredCount = 0, decalCount = 0, cutoutCount = 0, emissiveCount = 0,
+                    shadowCount = 0;
         for (const SourceMaterial &source : materials)
         {
-            if (!neededWorldMaterials.contains(source.name) || source.replayColor.empty() ||
-                source.name.find("__layer") != std::string::npos)
+            if (!neededWorldMaterials.contains(source.name))
                 continue;
             MaterialPlan &planned = plan.materials.at(source.name);
+            if (source.shadowOnly && source.castsShadow)
+            {
+                if (replayZones.empty())
+                    throw std::runtime_error("shadow-only world materials need the Replay install (--replay)");
+                if (!stockLibrary)
+                    stockLibrary.emplace(replayZones);
+                Json direct = stockLibrary->Material("tw/shadowcaster");
+                const auto &[techsetName, techsetFile] =
+                    stockTechset(stockLibrary->TechniqueSet(direct.at("techset").get<std::string>()),
+                                 "tw", "_shadowcaster", source);
+                direct["source"] = source.name;
+                direct["techset"] = techsetName;
+                direct["techsetDefinition"] = techsetFile;
+                direct["imageDefinitions"] = Json::array();
+                for (auto &texture : direct.at("textures"))
+                {
+                    const auto header = Unhex(texture.at("header").get<std::string>());
+                    if (header.at(0) == 0)
+                        texture["image"] = "$gray";
+                }
+                addMaterial(std::move(direct), source.name, planned);
+                planned.worldMaterialIndex = planned.stockWorldMaterialIndex;
+                ++shadowCount;
+                continue;
+            }
+            if (!visibleMaterials || source.replayColor.empty() ||
+                source.name.find("__layer") != std::string::npos)
+                continue;
             // An unlit opaque material draws as a stock emissive one (tw/uk_periph_emissive_light: the opaque permutation
             // with its emissive map, slot 0x12, times the emission row 0x24, which Replay scales as it scales the
             // lightmap, PS c8c1d12c): no albedo or specular, IW7's colour as the emissive map and its tint as the emission.
@@ -7300,9 +7333,9 @@ RenderPlan PrepareRenderAssets(const std::filesystem::path &exportRoot, const Js
             ++layeredCount;
         }
         zt::info("iw3: %zu stock Replay world materials, %zu stock layered ones, %zu stock decals, %zu stock cut-outs and "
-                 "%zu stock emissive ones in %zu technique sets",
-                 count, layeredCount, decalCount, cutoutCount, emissiveCount, techsets.size());
-        return count + layeredCount + decalCount + cutoutCount + emissiveCount;
+                 "%zu stock emissive ones and %zu shadow-only ones in %zu technique sets",
+                 count, layeredCount, decalCount, cutoutCount, emissiveCount, shadowCount, techsets.size());
+        return count + layeredCount + decalCount + cutoutCount + emissiveCount + shadowCount;
     };
     if (nativeWorld)
     {
@@ -7322,7 +7355,9 @@ RenderPlan PrepareRenderAssets(const std::filesystem::path &exportRoot, const Js
         const std::set<std::string> neededWorldMaterials(worldMaterials.begin(), worldMaterials.end());
         // Stock world materials first: a material whose surfaces they all draw needs no converted one.
         std::size_t nativeMaterials =
-            world.value("replay_stock_world", false) ? buildStockWorldMaterials(neededWorldMaterials) : 0;
+            world.value("replay_stock_world", false) || shadowWorld
+                ? buildStockWorldMaterials(neededWorldMaterials, world.value("replay_stock_world", false))
+                : 0;
         for (const SourceMaterial &source : materials)
         {
             if (!neededWorldMaterials.contains(source.name))
@@ -7367,6 +7402,8 @@ RenderPlan PrepareRenderAssets(const std::filesystem::path &exportRoot, const Js
         zt::info("iw3: %zu native world materials and 6 sky faces in %zu technique sets", nativeMaterials,
                  nativeVariants.size());
     }
+    else if (shadowWorld)
+        buildStockWorldMaterials(worldSurfaceMaterials, false);
     timing.lap("native world materials");
 
     // FxGlassSystem supplies its own vertices. A BSP glass variant cannot be

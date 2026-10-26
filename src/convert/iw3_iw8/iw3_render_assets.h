@@ -36,6 +36,7 @@ struct MaterialPlan
     std::size_t tile{};
     SurfaceKind kind{SurfaceKind::opaque};
     bool castsShadow{true};
+    bool shadowOnly{};
     unsigned flags{};
     // IW3 cull state: 0 none, 1 back, 2 front.
     unsigned cullMode{1};
