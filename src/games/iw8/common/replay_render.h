@@ -272,8 +272,10 @@ Mesh Load(const std::string &path);
 // The same from a definition already in memory (the IW3 converter's); `path` still places the files it names.
 Mesh Load(const std::string &path, const nlohmann::json &definition);
 void RegisterMaterial(iw8::ZoneWriter &writer, const Mesh &mesh);
+// Large resident image sets share the native techsets companion. The budget is a
+// soft main-zone target; larger sets balance between both zones. FF size guards still apply.
 void RegisterMapMaterials(iw8::ZoneWriter &main, iw8::ZoneWriter &techsets,
-                          const Mesh &mesh);
+                          const Mesh &mesh, uint64_t mainImageBudget = 2ull << 30);
 void RegisterMaterialReference(iw8::ZoneWriter &writer, const std::string &name);
 void RegisterReflectionProbeImage(iw8::ZoneWriter &writer, const Mesh &mesh);
 void StampWorld(std::vector<uint8_t> &world, const Mesh &mesh);
