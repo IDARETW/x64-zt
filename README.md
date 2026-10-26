@@ -42,6 +42,12 @@ Rows are the source game. Columns are the target game.
 - **IW3 → IW8** converts whole multiplayer maps into Replay 1.20 zones: the world with its lightmaps, light grid, probes, sky, fog and sun shadows, collision (Havok data built natively), static and entity models, materials and images, local lights, effects, sounds, breakable glass, bot navigation, the minimap and the map scripts (translated to IW8 GSC)
 - **IW7 → IW8** converts multiplayer maps the same way: IW7's world, collision, models, materials, lightmaps, probes, sky, lights, glass, effects (module by module), map sounds, map scripts and scriptables (breaking props, animated props) become an extraction that the IW3 → IW8 pipeline builds, with the vision's sky intensity, fog and colour grading. Every IW7 multiplayer map (33) converts and loads through Replay's own readers; in-game testing is in progress
 
+IW7 Scriptable rumble definitions convert through `asset_data/rumbles.json`, with every stored curve slot and all supported flags.
+Converted names use `mw120r/iw7/<source-map>/rumble/<source-name>` and `rumblegraph/<source-name>` to prevent collisions with Replay assets.
+The separate provenance file records source names, converted names, owner zones and decoded header snapshots.
+The native writer adds definitions to the map and their names to level NetConstStrings row 3.
+Native Scriptable rumble events remain unconverted. Asset delivery does not prove event playback.
+
 <details>
 <summary>v1 legend (<code>main</code>), for comparison</summary>
 

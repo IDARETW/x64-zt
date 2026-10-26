@@ -1,5 +1,6 @@
 #include <std_include.hpp>
 #include "export.hpp"
+#include <core/assets/rumble_data.hpp>
 
 #include <bit>
 
@@ -1728,5 +1729,330 @@ namespace zonetool::convert::iw7_iw8
 		std::filesystem::create_directories(path.parent_path());
 		std::ofstream(path, std::ios::binary | std::ios::trunc).write(entities.data(), static_cast<std::streamsize>(entities.size()));
 		ZONETOOL_INFO("iw7: exported %zu bytes of entities with %u spawn points", entities.size(), spawns.spawnsCount);
+	}
+
+	void export_rumbles(const source_map& source, const std::filesystem::path& extracted)
+	{
+		const auto map = source.map_ents();
+		if (!map)
+		{
+			throw std::runtime_error("IW7 map has no MapEnts for Scriptable asset closure");
+		}
+		using asset_data::rumble_graph;
+		using asset_data::rumble_info;
+		std::map<std::string, rumble_info> infos;
+		std::map<std::string, rumble_graph> graphs;
+		std::set<const iw7::RumbleInfo*> info_headers;
+		std::set<const iw7::RumbleGraph*> graph_headers;
+		ordered_json evidence{{"profile", "iw7"},
+							  {"snapshotScope", "decoded postload headers, not original packed source records"},
+							  {"unsupportedBySource", {"leftTrigger", "rightTrigger", "swapTriggerRumblesOnLefty", "panTriggerRumbles"}},
+							  {"assets", ordered_json::array()}};
+		// Common Replay rumbles use these source names with different curves and trigger channels.
+		const auto semantic_name = [&](const iw7::XAssetType type, const char* name)
+		{
+			const auto original = asset_name(name);
+			if (original.empty())
+			{
+				throw std::runtime_error("IW7 rumble asset has no name");
+			}
+			return std::format("mw120r/iw7/{}/{}/{}", source.name(), type == iw7::ASSET_TYPE_RUMBLE ? "rumble" : "rumblegraph", original);
+		};
+		const auto bytes = [](const void* header, const std::size_t count)
+		{
+			constexpr char digits[] = "0123456789abcdef";
+			const auto data = static_cast<const unsigned char*>(header);
+			std::string result;
+			result.reserve(count * 2);
+			for (std::size_t i = 0; i < count; ++i)
+			{
+				result += digits[data[i] >> 4];
+				result += digits[data[i] & 15];
+			}
+			return result;
+		};
+		const auto record = [&](const iw7::XAssetType type, const void* header, const std::size_t size, const std::size_t padding)
+		{
+			evidence["assets"].push_back(
+				{{"sourceType", static_cast<int>(type)},
+				 {"sourceName", asset_name(iw7::get_asset_name(type, header))},
+				 {"semanticName", semantic_name(type, iw7::get_asset_name(type, header))},
+				 {"ownerZone", source.asset_zone(type, header)},
+				 {"rootSize", size},
+				 {"decodedHeaderHex", bytes(header, size)},
+				 {"alignmentPadding",
+				  {{"offset", padding}, {"hex", bytes(static_cast<const unsigned char*>(header) + padding, size - padding)}}}});
+		};
+		static_assert(sizeof(iw7::RumbleInfo) == 40 && offsetof(iw7::RumbleInfo, broadcast) == 33);
+		static_assert(sizeof(iw7::RumbleGraph) == 144 && offsetof(iw7::RumbleGraph, knotCount) == 136);
+		const auto graph = [&](iw7::RumbleGraph* pointer) -> std::optional<std::string>
+		{
+			if (!pointer)
+			{
+				return std::nullopt;
+			}
+			const auto native = source.resolve(iw7::ASSET_TYPE_RUMBLE_GRAPH, pointer);
+			if (!native)
+			{
+				throw std::runtime_error("IW7 RumbleGraph dependency is unresolved");
+			}
+			rumble_graph value;
+			value.name = semantic_name(iw7::ASSET_TYPE_RUMBLE_GRAPH, native->name);
+			if (!graph_headers.insert(native).second)
+			{
+				return value.name;
+			}
+			record(iw7::ASSET_TYPE_RUMBLE_GRAPH, native, sizeof(*native), 138);
+			value.knot_count = native->knotCount;
+			for (std::size_t i = 0; i < 16; ++i)
+			{
+				value.x[i] = native->knots[i][0];
+				value.y[i] = native->knots[i][1];
+			}
+			const auto [found, added] = graphs.try_emplace(value.name, value);
+			if (!added)
+			{
+				bool equal = found->second.knot_count == value.knot_count;
+				for (std::size_t i = 0; i < 16; ++i)
+				{
+					equal &= std::bit_cast<std::uint32_t>(found->second.x[i]) == std::bit_cast<std::uint32_t>(value.x[i]) &&
+							 std::bit_cast<std::uint32_t>(found->second.y[i]) == std::bit_cast<std::uint32_t>(value.y[i]);
+				}
+				if (!equal)
+				{
+					throw std::runtime_error("conflicting IW7 RumbleGraph definitions: " + value.name);
+				}
+			}
+			return value.name;
+		};
+		const auto info = [&](iw7::RumbleInfo* pointer)
+		{
+			if (!pointer)
+			{
+				return;
+			}
+			const auto native = source.resolve(iw7::ASSET_TYPE_RUMBLE, pointer);
+			if (!native)
+			{
+				throw std::runtime_error("IW7 RumbleInfo dependency is unresolved");
+			}
+			if (!info_headers.insert(native).second)
+			{
+				return;
+			}
+			record(iw7::ASSET_TYPE_RUMBLE, native, sizeof(*native), 34);
+			rumble_info value;
+			value.name = semantic_name(iw7::ASSET_TYPE_RUMBLE, native->name);
+			value.duration_milliseconds = native->duration;
+			value.range = native->range;
+			value.high = graph(native->highRumbleGraph);
+			value.low = graph(native->lowRumbleGraph);
+			value.fade_with_distance = native->fadeWithDistance;
+			value.broadcast = native->broadcast;
+			const auto [found, added] = infos.try_emplace(value.name, value);
+			if (!added && (found->second.duration_milliseconds != value.duration_milliseconds ||
+						   std::bit_cast<std::uint32_t>(found->second.range) != std::bit_cast<std::uint32_t>(value.range) ||
+						   found->second.high != value.high || found->second.low != value.low ||
+						   found->second.fade_with_distance != value.fade_with_distance || found->second.broadcast != value.broadcast))
+			{
+				throw std::runtime_error("conflicting IW7 RumbleInfo definitions: " + value.name);
+			}
+		};
+		std::set<const iw7::ScriptableEventDef*> seen_events, active_events;
+		std::size_t rumble_events{};
+		const auto events = [&](auto&& self, const iw7::ScriptableEventDef* list, const unsigned count) -> void
+		{
+			if (count && !list)
+			{
+				throw std::runtime_error("IW7 Scriptable event count has no array");
+			}
+			for (unsigned i = 0; i < count; ++i)
+			{
+				const auto& event = list[i];
+				if (active_events.contains(&event))
+				{
+					throw std::runtime_error("cyclic IW7 Scriptable event arrays");
+				}
+				if (!seen_events.insert(&event).second)
+				{
+					continue;
+				}
+				active_events.insert(&event);
+				switch (event.type)
+				{
+				case iw7::Scriptable_EventType_Rumble:
+					++rumble_events;
+					info(event.data.rumble.rumbleAsset);
+					break;
+				case iw7::Scriptable_EventType_Random:
+					self(self, event.data.random.eventsA, event.data.random.eventACount);
+					self(self, event.data.random.eventsB, event.data.random.eventBCount);
+					break;
+				case iw7::Scriptable_EventType_Animation:
+					self(self, event.data.animation.eventsAtEnd, event.data.animation.eventAtEndCount);
+					break;
+				case iw7::Scriptable_EventType_ClientViewSelector:
+					self(self, event.data.clientViewSelector.events1p, event.data.clientViewSelector.event1pCount);
+					self(self, event.data.clientViewSelector.events3p, event.data.clientViewSelector.event3pCount);
+					break;
+				case iw7::Scriptable_EventType_TeamSelector:
+					self(self, event.data.teamSelector.eventsPass, event.data.teamSelector.eventPassCount);
+					self(self, event.data.teamSelector.eventsFail, event.data.teamSelector.eventFailCount);
+					break;
+				case iw7::Scriptable_EventType_NoteTrack:
+					if (event.data.noteTrack.noteTrackCount && !event.data.noteTrack.noteTracks)
+					{
+						throw std::runtime_error("IW7 Scriptable notetrack count has no array");
+					}
+					for (unsigned n = 0; n < event.data.noteTrack.noteTrackCount; ++n)
+					{
+						self(self, event.data.noteTrack.noteTracks[n].events, event.data.noteTrack.noteTracks[n].numEvents);
+					}
+					break;
+				default:
+					break;
+				}
+				active_events.erase(&event);
+			}
+		};
+		std::set<const iw7::ScriptablePartDef*> seen_parts, active_parts;
+		const auto part = [&](auto&& self, const iw7::ScriptablePartDef& value) -> void
+		{
+			if (active_parts.contains(&value))
+			{
+				throw std::runtime_error("cyclic IW7 Scriptable part arrays");
+			}
+			if (!seen_parts.insert(&value).second)
+			{
+				return;
+			}
+			active_parts.insert(&value);
+			if (value.numStates && !value.states)
+			{
+				throw std::runtime_error("IW7 Scriptable state count has no array");
+			}
+			for (unsigned s = 0; s < value.numStates; ++s)
+			{
+				const auto& state = value.states[s];
+				events(events, state.base.events, state.base.numEvents);
+				const iw7::ScriptableStateBaseDef* base{};
+				switch (state.type)
+				{
+				case iw7::Scriptable_StateType_Simple:
+					base = state.data.simple.base;
+					break;
+				case iw7::Scriptable_StateType_Health:
+					base = state.data.health.base;
+					break;
+				case iw7::Scriptable_StateType_Scripted:
+					base = state.data.scripted.base;
+					break;
+				default:
+					throw std::runtime_error("unknown IW7 Scriptable state type in rumble closure");
+				}
+				if (base)
+				{
+					events(events, base->events, base->numEvents);
+				}
+			}
+			if (value.numChildParts && !value.childParts)
+			{
+				throw std::runtime_error("IW7 Scriptable child part count has no array");
+			}
+			for (unsigned c = 0; c < value.numChildParts; ++c)
+			{
+				self(self, value.childParts[c]);
+			}
+			active_parts.erase(&value);
+		};
+		std::set<const iw7::ScriptableDef*> definitions;
+		const auto definition = [&](auto&& self, iw7::ScriptableDef* pointer) -> void
+		{
+			if (!pointer)
+			{
+				return;
+			}
+			const auto def = source.resolve(iw7::ASSET_TYPE_SCRIPTABLE, pointer);
+			if (!def)
+			{
+				throw std::runtime_error("IW7 placed Scriptable definition is unresolved");
+			}
+			if (!definitions.insert(def).second)
+			{
+				return;
+			}
+			(void)source.asset_zone(iw7::ASSET_TYPE_SCRIPTABLE, def);
+			if (def->numParts && !def->parts)
+			{
+				throw std::runtime_error("IW7 Scriptable part count has no array");
+			}
+			for (unsigned p = 0; p < def->numParts; ++p)
+			{
+				part(part, def->parts[p]);
+			}
+			self(self, def->nextScriptableDef);
+		};
+		std::set<const iw7::ScriptableDef*> placed_definitions;
+		const auto root = [&](iw7::ScriptableDef* pointer)
+		{
+			if (!pointer)
+			{
+				return;
+			}
+			const auto def = source.resolve(iw7::ASSET_TYPE_SCRIPTABLE, pointer);
+			if (!def)
+			{
+				throw std::runtime_error("IW7 placed Scriptable definition is unresolved");
+			}
+			placed_definitions.insert(def);
+			definition(definition, def);
+		};
+		const auto& placed = map->scriptableMapEnts;
+		if (placed.totalInstanceCount && !placed.instances)
+		{
+			throw std::runtime_error("IW7 Scriptable instance count has no array");
+		}
+		for (unsigned i = 0; i < placed.totalInstanceCount; ++i)
+		{
+			const auto& instance = placed.instances[i];
+			root(instance.contextHeader.context.def);
+			for (const auto& local : instance.contextHeaderLocalClient)
+			{
+				root(local.context.def);
+			}
+		}
+		if (infos.empty() && graphs.empty())
+		{
+			return;
+		}
+		asset_data::rumble_collection data;
+		for (auto& [name, value] : infos)
+		{
+			data.infos.push_back(std::move(value));
+		}
+		for (auto& [name, value] : graphs)
+		{
+			data.graphs.push_back(std::move(value));
+		}
+		const auto semantic = asset_data::write_rumbles(data);
+		evidence["placedDefinitions"] = placed_definitions.size();
+		evidence["reachableDefinitions"] = definitions.size();
+		evidence["uniqueRumbleEvents"] = rumble_events;
+		evidence["unmappedFields"] = ordered_json::array();
+		const auto output = extracted / "asset_data";
+		std::filesystem::create_directories(output);
+		const auto write = [&](const char* name, const ordered_json& value)
+		{
+			std::ofstream file(output / name, std::ios::binary | std::ios::trunc);
+			file << value.dump(2) << '\n';
+			if (!file.good())
+			{
+				throw std::runtime_error("cannot write IW7 rumble asset data");
+			}
+		};
+		write("rumbles.json", semantic);
+		write("rumbles.iw7.provenance.json", evidence);
+		ZONETOOL_INFO("iw7: exported %zu rumble(s), %zu graph(s) from %zu Scriptable rumble event(s)", data.infos.size(),
+					  data.graphs.size(), rumble_events);
 	}
 }

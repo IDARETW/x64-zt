@@ -1,4 +1,7 @@
 #include <std_include.hpp>
+#include <iw8/iw8.hpp>
+#include <iw8/zone/writer.hpp>
+#include <core/assets/rumble_data.hpp>
 #include "iw3_fastfile.h"
 #include "iw3_ledger.h"
 #include "iw3_lightgrid.h"
@@ -9461,6 +9464,84 @@ std::shared_ptr<const iw8::ClientTriggerSet> ReadClientTriggers(const std::files
 }
 } // namespace
 
+void PrepareRumbleAssets(const std::filesystem::path &extractionRoot, PreparedMap &prepared)
+{
+    const auto path = extractionRoot / "asset_data" / "rumbles.json";
+    if (!std::filesystem::exists(path))
+        return;
+    if (prepared.nativeAssetMemory || !prepared.nativeAssets.empty())
+        throw std::runtime_error("native assets were already prepared");
+    std::ifstream input(path, std::ios::binary);
+    if (!input)
+        throw std::runtime_error("cannot read rumble asset data: " + path.string());
+    auto data = zonetool::asset_data::read_rumbles(nlohmann::ordered_json::parse(input));
+    if (data.infos.empty() && data.graphs.empty())
+        return;
+    std::ranges::sort(data.graphs, {}, &zonetool::asset_data::rumble_graph::name);
+    std::ranges::sort(data.infos, {}, &zonetool::asset_data::rumble_info::name);
+
+    std::size_t budget{};
+    const auto reserve = [&](const std::size_t size, const std::size_t count = 1) {
+        if (count > (std::numeric_limits<std::uint32_t>::max() - budget) / size)
+            throw std::runtime_error("native rumble assets exceed the resident size limit");
+        budget += size * count;
+    };
+    reserve(sizeof(zonetool::iw8::RumbleGraph), data.graphs.size());
+    reserve(sizeof(zonetool::iw8::RumbleInfo), data.infos.size());
+    for (const auto &graph : data.graphs)
+        reserve(1, graph.name.size() + 1);
+    for (const auto &info : data.infos)
+        reserve(1, info.name.size() + 1);
+    auto memory = std::make_unique<zonetool::zone_memory>(budget);
+    // Allocate all aligned headers before any byte strings: zone_memory itself is a byte allocator.
+    auto graphs = memory->allocate<zonetool::iw8::RumbleGraph>(data.graphs.size());
+    auto infos = memory->allocate<zonetool::iw8::RumbleInfo>(data.infos.size());
+    std::map<std::string, zonetool::iw8::RumbleGraph *> byName;
+    for (std::size_t i = 0; i < data.graphs.size(); ++i)
+    {
+        const auto &source = data.graphs[i];
+        auto &target = graphs[i];
+        target.name = memory->duplicate_string(source.name);
+        target.knotCount = static_cast<std::uint16_t>(source.knot_count);
+        for (std::size_t knot = 0; knot < 16; ++knot)
+        {
+            target.knots[knot].v[0] = source.x[knot];
+            target.knots[knot].v[1] = source.y[knot];
+        }
+        byName.emplace(source.name, &target);
+    }
+    const auto curve = [&](const std::optional<std::string> &name) {
+        return name ? byName.at(*name) : nullptr;
+    };
+    std::vector<zonetool::iw8::zone_asset> assets;
+    assets.reserve(data.infos.size() + data.graphs.size());
+    for (std::size_t i = 0; i < data.infos.size(); ++i)
+    {
+        const auto &source = data.infos[i];
+        auto &target = infos[i];
+        target.name = memory->duplicate_string(source.name);
+        target.duration = source.duration_milliseconds;
+        target.range = source.range;
+        target.highRumbleGraph = curve(source.high);
+        target.lowRumbleGraph = curve(source.low);
+        target.leftTriggerRumbleGraph = curve(source.left_trigger);
+        target.rightTriggerRumbleGraph = curve(source.right_trigger);
+        target.fadeWithDistance = source.fade_with_distance;
+        target.broadcast = source.broadcast;
+        target.swapTriggerRumblesOnLefty = source.swap_trigger_rumbles_on_lefty;
+        target.panTriggerRumbles = source.pan_trigger_rumbles;
+        assets.push_back({zonetool::iw8::ASSET_TYPE_RUMBLE, &target, false});
+    }
+    for (std::size_t i = 0; i < data.graphs.size(); ++i)
+        assets.push_back({zonetool::iw8::ASSET_TYPE_RUMBLE_GRAPH, &graphs[i], false});
+    prepared.nativeAssetMemory = std::move(memory);
+    prepared.nativeAssets = std::move(assets);
+    zt::info("assets: prepared %zu rumble(s), %zu rumble graph(s) from semantic data",
+             data.infos.size(), data.graphs.size());
+}
+
+PreparedMap::PreparedMap() = default;
+
 PreparedMap::PreparedMap(PreparedMap &&other) noexcept
     : root(std::move(other.root))
     , ladderRungDistance(other.ladderRungDistance)
@@ -9469,6 +9550,8 @@ PreparedMap::PreparedMap(PreparedMap &&other) noexcept
     , scratch(std::move(other.scratch))
     , xmodels(std::move(other.xmodels))
     , rawFiles(std::move(other.rawFiles))
+    , nativeAssetMemory(std::move(other.nativeAssetMemory))
+    , nativeAssets(std::move(other.nativeAssets))
     , xanims(std::move(other.xanims))
     , fxEffects(std::move(other.fxEffects))
     , fxMaterialAliases(std::move(other.fxMaterialAliases))
@@ -9513,6 +9596,8 @@ PreparedMap &PreparedMap::operator=(PreparedMap &&other) noexcept
         scratch = std::move(other.scratch);
         xmodels = std::move(other.xmodels);
         rawFiles = std::move(other.rawFiles);
+        nativeAssetMemory = std::move(other.nativeAssetMemory);
+        nativeAssets = std::move(other.nativeAssets);
         xanims = std::move(other.xanims);
         fxEffects = std::move(other.fxEffects);
         fxMaterialAliases = std::move(other.fxMaterialAliases);
@@ -10340,6 +10425,7 @@ PreparedMap PrepareFastfile(const ImportOptions &options)
             throw std::runtime_error("cannot write the loading-screen preview");
     }
     result.rawFiles = ReadPreparedRawFiles(exportRoot, sourceMap);
+    PrepareRumbleAssets(exportRoot, result);
     // setExpFog and the vision film grade become Replay's vision fog, a grading
     // CLUT and (below) the converted surface shader's fog.
     const auto expFog = ReadMapExpFog(exportRoot, sourceMap);

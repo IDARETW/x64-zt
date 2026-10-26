@@ -92,6 +92,8 @@ namespace zonetool::convert::iw7_iw8
 			ZONETOOL_WARNING("iw7: zone \"code_post_gfx\" was not found; sound aliases keep the default curves");
 		}
 
+		export_rumbles(source, output.extracted);
+		lap("rumble assets");
 		export_sounds(source, output);
 		lap("sounds");
 		// A model that the loaded zones lack may have a zone of its own.

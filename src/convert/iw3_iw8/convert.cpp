@@ -1,5 +1,8 @@
 #include <std_include.hpp>
+#include <iw8/iw8.hpp>
 #include <game.hpp>
+#include <iw8/zone/loader.hpp>
+#include <iw8/zone/writer.hpp>
 #include <iw8/zone/ff_io.h>
 #include <iw8/common/fs_util.h>
 #include <iw8/common/log.h>
@@ -61,9 +64,6 @@ using namespace zt;
 namespace zonetool::iw8
 {
 	const game& definition();
-	xfile::fastfile rewrite_fastfile(const std::string& name, xfile::fastfile file);
-	std::vector<std::int32_t> zone_list_types(const std::filesystem::path& path);
-	std::vector<std::int32_t> zone_list_types(const std::filesystem::path& path, std::string data);
 }
 
 namespace
@@ -344,6 +344,15 @@ bool prepareOutputDirectory(const std::string &outputDirectory, const std::strin
 // iw8-zonetool builds.
 bool g_converterLayout = false;
 
+const char *outputAssetTypeName(const int type)
+{
+    const char *name = iw8sz::type_name(type);
+    if (std::strcmp(name, "unknown") != 0)
+        return name;
+    const auto format = zonetool::iw8::find_asset_format(type);
+    return format ? format->name : name;
+}
+
 struct ZoneValidation
 {
     uint32_t assetCount{};
@@ -520,7 +529,7 @@ bool validateZoneFile(const std::string &path, ZoneValidation *details = nullptr
             continue;
         if (!summary.empty())
             summary += ", ";
-        const char *name = iw8sz::type_name(static_cast<int>(type));
+        const char *name = outputAssetTypeName(static_cast<int>(type));
         summary += std::strcmp(name, "unknown") == 0 ? "type" + std::to_string(type) : name;
         summary += '=';
         summary += std::to_string(typeCounts[type]);
@@ -796,10 +805,17 @@ template <> Iw8WriteParams writeParams(const iw8::ZoneBuffer &buffer)
 }
 
 // Writes a zone that the converter built: the x64-zt zone writer lays it out again and the core container stores it.
-bool writeZone(const std::string &outputPath, std::vector<uint8_t> body, const Iw8WriteParams &params)
+bool writeZone(const std::string &outputPath, std::vector<uint8_t> body, const Iw8WriteParams &params,
+               const std::span<const zonetool::iw8::zone_asset> additional = {},
+               zonetool::iw8::zone_inventory *inventory = nullptr)
 {
     if (g_converterLayout)
     {
+        if (!additional.empty())
+        {
+            err("iw8: native asset additions require the x64-zt writer");
+            return false;
+        }
         // The margin is memory without file payload: a calc reservation.
         auto layout = params;
         layout.blockSize[iw8::XFILE_BLOCK_TEMP_POSTLOAD] += params.postloadMargin;
@@ -819,7 +835,7 @@ bool writeZone(const std::string &outputPath, std::vector<uint8_t> body, const I
         file.transient = params.transientFileType != 0;
         file.preload_walk_size = params.preloadWalkSize;
         auto written = zonetool::iw8::rewrite_fastfile(
-            std::filesystem::path(outputPath).stem().string(), std::move(file));
+            std::filesystem::path(outputPath).stem().string(), std::move(file), additional, inventory);
         written.block_sizes[iw8::XFILE_BLOCK_TEMP_POSTLOAD] += params.postloadMargin;
         zonetool::xfile::write(outputPath, zonetool::iw8::definition().format, written);
         info("iw8: wrote %s (%zu bytes of zone data)", outputPath.c_str(), written.payload.size());
@@ -1461,6 +1477,9 @@ std::vector<OutputLedgerRow> outputLedgerRows(
             set(ASSET_TYPE_VFX, effect.name, "IW3 effect");
         for (const auto &anim : prepared->xanims)
             set(ASSET_TYPE_XANIM, anim.name, "IW3 xanim");
+        for (const auto &asset : prepared->nativeAssets)
+            set(asset.type, zonetool::iw8::get_asset_name(asset.type, asset.header),
+                "semantic rumble collection (asset_data/rumbles.json)");
         for (const auto &raw : prepared->rawFiles)
             set(ASSET_TYPE_RAWFILE, raw.name,
                 raw.name.starts_with("vision/") ? "IW3 vision (converted, layer 17)"
@@ -1562,7 +1581,7 @@ std::vector<OutputLedgerRow> outputLedgerRows(
             default:
                 break;
             }
-        rows.push_back({zone, iw8sz::type_name(type), name, origin.empty() ? "UNEXPLAINED" : origin});
+        rows.push_back({zone, outputAssetTypeName(type), name, origin.empty() ? "UNEXPLAINED" : origin});
     }
     return rows;
 }
@@ -2088,6 +2107,10 @@ int writeMapPackage(const Args &args, const std::string &map, const std::string 
             if (prepared)
                 for (const auto &anim : prepared->xanims)
                     levelStrings[16].push_back(anim.name); // "anm"
+            if (prepared)
+                for (const auto &asset : prepared->nativeAssets)
+                    if (asset.type == zonetool::iw8::ASSET_TYPE_RUMBLE)
+                        levelStrings[3].push_back(zonetool::iw8::get_asset_name(asset.type, asset.header)); // "rmb"
             info("assets: level NetConstStrings: %zu model(s), %zu effect(s)", models.size(),
                  effects.size());
         }
@@ -2110,17 +2133,30 @@ int writeMapPackage(const Args &args, const std::string &map, const std::string 
         writer.build();
         timing.lap("main zone build");
         const auto mapParams = withPostloadMargin(writeParams(writer));
-        if (!writeZone(path_join(outputDirectory, map + ".ff"), writer.takeBody(), mapParams))
+        const auto native = prepared ? std::span<const zonetool::iw8::zone_asset>(prepared->nativeAssets)
+                                     : std::span<const zonetool::iw8::zone_asset>{};
+        zonetool::iw8::zone_inventory nativeInventory;
+        if (!writeZone(path_join(outputDirectory, map + ".ff"), writer.takeBody(), mapParams, native,
+                       native.empty() ? nullptr : &nativeInventory))
         {
             result = 1;
         }
         timing.lap("zone write");
-        for (auto &row : outputLedgerRows(map, writer.assetList(), renderMesh, prepared, map, stockCopier.get()))
+        auto emittedAssets = writer.assetList();
+        if (!native.empty())
+        {
+            emittedAssets.clear();
+            emittedAssets.reserve(nativeInventory.asset_offsets.size());
+            for (const auto &[offset, type, name] : nativeInventory.asset_offsets)
+                emittedAssets.emplace_back(static_cast<IW8_XAssetType>(type), name);
+        }
+        for (auto &row : outputLedgerRows(map, emittedAssets, renderMesh, prepared, map, stockCopier.get()))
             ledgerRows.push_back(std::move(row));
         for (auto &row : outputLedgerRows("techsets_" + map, techsets.assetList(), renderMesh, prepared, map,
                                           stockCopier.get()))
             ledgerRows.push_back(std::move(row));
-        info("build-map: main zone contains %zu assets", writer.assetCount());
+        info("build-map: main zone contains %zu assets",
+             native.empty() ? writer.assetCount() : nativeInventory.list_asset_count);
         info("build-map: techset zone contains %zu assets", techsets.assetCount());
     }
 

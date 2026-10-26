@@ -26,11 +26,18 @@ namespace zonetool::iw8
 		std::size_t expected_size{};
 	};
 
+	struct zone_inventory
+	{
+		std::size_t list_asset_count{};
+		std::vector<std::tuple<std::size_t, std::int32_t, std::string>> asset_offsets;
+	};
+
 	struct written_zone
 	{
 		std::string data;
 		std::vector<std::uint64_t> block_sizes;
 		std::size_t preload_walk_size{};
+		std::size_t list_asset_count{};
 		// The data offset where each asset starts, with its type and name.
 		std::vector<std::tuple<std::size_t, std::int32_t, std::string>> asset_offsets;
 	};
@@ -57,5 +64,8 @@ namespace zonetool::iw8
 	// version and the transient flag of `file`, and at least its preload walk size.
 	xfile::fastfile rewrite_fastfile(const std::string& name, xfile::fastfile file,
 		std::span<const zone_asset> additional);
+	// Optional inventory describes the final native list and every emitted asset body.
+	xfile::fastfile rewrite_fastfile(const std::string& name, xfile::fastfile file,
+		std::span<const zone_asset> additional, zone_inventory* inventory);
 	xfile::fastfile rewrite_fastfile(const std::string& name, xfile::fastfile file);
 }
