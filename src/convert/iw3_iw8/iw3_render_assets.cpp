@@ -7749,6 +7749,14 @@ RenderPlan PrepareRenderAssets(const std::filesystem::path &exportRoot, const Js
             const std::string materialFile = stem + "." + usage + "." + id + ".material.json";
             Json direct = modelMaterialTemplate;
             direct["source"] = source.name;
+            if (!entity)
+            {
+                auto info = Unhex(direct.at("info").get<std::string>());
+                constexpr std::uint32_t noCastShadow = 0x40000u;
+                const auto flags = At<std::uint32_t>(info, 4);
+                Put<std::uint32_t>(info, 4, source.castsShadow ? flags & ~noCastShadow : flags | noCastShadow);
+                direct["info"] = Hex(info);
+            }
             if (source.kind == SurfaceKind::glass)
             {
                 // Shipped Replay model glass is submitted after opaque surfaces,
