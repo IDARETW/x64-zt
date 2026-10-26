@@ -670,6 +670,13 @@ namespace zonetool::iw8::havok
 						return false;
 					});
 
+					// Section.numPackedVertices is an 8-bit count in Replay; zero does not encode 256.
+					if (candidates.size() > std::numeric_limits<std::uint8_t>::max())
+					{
+						shared[candidates.back()] = true;
+						candidates.pop_back();
+					}
+
 					changed = candidates.size() != before;
 				}
 
@@ -1011,6 +1018,11 @@ namespace zonetool::iw8::havok
 			for (const auto value : parms)
 			{
 				put(bytes, value);
+			}
+
+			if (section.packed.size() > std::numeric_limits<std::uint8_t>::max())
+			{
+				throw std::runtime_error("a compressed mesh section has more packed vertices than Replay can encode");
 			}
 
 			put(bytes, static_cast<std::uint32_t>(packed_vertices.size() - section.packed.size()));
