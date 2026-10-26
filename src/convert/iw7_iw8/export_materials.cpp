@@ -905,7 +905,7 @@ namespace zonetool::convert::iw7_iw8
 		// The IW3 material of a material, with the images of its roles (the pipeline's defaults for the missing ones).
 		json export_material(const iw7::Material* material,
 			const std::array<std::optional<std::string>, image_role_count>& images, const material_class& kind, const int layer,
-			const float light_scale, const bool decal_range)
+			const float light_scale, const bool decal_range, const bool shadow_only = false)
 		{
 			// IW7_MAT_DUMP=<text>: the technique set and constants of each material whose name holds the text.
 			if (const auto* dump = std::getenv("IW7_MAT_DUMP"); dump && !layer && material && material->name &&
@@ -1019,7 +1019,7 @@ namespace zonetool::convert::iw7_iw8
 				entries.push_back(kind.unlit ? (i == 4 ? 1 : -1) : (i == 7 ? 1 : i == 4 ? 0 : -1));
 			}
 
-			const auto shadow = !kind.unlit && kind.solid();
+			const auto shadow = shadow_only || (!kind.unlit && kind.solid());
 			// IW7 draws its decals (decal sheets, stripes, signs, scrapes) over the coplanar surface beneath with a depth
 			// bias: the polygon offset of the material's lit or emissive technique state. Its lit pass takes IW3's decal
 			// polygon offset, which the pipeline draws biased; the pipeline's rank nudge alone left the wayfinding signs
@@ -1052,6 +1052,11 @@ namespace zonetool::convert::iw7_iw8
 				{"textureAtlas", {{"columns", 1}, {"rows", 1}}},
 				{"textures", std::move(textures)},
 			};
+
+			if (shadow_only)
+			{
+				result["iw7ShadowOnly"] = true;
+			}
 
 			// Flag cloth and foliage move by IW7's flag wave (the pipeline's MAP_IW7_FLAG_* variants of static models).
 			if (const auto wave = layer ? std::nullopt : flag_wave(material))
@@ -1903,12 +1908,14 @@ namespace zonetool::convert::iw7_iw8
 			// cbf4948).
 			// Model nodraw materials (mo/nodraw, mopw/model_nodraw: Scorch's pillar signs) use a lit technique and
 			// IW7's own "nodraw" image: they are tools by name.
-			if (const auto tools = material && material->techniqueSet ? asset_name(material->techniqueSet->name) : std::string_view{};
-				(material && material->cameraRegion == 11) || tools.find("_tools_") != std::string_view::npos ||
+			const auto tools = material && material->techniqueSet ? asset_name(material->techniqueSet->name) : std::string_view{};
+			const bool tool = (material && material->cameraRegion == 11) || tools.find("_tools_") != std::string_view::npos ||
 				tools.ends_with("_tools") || tools.find("shadowcaster") != std::string_view::npos ||
-				name.ends_with("/nodraw") || name.ends_with("/model_nodraw") || name == "nodraw")
+				name.ends_with("/nodraw") || name.ends_with("/model_nodraw") || name == "nodraw";
+			const bool casts = name.find("shadow") != std::string::npos && tools.find("nocast") == std::string_view::npos;
+			const bool model_shadow_only = tool && casts && !output.world_materials.contains(name);
+			if (tool && !model_shadow_only)
 			{
-				const auto casts = name.find("shadow") != std::string::npos && tools.find("nocast") == std::string_view::npos;
 				auto state = state_json("none", false, surface_kind::opaque);
 				write_json_async(output.extracted / "materials" / (name + ".json"),
 				{
@@ -2044,7 +2051,7 @@ namespace zonetool::convert::iw7_iw8
 			flags += flag_wave(material).has_value();
 			missing += material == nullptr;
 			auto exported = export_material(material, images, kind, layer, light_unit_scale(source),
-				output.decal_range_materials.contains(name));
+				output.decal_range_materials.contains(name), model_shadow_only);
 			// Every surface of the world material is lightmapped: a stock Replay world material of it draws them all, and
 			// it needs no converted material.
 			if (replay_stock_world() && !layer && output.world_materials.contains(name) &&

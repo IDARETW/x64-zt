@@ -37,6 +37,8 @@ struct MaterialPlan
     SurfaceKind kind{SurfaceKind::opaque};
     bool castsShadow{true};
     bool shadowOnly{};
+    bool staticModelShadowOnly{};
+    bool entityNoDraw{};
     unsigned flags{};
     // IW3 cull state: 0 none, 1 back, 2 front.
     unsigned cullMode{1};
@@ -75,6 +77,15 @@ struct MaterialPlan
     std::string entityMaterial;
     std::string glassMaterial;
 };
+
+inline bool HasStaticModelSurface(const MaterialPlan &material)
+{
+    return material.staticModelShadowOnly ? material.castsShadow : material.kind != SurfaceKind::skipped;
+}
+
+bool HasStaticModelSurface(const std::filesystem::path &exportRoot,
+                           const std::vector<std::filesystem::path> &sourcePaths,
+                           const std::string &name);
 
 // World cutout surfaces share generated atlas materials. IW3 double-sided
 // lattices are two coplanar faces, so back-face culling must survive per

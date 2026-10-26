@@ -4064,8 +4064,11 @@ bool OnlyToolSurfaces(const std::filesystem::path &root, const SourceStaticModel
             auto path = SafeChild(root, std::filesystem::path("materials") / (surface.material + ".json"));
             if (!std::filesystem::is_regular_file(path, error) && surface.material.starts_with("mc/"))
                 path = SafeChild(root, std::filesystem::path("materials") / (surface.material.substr(3) + ".json"));
-            if (!std::filesystem::is_regular_file(path, error) ||
-                ReadJson(path).value("techniqueSet", std::string{}) != "shadowcaster")
+            if (!std::filesystem::is_regular_file(path, error))
+                return false;
+            const auto material = ReadJson(path);
+            if (material.value("techniqueSet", std::string{}) != "shadowcaster" &&
+                !material.value("iw7ShadowOnly", false))
                 return false;
             any = true;
         }
@@ -4077,20 +4080,27 @@ bool DrawsOnlyTools(const std::filesystem::path &root, const std::string &modelN
     return OnlyToolSurfaces(root, ReadSourceModel(root, modelName, true));
 }
 
-// Takes the placements of models that draw nothing (Fallen's prop_haybale_fn_shadowcaster) out of the static
-// models: Replay has no static model without surfaces, and they only cast the baked sun shadow. `kept` takes each
-// placement's new index (VisibilityGroups::Unassigned for a taken one).
-SourceStaticModels TakeShadowOnlyStaticModels(const std::filesystem::path &root, SourceStaticModels &staticModels,
+// Remove models with no native render surfaces before instance lighting and visibility are indexed.
+SourceStaticModels TakeNonrenderingStaticModels(const std::filesystem::path &root, const std::vector<std::filesystem::path> &sourcePaths,
+                                              SourceStaticModels &staticModels,
                                               std::vector<std::uint32_t> &kept)
 {
-    std::vector<bool> shadowOnly(staticModels.models.size());
+    std::unordered_map<std::string, bool> materials;
+    std::vector<bool> nonrendering(staticModels.models.size());
     for (std::size_t index = 0; index < staticModels.models.size(); ++index)
-        shadowOnly[index] = OnlyToolSurfaces(root, staticModels.models[index]);
+        nonrendering[index] = !std::ranges::any_of(staticModels.models[index].lods, [&](const auto &lod) {
+            return std::ranges::any_of(lod.surfaces, [&](const Surface &surface) {
+                auto [entry, inserted] = materials.try_emplace(surface.material);
+                if (inserted)
+                    entry->second = HasStaticModelSurface(root, sourcePaths, surface.material);
+                return entry->second;
+            });
+        });
     SourceStaticModels taken, drawn;
     std::vector<std::size_t> remap(staticModels.models.size());
     for (std::size_t index = 0; index < staticModels.models.size(); ++index)
     {
-        auto &target = shadowOnly[index] ? taken : drawn;
+        auto &target = nonrendering[index] ? taken : drawn;
         remap[index] = target.models.size();
         target.models.push_back(std::move(staticModels.models[index]));
     }
@@ -4098,7 +4108,7 @@ SourceStaticModels TakeShadowOnlyStaticModels(const std::filesystem::path &root,
     for (std::size_t index = 0; index < staticModels.instances.size(); ++index)
     {
         auto &instance = staticModels.instances[index];
-        auto &target = shadowOnly.at(instance.model) ? taken : drawn;
+        auto &target = nonrendering.at(instance.model) ? taken : drawn;
         if (&target == &drawn)
             kept[index] = static_cast<std::uint32_t>(drawn.instances.size());
         instance.model = remap[instance.model];
@@ -4106,7 +4116,7 @@ SourceStaticModels TakeShadowOnlyStaticModels(const std::filesystem::path &root,
     }
     staticModels = std::move(drawn);
     if (!taken.instances.empty())
-        zt::info("iw3: %zu placement(s) of %zu model(s) that draw only tool surfaces cast only the baked sun shadow",
+        zt::info("iw3: %zu placement(s) of %zu model(s) have no native render surfaces",
                  taken.instances.size(), taken.models.size());
     return taken;
 }
@@ -4475,7 +4485,9 @@ void BuildPreparedStaticModels(const SourceStaticModels &source, const RenderPla
         const bool drawn = std::ranges::any_of(sourceModel.lods, [&](const SourceStaticModelLod &lod) {
             return std::ranges::any_of(lod.surfaces, [&](const Surface &surface) {
                 const auto found = plan.materials.find(surface.material);
-                return found == plan.materials.end() || found->second.kind != SurfaceKind::skipped;
+                return found == plan.materials.end() ||
+                       (entityDraw ? found->second.kind != SurfaceKind::skipped && !found->second.entityNoDraw
+                                   : HasStaticModelSurface(found->second));
             });
         });
         if (!drawn && (!entityDraw || sourceModel.lods.empty()))
@@ -4504,7 +4516,8 @@ void BuildPreparedStaticModels(const SourceStaticModels &source, const RenderPla
                     throw std::runtime_error("IW3 render plan omitted model material " +
                                              surface.material);
                 const MaterialPlan &material = found->second;
-                if (material.kind == SurfaceKind::skipped)
+                if (entityDraw ? material.kind == SurfaceKind::skipped || material.entityNoDraw
+                               : !HasStaticModelSurface(material))
                     continue;
                 if (material.kind == SurfaceKind::sky)
                     throw std::runtime_error("IW3 static model uses a sky material: " +
@@ -4756,9 +4769,12 @@ void BuildPreparedStaticModels(const SourceStaticModels &source, const RenderPla
                 staticSurface.material = materialName;
                 // Decals and IW3 layers (polygon offset, sorts above opaque) lie
                 // on other geometry, as stock model decals do.
-                staticSurface.cullType = replayrender::StaticModelCullType(
-                    material.cullMode == 1, material.depthBias || ((material.flags >> 12) & 0x3Fu) != 0,
-                    material.kind == SurfaceKind::glass);
+                staticSurface.cullType = !entityDraw && material.staticModelShadowOnly
+                                            ? 0
+                                            : replayrender::StaticModelCullType(
+                                                  material.cullMode == 1,
+                                                  material.depthBias || ((material.flags >> 12) & 0x3Fu) != 0,
+                                                  material.kind == SurfaceKind::glass);
                 staticLod.surfaces.push_back(std::move(staticSurface));
             }
 
@@ -10860,8 +10876,8 @@ PreparedMap PrepareFastfile(const ImportOptions &options)
     AddPromotedStaticModels(world, exportRoot, TakeUnscriptedScriptModels(entities, scriptStrings, exportRoot),
                             sourceStaticModels);
     std::vector<std::uint32_t> keptPlacements;
-    const SourceStaticModels shadowOnlyStaticModels =
-        TakeShadowOnlyStaticModels(exportRoot, sourceStaticModels, keptPlacements);
+    const SourceStaticModels nonrenderingStaticModels =
+        TakeNonrenderingStaticModels(exportRoot, options.searchPaths, sourceStaticModels, keptPlacements);
     RenumberVisibilityModels(visibility, keptPlacements);
     timing.lap("read world");
     SourceStaticModels sourceEntityModels;
@@ -10918,13 +10934,13 @@ PreparedMap PrepareFastfile(const ImportOptions &options)
     for (const Surface &surface : brushModels.front().surfaces)
         shadowWorldMaterialNames.push_back(surface.material);
     for (const SourceStaticModels *models :
-         std::array<const SourceStaticModels *, 2>{&sourceStaticModels, &shadowOnlyStaticModels})
+         std::array<const SourceStaticModels *, 2>{&sourceStaticModels, &nonrenderingStaticModels})
         for (const SourceStaticModel &model : models->models)
             if (!model.lods.empty())
                 for (const Surface &surface : model.lods.front().surfaces)
                 {
                     shadowModelMaterialNames.push_back(surface.material);
-                    if (models == &shadowOnlyStaticModels)
+                    if (models == &nonrenderingStaticModels)
                         materialNames.push_back(surface.material);
                 }
     for (const BrushModel &model : brushModels)
@@ -11509,9 +11525,9 @@ PreparedMap PrepareFastfile(const ImportOptions &options)
     {
         SourceStaticModels casters = sourceStaticModels;
         const std::size_t offset = casters.models.size();
-        casters.models.insert(casters.models.end(), shadowOnlyStaticModels.models.begin(),
-                              shadowOnlyStaticModels.models.end());
-        for (auto instance : shadowOnlyStaticModels.instances)
+        casters.models.insert(casters.models.end(), nonrenderingStaticModels.models.begin(),
+                              nonrenderingStaticModels.models.end());
+        for (auto instance : nonrenderingStaticModels.instances)
         {
             instance.model += offset;
             casters.instances.push_back(std::move(instance));
