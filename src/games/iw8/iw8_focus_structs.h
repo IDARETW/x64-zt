@@ -1,4 +1,5 @@
 #pragma once
+#include <cstddef>
 #include <cstdint>
 
 // Pull in the iw8sz:: g_assetSizes constants (XMODELSURFS/XMODEL/MATERIAL/IMAGE) for the dual
@@ -51,6 +52,10 @@ struct XPakEntryInfo
                        //       adjacentRightType:3, adjacentLeft:19, adjacentRight:19, pad:10
 };
 static_assert(sizeof(XPakEntryInfo) == 0x20, "XPakEntryInfo");
+static_assert(offsetof(XPakEntryInfo, key) == 0x00);
+static_assert(offsetof(XPakEntryInfo, offset) == 0x08);
+static_assert(offsetof(XPakEntryInfo, size) == 0x10);
+static_assert(offsetof(XPakEntryInfo, bitfield) == 0x18);
 
 // =============================================================================================
 //  GfxImageStreamData  [PDB] 0x28 — one per mip-stream group (GfxImage.streams[4])
@@ -63,6 +68,10 @@ struct GfxImageStreamData
     uint16_t height;            // 0x26
 };
 static_assert(sizeof(GfxImageStreamData) == 0x28, "GfxImageStreamData");
+static_assert(offsetof(GfxImageStreamData, xpakEntry) == 0x00);
+static_assert(offsetof(GfxImageStreamData, levelCountAndSize) == 0x20);
+static_assert(offsetof(GfxImageStreamData, width) == 0x24);
+static_assert(offsetof(GfxImageStreamData, height) == 0x26);
 
 // =============================================================================================
 //  GfxImageFallback  [PDB] 0x10 — low-res inline fallback pixels (pointed to by image.fallback)
@@ -75,9 +84,14 @@ struct GfxImageFallback
     uint16_t height; // 0x0E
 };
 static_assert(sizeof(GfxImageFallback) == 0x10, "GfxImageFallback");
+static_assert(offsetof(GfxImageFallback, pixels) == 0x00);
+static_assert(offsetof(GfxImageFallback, size) == 0x08);
+static_assert(offsetof(GfxImageFallback, width) == 0x0C);
+static_assert(offsetof(GfxImageFallback, height) == 0x0E);
 
 // =============================================================================================
-//  GfxImage  (asset type 19)  [PDB] 0xE8  ==  [TBL] g_assetSizes[19]=0xE8   CONFIRMED
+//  Replay GfxImage (asset type 19), 0xE8. The native stream-count getter at RVA 0x193BF70 reads +0x32;
+//  the game-test PDB's +0x31 count and +0x32 decal index do not describe this target.
 //  Pointer fields: name, packedAtlasData, fallback, pixels. (streams[] is inline, scalar.)
 // =============================================================================================
 struct GfxImage
@@ -97,10 +111,11 @@ struct GfxImage
     uint8_t semantic;            // 0x2E  TextureSemantic
     uint8_t category;            // 0x2F  GfxImageCategory
     uint8_t levelCount;          // 0x30
-    uint8_t streamedPartCount;   // 0x31
-    uint8_t decalAtlasIndex;     // 0x32
+    uint8_t unknown_0x31;        // 0x31  stock resident HDR CLUTs keep 8 here
+    uint8_t streamedPartCount;   // 0x32
     int8_t freqDomainMetricBias; // 0x33
-    // 0x34..0x37 implicit pad (8-align for streams[])
+    uint8_t unknown_0x34;        // 0x34  written by Replay's Load_ImageStream helper
+    uint8_t padding_0x35[3];
     GfxImageStreamData streams[4]; // 0x38  (0xA0)  — inline scalar array
     GfxImageFallback *fallback;    // 0xD8  //PTR
     // GfxImagePixels pixels @0xE0 — [PDB] size 8: a pointer-sized union (the resident pixel
@@ -110,6 +125,13 @@ struct GfxImage
 };
 static_assert(sizeof(GfxImage) == 0xE8, "GfxImage size (pinned 0xE8)");
 static_assert(sizeof(GfxImage) == iw8sz::IMAGE, "GfxImage size must equal g_assetSizes[19]");
+static_assert(offsetof(GfxImage, unknown_0x31) == 0x31);
+static_assert(offsetof(GfxImage, streamedPartCount) == 0x32);
+static_assert(offsetof(GfxImage, freqDomainMetricBias) == 0x33);
+static_assert(offsetof(GfxImage, unknown_0x34) == 0x34);
+static_assert(offsetof(GfxImage, streams) == 0x38);
+static_assert(offsetof(GfxImage, fallback) == 0xD8);
+static_assert(offsetof(GfxImage, pixels) == 0xE0);
 
 // =============================================================================================
 //  MaterialTextureDef  [PDB] 0x10 — one per bound image (Material.textureTable[textureCount])

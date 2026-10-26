@@ -2671,6 +2671,8 @@ void EmitMaterial(ZoneWriter &w, const Material &m, bool definition)
 void RegisterImageDefinition(ZoneWriter &w, const Image &image,
                              std::set<std::pair<unsigned, std::string>> &registered)
 {
+    if (image.flags & 0x40u)
+        throw std::runtime_error("resident image requires streamed serialization: " + image.name);
     if (!registered.emplace(19, image.name).second)
         return;
     const Image *definition = &image;

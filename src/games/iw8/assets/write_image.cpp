@@ -32,8 +32,8 @@ static constexpr size_t kGI_atlasInfo = 0x2C;      // u16
 static constexpr size_t kGI_semantic = 0x2E;       // u8
 static constexpr size_t kGI_category = 0x2F;       // u8
 static constexpr size_t kGI_levelCount = 0x30;     // u8
-static constexpr size_t kGI_streamedPart = 0x31;   // u8
-static constexpr size_t kGI_decalAtlasIdx = 0x32;  // u8
+static constexpr size_t kGI_unknown31 = 0x31;      // u8, distinct from the target's stream count
+static constexpr size_t kGI_streamedPart = 0x32;   // u8
 static constexpr size_t kGI_freqBias = 0x33;       // i8
 static constexpr size_t kGI_streams = 0x38;        // GfxImageStreamData[4] (0xA0) — zeroed
 static constexpr size_t kGI_fallback = 0xD8;       // GfxImageFallback* //PTR
@@ -51,8 +51,9 @@ static_assert(offsetof(iw8_focus::GfxImage, numElements) == kGI_numElements, "nu
 static_assert(offsetof(iw8_focus::GfxImage, semantic) == kGI_semantic, "semantic@0x2E");
 static_assert(offsetof(iw8_focus::GfxImage, category) == kGI_category, "category@0x2F");
 static_assert(offsetof(iw8_focus::GfxImage, levelCount) == kGI_levelCount, "levelCount@0x30");
+static_assert(offsetof(iw8_focus::GfxImage, unknown_0x31) == kGI_unknown31, "unknown@0x31");
 static_assert(offsetof(iw8_focus::GfxImage, streamedPartCount) == kGI_streamedPart,
-              "streamedPart@0x31");
+              "streamedPart@0x32");
 static_assert(offsetof(iw8_focus::GfxImage, streams) == kGI_streams, "streams@0x38");
 static_assert(offsetof(iw8_focus::GfxImage, fallback) == kGI_fallback, "fallback@0xD8");
 static_assert(offsetof(iw8_focus::GfxImage, pixels) == kGI_pixels, "pixels@0xE0");
@@ -79,6 +80,14 @@ bool emitImageBody(iw8::ZoneWriter &zw, const Iw8ImageDef &def)
     if (def.name.empty())
     {
         err("dumpimg: emitImageBody: empty image name");
+        return false;
+    }
+
+    // Replay Load_GfxImagePixels selects a streamer handle when flag 0x40 is set,
+    // rather than consuming the resident payload emitted by this writer.
+    if ((def.flags & 0x40u) || def.streamedPartCount)
+    {
+        err("dumpimg: emitImageBody: '%s' requires streamed image serialization", def.name.c_str());
         return false;
     }
 
@@ -110,8 +119,8 @@ bool emitImageBody(iw8::ZoneWriter &zw, const Iw8ImageDef &def)
     s8(gi, kGI_semantic, def.semantic);
     s8(gi, kGI_category, def.category);
     s8(gi, kGI_levelCount, def.levelCount ? def.levelCount : 1);
+    s8(gi, kGI_unknown31, 0);
     s8(gi, kGI_streamedPart, 0); // 0 => fully resident (no xpak)
-    s8(gi, kGI_decalAtlasIdx, 0);
     s8(gi, kGI_freqBias, 0);
     // streams[4] @0x38 (0xA0): left zeroed (no streamed parts).
     s64(gi, kGI_fallback, iw8::PTR_NULL); // no low-res fallback
@@ -155,7 +164,10 @@ bool addImageAsset(iw8::ZoneWriter &zw, const Iw8ImageDef &def)
         return false;
     }
     Iw8ImageDef copy = def; // capture by value so the deferred callback owns its data
-    zw.add(ASSET_TYPE_IMAGE, def.name, [copy](iw8::ZoneWriter &w) { emitImageBody(w, copy); });
+    zw.add(ASSET_TYPE_IMAGE, def.name, [copy](iw8::ZoneWriter &w) {
+        if (!emitImageBody(w, copy))
+            throw std::runtime_error("could not serialize resident image '" + copy.name + "'");
+    });
     return true;
 }
 
