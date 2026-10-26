@@ -3,6 +3,9 @@
 #include "loader.hpp"
 #include "writer.hpp"
 
+#include <limits>
+#include <set>
+
 namespace zonetool::iw8
 {
 	namespace
@@ -362,6 +365,12 @@ namespace zonetool::iw8
 
 	written_zone write_zone(const loaded_zone& zone, const write_options& options)
 	{
+		return write_zone(zone, options, {});
+	}
+
+	written_zone write_zone(const loaded_zone& zone, const write_options& options,
+		const std::span<const zone_asset> additional)
+	{
 		std::vector<zone_asset> list;
 		list.reserve(zone.list.size());
 		for (const auto& asset : zone.list)
@@ -376,10 +385,49 @@ namespace zonetool::iw8
 			assets.emplace_back(asset.type, asset.header, asset.referenced);
 		}
 
+		if (!additional.empty())
+		{
+			if (additional.size() > std::numeric_limits<std::uint32_t>::max() - list.size())
+			{
+				throw std::runtime_error("appended assets exceed the native asset list count");
+			}
+
+			std::set<asset_key> keys;
+			for (const auto& asset : assets)
+			{
+				keys.emplace(asset.type, name_of(asset.type, asset.header));
+			}
+			for (const auto& asset : list)
+			{
+				keys.emplace(asset.type, name_of(asset.type, asset.header));
+			}
+			for (const auto& asset : additional)
+			{
+				const auto format = find_asset_format(asset.type);
+				if (!format || !asset.header || asset.referenced)
+				{
+					throw std::runtime_error("appended asset must have a native type and a full header");
+				}
+				const auto name = name_of(asset.type, asset.header);
+				if (name.empty() || !keys.emplace(asset.type, name).second)
+				{
+					throw std::runtime_error(std::format("appended {} asset has an empty or duplicate name: {}", format->name, name));
+				}
+				list.push_back(asset);
+				assets.push_back(asset);
+			}
+		}
+
 		return write_zone(list, assets, zone.script_strings, options);
 	}
 
 	xfile::fastfile rewrite_fastfile(const std::string& name, xfile::fastfile file)
+	{
+		return rewrite_fastfile(name, std::move(file), {});
+	}
+
+	xfile::fastfile rewrite_fastfile(const std::string& name, xfile::fastfile file,
+		const std::span<const zone_asset> additional)
 	{
 		xfile::fastfile result{};
 		result.xfile_version = file.xfile_version;
@@ -389,7 +437,7 @@ namespace zonetool::iw8
 		const auto expected_size = file.payload.size() + file.payload.size() / 16;
 
 		auto zone = load_zone(name, std::move(file), {.keep_temp_data = true});
-		auto written = write_zone(*zone, {.expected_size = expected_size});
+		auto written = write_zone(*zone, {.expected_size = expected_size}, additional);
 		zone.reset();
 
 		result.payload = std::move(written.data);

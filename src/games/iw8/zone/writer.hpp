@@ -47,8 +47,15 @@ namespace zonetool::iw8
 	// follow (-2), as in stock zones. The zone must load with keep_temp_data.
 	written_zone write_zone(const loaded_zone& zone, const write_options& options = {});
 
+	// Additional definitions become list entries; their headers must remain alive through the write.
+	// Existing identities, duplicate additions and referenced stubs are rejected.
+	written_zone write_zone(const loaded_zone& zone, const write_options& options,
+		std::span<const zone_asset> additional);
+
 	// Writes zone data that another writer made with the choices of this writer, for example a zone of the IW3
 	// converter: the zone loads, keeping the data that the game drops, and is written again. The result keeps the xfile
 	// version and the transient flag of `file`, and at least its preload walk size.
+	xfile::fastfile rewrite_fastfile(const std::string& name, xfile::fastfile file,
+		std::span<const zone_asset> additional);
 	xfile::fastfile rewrite_fastfile(const std::string& name, xfile::fastfile file);
 }
