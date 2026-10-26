@@ -218,6 +218,22 @@ namespace zonetool::convert::iw7_iw8
 		return found != pool->second.end() ? found->second : nullptr;
 	}
 
+	std::string source_map::asset_zone(const iw7::XAssetType type, const void* header) const
+	{
+		for (const auto& zone : this->zones_)
+		{
+			for (const auto& asset : zone->assets)
+			{
+				if (asset.type == type && asset.header == header && !asset.referenced)
+				{
+					return zone->name;
+				}
+			}
+		}
+
+		throw std::runtime_error(std::format("IW7 asset type {} has no complete loaded owner", static_cast<int>(type)));
+	}
+
 	bool source_map::load(const std::string_view zone_name, const bool patch)
 	{
 		const auto path = game_files::find_zone(zone_name);

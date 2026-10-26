@@ -73,6 +73,9 @@ namespace zonetool::convert::iw7_iw8
 			return name && name[0] != ',' ? header : nullptr;
 		}
 
+		// The loaded zone that owns a complete asset header; references have no owner here.
+		std::string asset_zone(iw7::XAssetType type, const void* header) const;
+
 		// Loads another zone of the game folder, for the assets that the map references.
 		bool load(std::string_view zone_name, bool patch = false);
 		// Loads the zone of a model's own (IW7 keeps characters in <model>_tr) with its streamed surfaces; false without one.

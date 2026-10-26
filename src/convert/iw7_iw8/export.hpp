@@ -186,6 +186,9 @@ namespace zonetool::convert::iw7_iw8
 		std::string add_model(const source_map& source, iw7::XModel* header);
 	};
 
+	// Semantic rumble definitions referenced by the placed Scriptables, with source evidence kept separately.
+	void export_rumbles(const source_map& source, const std::filesystem::path& extracted);
+
 	// A name that a file of the extraction can take: '*' and the other characters that paths reject become '_'.
 	std::string file_name(std::string_view name);
 

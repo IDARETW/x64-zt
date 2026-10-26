@@ -164,6 +164,7 @@ namespace zonetool::iw8
 				// The preload plan records [block u8][int32 delta] for each of 8 moved blocks and a terminator per
 				// asset of the list (see vault re/replay-120-postload-plan).
 				zone.preload_walk_size = 41 * entries.size() + 16;
+				zone.list_asset_count = entries.size();
 				zone.asset_offsets = std::move(this->asset_offsets_);
 				return zone;
 			}
@@ -429,6 +430,12 @@ namespace zonetool::iw8
 	xfile::fastfile rewrite_fastfile(const std::string& name, xfile::fastfile file,
 		const std::span<const zone_asset> additional)
 	{
+		return rewrite_fastfile(name, std::move(file), additional, nullptr);
+	}
+
+	xfile::fastfile rewrite_fastfile(const std::string& name, xfile::fastfile file,
+		const std::span<const zone_asset> additional, zone_inventory* inventory)
+	{
 		xfile::fastfile result{};
 		result.xfile_version = file.xfile_version;
 		result.transient = file.transient;
@@ -443,6 +450,11 @@ namespace zonetool::iw8
 		result.payload = std::move(written.data);
 		result.block_sizes = std::move(written.block_sizes);
 		result.preload_walk_size = std::max<std::uint64_t>(written.preload_walk_size, preload_walk_size);
+		if (inventory)
+		{
+			inventory->list_asset_count = written.list_asset_count;
+			inventory->asset_offsets = std::move(written.asset_offsets);
+		}
 		return result;
 	}
 }

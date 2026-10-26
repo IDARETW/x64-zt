@@ -25,6 +25,12 @@
 #include <unordered_map>
 #include <vector>
 
+namespace zonetool
+{
+class zone_memory;
+namespace iw8 { struct zone_asset; }
+}
+
 namespace iw3
 {
 struct ImportOptions
@@ -233,6 +239,9 @@ struct PreparedMap
     std::filesystem::path scratch;
     std::vector<PreparedXModel> xmodels;
     std::vector<PreparedRawFile> rawFiles;
+    // Fresh Replay definitions materialized from version-neutral asset data.
+    std::unique_ptr<zonetool::zone_memory> nativeAssetMemory;
+    std::vector<zonetool::iw8::zone_asset> nativeAssets;
     // IW3 animations the converted scripts play (vehicle destroy anims).
     std::vector<iw8::xanim::Anim> xanims;
     std::vector<PreparedFx> fxEffects;
@@ -282,13 +291,16 @@ struct PreparedMap
     std::string chyronClock;
     std::array<std::string, 2> chyronUnits;
 
-    PreparedMap() = default;
+    PreparedMap();
     PreparedMap(const PreparedMap &) = delete;
     PreparedMap &operator=(const PreparedMap &) = delete;
     PreparedMap(PreparedMap &&other) noexcept;
     PreparedMap &operator=(PreparedMap &&other) noexcept;
     ~PreparedMap();
 };
+
+// Optional asset_data/rumbles.json; validates the semantic closure before allocating native definitions.
+void PrepareRumbleAssets(const std::filesystem::path &extractionRoot, PreparedMap &prepared);
 
 PreparedMap PrepareFastfile(const ImportOptions &options);
 } // namespace iw3
