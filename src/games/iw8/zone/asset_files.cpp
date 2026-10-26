@@ -429,7 +429,7 @@ namespace zonetool::iw8
 		file.close();
 	}
 
-	void* asset_parser::parse(const std::string_view data)
+	void* asset_parser::parse(const std::string_view data, const std::optional<std::int32_t> expected_type)
 	{
 		parse_stream stream(data,
 			[this](const std::size_t size)
@@ -441,6 +441,12 @@ namespace zonetool::iw8
 				this->references_.emplace_back(type, name);
 				return this->stub(type, name);
 			});
+
+		if (expected_type && stream.type() != *expected_type)
+		{
+			throw std::runtime_error(std::format("native asset type {} does not match requested type {}",
+				stream.type(), *expected_type));
+		}
 
 		const auto& format = format_of(stream.type());
 		const auto header = stream.begin(format.size);
@@ -469,7 +475,7 @@ namespace zonetool::iw8
 		{
 			if (!file.shared)
 			{
-				return this->parse(file.data);
+				return this->parse(file.data, type);
 			}
 
 			const auto format = find_shared_format(type);
