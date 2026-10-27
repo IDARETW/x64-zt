@@ -25,11 +25,20 @@ namespace zonetool::convert::iw7_iw8
 		std::vector<model_geometry_surface> surfaces;
 	};
 
+	struct model_root_bone
+	{
+		std::string name;
+		std::array<float, 4> quat{};
+		std::array<float, 3> trans{};
+		float trans_weight{};
+	};
+
 	struct model_geometry
 	{
 		int schema{};
 		std::string name;
 		unsigned bone_count{};
+		std::optional<model_root_bone> root_bone;
 		std::uint32_t contents{};
 		std::vector<model_geometry_lod> lods;
 	};
@@ -339,6 +348,24 @@ namespace zonetool::convert::iw7_iw8
 			geometry.name = name;
 			// The importer warns about a missing skeleton export only for models with bones to keep.
 			geometry.bone_count = model->numBones;
+			if (model->numBones == 1 && model->numRootBones == 1 && model->boneNames && model->baseMat)
+			{
+				const auto* bone_name = SL_ConvertToString(static_cast<std::uint32_t>(model->boneNames[0]));
+				if (bone_name && *bone_name)
+				{
+					const auto& pose = model->baseMat[0];
+					model_root_bone root;
+					root.name = bone_name;
+					std::ranges::copy(pose.quat, root.quat.begin());
+					std::ranges::copy(pose.trans, root.trans.begin());
+					root.trans_weight = pose.transWeight;
+					geometry.root_bone = std::move(root);
+				}
+			}
+			if (model->numBones == 1 && !geometry.root_bone)
+			{
+				ZONETOOL_WARNING("iw7: model \"%s\" has no complete named root bind pose; it keeps the default root", name.data());
+			}
 			geometry.contents = static_cast<std::uint32_t>(model->contents);
 			// The first LOD's reactive-motion surfaces: those of the motion vertices (piece index and weight) and a reactive
 			// material.
@@ -786,7 +813,7 @@ namespace zonetool::convert::iw7_iw8
 				return false;
 			};
 
-			// A model of one bone (tag_origin) has no skeleton to write.
+			// Single-root names and bind poses travel with the geometry; this file is for multi-bone models.
 			if (model.numBones < 2)
 			{
 				return false;

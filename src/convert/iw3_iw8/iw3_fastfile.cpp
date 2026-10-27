@@ -53,6 +53,15 @@
 
 namespace iw3
 {
+// A single root's source name and native bind pose, without vertex skinning data.
+struct SourceRootBone
+{
+    std::string name;
+    std::array<float, 4> quat{};
+    std::array<float, 3> trans{};
+    float trans_weight{};
+};
+
 namespace
 {
 // `body(index)` for every index on every core; the results keep the index order and the first failure in that order
@@ -162,8 +171,9 @@ struct SourceStaticModel
     std::uint32_t contents{1};
     std::vector<SourceStaticModelLod> lods;
     // IW3 skeleton of a scripted model that hides, shows, or plays effects on
-    // parts by bone (destructible vehicles); empty keeps one tag_origin bone.
+    // parts by bone (destructible vehicles); a single root is stored separately.
     std::vector<SourceBone> bones;
+    std::optional<SourceRootBone> rootBone;
     // Simulated clutter body from the IW3 physics preset (dynamic models).
     std::optional<iw8::havok::ClutterBody> clutter;
     // Reactive motion (IW7 foliage): the wind scales and parts of Replay's reactive-motion sim.
@@ -2200,6 +2210,7 @@ struct RawGeometry
     std::vector<RawGeometryLod> lods;
     std::optional<unsigned> contents;
     std::optional<int> bone_count;
+    std::optional<SourceRootBone> root_bone;
 };
 
 namespace
@@ -2287,6 +2298,14 @@ RawGeometry ReadRawGeometry(const std::filesystem::path &path)
         output.contents = source.at("contents").get<unsigned>();
     if (source.contains("bone_count"))
         output.bone_count = source.at("bone_count").get<int>();
+    if (source.contains("root_bone") && !source.at("root_bone").is_null())
+    {
+        const auto &root = source.at("root_bone");
+        output.root_bone = SourceRootBone{root.at("name").get<std::string>(),
+                                          root.at("quat").get<std::array<float, 4>>(),
+                                          root.at("trans").get<std::array<float, 3>>(),
+                                          root.at("trans_weight").get<float>()};
+    }
     const auto &lods = source.at("lods");
     if (!lods.is_array())
         throw std::runtime_error("IW3 model geometry has no LOD table: " + path.string());
@@ -2963,6 +2982,16 @@ SourceStaticModel ReadSourceModel(const std::filesystem::path &root, const std::
         geometry.lods.size() != model.at("lods").size())
         throw std::runtime_error("IW3 model geometry does not match its LOD table: " + modelName);
     converted.contents = geometry.contents.value_or(1u);
+    if (geometry.root_bone)
+    {
+        const auto &sourceRoot = *geometry.root_bone;
+        const auto finite = [](float value) { return std::isfinite(value); };
+        const auto norm = std::inner_product(sourceRoot.quat.begin(), sourceRoot.quat.end(), sourceRoot.quat.begin(), 0.0);
+        if (geometry.bone_count != 1 || sourceRoot.name.empty() || !std::ranges::all_of(sourceRoot.quat, finite) ||
+            !std::ranges::all_of(sourceRoot.trans, finite) || !finite(sourceRoot.trans_weight) || !(norm > 0.0))
+            throw std::runtime_error("IW3 model has an invalid single-root bind pose: " + modelName);
+        converted.rootBone = sourceRoot;
+    }
     const auto skeleton = ReadSourceSkeleton(skeletonRoot, modelName, model.at("lods").size(),
                                              geometry.bone_count.value_or(0) != 1);
     if (!skeleton.empty())
@@ -4459,10 +4488,19 @@ void BuildPreparedStaticModels(const SourceStaticModels &source, const RenderPla
         {
             prepared.model.numBones = 1;
             prepared.model.numRootBones = 1;
-            prepared.model.boneNames = {"tag_origin"};
             prepared.model.skeleton.partClassification = {0};
-            // DObjAnimMat.transWeight is 2 / |quat|^2; shipped identity bind poses store 2.
-            prepared.model.skeleton.baseMat = {{{0, 0, 0, 1}, {0, 0, 0}, 2}};
+            if (sourceModel.rootBone)
+            {
+                const auto &root = *sourceModel.rootBone;
+                prepared.model.boneNames = {root.name};
+                prepared.model.skeleton.baseMat = {{root.quat, root.trans, root.trans_weight}};
+            }
+            else
+            {
+                prepared.model.boneNames = {"tag_origin"};
+                // DObjAnimMat.transWeight is 2 / |quat|^2; shipped identity bind poses store 2.
+                prepared.model.skeleton.baseMat = {{{0, 0, 0, 1}, {0, 0, 0}, 2}};
+            }
         }
         // Bind-space bounds of each bone's LOD0 vertices (skinned models).
         std::vector<replaybounds::Accumulator> boneBounds(skinned ? sourceModel.bones.size() : 0);
