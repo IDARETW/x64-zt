@@ -167,6 +167,11 @@ namespace zonetool::convert::iw7_iw8
 		// the end of the animation, over its length.
 		struct scriptable_state
 		{
+			struct animation_step
+			{
+				const iw7::ScriptableEventAnimationDef* event{};
+				const iw7::XAnimParts* anim{};
+			};
 			std::string part;
 			std::string state;
 			const iw7::XAnimParts* anim{};
@@ -174,6 +179,9 @@ namespace zonetool::convert::iw7_iw8
 			bool moves{};
 			std::array<float, 3> to{};
 			float time{};
+			// Source event records remain available while the map is being extracted.
+			const iw7::ScriptableEventAnimationDef* event{};
+			std::vector<animation_step> on_end;
 		};
 		std::map<std::string, std::vector<scriptable_state>> scriptable_states;
 		// The models of animated scriptables that move as entities (export_animations).

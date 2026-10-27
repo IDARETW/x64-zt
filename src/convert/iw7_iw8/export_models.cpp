@@ -1242,7 +1242,8 @@ namespace zonetool::convert::iw7_iw8
 				continue;
 			}
 
-			if (const auto bone = single_moving_bone(source, *model))
+			const auto has_end_events = std::ranges::any_of(states, [](const auto& state) { return !state.on_end.empty(); });
+			if (const auto bone = has_end_events ? std::nullopt : single_moving_bone(source, *model))
 			{
 				const auto bone_name = script_name(model->boneNames[*bone]);
 				const auto& bind = model->baseMat[*bone].trans;
@@ -1285,18 +1286,30 @@ namespace zonetool::convert::iw7_iw8
 			skeletons.insert(name);
 			std::erase_if(states, [&](const auto& state)
 			{
-				const std::string anim(asset_name(state.anim->name));
-				if (output.xanims.contains(anim))
+				const auto export_animation = [&](const iw7::XAnimParts* parts)
 				{
-					return false;
-				}
-
-				if (!write_xanim(*state.anim, output.extracted / "xanim" / (anim + ".iw3.json")))
+					const std::string anim(asset_name(parts->name));
+					if (!output.xanims.contains(anim))
+					{
+						if (!write_xanim(*parts, output.extracted / "xanim" / (anim + ".iw3.json")))
+						{
+							return false;
+						}
+						output.xanims.emplace(anim, parts);
+					}
+					return true;
+				};
+				if (!export_animation(state.anim))
 				{
 					return true;
 				}
-
-				output.xanims.emplace(anim, state.anim);
+				for (const auto& step : state.on_end)
+				{
+					if (!export_animation(step.anim))
+					{
+						throw std::runtime_error("failed to export IW7 Scriptable end animation: " + std::string(step.anim->name));
+					}
+				}
 				return false;
 			});
 

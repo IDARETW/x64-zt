@@ -2348,6 +2348,32 @@ iw7_state( mode, animation, to, time )
 }
 )gsc";
 
+		// A source animation can start another animation at its end. The notify argument
+		// asks Replay's server animation tree to report the native end notetrack.
+		constexpr std::string_view scriptable_animation_end_helpers = R"gsc(
+iw7_animation_step( animation, next )
+{
+	step = spawnstruct();
+	step.animation = animation;
+	step.next = next;
+	return step;
+}
+
+iw7_animation_on_end( part, step )
+{
+	self endon( "death" );
+	self endon( "iw7_anim_cancel_" + part );
+	self waittillmatch( "iw7_anim_done_" + part, "end" );
+	if ( isdefined( step.next ) )
+	{
+		self thread iw7_animation_on_end( part, step.next );
+		self scriptmodelplayanim( step.animation, "iw7_anim_done_" + part, 0, 1, "none" );
+	}
+	else
+		self scriptmodelplayanim( step.animation, undefined, 0, 1, "none" );
+}
+)gsc";
+
 		constexpr std::string_view scriptable_machine_runtime = R"gsc(
 // The runtime of the converted IW7 scriptables (iw7_scriptables), after IW7's scriptable system: each part of a piece
 // runs the events of its state in turn, and a state change stops the events of the part's state before (effects that
@@ -3520,6 +3546,7 @@ iw7_out_of_bounds_clear()
 		if (!output.scriptable_animations.empty())
 		{
 			std::string calls = "\tlevel.iw7_states = [];\n";
+			bool has_animation_end_events{};
 			for (const auto& [model, states] : output.scriptable_states)
 			{
 				calls += std::format("\tlevel.iw7_states[\"{}\"] = [];\n", model);
@@ -3528,6 +3555,17 @@ iw7_out_of_bounds_clear()
 					calls += std::format("\tlevel.iw7_states[\"{}\"][\"{}:{}\"] = iw7_state( \"{}\", \"{}\", ( {}, {}, {} ), {} );\n", model,
 						state.part, state.state, state.moves ? "move" : "anim", asset_name(state.anim->name), state.to[0], state.to[1],
 						state.to[2], state.time);
+					if (!state.on_end.empty())
+					{
+						has_animation_end_events = true;
+						std::string next = "undefined";
+						for (auto it = state.on_end.rbegin(); it != state.on_end.rend(); ++it)
+						{
+							next = std::format("iw7_animation_step( \"{}\", {} )", asset_name(it->anim->name), next);
+						}
+						calls += std::format("\tlevel.iw7_states[\"{}\"][\"{}:{}\"].on_end = {};\n", model,
+							state.part, state.state, next);
+					}
 				}
 			}
 
@@ -3564,6 +3602,34 @@ iw7_first_state( name, part, state )
 			if (map_script.find("iw7_setscriptablepartstate( part, state, instant )") == std::string::npos)
 			{
 				map_script += scriptable_state_helpers;
+			}
+			if (has_animation_end_events)
+			{
+				const auto helper_at = map_script.find("iw7_setscriptablepartstate( part, state, instant )");
+				const auto helper_end = map_script.find("\niw7_state( mode, animation, to, time )", helper_at);
+				const std::string lookup = "\tif ( !isdefined( entry ) )\n\t\treturn;\n";
+				const auto lookup_at = map_script.find(lookup, helper_at);
+				if (helper_at == std::string::npos || helper_end == std::string::npos ||
+					lookup_at == std::string::npos || lookup_at >= helper_end)
+				{
+					throw std::runtime_error("IW7 animation-state helper is missing its state lookup");
+				}
+				map_script.insert(lookup_at + lookup.size(), "\tself notify( \"iw7_anim_cancel_\" + part );\n");
+				const std::string play = "\tself scriptmodelplayanim( entry.animation );";
+				const auto play_at = map_script.find(play, lookup_at + lookup.size());
+				const auto updated_end = map_script.find("\niw7_state( mode, animation, to, time )", lookup_at);
+				if (play_at == std::string::npos || updated_end == std::string::npos || play_at >= updated_end)
+				{
+					throw std::runtime_error("IW7 animation-state helper is missing its playback call");
+				}
+				map_script.replace(play_at, play.size(), R"gsc(	if ( isdefined( entry.on_end ) )
+	{
+		self thread iw7_animation_on_end( part, entry.on_end );
+		self scriptmodelplayanim( entry.animation, "iw7_anim_done_" + part, 0, 1, "none" );
+	}
+	else
+		self scriptmodelplayanim( entry.animation );)gsc");
+				map_script += scriptable_animation_end_helpers;
 			}
 
 			ZONETOOL_INFO("iw7: the map script animates %zu kinds of scriptables (%zu models)", output.scriptable_animations.size(),
