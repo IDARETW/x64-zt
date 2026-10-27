@@ -8,6 +8,8 @@
 #include "zone/asset_files.hpp"
 #include "zone/loader.hpp"
 #include "zone/writer.hpp"
+#include "neutral/rumble.hpp"
+#include "neutral/text.hpp"
 
 #include <game.hpp>
 
@@ -244,6 +246,164 @@ namespace zonetool::iw8
 			throw std::runtime_error(std::format("the written zone differs: 0x{:X} bytes, zone data 0x{:X} bytes, first "
 				"difference at 0x{:X} in {} (written {} zone {}); block sizes (written/zone){}", written.data.size(),
 				original.size(), offset, asset, bytes_at(written.data), bytes_at(original), blocks.empty() ? " equal" : blocks));
+		}
+
+		// The neutral data of an asset that has a neutral adapter (neutral/*.hpp).
+		using neutral_data = std::variant<asset_data::localize_entry, asset_data::net_const_strings, asset_data::raw_file,
+			asset_data::rumble_graph, asset_data::rumble_info>;
+
+		std::optional<neutral_data> neutral_of(const std::int32_t type, const void* header)
+		{
+			switch (type)
+			{
+			case ASSET_TYPE_LOCALIZE_ENTRY:
+				return neutral::to_neutral(*static_cast<const LocalizeEntry*>(header));
+			case ASSET_TYPE_NET_CONST_STRINGS:
+				return neutral::to_neutral(*static_cast<const NetConstStrings*>(header));
+			case ASSET_TYPE_RAWFILE:
+				return neutral::to_neutral(*static_cast<const RawFile*>(header));
+			case ASSET_TYPE_RUMBLE_GRAPH:
+				return neutral::to_neutral(*static_cast<const RumbleGraph*>(header));
+			case ASSET_TYPE_RUMBLE:
+				return neutral::to_neutral(*static_cast<const RumbleInfo*>(header));
+			default:
+				return std::nullopt;
+			}
+		}
+
+		// IW8_REWRITE=neutral rebuilds each asset that has a neutral adapter from its neutral data, in fresh memory, and
+		// writes the zone as IW8_REWRITE=fresh does: the kept markers and packed offsets of the zone describe its own
+		// layout, and the shared data of the rebuilt assets (strings that several assets point to) is not neutral data.
+		// The written zone must load with the same assets and give the same neutral data for each rebuilt asset.
+		void verify_neutral_rewrite(const loaded_zone& zone)
+		{
+			std::map<void*, neutral_data> data;
+			std::map<asset_key, neutral_data> by_key;
+			std::size_t size{};
+			for (const auto& asset : zone.assets)
+			{
+				if (asset.referenced || data.contains(asset.header))
+				{
+					continue;
+				}
+
+				if (auto value = neutral_of(asset.type, asset.header))
+				{
+					size += std::visit([](const auto& item) { return neutral::native_size(item); }, *value);
+					by_key.emplace(asset_key{asset.type, asset_name(asset.type, asset.header)}, *value);
+					data.emplace(asset.header, std::move(*value));
+				}
+			}
+
+			zone_memory memory(std::max<std::size_t>(size, 1));
+			std::map<void*, void*> rebuilt;
+			// A rumble points to its graphs: the graphs of the zone (rebuilt when they are held) come first.
+			std::map<std::string, RumbleGraph*> graphs;
+			for (const auto& asset : zone.assets)
+			{
+				if (asset.type == ASSET_TYPE_RUMBLE_GRAPH)
+				{
+					auto* header = static_cast<RumbleGraph*>(asset.header);
+					if (const auto found = data.find(asset.header); found != data.end() && !rebuilt.contains(asset.header))
+					{
+						rebuilt.emplace(asset.header, neutral::from_neutral(std::get<asset_data::rumble_graph>(found->second), memory));
+					}
+
+					graphs.try_emplace(asset_name(asset.type, header), static_cast<RumbleGraph*>(rebuilt.contains(asset.header)
+						? rebuilt.at(asset.header) : asset.header));
+				}
+			}
+
+			const auto resolve = [&graphs](const std::string& name) -> RumbleGraph*
+			{
+				const auto found = graphs.find(name);
+				return found != graphs.end() ? found->second : nullptr;
+			};
+
+			for (const auto& [header, value] : data)
+			{
+				if (rebuilt.contains(header))
+				{
+					continue;
+				}
+
+				rebuilt.emplace(header, std::visit([&](const auto& item) -> void*
+				{
+					if constexpr (std::is_same_v<std::decay_t<decltype(item)>, asset_data::rumble_info>)
+					{
+						return neutral::from_neutral(item, memory, resolve);
+					}
+					else
+					{
+						return neutral::from_neutral(item, memory);
+					}
+				}, value));
+			}
+
+			const auto replace = [&rebuilt](std::vector<zone_asset> assets)
+			{
+				for (auto& asset : assets)
+				{
+					if (const auto found = rebuilt.find(asset.header); found != rebuilt.end())
+					{
+						asset.header = found->second;
+					}
+				}
+
+				return assets;
+			};
+
+			const auto written = write_zone(replace(to_zone_assets(zone.list)), replace(to_zone_assets(zone.assets)),
+				zone.script_strings);
+			save_written_zone(zone, written);
+
+			xfile::fastfile file{};
+			file.payload = written.data;
+			file.block_sizes = written.block_sizes;
+			const auto reloaded = load_zone(zone.name, std::move(file));
+			if (const auto written_assets = distinct_assets(*reloaded), zone_assets = distinct_assets(zone); written_assets != zone_assets)
+			{
+				std::string difference;
+				for (const auto& [from, to, sign] : {std::tuple{&written_assets, &zone_assets, '+'}, {&zone_assets, &written_assets, '-'}})
+				{
+					for (const auto& [type, name, referenced] : *from)
+					{
+						if (!to->contains({type, name, referenced}) && difference.size() < 400)
+						{
+							const auto format = find_asset_format(type);
+							difference += std::format(" {}{} {}{}", sign, format ? format->name : "?", name, referenced ? " (reference)" : "");
+						}
+					}
+				}
+
+				throw std::runtime_error("the zone that the neutral data makes holds other assets:" + difference);
+			}
+
+			std::set<asset_key> compared;
+			for (const auto& asset : reloaded->assets)
+			{
+				const auto found = asset.referenced ? by_key.end() : by_key.find({asset.type, asset_name(asset.type, asset.header)});
+				if (found == by_key.end())
+				{
+					continue;
+				}
+
+				if (neutral_of(asset.type, asset.header) != found->second)
+				{
+					throw std::runtime_error(std::format("{} reads back with other neutral data", found->first.second));
+				}
+
+				compared.insert(found->first);
+			}
+
+			if (compared.size() != by_key.size())
+			{
+				throw std::runtime_error(std::format("{} of {} rebuilt assets read back", compared.size(), by_key.size()));
+			}
+
+			ZONETOOL_INFO("%s: %zu assets rebuilt from neutral data; the written zone (0x%zX of 0x%zX bytes) loads with the same "
+				"assets and gives the same neutral data for each", zone.name.data(), compared.size(), written.data.size(),
+				zone.file.payload.size());
 		}
 
 		using havok::replay_compendium;
@@ -2935,6 +3095,10 @@ namespace zonetool::iw8
 			else if (std::string_view(rewrite) == "compare")
 			{
 				verify_compare(zone_folder, *zone);
+			}
+			else if (std::string_view(rewrite) == "neutral")
+			{
+				verify_neutral_rewrite(*zone);
 			}
 			else
 			{

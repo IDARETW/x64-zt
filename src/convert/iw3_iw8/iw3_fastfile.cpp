@@ -1,7 +1,7 @@
 #include <std_include.hpp>
 #include <iw8/iw8.hpp>
 #include <iw8/zone/writer.hpp>
-#include <core/assets/rumble_data.hpp>
+#include <iw8/neutral/rumble.hpp>
 #include "iw3_fastfile.h"
 #include "iw3_ledger.h"
 #include "iw3_lightgrid.h"
@@ -9526,59 +9526,30 @@ void PrepareRumbleAssets(const std::filesystem::path &extractionRoot, PreparedMa
     std::ranges::sort(data.infos, {}, &zonetool::asset_data::rumble_info::name);
 
     std::size_t budget{};
-    const auto reserve = [&](const std::size_t size, const std::size_t count = 1) {
-        if (count > (std::numeric_limits<std::uint32_t>::max() - budget) / size)
-            throw std::runtime_error("native rumble assets exceed the resident size limit");
-        budget += size * count;
-    };
-    reserve(sizeof(zonetool::iw8::RumbleGraph), data.graphs.size());
-    reserve(sizeof(zonetool::iw8::RumbleInfo), data.infos.size());
     for (const auto &graph : data.graphs)
-        reserve(1, graph.name.size() + 1);
+        budget += zonetool::iw8::neutral::native_size(graph);
     for (const auto &info : data.infos)
-        reserve(1, info.name.size() + 1);
+        budget += zonetool::iw8::neutral::native_size(info);
+    if (budget > std::numeric_limits<std::uint32_t>::max())
+        throw std::runtime_error("native rumble assets exceed the resident size limit");
     auto memory = std::make_unique<zonetool::zone_memory>(budget);
-    // Allocate all aligned headers before any byte strings: zone_memory itself is a byte allocator.
-    auto graphs = memory->allocate<zonetool::iw8::RumbleGraph>(data.graphs.size());
-    auto infos = memory->allocate<zonetool::iw8::RumbleInfo>(data.infos.size());
     std::map<std::string, zonetool::iw8::RumbleGraph *> byName;
-    for (std::size_t i = 0; i < data.graphs.size(); ++i)
+    std::vector<zonetool::iw8::zone_asset> graphs;
+    for (const auto &graph : data.graphs)
     {
-        const auto &source = data.graphs[i];
-        auto &target = graphs[i];
-        target.name = memory->duplicate_string(source.name);
-        target.knotCount = static_cast<std::uint16_t>(source.knot_count);
-        for (std::size_t knot = 0; knot < 16; ++knot)
-        {
-            target.knots[knot].v[0] = source.x[knot];
-            target.knots[knot].v[1] = source.y[knot];
-        }
-        byName.emplace(source.name, &target);
+        auto *native = zonetool::iw8::neutral::from_neutral(graph, *memory);
+        byName.emplace(graph.name, native);
+        graphs.push_back({zonetool::iw8::ASSET_TYPE_RUMBLE_GRAPH, native, false});
     }
-    const auto curve = [&](const std::optional<std::string> &name) {
-        return name ? byName.at(*name) : nullptr;
+    const auto resolve = [&byName](const std::string &name) -> zonetool::iw8::RumbleGraph * {
+        const auto found = byName.find(name);
+        return found != byName.end() ? found->second : nullptr;
     };
     std::vector<zonetool::iw8::zone_asset> assets;
     assets.reserve(data.infos.size() + data.graphs.size());
-    for (std::size_t i = 0; i < data.infos.size(); ++i)
-    {
-        const auto &source = data.infos[i];
-        auto &target = infos[i];
-        target.name = memory->duplicate_string(source.name);
-        target.duration = source.duration_milliseconds;
-        target.range = source.range;
-        target.highRumbleGraph = curve(source.high);
-        target.lowRumbleGraph = curve(source.low);
-        target.leftTriggerRumbleGraph = curve(source.left_trigger);
-        target.rightTriggerRumbleGraph = curve(source.right_trigger);
-        target.fadeWithDistance = source.fade_with_distance;
-        target.broadcast = source.broadcast;
-        target.swapTriggerRumblesOnLefty = source.swap_trigger_rumbles_on_lefty;
-        target.panTriggerRumbles = source.pan_trigger_rumbles;
-        assets.push_back({zonetool::iw8::ASSET_TYPE_RUMBLE, &target, false});
-    }
-    for (std::size_t i = 0; i < data.graphs.size(); ++i)
-        assets.push_back({zonetool::iw8::ASSET_TYPE_RUMBLE_GRAPH, &graphs[i], false});
+    for (const auto &info : data.infos)
+        assets.push_back({zonetool::iw8::ASSET_TYPE_RUMBLE, zonetool::iw8::neutral::from_neutral(info, *memory, resolve), false});
+    assets.insert(assets.end(), graphs.begin(), graphs.end());
     prepared.nativeAssetMemory = std::move(memory);
     prepared.nativeAssets = std::move(assets);
     zt::info("assets: prepared %zu rumble(s), %zu rumble graph(s) from semantic data",
