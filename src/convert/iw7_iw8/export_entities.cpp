@@ -303,7 +303,7 @@ namespace zonetool::convert::iw7_iw8
 		std::optional<extraction::scriptable_destructible> destructible_of(const source_map& source, const iw7::ScriptableDef& def,
 			extraction& output)
 		{
-			if (!def.parts || def.numParts != 1 || !def.parts[0].states || def.parts[0].numStates != 2)
+			if (!def.parts || def.numParts != 1 || def.parts[0].numChildParts != 0 || !def.parts[0].states || def.parts[0].numStates != 2)
 			{
 				return std::nullopt;
 			}
