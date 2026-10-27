@@ -8,6 +8,7 @@
 #include "zone/asset_files.hpp"
 #include "zone/loader.hpp"
 #include "zone/writer.hpp"
+#include "neutral/image.hpp"
 #include "neutral/rumble.hpp"
 #include "neutral/text.hpp"
 
@@ -250,7 +251,7 @@ namespace zonetool::iw8
 
 		// The neutral data of an asset that has a neutral adapter (neutral/*.hpp).
 		using neutral_data = std::variant<asset_data::localize_entry, asset_data::net_const_strings, asset_data::raw_file,
-			asset_data::rumble_graph, asset_data::rumble_info>;
+			asset_data::rumble_graph, asset_data::rumble_info, neutral::image_source>;
 
 		std::optional<neutral_data> neutral_of(const std::int32_t type, const void* header)
 		{
@@ -266,6 +267,13 @@ namespace zonetool::iw8
 				return neutral::to_neutral(*static_cast<const RumbleGraph*>(header));
 			case ASSET_TYPE_RUMBLE:
 				return neutral::to_neutral(*static_cast<const RumbleInfo*>(header));
+			case ASSET_TYPE_IMAGE:
+				if (auto source = neutral::to_neutral(*static_cast<const GfxImage*>(header)))
+				{
+					return std::move(*source);
+				}
+
+				return std::nullopt;
 			default:
 				return std::nullopt;
 			}
@@ -280,6 +288,8 @@ namespace zonetool::iw8
 			std::map<void*, neutral_data> data;
 			std::map<asset_key, neutral_data> by_key;
 			std::size_t size{};
+			// Images whose texels the zone does not hold keep their native records.
+			std::set<void*> kept;
 			for (const auto& asset : zone.assets)
 			{
 				if (asset.referenced || data.contains(asset.header))
@@ -287,7 +297,13 @@ namespace zonetool::iw8
 					continue;
 				}
 
-				if (auto value = neutral_of(asset.type, asset.header))
+				auto value = neutral_of(asset.type, asset.header);
+				if (!value && asset.type == ASSET_TYPE_IMAGE)
+				{
+					kept.insert(asset.header);
+				}
+
+				if (value)
 				{
 					size += std::visit([](const auto& item) { return neutral::native_size(item); }, *value);
 					by_key.emplace(asset_key{asset.type, asset_name(asset.type, asset.header)}, *value);
@@ -360,7 +376,8 @@ namespace zonetool::iw8
 			xfile::fastfile file{};
 			file.payload = written.data;
 			file.block_sizes = written.block_sizes;
-			const auto reloaded = load_zone(zone.name, std::move(file));
+			// Resident texels load into a temporary block: keep it for the comparison.
+			const auto reloaded = load_zone(zone.name, std::move(file), {.keep_temp_data = true});
 			if (const auto written_assets = distinct_assets(*reloaded), zone_assets = distinct_assets(zone); written_assets != zone_assets)
 			{
 				std::string difference;
@@ -388,9 +405,26 @@ namespace zonetool::iw8
 					continue;
 				}
 
-				if (neutral_of(asset.type, asset.header) != found->second)
+				if (const auto again = neutral_of(asset.type, asset.header); again != found->second)
 				{
-					throw std::runtime_error(std::format("{} reads back with other neutral data", found->first.second));
+					std::string detail;
+					const auto* before = std::get_if<neutral::image_source>(&found->second);
+					const auto* after = again ? std::get_if<neutral::image_source>(&*again) : nullptr;
+					if (before && after)
+					{
+						detail = before->image == after->image ? "; image equal" : "; image differs";
+						for (const auto& [field, bytes] : before->provenance.fields)
+						{
+							const auto other = after->provenance.fields.find(field);
+							if (other == after->provenance.fields.end() || other->second != bytes)
+							{
+								detail += std::format("; {} {} -> {}", field, bytes,
+									other != after->provenance.fields.end() ? other->second : "absent");
+							}
+						}
+					}
+
+					throw std::runtime_error(std::format("{} reads back with other neutral data{}", found->first.second, detail));
 				}
 
 				compared.insert(found->first);
@@ -401,9 +435,9 @@ namespace zonetool::iw8
 				throw std::runtime_error(std::format("{} of {} rebuilt assets read back", compared.size(), by_key.size()));
 			}
 
-			ZONETOOL_INFO("%s: %zu assets rebuilt from neutral data; the written zone (0x%zX of 0x%zX bytes) loads with the same "
-				"assets and gives the same neutral data for each", zone.name.data(), compared.size(), written.data.size(),
-				zone.file.payload.size());
+			ZONETOOL_INFO("%s: %zu assets rebuilt from neutral data (%zu images kept native); the written zone (0x%zX of 0x%zX "
+				"bytes) loads with the same assets and gives the same neutral data for each", zone.name.data(), compared.size(),
+				kept.size(), written.data.size(), zone.file.payload.size());
 		}
 
 		using havok::replay_compendium;
