@@ -1208,8 +1208,7 @@ inline void emitComWorldBody(ZoneBuffer &zb, const char *assetName, const MapSun
                 light[3] = source->type == 2 && source->canUseShadowMap && source->needsDynamicShadows ? 1 : 0;
                 light[4] = source->isVolumetric ? 1 : 0;
                 // Shipped local-light defaults (mp_hideout, 124 lights): IW3 lights
-                // are points (smallest shipped bulb 1), shadow near-plane bias 8 (or past
-                // the light's fixture, dropEnclosedShadowedSpots),
+                // are points (smallest shipped bulb 1), shadow near-plane bias 8,
                 // softness 0.55, bias 0.75, area 0.0018, distance falloff 0.2, and
                 // collimation cos(90 deg) = no collimation.
                 // Shipped local lights (mp_hideout, 124 of 124) set spawnFlags by their
