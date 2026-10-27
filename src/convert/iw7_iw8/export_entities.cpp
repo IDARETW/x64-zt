@@ -245,8 +245,9 @@ namespace zonetool::convert::iw7_iw8
 
 		// The world placement of a tag of a model at an instance's origin and angles, in the model's bind pose (DObjAnimMat
 		// base poses are in model space). An empty tag uses the model origin; tag_origin is resolved like any other bone.
+		// Effects that do not use tag angles keep the world identity orientation at that position.
 		std::optional<extraction::scriptable_effect> tag_placement(const iw7::XModel* model, const std::string& tag, const float* origin,
-			const float* angles)
+			const float* angles, const bool use_tag_angles)
 		{
 			const auto instance = angles_to_axes(angles);
 			std::array<double, 3> position{};
@@ -298,7 +299,7 @@ namespace zonetool::convert::iw7_iw8
 				}
 			}
 
-			result.angles = axes_to_angles(world);
+			result.angles = use_tag_angles ? axes_to_angles(world) : std::array<float, 3>{};
 			return result;
 		}
 
@@ -604,7 +605,7 @@ namespace zonetool::convert::iw7_iw8
 						}
 
 						result.push_back({{"t", "fx"}, {"effect", vfx ? std::string(asset_name(iw7::get_asset_name(iw7::ASSET_TYPE_VFX, vfx))) :
-							std::string{}}, {"tags", tags}, {"loop", fx.loopRate}, {"kill", fx.killOnExit}});
+							std::string{}}, {"tags", tags}, {"loop", fx.loopRate}, {"kill", fx.killOnExit}, {"use_tag_angles", fx.useTagAngles}});
 						break;
 					}
 					case iw7::Scriptable_EventType_Sound:
@@ -807,7 +808,7 @@ namespace zonetool::convert::iw7_iw8
 					const auto effect = std::string(asset_name(iw7::get_asset_name(iw7::ASSET_TYPE_VFX, vfx)));
 					for (const auto& tag : tags)
 					{
-						auto placement = tag_placement(model, tag, context.initialOrigin, context.initialAngles);
+						auto placement = tag_placement(model, tag, context.initialOrigin, context.initialAngles, fx.useTagAngles);
 						if (!placement)
 						{
 							ZONETOOL_WARNING("iw7: scriptable %s: its model has no tag %s for effect %s", def.name ? def.name : "?", tag.data(),
