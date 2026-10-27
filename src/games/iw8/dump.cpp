@@ -11,6 +11,7 @@
 #include "neutral/image.hpp"
 #include "neutral/rumble.hpp"
 #include "neutral/text.hpp"
+#include "neutral/xanim.hpp"
 
 #include <game.hpp>
 
@@ -251,9 +252,11 @@ namespace zonetool::iw8
 
 		// The neutral data of an asset that has a neutral adapter (neutral/*.hpp).
 		using neutral_data = std::variant<asset_data::localize_entry, asset_data::net_const_strings, asset_data::raw_file,
-			asset_data::rumble_graph, asset_data::rumble_info, neutral::image_source>;
+			asset_data::rumble_graph, asset_data::rumble_info, neutral::image_source, neutral::xanim_source>;
 
-		std::optional<neutral_data> neutral_of(const std::int32_t type, const void* header)
+		// An asset of an adapter-backed type that the adapter declines (an image whose texels the zone does not hold, an
+		// animation whose streams it does not decode) has no neutral data: `kept` receives the reason when it is given.
+		std::optional<neutral_data> neutral_of(const std::int32_t type, const void* header, std::string* kept = nullptr)
 		{
 			switch (type)
 			{
@@ -273,6 +276,22 @@ namespace zonetool::iw8
 					return std::move(*source);
 				}
 
+				if (kept)
+				{
+					*kept = "image texels outside the zone";
+				}
+
+				return std::nullopt;
+			case ASSET_TYPE_XANIMPARTS:
+				if (auto source = neutral::to_neutral(*static_cast<const XAnimParts*>(header)))
+				{
+					return std::move(*source);
+				}
+				else if (kept)
+				{
+					*kept = "animation: " + source.error();
+				}
+
 				return std::nullopt;
 			default:
 				return std::nullopt;
@@ -288,8 +307,8 @@ namespace zonetool::iw8
 			std::map<void*, neutral_data> data;
 			std::map<asset_key, neutral_data> by_key;
 			std::size_t size{};
-			// Images whose texels the zone does not hold keep their native records.
-			std::set<void*> kept;
+			// The assets that keep their native records, by reason: the count and the first name.
+			std::map<std::string, std::pair<std::size_t, std::string>> kept;
 			for (const auto& asset : zone.assets)
 			{
 				if (asset.referenced || data.contains(asset.header))
@@ -297,10 +316,15 @@ namespace zonetool::iw8
 					continue;
 				}
 
-				auto value = neutral_of(asset.type, asset.header);
-				if (!value && asset.type == ASSET_TYPE_IMAGE)
+				std::string reason;
+				auto value = neutral_of(asset.type, asset.header, &reason);
+				if (!reason.empty())
 				{
-					kept.insert(asset.header);
+					auto& [count, example] = kept[reason];
+					if (!count++)
+					{
+						example = asset_name(asset.type, asset.header);
+					}
 				}
 
 				if (value)
@@ -424,6 +448,25 @@ namespace zonetool::iw8
 						}
 					}
 
+					const auto* before_xanim = std::get_if<neutral::xanim_source>(&found->second);
+					const auto* after_xanim = again ? std::get_if<neutral::xanim_source>(&*again) : nullptr;
+					if (before_xanim && after_xanim)
+					{
+						const auto& [a, b] = std::tie(before_xanim->xanim, after_xanim->xanim);
+						for (const auto& [part, equal] : {std::pair{"bones", a.bones == b.bones}, {"delta", a.delta == b.delta},
+							{"notes", a.notes == b.notes}, {"blend shapes", a.blend_shapes == b.blend_shapes &&
+							a.blend_shape_weights == b.blend_shape_weights}, {"flags", a.flags == b.flags}, {"frames", a.frames == b.frames &&
+							a.framerate == b.framerate && a.frequency == b.frequency}, {"provenance", before_xanim->provenance ==
+							after_xanim->provenance}})
+						{
+							detail += equal ? "" : std::format("; {} differ", part);
+						}
+					}
+					else if (std::holds_alternative<neutral::xanim_source>(found->second))
+					{
+						detail = "; the adapter declines the written animation";
+					}
+
 					throw std::runtime_error(std::format("{} reads back with other neutral data{}", found->first.second, detail));
 				}
 
@@ -435,9 +478,16 @@ namespace zonetool::iw8
 				throw std::runtime_error(std::format("{} of {} rebuilt assets read back", compared.size(), by_key.size()));
 			}
 
-			ZONETOOL_INFO("%s: %zu assets rebuilt from neutral data (%zu images kept native); the written zone (0x%zX of 0x%zX "
-				"bytes) loads with the same assets and gives the same neutral data for each", zone.name.data(), compared.size(),
-				kept.size(), written.data.size(), zone.file.payload.size());
+			std::size_t native{};
+			for (const auto& [reason, item] : kept)
+			{
+				native += item.first;
+				ZONETOOL_INFO("%s: %zu kept native (%s), e.g. %s", zone.name.data(), item.first, reason.data(), item.second.data());
+			}
+
+			ZONETOOL_INFO("%s: %zu assets rebuilt from neutral data (%zu kept native); the written zone (0x%zX of 0x%zX bytes) "
+				"loads with the same assets and gives the same neutral data for each", zone.name.data(), compared.size(), native,
+				written.data.size(), zone.file.payload.size());
 		}
 
 		using havok::replay_compendium;
