@@ -785,6 +785,7 @@ namespace zonetool::convert::iw7_iw8
 				{"framerate", anim.framerate},
 				{"frequency", anim.frequency},
 				{"loop", (anim.flags & 1) != 0},
+				{"iw7_flags", anim.flags},
 				{"bone_count", std::move(counts)},
 				{"names", std::move(names)},
 				{"notify", std::move(notify)},
