@@ -44,6 +44,18 @@ struct raw_file
 	bool operator==(const raw_file&) const = default;
 };
 
+// A table of strings: rows of `columns` cells, row after row. A null cell and an empty cell stay distinct. The target
+// encoding (a dictionary of the unique strings with their hashes) is the writer's concern.
+struct string_table
+{
+	std::string name;
+	std::uint32_t columns{};
+	std::uint32_t rows{};
+	std::vector<std::optional<std::string>> cells;
+
+	bool operator==(const string_table&) const = default;
+};
+
 inline void validate(const localize_entry& data)
 {
 	detail::name(data.name, "localize");
@@ -69,6 +81,15 @@ inline void validate(const net_const_strings& data)
 inline void validate(const raw_file& data)
 {
 	detail::name(data.name, "rawfile");
+}
+
+inline void validate(const string_table& data)
+{
+	detail::name(data.name, "stringtable");
+	if (data.cells.size() != static_cast<std::size_t>(data.rows) * data.columns)
+	{
+		throw std::runtime_error("stringtable " + data.name + " does not have rows * columns cells");
+	}
 }
 
 inline detail::data_json write_localize_entry(const localize_entry& data)
@@ -160,6 +181,47 @@ inline raw_file read_raw_file(const detail::data_json& value)
 				throw std::runtime_error("rawfile byte is outside 0..255");
 			}
 			content.push_back(static_cast<std::uint8_t>(number));
+		}
+	}
+	validate(result);
+	return result;
+}
+inline detail::data_json write_string_table(const string_table& data)
+{
+	validate(data);
+	auto rows = detail::data_json::array();
+	for (std::size_t row = 0; row < data.rows; ++row)
+	{
+		auto& cells = rows.emplace_back(detail::data_json::array());
+		for (std::size_t column = 0; column < data.columns; ++column)
+		{
+			cells.push_back(detail::optional_json(data.cells[row * data.columns + column]));
+		}
+	}
+	return {{"format", "canonical-stringtable"}, {"schema_version", 1}, {"name", data.name}, {"columns", data.columns},
+		{"rows", std::move(rows)}};
+}
+
+inline string_table read_string_table(const detail::data_json& value)
+{
+	detail::fields(value, {"format", "schema_version", "name", "columns", "rows"}, "stringtable");
+	const auto columns = detail::integer(value.at("columns"), "stringtable");
+	if (value.at("format") != "canonical-stringtable" || detail::integer(value.at("schema_version"), "stringtable") != 1 ||
+		columns < 0 || !value.at("rows").is_array())
+	{
+		throw std::runtime_error("unsupported stringtable data schema");
+	}
+	string_table result{detail::text(value.at("name"), "stringtable"), static_cast<std::uint32_t>(columns),
+		static_cast<std::uint32_t>(value.at("rows").size()), {}};
+	for (const auto& row : value.at("rows"))
+	{
+		if (!row.is_array() || row.size() != result.columns)
+		{
+			throw std::runtime_error("stringtable rows must be arrays of `columns` cells");
+		}
+		for (const auto& cell : row)
+		{
+			result.cells.push_back(detail::optional_text(cell, "stringtable"));
 		}
 	}
 	validate(result);

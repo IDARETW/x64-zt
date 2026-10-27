@@ -252,7 +252,24 @@ namespace zonetool::iw8
 
 		// The neutral data of an asset that has a neutral adapter (neutral/*.hpp).
 		using neutral_data = std::variant<asset_data::localize_entry, asset_data::net_const_strings, asset_data::raw_file,
-			asset_data::rumble_graph, asset_data::rumble_info, neutral::image_source, neutral::xanim_source>;
+			asset_data::string_table, asset_data::rumble_graph, asset_data::rumble_info, neutral::image_source,
+			neutral::xanim_source>;
+
+		template <typename T>
+		std::optional<neutral_data> accepted(std::expected<T, std::string> value, const char* kind, std::string* kept)
+		{
+			if (value)
+			{
+				return std::move(*value);
+			}
+
+			if (kept)
+			{
+				*kept = std::format("{}: {}", kind, value.error());
+			}
+
+			return std::nullopt;
+		}
 
 		// An asset of an adapter-backed type that the adapter declines (an image whose texels the zone does not hold, an
 		// animation whose streams it does not decode) has no neutral data: `kept` receives the reason when it is given.
@@ -282,17 +299,10 @@ namespace zonetool::iw8
 				}
 
 				return std::nullopt;
+			case ASSET_TYPE_STRINGTABLE:
+				return accepted(neutral::to_neutral(*static_cast<const StringTable*>(header)), "string table", kept);
 			case ASSET_TYPE_XANIMPARTS:
-				if (auto source = neutral::to_neutral(*static_cast<const XAnimParts*>(header)))
-				{
-					return std::move(*source);
-				}
-				else if (kept)
-				{
-					*kept = "animation: " + source.error();
-				}
-
-				return std::nullopt;
+				return accepted(neutral::to_neutral(*static_cast<const XAnimParts*>(header)), "animation", kept);
 			default:
 				return std::nullopt;
 			}

@@ -1,5 +1,6 @@
 #include <std_include.hpp>
 #include "text.hpp"
+#include "../zone/asset_files.hpp"
 #include "../zone/replay_netconst.h"
 
 #include <formats/compression.hpp>
@@ -188,6 +189,92 @@ namespace zonetool::iw8::neutral
 		return native;
 	}
 
+	std::expected<asset_data::string_table, std::string> to_neutral(const StringTable& native)
+	{
+		const auto cells = static_cast<std::size_t>(std::max(native.rowCount, 0)) * std::max(native.columnCount, 0);
+		if (!native.name || native.rowCount < 0 || native.columnCount < 0 || native.uniqueCellCount < 0 ||
+			(cells && (!native.cellIndices || !native.strings || !native.hashes)))
+		{
+			return std::unexpected("the table has no name, a negative count or cells without data");
+		}
+
+		asset_data::string_table data{native.name, static_cast<std::uint32_t>(native.columnCount),
+			static_cast<std::uint32_t>(native.rowCount), {}};
+		for (std::size_t cell = 0; cell < cells; ++cell)
+		{
+			const auto index = native.cellIndices[cell];
+			if (index >= native.uniqueCellCount)
+			{
+				return std::unexpected(std::format("cell {} has the string index {} of {}", cell, index, native.uniqueCellCount));
+			}
+
+			const auto* value = native.strings[index];
+			if (native.hashes[index] != (value ? string_table_hash(value) : 0))
+			{
+				return std::unexpected(std::format("string {} has a hash that is not Replay's cell hash", index));
+			}
+
+			data.cells.push_back(value ? std::optional<std::string>(value) : std::nullopt);
+		}
+
+		asset_data::validate(data);
+		return data;
+	}
+
+	// Stock tables keep the unique strings in the order of their first cell.
+	StringTable* from_neutral(const asset_data::string_table& data, zone_memory& memory)
+	{
+		asset_data::validate(data);
+		std::map<std::optional<std::string>, std::uint16_t> unique;
+		std::vector<const std::optional<std::string>*> strings;
+		std::vector<std::uint16_t> indices;
+		for (const auto& cell : data.cells)
+		{
+			const auto [entry, added] = unique.try_emplace(cell, static_cast<std::uint16_t>(strings.size()));
+			if (added)
+			{
+				if (strings.size() > std::numeric_limits<std::uint16_t>::max())
+				{
+					throw std::runtime_error("stringtable " + data.name + " has more than 65536 unique strings");
+				}
+
+				strings.push_back(&entry->first);
+			}
+
+			indices.push_back(entry->second);
+		}
+
+		if (data.cells.size() > static_cast<std::size_t>(std::numeric_limits<std::int32_t>::max()) ||
+			data.rows > static_cast<std::uint32_t>(std::numeric_limits<std::int32_t>::max()) ||
+			data.columns > static_cast<std::uint32_t>(std::numeric_limits<std::int32_t>::max()))
+		{
+			throw std::runtime_error("stringtable " + data.name + " exceeds Replay's counts");
+		}
+
+		auto* native = memory.allocate<StringTable>();
+		native->name = copy_text(memory, data.name);
+		native->columnCount = static_cast<std::int32_t>(data.columns);
+		native->rowCount = static_cast<std::int32_t>(data.rows);
+		native->uniqueCellCount = static_cast<std::int32_t>(strings.size());
+		if (!indices.empty())
+		{
+			native->cellIndices = memory.manual_allocate<std::uint16_t>(rounded(indices.size() * sizeof(std::uint16_t)));
+			std::ranges::copy(indices, native->cellIndices);
+			native->hashes = memory.manual_allocate<std::int32_t>(rounded(strings.size() * sizeof(std::int32_t)));
+			native->strings = memory.manual_allocate<const char*>(strings.size() * sizeof(const char*));
+			for (std::size_t index = 0; index < strings.size(); ++index)
+			{
+				if (const auto& value = *strings[index])
+				{
+					native->strings[index] = copy_text(memory, *value);
+					native->hashes[index] = string_table_hash(*value);
+				}
+			}
+		}
+
+		return native;
+	}
+
 	std::size_t native_size(const asset_data::localize_entry& data)
 	{
 		return sizeof(LocalizeEntry) + rounded(data.name.size() + 1) + (data.value ? rounded(data.value->size() + 1) : 0);
@@ -206,6 +293,17 @@ namespace zonetool::iw8::neutral
 		}
 
 		return size;
+	}
+
+	std::size_t native_size(const asset_data::string_table& data)
+	{
+		auto size = sizeof(StringTable) + rounded(data.name.size() + 1) + rounded(data.cells.size() * sizeof(std::uint16_t));
+		for (const auto& cell : data.cells)
+		{
+			size += sizeof(std::int32_t) + sizeof(const char*) + (cell ? rounded(cell->size() + 1) : 0);
+		}
+
+		return size + 8;
 	}
 
 	std::size_t native_size(const asset_data::raw_file& data)

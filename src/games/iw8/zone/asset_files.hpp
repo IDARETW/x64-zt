@@ -19,6 +19,10 @@ namespace zonetool::iw8
 	// The name of a localized string in a zone. Stock names are lowercase, and the scripts use them in uppercase.
 	std::string localize_name(const std::string& name);
 
+	// The hash of a string table cell. Stock hashes take the characters as signed values; the core string_table_hash
+	// takes them as unsigned values.
+	std::int32_t string_table_hash(std::string_view value);
+
 	std::string dump_asset_data(std::int32_t type, const void* header);
 	// The assets that the fields of an asset point at, by type and name.
 	std::vector<std::pair<std::int32_t, std::string>> asset_dependencies(std::int32_t type, const void* header);
