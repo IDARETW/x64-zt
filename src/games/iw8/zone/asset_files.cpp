@@ -57,19 +57,6 @@ namespace zonetool::iw8
 			return std::string(bytes.begin(), bytes.end());
 		}
 
-		// Stock hashes take the characters as signed values. The core string_table_hash takes them as unsigned values.
-		std::int32_t string_table_hash(const std::string_view value)
-		{
-			std::uint32_t hash{};
-			for (const auto c : value)
-			{
-				const auto character = static_cast<signed char>(c);
-				hash = hash * 31 + static_cast<std::uint32_t>(character >= 'A' && character <= 'Z' ? character + 32 : character);
-			}
-
-			return static_cast<std::int32_t>(hash);
-		}
-
 		// A cell as the core string table dump writes it.
 		std::string csv_cell(const std::string_view value)
 		{
@@ -370,6 +357,18 @@ namespace zonetool::iw8
 	std::string localize_name(const std::string& name)
 	{
 		return utils::string::to_lower(name);
+	}
+
+	std::int32_t string_table_hash(const std::string_view value)
+	{
+		std::uint32_t hash{};
+		for (const auto c : value)
+		{
+			const auto character = static_cast<signed char>(c);
+			hash = hash * 31 + static_cast<std::uint32_t>(character >= 'A' && character <= 'Z' ? character + 32 : character);
+		}
+
+		return static_cast<std::int32_t>(hash);
 	}
 
 	std::vector<asset_file> asset_file_locations(const std::int32_t type, const std::string& name)
