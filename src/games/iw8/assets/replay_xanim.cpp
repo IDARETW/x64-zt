@@ -28,10 +28,10 @@ constexpr size_t kName = 0x00, kNames = 0x08, kDataByte = 0x10, kDataShort = 0x1
                  kNumFrames = 0x76, kFlags = 0x78, kBoneCount = 0x79, kNotifyCount = 0x83,
                  kAssetType = 0x84;
 constexpr unsigned kPartTypeAll = 9;
-// flags bit 0 = loop (shipped looping fans 3, their non-looping stop anims 2).
+// flags bit 0 = loop; bits 1 and 2 select the native 2D/3D delta paths.
 // Non-looping prop anims played on script models ship flags 2 and assetType 7
 // (equipment_box_fan_anim_stop); assetType is read only by a script query
-// (0xE8FF68 -> XAnimGetAssetType), never by playback. Bit 1 is inferred.
+// (0xE8FF68 -> XAnimGetAssetType), never by playback. Legacy IW3 dumps omit flags.
 constexpr uint8_t kFlagLoop = 1, kFlagShipped = 2, kAssetTypeProp = 7;
 
 template <class T> std::vector<T> Array(const nlohmann::json &source, const char *field)
@@ -155,6 +155,15 @@ Anim LoadIw3(const std::filesystem::path &path)
     anim.framerate = source.at("framerate");
     anim.frequency = source.at("frequency");
     anim.loop = source.at("loop");
+    if (const auto flags = source.find("iw7_flags"); flags != source.end())
+    {
+        if (!flags->is_number_integer())
+            throw std::runtime_error("invalid IW7 XAnim flags: " + anim.name);
+        const auto value = flags->get<int64_t>();
+        if (value < 0 || value > UINT8_MAX || ((value & kFlagLoop) != 0) != anim.loop)
+            throw std::runtime_error("inconsistent IW7 XAnim flags: " + anim.name);
+        anim.iw7Flags = static_cast<uint8_t>(value);
+    }
     const auto counts = source.at("bone_count");
     if (counts.size() != anim.boneCount.size())
         throw std::runtime_error("IW3 XAnim bone-count table has the wrong size");
@@ -215,7 +224,7 @@ void Register(ZoneWriter &writer, const Anim &anim)
         Store(parts.data(), kDataIntCount, static_cast<uint16_t>(anim.dataInt.size()));
         Store(parts.data(), kRandomDataIntCount, static_cast<uint16_t>(anim.randomDataInt.size()));
         Store(parts.data(), kNumFrames, anim.numframes);
-        parts[kFlags] = static_cast<uint8_t>(kFlagShipped | (anim.loop ? kFlagLoop : 0));
+        parts[kFlags] = anim.iw7Flags.value_or(static_cast<uint8_t>(kFlagShipped | (anim.loop ? kFlagLoop : 0)));
         std::memcpy(parts.data() + kBoneCount, anim.boneCount.data(), anim.boneCount.size());
         parts[kNotifyCount] = static_cast<uint8_t>(notify.size());
         parts[kAssetType] = kAssetTypeProp;

@@ -47,6 +47,8 @@ struct Anim
     float framerate = 30;
     float frequency = 0;
     bool loop = false;
+    // IW7 supplies its original XAnimParts flags; older IW3 dumps omit them.
+    std::optional<uint8_t> iw7Flags;
     std::array<uint8_t, 10> boneCount{};
     std::vector<std::string> names;
     std::vector<std::pair<std::string, float>> notify;
