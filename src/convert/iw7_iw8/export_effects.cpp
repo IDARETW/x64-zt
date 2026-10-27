@@ -1616,11 +1616,22 @@ namespace zonetool::convert::iw7_iw8
 			const std::filesystem::path& gsc_tool)
 		{
 			std::filesystem::remove_all(folder);
+			const auto& script_assets = source.assets(iw7::ASSET_TYPE_SCRIPTFILE);
+			if (script_assets.empty())
+			{
+				return {};
+			}
+
 			const auto input = folder / "gscbin";
-			for (const auto& [name, header] : source.assets(iw7::ASSET_TYPE_SCRIPTFILE))
+			for (const auto& [name, header] : script_assets)
 			{
 				// The format of zonetool's script dumps: the name, the three lengths, the compressed source and the bytecode.
 				const auto* script = static_cast<const iw7::ScriptFile*>(header);
+				if (!script || !script->name || script->compressedLen < 0 || script->len < 0 || script->bytecodeLen < 0 ||
+					(script->compressedLen && !script->buffer) || (script->bytecodeLen && !script->bytecode))
+				{
+					throw std::runtime_error(std::format("invalid IW7 script asset: {}", name));
+				}
 				const auto path = input / (name + ".gscbin");
 				std::filesystem::create_directories(path.parent_path());
 				std::ofstream file(path, std::ios::binary | std::ios::trunc);
@@ -1628,8 +1639,19 @@ namespace zonetool::convert::iw7_iw8
 				file.write(reinterpret_cast<const char*>(&script->compressedLen), 4);
 				file.write(reinterpret_cast<const char*>(&script->len), 4);
 				file.write(reinterpret_cast<const char*>(&script->bytecodeLen), 4);
-				file.write(script->buffer, script->compressedLen);
-				file.write(script->bytecode, script->bytecodeLen);
+				if (script->compressedLen)
+				{
+					file.write(script->buffer, script->compressedLen);
+				}
+				if (script->bytecodeLen)
+				{
+					file.write(script->bytecode, script->bytecodeLen);
+				}
+				file.close();
+				if (!file)
+				{
+					throw std::runtime_error(std::format("cannot write IW7 script {}", path.string()));
+				}
 			}
 
 			std::wstring command = L"\"" + gsc_tool.wstring() + L"\" -m decomp -g iw7 -s pc \"" + input.wstring() + L"\"";
@@ -1657,18 +1679,32 @@ namespace zonetool::convert::iw7_iw8
 				throw std::runtime_error(std::format("cannot run gsc-tool: {}", gsc_tool.string()));
 			}
 
-			WaitForSingleObject(process.hProcess, 300000);
-			CloseHandle(process.hThread);
-			CloseHandle(process.hProcess);
+			const auto close_process = gsl::finally([&] { CloseHandle(process.hThread); CloseHandle(process.hProcess); });
+			const auto wait_result = WaitForSingleObject(process.hProcess, INFINITE);
+			DWORD exit_code{};
+			if (wait_result != WAIT_OBJECT_0 || !GetExitCodeProcess(process.hProcess, &exit_code))
+			{
+				throw std::runtime_error(std::format("cannot wait for gsc-tool; see {}", log.string()));
+			}
+			if (exit_code != 0)
+			{
+				throw std::runtime_error(std::format("gsc-tool exited with code {}; see {}", exit_code, log.string()));
+			}
 
 			std::map<std::string, std::string> result;
 			const auto decompiled = folder / "decompiled" / "iw7";
-			for (const auto& [name, header] : source.assets(iw7::ASSET_TYPE_SCRIPTFILE))
+			for (const auto& [name, header] : script_assets)
 			{
-				std::ifstream file(decompiled / (name + ".gsc"), std::ios::binary);
-				if (file)
+				const auto path = decompiled / (name + ".gsc");
+				std::ifstream file(path, std::ios::binary);
+				if (!file)
 				{
-					result.emplace(name, std::string(std::istreambuf_iterator<char>(file), std::istreambuf_iterator<char>()));
+					throw std::runtime_error(std::format("gsc-tool did not produce {}; see {}", path.string(), log.string()));
+				}
+				result.emplace(name, std::string(std::istreambuf_iterator<char>(file), std::istreambuf_iterator<char>()));
+				if (file.bad())
+				{
+					throw std::runtime_error(std::format("cannot read decompiled script {}", path.string()));
 				}
 			}
 
