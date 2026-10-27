@@ -2645,7 +2645,8 @@ iw7_scriptable_sound( part, alias )
 		return;
 	self playsound( alias );
 	self playloopsound( alias );
-	self thread iw7_scriptable_sound_stop( part );
+	if ( iw3compat_sound_kind( alias ) == 2 )
+		self thread iw7_scriptable_sound_stop( part );
 }
 
 iw7_scriptable_sound_stop( part )
