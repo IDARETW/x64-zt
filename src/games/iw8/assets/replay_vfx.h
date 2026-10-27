@@ -27,7 +27,7 @@ struct Module
 
     // Imported stock modules (iw8::stock): `native` is the shipped record and
     // every pointer it carries is one of these children, at its byte offset in
-    // the record, in load order: a ParticleCurveDef's control points, or a
+    // the record, in load order: curve points, mesh-count records, or a
     // ParticleLinkedAssetListDef whose entries keep their shipped bytes and
     // name the asset (or, for INIT_SOUND, the inline alias string) each
     // pointer slot holds.
@@ -41,7 +41,9 @@ struct Module
     {
         std::size_t offset{};
         bool curve{};
+        bool meshData{};
         std::vector<iw8_focus::ParticleCurveControlPointDef> points;
+        std::vector<iw8_focus::ParticleSpawnMeshAssetDef> meshAssets;
         std::vector<LinkedEntry> entries;
     };
     bool imported = false;
