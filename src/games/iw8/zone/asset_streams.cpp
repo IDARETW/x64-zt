@@ -975,7 +975,7 @@ namespace zonetool::iw8
 		template <typename Stream>
 		void stream_physicssfxeventassetfrequencyrule(Stream& stream, PhysicsSFXEventAssetFrequencyRule& data)
 		{
-			if (const auto items_0 = stream.array(data.entries, 7, *reinterpret_cast<const std::int32_t*>(&data)))
+			if (const auto items_0 = stream.inline_array(data.entries, 7, *reinterpret_cast<const std::int32_t*>(&data)))
 			{
 				if (*reinterpret_cast<const std::int32_t*>(&data) != 0)
 				{
@@ -990,7 +990,7 @@ namespace zonetool::iw8
 		template <typename Stream>
 		void stream_physicssfxeventassetcameradistancerule(Stream& stream, PhysicsSFXEventAssetCameraDistanceRule& data)
 		{
-			if (const auto items_0 = stream.array(data.entries, 7, *reinterpret_cast<const std::int32_t*>(&data)))
+			if (const auto items_0 = stream.inline_array(data.entries, 7, *reinterpret_cast<const std::int32_t*>(&data)))
 			{
 				if (*reinterpret_cast<const std::int32_t*>(&data) != 0)
 				{
@@ -1005,7 +1005,7 @@ namespace zonetool::iw8
 		template <typename Stream>
 		void stream_physicssfxeventassetatmosphererule(Stream& stream, PhysicsSFXEventAssetAtmosphereRule& data)
 		{
-			if (const auto items_0 = stream.array(data.entries, 7, *reinterpret_cast<const std::int32_t*>(&data)))
+			if (const auto items_0 = stream.inline_array(data.entries, 7, *reinterpret_cast<const std::int32_t*>(&data)))
 			{
 				if (*reinterpret_cast<const std::int32_t*>(&data) != 0)
 				{
@@ -1020,7 +1020,7 @@ namespace zonetool::iw8
 		template <typename Stream>
 		void stream_physicssfxeventassetgravityrule(Stream& stream, PhysicsSFXEventAssetGravityRule& data)
 		{
-			if (const auto items_0 = stream.array(data.entries, 7, *reinterpret_cast<const std::int32_t*>(&data)))
+			if (const auto items_0 = stream.inline_array(data.entries, 7, *reinterpret_cast<const std::int32_t*>(&data)))
 			{
 				if (*reinterpret_cast<const std::int32_t*>(&data) != 0)
 				{
@@ -1035,7 +1035,7 @@ namespace zonetool::iw8
 		template <typename Stream>
 		void stream_physicssfxeventassetmassrule(Stream& stream, PhysicsSFXEventAssetMassRule& data)
 		{
-			if (const auto items_0 = stream.array(data.entries, 7, *reinterpret_cast<const std::int32_t*>(&data)))
+			if (const auto items_0 = stream.inline_array(data.entries, 7, *reinterpret_cast<const std::int32_t*>(&data)))
 			{
 				if (*reinterpret_cast<const std::int32_t*>(&data) != 0)
 				{
@@ -1050,7 +1050,7 @@ namespace zonetool::iw8
 		template <typename Stream>
 		void stream_physicssfxeventassetspeedrule(Stream& stream, PhysicsSFXEventAssetSpeedRule& data)
 		{
-			if (const auto items_0 = stream.array(data.entries, 7, *reinterpret_cast<const std::int32_t*>(&data)))
+			if (const auto items_0 = stream.inline_array(data.entries, 7, *reinterpret_cast<const std::int32_t*>(&data)))
 			{
 				if (*reinterpret_cast<const std::int32_t*>(&data) != 0)
 				{
@@ -1065,7 +1065,7 @@ namespace zonetool::iw8
 		template <typename Stream>
 		void stream_physicssfxeventassetanglerule(Stream& stream, PhysicsSFXEventAssetAngleRule& data)
 		{
-			if (const auto items_0 = stream.array(data.entries, 7, *reinterpret_cast<const std::int32_t*>(&data)))
+			if (const auto items_0 = stream.inline_array(data.entries, 7, *reinterpret_cast<const std::int32_t*>(&data)))
 			{
 				if (*reinterpret_cast<const std::int32_t*>(&data) != 0)
 				{
@@ -1080,7 +1080,7 @@ namespace zonetool::iw8
 		template <typename Stream>
 		void stream_physicssfxeventassetmaterialrule(Stream& stream, PhysicsSFXEventAssetMaterialRule& data)
 		{
-			if (const auto items_0 = stream.array(data.entries, 7, *reinterpret_cast<const std::int32_t*>(&data)))
+			if (const auto items_0 = stream.inline_array(data.entries, 7, *reinterpret_cast<const std::int32_t*>(&data)))
 			{
 				if (*reinterpret_cast<const std::int32_t*>(&data) != 0)
 				{
@@ -1102,7 +1102,7 @@ namespace zonetool::iw8
 		template <typename Stream>
 		void stream_physicssfxeventassetrules(Stream& stream, PhysicsSFXEventAssetRules& data)
 		{
-			if (const auto items_0 = stream.array(data.rules, 7, *reinterpret_cast<const std::int32_t*>(&data)))
+			if (const auto items_0 = stream.inline_array(data.rules, 7, *reinterpret_cast<const std::int32_t*>(&data)))
 			{
 				if (*reinterpret_cast<const std::int32_t*>(&data) != 0)
 				{
@@ -1187,7 +1187,7 @@ namespace zonetool::iw8
 		template <typename Stream>
 		void stream_physicsvfxeventassetfrequencyrule(Stream& stream, PhysicsVFXEventAssetFrequencyRule& data)
 		{
-			if (const auto items_0 = stream.array(data.entries, 7, *reinterpret_cast<const std::int32_t*>(&data)))
+			if (const auto items_0 = stream.inline_array(data.entries, 7, *reinterpret_cast<const std::int32_t*>(&data)))
 			{
 				if (*reinterpret_cast<const std::int32_t*>(&data) != 0)
 				{
@@ -1202,7 +1202,7 @@ namespace zonetool::iw8
 		template <typename Stream>
 		void stream_physicsvfxeventassetcameradistancerule(Stream& stream, PhysicsVFXEventAssetCameraDistanceRule& data)
 		{
-			if (const auto items_0 = stream.array(data.entries, 7, *reinterpret_cast<const std::int32_t*>(&data)))
+			if (const auto items_0 = stream.inline_array(data.entries, 7, *reinterpret_cast<const std::int32_t*>(&data)))
 			{
 				if (*reinterpret_cast<const std::int32_t*>(&data) != 0)
 				{
@@ -1217,7 +1217,7 @@ namespace zonetool::iw8
 		template <typename Stream>
 		void stream_physicsvfxeventassetatmosphererule(Stream& stream, PhysicsVFXEventAssetAtmosphereRule& data)
 		{
-			if (const auto items_0 = stream.array(data.entries, 7, *reinterpret_cast<const std::int32_t*>(&data)))
+			if (const auto items_0 = stream.inline_array(data.entries, 7, *reinterpret_cast<const std::int32_t*>(&data)))
 			{
 				if (*reinterpret_cast<const std::int32_t*>(&data) != 0)
 				{
@@ -1232,7 +1232,7 @@ namespace zonetool::iw8
 		template <typename Stream>
 		void stream_physicsvfxeventassetgravityrule(Stream& stream, PhysicsVFXEventAssetGravityRule& data)
 		{
-			if (const auto items_0 = stream.array(data.entries, 7, *reinterpret_cast<const std::int32_t*>(&data)))
+			if (const auto items_0 = stream.inline_array(data.entries, 7, *reinterpret_cast<const std::int32_t*>(&data)))
 			{
 				if (*reinterpret_cast<const std::int32_t*>(&data) != 0)
 				{
@@ -1247,7 +1247,7 @@ namespace zonetool::iw8
 		template <typename Stream>
 		void stream_physicsvfxeventassetmassrule(Stream& stream, PhysicsVFXEventAssetMassRule& data)
 		{
-			if (const auto items_0 = stream.array(data.entries, 7, *reinterpret_cast<const std::int32_t*>(&data)))
+			if (const auto items_0 = stream.inline_array(data.entries, 7, *reinterpret_cast<const std::int32_t*>(&data)))
 			{
 				if (*reinterpret_cast<const std::int32_t*>(&data) != 0)
 				{
@@ -1262,7 +1262,7 @@ namespace zonetool::iw8
 		template <typename Stream>
 		void stream_physicsvfxeventassetspeedrule(Stream& stream, PhysicsVFXEventAssetSpeedRule& data)
 		{
-			if (const auto items_0 = stream.array(data.entries, 7, *reinterpret_cast<const std::int32_t*>(&data)))
+			if (const auto items_0 = stream.inline_array(data.entries, 7, *reinterpret_cast<const std::int32_t*>(&data)))
 			{
 				if (*reinterpret_cast<const std::int32_t*>(&data) != 0)
 				{
@@ -1277,7 +1277,7 @@ namespace zonetool::iw8
 		template <typename Stream>
 		void stream_physicsvfxeventassetanglerule(Stream& stream, PhysicsVFXEventAssetAngleRule& data)
 		{
-			if (const auto items_0 = stream.array(data.entries, 7, *reinterpret_cast<const std::int32_t*>(&data)))
+			if (const auto items_0 = stream.inline_array(data.entries, 7, *reinterpret_cast<const std::int32_t*>(&data)))
 			{
 				if (*reinterpret_cast<const std::int32_t*>(&data) != 0)
 				{
@@ -1292,7 +1292,7 @@ namespace zonetool::iw8
 		template <typename Stream>
 		void stream_physicsvfxeventassetmaterialrule(Stream& stream, PhysicsVFXEventAssetMaterialRule& data)
 		{
-			if (const auto items_0 = stream.array(data.entries, 7, *reinterpret_cast<const std::int32_t*>(&data)))
+			if (const auto items_0 = stream.inline_array(data.entries, 7, *reinterpret_cast<const std::int32_t*>(&data)))
 			{
 				if (*reinterpret_cast<const std::int32_t*>(&data) != 0)
 				{
@@ -1314,7 +1314,7 @@ namespace zonetool::iw8
 		template <typename Stream>
 		void stream_physicsvfxeventassetrules(Stream& stream, PhysicsVFXEventAssetRules& data)
 		{
-			if (const auto items_0 = stream.array(data.rules, 7, *reinterpret_cast<const std::int32_t*>(&data)))
+			if (const auto items_0 = stream.inline_array(data.rules, 7, *reinterpret_cast<const std::int32_t*>(&data)))
 			{
 				if (*reinterpret_cast<const std::int32_t*>(&data) != 0)
 				{
@@ -1430,14 +1430,14 @@ namespace zonetool::iw8
 			stream.begin_asset();
 			stream.push(5);
 			stream.string(data.name);
-			stream.array(data.havokData, 15, data.havokDataSize);
-			stream.array(data.simulationCategories, 3, data.numRigidBodies);
-			stream.array(data.bodyContents, 3, data.numRigidBodies);
-			if (const auto items_6 = stream.array(data.sfxEventAssets, 7, data.numSFXEventAssets))
+			stream.inline_array(data.havokData, 15, data.havokDataSize);
+			stream.inline_array(data.simulationCategories, 3, data.numRigidBodies);
+			stream.inline_array(data.bodyContents, 3, data.numRigidBodies);
+			if (const auto items_6 = stream.inline_array(data.sfxEventAssets, 7, data.numSFXEventAssets))
 			{
 				stream_physicssfxeventasset_ptr_array(stream, items_6, data.numSFXEventAssets);
 			}
-			if (const auto items_10 = stream.array(data.vfxEventAssets, 7, data.numVFXEventAssets))
+			if (const auto items_10 = stream.inline_array(data.vfxEventAssets, 7, data.numVFXEventAssets))
 			{
 				stream_physicsvfxeventasset_ptr_array(stream, items_10, data.numVFXEventAssets);
 			}
@@ -1461,7 +1461,7 @@ namespace zonetool::iw8
 			stream.begin_asset();
 			stream.push(5);
 			stream.string(data.name);
-			stream.array(data.havokData, 15, data.havokDataSize);
+			stream.inline_array(data.havokData, 15, data.havokDataSize);
 			stream.string(data.soundAlias);
 			stream.pop();
 			stream.end_asset();
@@ -1474,9 +1474,9 @@ namespace zonetool::iw8
 			{
 				for (std::size_t i1 = 0; i1 < count; i1++)
 				{
-					stream.array(data[i1].vertices, 3, *reinterpret_cast<const std::uint32_t*>(&data[i1]));
-					stream.array(data[i1].indices, 1, data[i1].numIndices);
-					stream.array(data[i1].areas, 3, data[i1].numAreas);
+					stream.inline_array(data[i1].vertices, 3, *reinterpret_cast<const std::uint32_t*>(&data[i1]));
+					stream.inline_array(data[i1].indices, 1, data[i1].numIndices);
+					stream.inline_array(data[i1].areas, 3, data[i1].numAreas);
 				}
 			}
 		}
@@ -1484,23 +1484,23 @@ namespace zonetool::iw8
 		template <typename Stream>
 		void stream_physicsworldmeshdebugdata(Stream& stream, PhysicsWorldMeshDebugData& data)
 		{
-			if (const auto items_0 = stream.array(data.generalWorldMeshDebugDrawBuffers, 7, data.numGeneralWorldMeshDebugDrawBuffers))
+			if (const auto items_0 = stream.inline_array(data.generalWorldMeshDebugDrawBuffers, 7, data.numGeneralWorldMeshDebugDrawBuffers))
 			{
 				stream_physicsworldmeshdebugdrawbuffer_array(stream, items_0, data.numGeneralWorldMeshDebugDrawBuffers);
 			}
-			if (const auto items_4 = stream.array(data.characterWorldMeshDebugDrawBuffers, 7, data.numCharacterWorldMeshDebugDrawBuffers))
+			if (const auto items_4 = stream.inline_array(data.characterWorldMeshDebugDrawBuffers, 7, data.numCharacterWorldMeshDebugDrawBuffers))
 			{
 				stream_physicsworldmeshdebugdrawbuffer_array(stream, items_4, data.numCharacterWorldMeshDebugDrawBuffers);
 			}
-			if (const auto items_8 = stream.array(data.itemWorldMeshDebugDrawBuffers, 7, data.numItemWorldMeshDebugDrawBuffers))
+			if (const auto items_8 = stream.inline_array(data.itemWorldMeshDebugDrawBuffers, 7, data.numItemWorldMeshDebugDrawBuffers))
 			{
 				stream_physicsworldmeshdebugdrawbuffer_array(stream, items_8, data.numItemWorldMeshDebugDrawBuffers);
 			}
-			if (const auto items_12 = stream.array(data.weaponWorldMeshDebugDrawBuffers, 7, data.numWeaponWorldMeshDebugDrawBuffers))
+			if (const auto items_12 = stream.inline_array(data.weaponWorldMeshDebugDrawBuffers, 7, data.numWeaponWorldMeshDebugDrawBuffers))
 			{
 				stream_physicsworldmeshdebugdrawbuffer_array(stream, items_12, data.numWeaponWorldMeshDebugDrawBuffers);
 			}
-			if (const auto items_16 = stream.array(data.miscWorldMeshDebugDrawBuffers, 7, data.numMiscWorldMeshDebugDrawBuffers))
+			if (const auto items_16 = stream.inline_array(data.miscWorldMeshDebugDrawBuffers, 7, data.numMiscWorldMeshDebugDrawBuffers))
 			{
 				stream_physicsworldmeshdebugdrawbuffer_array(stream, items_16, data.numMiscWorldMeshDebugDrawBuffers);
 			}
@@ -1513,12 +1513,12 @@ namespace zonetool::iw8
 			stream.push(5);
 			stream.string(data.name);
 			stream_physicsworldmeshdebugdata(stream, data.worldMeshDebugData);
-			stream.array(data.pmoveSamplePositions, 3, data.pmoveNumSamples);
-			stream.array(data.pmoveSampleHitCounts, 0, data.pmoveNumSamples);
-			stream.array(data.pmoveSampleTimes, 3, data.pmoveNumSamples);
-			stream.array(data.bulletSamplePositions, 3, data.bulletNumSamples);
-			stream.array(data.bulletSampleHitCounts, 0, data.bulletNumSamples);
-			stream.array(data.bulletSampleAverageTimes, 3, data.bulletNumSamples);
+			stream.inline_array(data.pmoveSamplePositions, 3, data.pmoveNumSamples);
+			stream.inline_array(data.pmoveSampleHitCounts, 0, data.pmoveNumSamples);
+			stream.inline_array(data.pmoveSampleTimes, 3, data.pmoveNumSamples);
+			stream.inline_array(data.bulletSamplePositions, 3, data.bulletNumSamples);
+			stream.inline_array(data.bulletSampleHitCounts, 0, data.bulletNumSamples);
+			stream.inline_array(data.bulletSampleAverageTimes, 3, data.bulletNumSamples);
 			stream.pop();
 			stream.end_asset();
 		}
@@ -1555,11 +1555,11 @@ namespace zonetool::iw8
 			stream_xanimdynamicindices(stream, data.indices, outer_xanimparttrans, outer_xanimparts);
 			if (outer_xanimparttrans.smallTrans == 0)
 			{
-				stream.array(data.frames._2, 1, (*reinterpret_cast<const std::uint16_t*>(&outer_xanimparttrans) == 0 ? 0 : (3 + (*reinterpret_cast<const std::uint16_t*>(&outer_xanimparttrans) * 3))));
+				stream.inline_array(data.frames._2, 1, (*reinterpret_cast<const std::uint16_t*>(&outer_xanimparttrans) == 0 ? 0 : (3 + (*reinterpret_cast<const std::uint16_t*>(&outer_xanimparttrans) * 3))));
 			}
 			else
 			{
-				stream.array(data.frames._1, 0, (*reinterpret_cast<const std::uint16_t*>(&outer_xanimparttrans) == 0 ? 0 : (3 + (*reinterpret_cast<const std::uint16_t*>(&outer_xanimparttrans) * 3))));
+				stream.inline_array(data.frames._1, 0, (*reinterpret_cast<const std::uint16_t*>(&outer_xanimparttrans) == 0 ? 0 : (3 + (*reinterpret_cast<const std::uint16_t*>(&outer_xanimparttrans) * 3))));
 			}
 		}
 
@@ -1670,37 +1670,37 @@ namespace zonetool::iw8
 			stream.begin_asset();
 			stream.push(5);
 			stream.string(data.name);
-			if (const auto items_3 = stream.array(data.names, 3, data.boneCount[9]))
+			if (const auto items_3 = stream.inline_array(data.names, 3, data.boneCount[9]))
 			{
 				stream.script_strings(items_3, data.boneCount[9]);
 			}
-			if (const auto items_7 = stream.array(data.notify, 3, data.notifyCount))
+			if (const auto items_7 = stream.inline_array(data.notify, 3, data.notifyCount))
 			{
 				stream_xanimnotifyinfo_array(stream, items_7, data.notifyCount);
 			}
-			if (const auto items_11 = stream.array(data.deltaPart, 7, 1))
+			if (const auto items_11 = stream.inline_array(data.deltaPart, 7, 1))
 			{
 				stream_xanimdeltapart(stream, *items_11, data);
 			}
-			stream.array(data.dataByte, 0, data.dataByteCount);
-			stream.array(data.dataShort, 1, data.dataShortCount);
-			stream.array(data.dataInt, 3, data.dataIntCount);
-			stream.array(data.randomDataShort, 1, data.randomDataShortCount);
-			stream.array(data.randomDataByte, 0, data.randomDataByteCount);
-			stream.array(data.randomDataInt, 3, data.randomDataIntCount);
+			stream.inline_array(data.dataByte, 0, data.dataByteCount);
+			stream.inline_array(data.dataShort, 1, data.dataShortCount);
+			stream.inline_array(data.dataInt, 3, data.dataIntCount);
+			stream.inline_array(data.randomDataShort, 1, data.randomDataShortCount);
+			stream.inline_array(data.randomDataByte, 0, data.randomDataByteCount);
+			stream.inline_array(data.randomDataInt, 3, data.randomDataIntCount);
 			if (static_cast<std::uint16_t>(data.numframes) >= static_cast<std::uint16_t>(256))
 			{
-				stream.array(data.indices._2, 1, data.indexCount);
+				stream.inline_array(data.indices._2, 1, data.indexCount);
 			}
 			else
 			{
-				stream.array(data.indices._1, 0, data.indexCount);
+				stream.inline_array(data.indices._1, 0, data.indexCount);
 			}
-			if (const auto items_29 = stream.array(data.blendShapeWeightNames, 3, data.blendShapeWeightCount))
+			if (const auto items_29 = stream.inline_array(data.blendShapeWeightNames, 3, data.blendShapeWeightCount))
 			{
 				stream.script_strings(items_29, data.blendShapeWeightCount);
 			}
-			stream.array(data.blendShapeWeights, 1, ((data.numframes + 1) * data.blendShapeWeightCount));
+			stream.inline_array(data.blendShapeWeights, 1, ((data.numframes + 1) * data.blendShapeWeightCount));
 			stream.pop();
 			stream.end_asset();
 		}
@@ -1718,15 +1718,15 @@ namespace zonetool::iw8
 				for (std::size_t i1 = 0; i1 < count; i1++)
 				{
 					stream.array(data[i1].rigidVertLists, 3, outer_xsurface.rigidVertListCount);
-					stream.array(data[i1].faceIndices, 3, ((data[i1].faceCount + (data[i1].faceCount * 2)) + (data[i1].faceCount + (data[i1].faceCount * 2))));
-					stream.array(data[i1].regularPatchIndices, 3, (data[i1].regularPatchCount * 16));
-					stream.array(data[i1].regularPatchFlags, 3, data[i1].regularPatchCount);
-					stream.array(data[i1].facePoints, 3, (data[i1].facePointBufferSize >> 2));
-					stream.array(data[i1].edgePoints, 3, (data[i1].edgePointCount + data[i1].edgePointCount));
-					stream.array(data[i1].vertexPoints, 3, (data[i1].vertexPointBufferSize >> 2));
-					stream.array(data[i1].normals, 3, (data[i1].normalBufferSize >> 2));
-					stream.array(data[i1].transitionPoints, 3, data[i1].transitionPointCount);
-					stream.array(data[i1].regularPatchCones, 3, (data[i1].regularPatchCount * 8));
+					stream.inline_array(data[i1].faceIndices, 3, ((data[i1].faceCount + (data[i1].faceCount * 2)) + (data[i1].faceCount + (data[i1].faceCount * 2))));
+					stream.inline_array(data[i1].regularPatchIndices, 3, (data[i1].regularPatchCount * 16));
+					stream.inline_array(data[i1].regularPatchFlags, 3, data[i1].regularPatchCount);
+					stream.inline_array(data[i1].facePoints, 3, (data[i1].facePointBufferSize >> 2));
+					stream.inline_array(data[i1].edgePoints, 3, (data[i1].edgePointCount + data[i1].edgePointCount));
+					stream.inline_array(data[i1].vertexPoints, 3, (data[i1].vertexPointBufferSize >> 2));
+					stream.inline_array(data[i1].normals, 3, (data[i1].normalBufferSize >> 2));
+					stream.inline_array(data[i1].transitionPoints, 3, data[i1].transitionPointCount);
+					stream.inline_array(data[i1].regularPatchCones, 3, (data[i1].regularPatchCount * 8));
 				}
 			}
 		}
@@ -1734,7 +1734,7 @@ namespace zonetool::iw8
 		template <typename Stream>
 		void stream_xsurfacesubdivinfo(Stream& stream, XSurfaceSubdivInfo& data, [[maybe_unused]] const XSurface& outer_xsurface)
 		{
-			if (const auto items_0 = stream.array(data.levels, 7, outer_xsurface.subdivLevelCount))
+			if (const auto items_0 = stream.inline_array(data.levels, 7, outer_xsurface.subdivLevelCount))
 			{
 				stream_xsurfacesubdivlevel_array(stream, items_0, outer_xsurface.subdivLevelCount, outer_xsurface);
 			}
@@ -1770,7 +1770,7 @@ namespace zonetool::iw8
 			stream.array(data.lmapCoords, 3, data.vertCount);
 			stream.array(data.rigidVertLists, 1, data.rigidVertListCount);
 			reinterpret_cast<std::uint16_t*>(stream.elements(data.blendVerts, 3, 1, (data.blendVertSize & (-2))));
-			if (const auto items_14 = stream.array(data.subdiv, 15, 1))
+			if (const auto items_14 = stream.inline_array(data.subdiv, 15, 1))
 			{
 				stream_xsurfacesubdivinfo(stream, *items_14, data);
 			}
@@ -1791,7 +1791,7 @@ namespace zonetool::iw8
 			stream.begin_asset();
 			stream.push(5);
 			stream.string(data.name);
-			if (const auto items_3 = stream.array(data.surfs, 15, data.numsurfs))
+			if (const auto items_3 = stream.inline_array(data.surfs, 15, data.numsurfs))
 			{
 				if (data.numsurfs != 0)
 				{
@@ -1826,10 +1826,10 @@ namespace zonetool::iw8
 		template <typename Stream>
 		void stream_materialconstantbufferdef(Stream& stream, MaterialConstantBufferDef& data)
 		{
-			stream.array(data.vsData, 15, *reinterpret_cast<const std::uint32_t*>(&data));
-			stream.array(data.hsData, 15, data.hsDataSize);
-			stream.array(data.dsData, 15, data.dsDataSize);
-			stream.array(data.psData, 15, data.psDataSize);
+			stream.inline_array(data.vsData, 15, *reinterpret_cast<const std::uint32_t*>(&data));
+			stream.inline_array(data.hsData, 15, data.hsDataSize);
+			stream.inline_array(data.dsData, 15, data.dsDataSize);
+			stream.inline_array(data.psData, 15, data.psDataSize);
 		}
 
 		template <typename Stream>
@@ -1863,7 +1863,7 @@ namespace zonetool::iw8
 					}
 				}
 			}
-			if (const auto items_28 = stream.array(data.subMaterials, 7, data.layerCount))
+			if (const auto items_28 = stream.inline_array(data.subMaterials, 7, data.layerCount))
 			{
 				for (std::size_t string_30 = 0; string_30 < data.layerCount; string_30++)
 				{
@@ -1918,7 +1918,7 @@ namespace zonetool::iw8
 			stream.begin_asset();
 			stream.push(5);
 			stream.string(data.name);
-			stream.array(data.havokData, 15, data.havokDataSize);
+			stream.inline_array(data.havokData, 15, data.havokDataSize);
 			if (const auto items_4 = stream.array(data.boneMappingSets, 7, data.boneMappingSetCount))
 			{
 				if (data.boneMappingSetCount != 0)
@@ -1981,7 +1981,7 @@ namespace zonetool::iw8
 		template <typename Stream>
 		void stream_xmodeldecalvolumesinfo(Stream& stream, XModelDecalVolumesInfo& data)
 		{
-			if (const auto items_0 = stream.array(data.decalVolumes, 7, data.numDecalVolumes))
+			if (const auto items_0 = stream.inline_array(data.decalVolumes, 7, data.numDecalVolumes))
 			{
 				if (data.numDecalVolumes != 0)
 				{
@@ -2003,7 +2003,7 @@ namespace zonetool::iw8
 			stream.asset(ASSET_TYPE_SCRIPTABLE, data.scriptableMoverDef);
 			stream.asset(ASSET_TYPE_XANIM_PROCEDURALBONES, data.proceduralBones);
 			stream.asset(ASSET_TYPE_XANIM_DYNAMICBONES, data.dynamicBones);
-			if (const auto items_6 = stream.array(data.aimAssistBones, 3, data.numAimAssistBones))
+			if (const auto items_6 = stream.inline_array(data.aimAssistBones, 3, data.numAimAssistBones))
 			{
 				stream.script_strings(items_6, data.numAimAssistBones);
 			}
@@ -2021,7 +2021,7 @@ namespace zonetool::iw8
 			{
 				stream_reactivemotionmodelinfo(stream, *items_20);
 			}
-			if (const auto items_24 = stream.array(data.materialHandles, 7, data.numsurfs))
+			if (const auto items_24 = stream.inline_array(data.materialHandles, 7, data.numsurfs))
 			{
 				stream_material_ptr_array(stream, items_24, data.numsurfs);
 			}
@@ -2029,8 +2029,8 @@ namespace zonetool::iw8
 			{
 				stream.asset(ASSET_TYPE_XMODEL_SURFS, data.lodInfo[i1].modelSurfsStaging);
 			}
-			stream.array(data.boneInfo, 3, (data.numClientBones + data.numBones));
-			stream.array(data.himipRadiusInvSq, 3, data.numsurfs);
+			stream.inline_array(data.boneInfo, 3, (data.numClientBones + data.numBones));
+			stream.inline_array(data.himipRadiusInvSq, 3, data.numsurfs);
 			stream.asset(ASSET_TYPE_PHYSICSASSET, data.physicsAsset);
 			stream.asset(ASSET_TYPE_PHYSICS_FX_SHAPE, data.physicsFXShape);
 			stream.asset(ASSET_TYPE_XMODEL_DETAIL_COLLISION, data.detailCollision);
@@ -2042,7 +2042,7 @@ namespace zonetool::iw8
 			{
 				stream_xmodelblendshapeinfo(stream, *items_41);
 			}
-			if (const auto items_45 = stream.array(data.mdaoVolumes, 7, data.mdaoVolumeCount))
+			if (const auto items_45 = stream.inline_array(data.mdaoVolumes, 7, data.mdaoVolumeCount))
 			{
 				if (data.mdaoVolumeCount != 0)
 				{
@@ -2052,7 +2052,7 @@ namespace zonetool::iw8
 					}
 				}
 			}
-			if (const auto items_55 = stream.array(data.decalVolumesInfo, 7, 1))
+			if (const auto items_55 = stream.inline_array(data.decalVolumesInfo, 7, 1))
 			{
 				stream_xmodeldecalvolumesinfo(stream, *items_55);
 			}
@@ -2115,7 +2115,7 @@ namespace zonetool::iw8
 							stream_mayhemanimframessplinecompressed(stream, *items_0, data[0]);
 						}
 					}
-					if (const auto items_16 = stream.array(data[i1].notify, 3, data[i1].notifyCount))
+					if (const auto items_16 = stream.inline_array(data[i1].notify, 3, data[i1].notifyCount))
 					{
 						stream_xanimnotifyinfo_array(stream, items_16, data[i1].notifyCount);
 					}
@@ -2186,14 +2186,14 @@ namespace zonetool::iw8
 		void stream_materialtechnique(Stream& stream, MaterialTechnique& data)
 		{
 			stream.string(data.name);
-			stream.array(data.pipelineStates, 7, (data.pipelineStateCount * data.pipelineStateInputLayoutCount));
+			stream.inline_array(data.pipelineStates, 7, (data.pipelineStateCount * data.pipelineStateInputLayoutCount));
 			stream.array(data.rootParameterMap, 0, 16);
 			stream.asset(ASSET_TYPE_VERTEXSHADER, data.vertexShader);
 			stream.asset(ASSET_TYPE_HULLSHADER, data.hullShader);
 			stream.asset(ASSET_TYPE_DOMAINSHADER, data.domainShader);
 			stream.asset(ASSET_TYPE_PIXELSHADER, data.pixelShader);
-			stream.array(data.stateBits, 0, data.pipelineStateCount);
-			stream.array(data.args, 1, (((data.neverArgCount + data.perObjArgCount) + data.perPrimArgCount) + data.stableArgCount));
+			stream.inline_array(data.stateBits, 0, data.pipelineStateCount);
+			stream.inline_array(data.args, 1, (((data.neverArgCount + data.perObjArgCount) + data.perPrimArgCount) + data.stableArgCount));
 		}
 
 		template <typename Stream>
@@ -2245,7 +2245,7 @@ namespace zonetool::iw8
 		template <typename Stream>
 		void stream_gfximagefallback_ptr(Stream& stream, GfxImageFallback*& data)
 		{
-			if (const auto items_0 = stream.array(data, 7, 1))
+			if (const auto items_0 = stream.inline_array(data, 7, 1))
 			{
 				stream_gfximagefallback(stream, *items_0);
 			}
@@ -2262,7 +2262,7 @@ namespace zonetool::iw8
 			if (((static_cast<std::uint32_t>(data.flags) >> 6) & 1) == 0)
 			{
 				stream.push(1);
-				stream.array(data.pixels.residentData, 15, data.totalSize);
+				stream.inline_array(data.pixels.residentData, 15, data.totalSize);
 				stream.pop();
 			}
 			else
@@ -2279,9 +2279,9 @@ namespace zonetool::iw8
 			stream.begin_asset();
 			stream.push(5);
 			stream.string(data.name);
-			stream.array(data.volmodinfo, 3, data.volmodinfoCount);
-			stream.array(data.entchannelInfo, 3, data.entchannelCount);
-			if (const auto items_5 = stream.array(data.contexts, 7, data.contextCount))
+			stream.inline_array(data.volmodinfo, 3, data.volmodinfoCount);
+			stream.inline_array(data.entchannelInfo, 3, data.entchannelCount);
+			if (const auto items_5 = stream.inline_array(data.contexts, 7, data.contextCount))
 			{
 				if (data.contextCount != 0)
 				{
@@ -2291,7 +2291,7 @@ namespace zonetool::iw8
 					}
 				}
 			}
-			if (const auto items_15 = stream.array(data.contextValues, 7, data.contextValueCount))
+			if (const auto items_15 = stream.inline_array(data.contextValues, 7, data.contextValueCount))
 			{
 				if (data.contextValueCount != 0)
 				{
@@ -2301,9 +2301,9 @@ namespace zonetool::iw8
 					}
 				}
 			}
-			stream.array(data.masters, 3, data.masterCount);
-			stream.array(data.whizbys, 3, data.whizbyCount);
-			stream.array(data.perkinfo, 3, data.perkinfoCount);
+			stream.inline_array(data.masters, 3, data.masterCount);
+			stream.inline_array(data.whizbys, 3, data.whizbyCount);
+			stream.inline_array(data.perkinfo, 3, data.perkinfoCount);
 			stream.pop();
 			stream.end_asset();
 		}
@@ -2373,7 +2373,7 @@ namespace zonetool::iw8
 		template <typename Stream>
 		void stream_soundtable(Stream& stream, SoundTable& data)
 		{
-			if (const auto items_0 = stream.array(data.adsrSettings, 7, data.adsrCount))
+			if (const auto items_0 = stream.inline_array(data.adsrSettings, 7, data.adsrCount))
 			{
 				if (data.adsrCount != 0)
 				{
@@ -2383,7 +2383,7 @@ namespace zonetool::iw8
 					}
 				}
 			}
-			if (const auto items_10 = stream.array(data.ambientDefs, 7, data.ambientDefCount))
+			if (const auto items_10 = stream.inline_array(data.ambientDefs, 7, data.ambientDefCount))
 			{
 				if (data.ambientDefCount != 0)
 				{
@@ -2393,8 +2393,8 @@ namespace zonetool::iw8
 					}
 				}
 			}
-			stream.array(data.ambientEvents, 3, data.ambientEventCount);
-			if (const auto items_21 = stream.array(data.ambientElements, 7, data.ambientElementsCount))
+			stream.inline_array(data.ambientEvents, 3, data.ambientEventCount);
+			if (const auto items_21 = stream.inline_array(data.ambientElements, 7, data.ambientElementsCount))
 			{
 				if (data.ambientElementsCount != 0)
 				{
@@ -2404,20 +2404,20 @@ namespace zonetool::iw8
 					}
 				}
 			}
-			stream.array(data.filters, 3, data.filterCount);
-			stream.array(data.mixes, 3, data.mixCount);
-			if (const auto items_33 = stream.array(data.npcADSRZones, 7, data.npcADSRZoneCount))
+			stream.inline_array(data.filters, 3, data.filterCount);
+			stream.inline_array(data.mixes, 3, data.mixCount);
+			if (const auto items_33 = stream.inline_array(data.npcADSRZones, 7, data.npcADSRZoneCount))
 			{
 				stream_adsrzoneentry_array(stream, items_33, data.npcADSRZoneCount);
 			}
-			stream.array(data.occlusionFilters, 3, data.occlusionFilterCount);
-			if (const auto items_38 = stream.array(data.playerADSRZones, 7, data.playerADSRZoneCount))
+			stream.inline_array(data.occlusionFilters, 3, data.occlusionFilterCount);
+			if (const auto items_38 = stream.inline_array(data.playerADSRZones, 7, data.playerADSRZoneCount))
 			{
 				stream_adsrzoneentry_array(stream, items_38, data.playerADSRZoneCount);
 			}
-			stream.array(data.reverbs, 3, data.reverbCount);
-			stream.array(data.timeScaleSettings, 3, data.timeScaleSettingCount);
-			if (const auto items_44 = stream.array(data.zones, 7, data.zoneCount))
+			stream.inline_array(data.reverbs, 3, data.reverbCount);
+			stream.inline_array(data.timeScaleSettings, 3, data.timeScaleSettingCount);
+			if (const auto items_44 = stream.inline_array(data.zones, 7, data.zoneCount))
 			{
 				if (data.zoneCount != 0)
 				{
@@ -2427,8 +2427,8 @@ namespace zonetool::iw8
 					}
 				}
 			}
-			stream.array(data.fullOcclusionDefs, 3, data.fullOcclusionDefCount);
-			if (const auto items_55 = stream.array(data.plrBreathStateDefs, 7, data.plrBreathStateDefCount))
+			stream.inline_array(data.fullOcclusionDefs, 3, data.fullOcclusionDefCount);
+			if (const auto items_55 = stream.inline_array(data.plrBreathStateDefs, 7, data.plrBreathStateDefCount))
 			{
 				if (data.plrBreathStateDefCount != 0)
 				{
@@ -2448,11 +2448,11 @@ namespace zonetool::iw8
 			{
 				for (std::size_t i1 = 0; i1 < count; i1++)
 				{
-					stream.array(data[i1].attenuation, 31, 128);
-					stream.array(data[i1].hpf, 31, 128);
-					stream.array(data[i1].lpf, 31, 128);
-					stream.array(data[i1].focusAmount, 31, 128);
-					stream.array(data[i1].focusCone, 3, 128);
+					stream.inline_array(data[i1].attenuation, 31, 128);
+					stream.inline_array(data[i1].hpf, 31, 128);
+					stream.inline_array(data[i1].lpf, 31, 128);
+					stream.inline_array(data[i1].focusAmount, 31, 128);
+					stream.inline_array(data[i1].focusCone, 3, 128);
 				}
 			}
 		}
@@ -2464,13 +2464,13 @@ namespace zonetool::iw8
 			{
 				for (std::size_t i1 = 0; i1 < count; i1++)
 				{
-					if (const auto items_2 = stream.array(data[i1].states, 7, data[i1].stateCount))
+					if (const auto items_2 = stream.inline_array(data[i1].states, 7, data[i1].stateCount))
 					{
 						if (data[i1].stateCount != 0)
 						{
 							for (std::size_t i2 = 0; i2 < data[i1].stateCount; i2++)
 							{
-								stream.array(items_2[i2].loops, 3, items_2[i2].loopCount);
+								stream.inline_array(items_2[i2].loops, 3, items_2[i2].loopCount);
 							}
 						}
 					}
@@ -2499,34 +2499,34 @@ namespace zonetool::iw8
 			stream.string(data.zone);
 			stream.string(data.gameLanguage);
 			stream.string(data.soundLanguage);
-			if (const auto items_4 = stream.array(data.alias, 7, data.aliasCount))
+			if (const auto items_4 = stream.inline_array(data.alias, 7, data.aliasCount))
 			{
 				stream_sndaliaslist_array(stream, items_4, data.aliasCount);
 			}
-			stream.array(data.aliasIndex, 1, data.aliasCount);
-			stream.array(data.sendEffects, 3, data.sendEffectCount);
+			stream.inline_array(data.aliasIndex, 1, data.aliasCount);
+			stream.inline_array(data.sendEffects, 3, data.sendEffectCount);
 			stream_soundtable(stream, data.soundTable);
-			if (const auto items_11 = stream.array(data.ducks, 7, data.duckCount))
+			if (const auto items_11 = stream.inline_array(data.ducks, 7, data.duckCount))
 			{
 				stream_sndduck_array(stream, items_11, data.duckCount);
 			}
-			if (const auto items_15 = stream.array(data.musicSets, 7, data.musicSetCount))
+			if (const auto items_15 = stream.inline_array(data.musicSets, 7, data.musicSetCount))
 			{
 				stream_sndmusicset_array(stream, items_15, data.musicSetCount);
 			}
-			if (const auto items_19 = stream.array(data.weapReflections, 7, data.weapReflectionCount))
+			if (const auto items_19 = stream.inline_array(data.weapReflections, 7, data.weapReflectionCount))
 			{
 				stream_weaponreflectiondef_array(stream, items_19, data.weapReflectionCount);
 			}
-			stream.array(data.dopplerPresets, 3, data.dopplerPresetCount);
-			stream.array(data.occlusionShapes, 3, data.occlusionShapeCount);
-			stream.array(data.focusCones, 3, data.focusConeCount);
-			stream.array(data.vfCurves, 3, data.vfCurveCount);
-			stream.array(data.lpfCurves, 3, data.lpfCurveCount);
-			stream.array(data.hpfCurves, 3, data.hpfCurveCount);
-			stream.array(data.rvbCurves, 3, data.rvbCurveCount);
-			stream.array(data.speakerMaps, 3, data.speakerMapCount);
-			stream.array(data.futzs, 3, data.futzCount);
+			stream.inline_array(data.dopplerPresets, 3, data.dopplerPresetCount);
+			stream.inline_array(data.occlusionShapes, 3, data.occlusionShapeCount);
+			stream.inline_array(data.focusCones, 3, data.focusConeCount);
+			stream.inline_array(data.vfCurves, 3, data.vfCurveCount);
+			stream.inline_array(data.lpfCurves, 3, data.lpfCurveCount);
+			stream.inline_array(data.hpfCurves, 3, data.hpfCurveCount);
+			stream.inline_array(data.rvbCurves, 3, data.rvbCurveCount);
+			stream.inline_array(data.speakerMaps, 3, data.speakerMapCount);
+			stream.inline_array(data.futzs, 3, data.futzCount);
 			stream.asset(ASSET_TYPE_STREAM_KEY, data.streamInfo.loadedStreamKey);
 		}
 
@@ -2556,13 +2556,13 @@ namespace zonetool::iw8
 			stream.script_string(data.name);
 			stream.asset(ASSET_TYPE_PHYSICSASSET, data.physicsAsset);
 			stream.asset(ASSET_TYPE_XMODEL_DETAIL_COLLISION, data.detailCollision);
-			stream.array(data.instances, 3, data.numInstances);
+			stream.inline_array(data.instances, 3, data.numInstances);
 		}
 
 		template <typename Stream>
 		void stream_staticmodelcollisionmodellist(Stream& stream, StaticModelCollisionModelList& data)
 		{
-			if (const auto items_0 = stream.array(data.models, 7, *reinterpret_cast<const std::uint32_t*>(&data)))
+			if (const auto items_0 = stream.inline_array(data.models, 7, *reinterpret_cast<const std::uint32_t*>(&data)))
 			{
 				if (*reinterpret_cast<const std::uint32_t*>(&data) != 0)
 				{
@@ -2611,7 +2611,7 @@ namespace zonetool::iw8
 			stream.begin_asset();
 			stream.push(5);
 			stream.string(data.name);
-			if (const auto items_3 = stream.array(data.staticModelCollisionModelLists, 7, data.numStaticModelCollisionModelLists))
+			if (const auto items_3 = stream.inline_array(data.staticModelCollisionModelLists, 7, data.numStaticModelCollisionModelLists))
 			{
 				if (data.numStaticModelCollisionModelLists != 0)
 				{
@@ -2622,13 +2622,13 @@ namespace zonetool::iw8
 				}
 			}
 			stream.asset(ASSET_TYPE_MAP_ENTS, data.mapEnts);
-			if (const auto items_14 = stream.array(data.stages, 7, data.stageCount))
+			if (const auto items_14 = stream.inline_array(data.stages, 7, data.stageCount))
 			{
 				stream_stage_array(stream, items_14, data.stageCount);
 			}
 			stream_maptriggers(stream, data.stageTrigger);
-			stream.array(data.havokWorldShapeData, 15, data.havokWorldShapeDataSize);
-			stream.array(data.collisionHeatmap, 3, data.numCollisionHeatmapEntries);
+			stream.inline_array(data.havokWorldShapeData, 15, data.havokWorldShapeDataSize);
+			stream.inline_array(data.collisionHeatmap, 3, data.numCollisionHeatmapEntries);
 			stream.array(data.topDownMapData, 3, 1);
 			stream.string(data.visionSetName);
 			stream.pop();
@@ -2641,7 +2641,7 @@ namespace zonetool::iw8
 			stream.begin_asset();
 			stream.push(5);
 			stream.string(data.name);
-			if (const auto items_3 = stream.array(data.primaryLights, 7, data.primaryLightCount))
+			if (const auto items_3 = stream.inline_array(data.primaryLights, 7, data.primaryLightCount))
 			{
 				if (data.primaryLightCount != 0)
 				{
@@ -2651,9 +2651,9 @@ namespace zonetool::iw8
 					}
 				}
 			}
-			stream.array(data.transientTable, 1, data.transientTableSize);
+			stream.inline_array(data.transientTable, 1, data.transientTableSize);
 			stream.string(data.changeListInfo.userName);
-			if (const auto items_15 = stream.array(data.umbraGateNames, 7, data.numUmbraGates))
+			if (const auto items_15 = stream.inline_array(data.umbraGateNames, 7, data.numUmbraGates))
 			{
 				for (std::size_t string_17 = 0; string_17 < data.numUmbraGates; string_17++)
 				{
@@ -2669,7 +2669,7 @@ namespace zonetool::iw8
 		{
 			stream.string(data.nameStr);
 			stream.script_string(data.name);
-			stream.array(data.pieceIndices, 1, data.pieceCount);
+			stream.inline_array(data.pieceIndices, 1, data.pieceCount);
 		}
 
 		template <typename Stream>
@@ -2682,8 +2682,8 @@ namespace zonetool::iw8
 		template <typename Stream>
 		void stream_g_glassdata(Stream& stream, G_GlassData& data)
 		{
-			stream.array(data.glassPieces, 3, data.pieceCount);
-			if (const auto items_1 = stream.array(data.glassNames, 7, data.glassNameCount))
+			stream.inline_array(data.glassPieces, 3, data.pieceCount);
+			if (const auto items_1 = stream.inline_array(data.glassNames, 7, data.glassNameCount))
 			{
 				if (data.glassNameCount != 0)
 				{
@@ -2693,7 +2693,7 @@ namespace zonetool::iw8
 					}
 				}
 			}
-			if (const auto items_11 = stream.array(data.spatialTree, 7, 1))
+			if (const auto items_11 = stream.inline_array(data.spatialTree, 7, 1))
 			{
 				stream_spatialpartition_tree(stream, *items_11);
 			}
@@ -2705,7 +2705,7 @@ namespace zonetool::iw8
 			stream.begin_asset();
 			stream.push(5);
 			stream.string(data.name);
-			if (const auto items_3 = stream.array(data.g_glassData, 7, 1))
+			if (const auto items_3 = stream.inline_array(data.g_glassData, 7, 1))
 			{
 				stream_g_glassdata(stream, *items_3);
 			}
@@ -2723,7 +2723,7 @@ namespace zonetool::iw8
 			stream.script_string(data.animscript);
 			stream.script_string(data.interactable);
 			stream.script_string(data.parent.name);
-			stream.array(data.Links, 3, data.totalLinkCount);
+			stream.inline_array(data.Links, 3, data.totalLinkCount);
 		}
 
 		template <typename Stream>
@@ -2779,7 +2779,7 @@ namespace zonetool::iw8
 			stream.begin_asset();
 			stream.push(5);
 			stream.string(data.name);
-			if (const auto items_3 = stream.array(data.nodes, 7, data.nodeCount))
+			if (const auto items_3 = stream.inline_array(data.nodes, 7, data.nodeCount))
 			{
 				if (data.nodeCount != 0)
 				{
@@ -2789,28 +2789,28 @@ namespace zonetool::iw8
 					}
 				}
 			}
-			stream.array(data.pathVis, 0, data.visBytes);
-			if (const auto items_14 = stream.array(data.nodeTree, 7, data.nodeTreeCount))
+			stream.inline_array(data.pathVis, 0, data.visBytes);
+			if (const auto items_14 = stream.inline_array(data.nodeTree, 7, data.nodeTreeCount))
 			{
 				stream_pathnode_tree_t_array(stream, items_14, data.nodeTreeCount);
 			}
-			if (const auto items_18 = stream.array(data.dynamicNodeGroups, 7, data.dynamicNodeGroupCount))
+			if (const auto items_18 = stream.inline_array(data.dynamicNodeGroups, 7, data.dynamicNodeGroupCount))
 			{
 				if (data.dynamicNodeGroupCount != 0)
 				{
 					for (std::size_t i2 = 0; i2 < data.dynamicNodeGroupCount; i2++)
 					{
-						if (const auto items_2 = stream.array(items_18[i2].nodeTree, 7, items_18[i2].nodeTreeCount))
+						if (const auto items_2 = stream.inline_array(items_18[i2].nodeTree, 7, items_18[i2].nodeTreeCount))
 						{
 							stream_pathnode_tree_t_array(stream, items_2, items_18[i2].nodeTreeCount);
 						}
 					}
 				}
 			}
-			stream.array(data.pathExposure, 0, data.exposureBytes);
-			stream.array(data.pathNoPeekVis, 0, data.noPeekVisBytes);
-			stream.array(data.pathZones, 0, data.zonesBytes);
-			stream.array(data.pathDynStates, 0, data.dynStatesBytes);
+			stream.inline_array(data.pathExposure, 0, data.exposureBytes);
+			stream.inline_array(data.pathNoPeekVis, 0, data.noPeekVisBytes);
+			stream.inline_array(data.pathZones, 0, data.zonesBytes);
+			stream.inline_array(data.pathDynStates, 0, data.dynStatesBytes);
 			stream.pop();
 			stream.end_asset();
 		}
@@ -2819,20 +2819,20 @@ namespace zonetool::iw8
 		void stream_nav_resource_s(Stream& stream, nav_resource_s& data)
 		{
 			stream.script_string(data.targetName);
-			stream.array(data.pGraphBuffer, 3, data.graphSize);
-			stream.array(data.pWorkingGraph, 3, (static_cast<std::uint8_t>(data.bDockable) == 0 ? 0 : data.graphSize));
+			stream.inline_array(data.pGraphBuffer, 3, data.graphSize);
+			stream.inline_array(data.pWorkingGraph, 3, (static_cast<std::uint8_t>(data.bDockable) == 0 ? 0 : data.graphSize));
 		}
 
 		template <typename Stream>
 		void stream_nav_obstacle_bounds_s(Stream& stream, nav_obstacle_bounds_s& data)
 		{
-			if (const auto items_0 = stream.array(data.m_Hulls, 7, data.m_NumHulls))
+			if (const auto items_0 = stream.inline_array(data.m_Hulls, 7, data.m_NumHulls))
 			{
 				if (data.m_NumHulls != 0)
 				{
 					for (std::size_t i1 = 0; i1 < data.m_NumHulls; i1++)
 					{
-						stream.array(items_0[i1].m_Boundaries, 3, items_0[i1].m_NumBoundaries);
+						stream.inline_array(items_0[i1].m_Boundaries, 3, items_0[i1].m_NumBoundaries);
 					}
 				}
 			}
@@ -2841,7 +2841,7 @@ namespace zonetool::iw8
 		template <typename Stream>
 		void stream_nav_modifier_s(Stream& stream, nav_modifier_s& data)
 		{
-			stream.array(data.m_Boundaries, 3, data.m_NumBoundaries);
+			stream.inline_array(data.m_Boundaries, 3, data.m_NumBoundaries);
 			stream.script_string(data.m_TargetName);
 			stream.script_string(data.m_Target);
 			stream.script_string(data.m_ScriptNoteworthy);
@@ -2854,7 +2854,7 @@ namespace zonetool::iw8
 			stream.begin_asset();
 			stream.push(5);
 			stream.string(data.name);
-			if (const auto items_3 = stream.array(data.navResources, 7, data.numNavResources))
+			if (const auto items_3 = stream.inline_array(data.navResources, 7, data.numNavResources))
 			{
 				if (data.numNavResources != 0)
 				{
@@ -2864,7 +2864,7 @@ namespace zonetool::iw8
 					}
 				}
 			}
-			if (const auto items_13 = stream.array(data.obstacleBounds, 7, data.numObstacleBounds))
+			if (const auto items_13 = stream.inline_array(data.obstacleBounds, 7, data.numObstacleBounds))
 			{
 				if (data.numObstacleBounds != 0)
 				{
@@ -2874,17 +2874,17 @@ namespace zonetool::iw8
 					}
 				}
 			}
-			if (const auto items_23 = stream.array(data.glassBounds, 7, data.numGlassBounds))
+			if (const auto items_23 = stream.inline_array(data.glassBounds, 7, data.numGlassBounds))
 			{
 				if (data.numGlassBounds != 0)
 				{
 					for (std::size_t i3 = 0; i3 < data.numGlassBounds; i3++)
 					{
-						stream.array(items_23[i3].m_Boundaries, 3, items_23[i3].m_NumBoundaries);
+						stream.inline_array(items_23[i3].m_Boundaries, 3, items_23[i3].m_NumBoundaries);
 					}
 				}
 			}
-			if (const auto items_33 = stream.array(data.modifiers, 7, data.numModifiers))
+			if (const auto items_33 = stream.inline_array(data.modifiers, 7, data.numModifiers))
 			{
 				if (data.numModifiers != 0)
 				{
@@ -2894,7 +2894,7 @@ namespace zonetool::iw8
 					}
 				}
 			}
-			if (const auto items_43 = stream.array(data.linkCreationData, 3, data.numLinkCreationData))
+			if (const auto items_43 = stream.inline_array(data.linkCreationData, 3, data.numLinkCreationData))
 			{
 				if (data.numLinkCreationData != 0)
 				{
@@ -2906,15 +2906,15 @@ namespace zonetool::iw8
 					}
 				}
 			}
-			stream.array(data.volumeSeeds, 3, data.numVolumeSeeds);
-			stream.array(data.rawVolumes, 3, data.numRawVolumes);
-			if (const auto items_57 = stream.array(data.rawCustomVolumes, 7, data.numRawCustomVolumes))
+			stream.inline_array(data.volumeSeeds, 3, data.numVolumeSeeds);
+			stream.inline_array(data.rawVolumes, 3, data.numRawVolumes);
+			if (const auto items_57 = stream.inline_array(data.rawCustomVolumes, 7, data.numRawCustomVolumes))
 			{
 				if (data.numRawCustomVolumes != 0)
 				{
 					for (std::size_t i6 = 0; i6 < data.numRawCustomVolumes; i6++)
 					{
-						stream.array(items_57[i6].m_Tris, 3, items_57[i6].m_NumTris);
+						stream.inline_array(items_57[i6].m_Tris, 3, items_57[i6].m_NumTris);
 					}
 				}
 			}
@@ -2934,7 +2934,7 @@ namespace zonetool::iw8
 		template <typename Stream>
 		void stream_tacpoint_search_node_t(Stream& stream, tacpoint_search_node_t& data)
 		{
-			if (const auto items_0 = stream.array(data.m_ChildNodes, 7, 4))
+			if (const auto items_0 = stream.inline_array(data.m_ChildNodes, 7, 4))
 			{
 				for (std::size_t i1 = 0; i1 < 4; i1++)
 				{
@@ -2946,14 +2946,14 @@ namespace zonetool::iw8
 		template <typename Stream>
 		void stream_tacticalgraph(Stream& stream, TacticalGraph& data)
 		{
-			stream.array(data.m_Points, 3, data.m_NumPoints);
-			if (const auto items_1 = stream.array(data.m_VisGraph, 7, ((-1) + data.m_NumPoints)))
+			stream.inline_array(data.m_Points, 3, data.m_NumPoints);
+			if (const auto items_1 = stream.inline_array(data.m_VisGraph, 7, ((-1) + data.m_NumPoints)))
 			{
 				if ((data.m_NumPoints + (-1)) != 0)
 				{
 					for (std::size_t i1 = 0; i1 < (data.m_NumPoints + (-1)); i1++)
 					{
-						stream.array(items_1[i1].m_Vis, 0, ((static_cast<std::int64_t>(((items_1[i1].m_End - *reinterpret_cast<const std::uint16_t*>(&items_1[i1])) + ((static_cast<std::int64_t>((items_1[i1].m_End - *reinterpret_cast<const std::uint16_t*>(&items_1[i1]))) < 0 ? -1 : 0) & 7))) >> 3) + 1));
+						stream.inline_array(items_1[i1].m_Vis, 0, ((static_cast<std::int64_t>(((items_1[i1].m_End - *reinterpret_cast<const std::uint16_t*>(&items_1[i1])) + ((static_cast<std::int64_t>((items_1[i1].m_End - *reinterpret_cast<const std::uint16_t*>(&items_1[i1]))) < 0 ? -1 : 0) & 7))) >> 3) + 1));
 					}
 				}
 			}
@@ -2966,7 +2966,7 @@ namespace zonetool::iw8
 			stream.begin_asset();
 			stream.push(5);
 			stream.string(data.m_Name);
-			if (const auto items_3 = stream.array(data.m_TacGraphs, 7, data.m_NumTacGraphs))
+			if (const auto items_3 = stream.inline_array(data.m_TacGraphs, 7, data.m_NumTacGraphs))
 			{
 				if (data.m_NumTacGraphs != 0)
 				{
@@ -3012,23 +3012,23 @@ namespace zonetool::iw8
 		void stream_clienttriggers(Stream& stream, ClientTriggers& data)
 		{
 			stream_clientmaptriggers(stream, data.trigger);
-			stream.array(data.triggerString, 0, data.triggerStringLength);
-			stream.array(data.visionSetTriggers, 1, *reinterpret_cast<const std::uint32_t*>(&data));
-			stream.array(data.triggerType, 1, *reinterpret_cast<const std::uint32_t*>(&data));
-			stream.array(data.origins, 3, *reinterpret_cast<const std::uint32_t*>(&data));
-			stream.array(data.scriptDelay, 3, *reinterpret_cast<const std::uint32_t*>(&data));
-			stream.array(data.priority, 3, *reinterpret_cast<const std::uint32_t*>(&data));
-			stream.array(data.audioTriggers, 1, *reinterpret_cast<const std::uint32_t*>(&data));
-			stream.array(data.blendLookup, 1, *reinterpret_cast<const std::uint32_t*>(&data));
-			stream.array(data.npcTriggers, 1, *reinterpret_cast<const std::uint32_t*>(&data));
-			stream.array(data.audioStateIds, 1, *reinterpret_cast<const std::uint32_t*>(&data));
-			if (const auto items_11 = stream.array(data.detailSoundBank, 7, *reinterpret_cast<const std::uint32_t*>(&data)))
+			stream.inline_array(data.triggerString, 0, data.triggerStringLength);
+			stream.inline_array(data.visionSetTriggers, 1, *reinterpret_cast<const std::uint32_t*>(&data));
+			stream.inline_array(data.triggerType, 1, *reinterpret_cast<const std::uint32_t*>(&data));
+			stream.inline_array(data.origins, 3, *reinterpret_cast<const std::uint32_t*>(&data));
+			stream.inline_array(data.scriptDelay, 3, *reinterpret_cast<const std::uint32_t*>(&data));
+			stream.inline_array(data.priority, 3, *reinterpret_cast<const std::uint32_t*>(&data));
+			stream.inline_array(data.audioTriggers, 1, *reinterpret_cast<const std::uint32_t*>(&data));
+			stream.inline_array(data.blendLookup, 1, *reinterpret_cast<const std::uint32_t*>(&data));
+			stream.inline_array(data.npcTriggers, 1, *reinterpret_cast<const std::uint32_t*>(&data));
+			stream.inline_array(data.audioStateIds, 1, *reinterpret_cast<const std::uint32_t*>(&data));
+			if (const auto items_11 = stream.inline_array(data.detailSoundBank, 7, *reinterpret_cast<const std::uint32_t*>(&data)))
 			{
 				stream_sndbanktransient_ptr_array(stream, items_11, *reinterpret_cast<const std::uint32_t*>(&data));
 			}
-			stream.array(data.audioRvbPanInfo, 3, *reinterpret_cast<const std::uint32_t*>(&data));
-			stream.array(data.parent, 1, *reinterpret_cast<const std::uint32_t*>(&data));
-			if (const auto items_17 = stream.array(data.linkTo, 7, *reinterpret_cast<const std::uint32_t*>(&data)))
+			stream.inline_array(data.audioRvbPanInfo, 3, *reinterpret_cast<const std::uint32_t*>(&data));
+			stream.inline_array(data.parent, 1, *reinterpret_cast<const std::uint32_t*>(&data));
+			if (const auto items_17 = stream.inline_array(data.linkTo, 7, *reinterpret_cast<const std::uint32_t*>(&data)))
 			{
 				if (*reinterpret_cast<const std::uint32_t*>(&data) != 0)
 				{
@@ -3038,7 +3038,7 @@ namespace zonetool::iw8
 					}
 				}
 			}
-			if (const auto items_27 = stream.array(data.spatialTree, 7, 1))
+			if (const auto items_27 = stream.inline_array(data.spatialTree, 7, 1))
 			{
 				stream_spatialpartition_tree(stream, *items_27);
 			}
@@ -3047,13 +3047,13 @@ namespace zonetool::iw8
 		template <typename Stream>
 		void stream_clienttriggerblend(Stream& stream, ClientTriggerBlend& data)
 		{
-			stream.array(data.blendNodes, 3, *reinterpret_cast<const std::uint16_t*>(&data));
+			stream.inline_array(data.blendNodes, 3, *reinterpret_cast<const std::uint16_t*>(&data));
 		}
 
 		template <typename Stream>
 		void stream_spawnpointrecordlist(Stream& stream, SpawnPointRecordList& data)
 		{
-			if (const auto items_0 = stream.array(data.spawns, 3, *reinterpret_cast<const std::uint16_t*>(&data)))
+			if (const auto items_0 = stream.inline_array(data.spawns, 3, *reinterpret_cast<const std::uint16_t*>(&data)))
 			{
 				if (*reinterpret_cast<const std::uint16_t*>(&data) != 0)
 				{
@@ -3079,7 +3079,7 @@ namespace zonetool::iw8
 		template <typename Stream>
 		void stream_splinepointrecordlist(Stream& stream, SplinePointRecordList& data)
 		{
-			if (const auto items_0 = stream.array(data.splinePoints, 3, *reinterpret_cast<const std::uint16_t*>(&data)))
+			if (const auto items_0 = stream.inline_array(data.splinePoints, 3, *reinterpret_cast<const std::uint16_t*>(&data)))
 			{
 				if (*reinterpret_cast<const std::uint16_t*>(&data) != 0)
 				{
@@ -3094,7 +3094,7 @@ namespace zonetool::iw8
 		template <typename Stream>
 		void stream_splinerecordlist(Stream& stream, SplineRecordList& data)
 		{
-			if (const auto items_0 = stream.array(data.splines, 7, *reinterpret_cast<const std::uint16_t*>(&data)))
+			if (const auto items_0 = stream.inline_array(data.splines, 7, *reinterpret_cast<const std::uint16_t*>(&data)))
 			{
 				if (*reinterpret_cast<const std::uint16_t*>(&data) != 0)
 				{
@@ -3172,7 +3172,7 @@ namespace zonetool::iw8
 			{
 				for (std::size_t i1 = 0; i1 < count; i1++)
 				{
-					stream.array(data[i1].array, 3, data[i1].wordCount);
+					stream.inline_array(data[i1].array, 3, data[i1].wordCount);
 				}
 			}
 		}
@@ -3180,7 +3180,7 @@ namespace zonetool::iw8
 		template <typename Stream>
 		void stream_spatialpartition_population_transientmap(Stream& stream, SpatialPartition_Population_TransientMap& data)
 		{
-			if (const auto items_0 = stream.array(data.partitionsForTransient, 7, *reinterpret_cast<const std::uint32_t*>(&data)))
+			if (const auto items_0 = stream.inline_array(data.partitionsForTransient, 7, *reinterpret_cast<const std::uint32_t*>(&data)))
 			{
 				stream_bitarray_dynamic_array(stream, items_0, *reinterpret_cast<const std::uint32_t*>(&data));
 			}
@@ -3216,13 +3216,13 @@ namespace zonetool::iw8
 		template <typename Stream>
 		void stream_scriptablereserveddynents(Stream& stream, ScriptableReservedDynents& data)
 		{
-			stream.array(data.reservedDynents, 3, data.numReservedDynents);
+			stream.inline_array(data.reservedDynents, 3, data.numReservedDynents);
 		}
 
 		template <typename Stream>
 		void stream_scriptablemapents(Stream& stream, ScriptableMapEnts& data)
 		{
-			if (const auto items_0 = stream.array(data.mapInstances, 7, data.mapInstanceCount))
+			if (const auto items_0 = stream.inline_array(data.mapInstances, 7, data.mapInstanceCount))
 			{
 				if (data.mapInstanceCount != 0)
 				{
@@ -3234,7 +3234,7 @@ namespace zonetool::iw8
 			}
 			stream_scriptablereserveddynents(stream, data.reservedDynents[0]);
 			stream_scriptablereserveddynents(stream, data.reservedDynents[1]);
-			if (const auto items_12 = stream.array(data.spatialPopulationTree, 7, 1))
+			if (const auto items_12 = stream.inline_array(data.spatialPopulationTree, 7, 1))
 			{
 				stream_spatialpartition_population_tree(stream, *items_12);
 			}
@@ -3244,25 +3244,25 @@ namespace zonetool::iw8
 		void stream_spawngroupzone(Stream& stream, SpawnGroupZone& data)
 		{
 			stream.script_string(data.name);
-			stream.array(data.points, 1, data.pointCount);
-			stream.array(data.clusters, 1, data.clusterCount);
+			stream.inline_array(data.points, 1, data.pointCount);
+			stream.inline_array(data.clusters, 1, data.clusterCount);
 		}
 
 		template <typename Stream>
 		void stream_spawngroup(Stream& stream, SpawnGroup& data)
 		{
-			stream.array(data.points, 3, *reinterpret_cast<const std::uint16_t*>(&data));
-			if (const auto items_1 = stream.array(data.clusters, 7, data.clusterCount))
+			stream.inline_array(data.points, 3, *reinterpret_cast<const std::uint16_t*>(&data));
+			if (const auto items_1 = stream.inline_array(data.clusters, 7, data.clusterCount))
 			{
 				if (data.clusterCount != 0)
 				{
 					for (std::size_t i1 = 0; i1 < data.clusterCount; i1++)
 					{
-						stream.array(items_1[i1].points, 1, items_1[i1].pointCount);
+						stream.inline_array(items_1[i1].points, 1, items_1[i1].pointCount);
 					}
 				}
 			}
-			if (const auto items_11 = stream.array(data.zones, 7, data.zoneCount))
+			if (const auto items_11 = stream.inline_array(data.zones, 7, data.zoneCount))
 			{
 				if (data.zoneCount != 0)
 				{
@@ -3307,7 +3307,7 @@ namespace zonetool::iw8
 		{
 			stream_fxcombineddef(stream, data.effect);
 			stream_sndaliaslookup(stream, data.effectSound);
-			if (const auto items_2 = stream.array(data.aliasList, 7, 1))
+			if (const auto items_2 = stream.inline_array(data.aliasList, 7, 1))
 			{
 				stream_sndaliaslist(stream, *items_2);
 			}
@@ -3319,7 +3319,7 @@ namespace zonetool::iw8
 		{
 			stream_fxcombineddef(stream, data.effect);
 			stream_sndaliaslookup(stream, data.effectSound);
-			if (const auto items_2 = stream.array(data.aliasList, 7, 1))
+			if (const auto items_2 = stream.inline_array(data.aliasList, 7, 1))
 			{
 				stream_sndaliaslist(stream, *items_2);
 			}
@@ -3328,7 +3328,7 @@ namespace zonetool::iw8
 		template <typename Stream>
 		void stream_clientsideeffects(Stream& stream, ClientSideEffects& data)
 		{
-			if (const auto items_0 = stream.array(data.oneshotEffects, 7, *reinterpret_cast<const std::uint32_t*>(&data)))
+			if (const auto items_0 = stream.inline_array(data.oneshotEffects, 7, *reinterpret_cast<const std::uint32_t*>(&data)))
 			{
 				if (*reinterpret_cast<const std::uint32_t*>(&data) != 0)
 				{
@@ -3339,12 +3339,12 @@ namespace zonetool::iw8
 					}
 				}
 			}
-			if (const auto items_11 = stream.array(data.oneshotEffectsTree, 7, 1))
+			if (const auto items_11 = stream.inline_array(data.oneshotEffectsTree, 7, 1))
 			{
 				stream_spatialpartition_tree(stream, *items_11);
 			}
-			stream.array(data.oneshotSoundIndices, 3, data.oneshotSoundCount);
-			if (const auto items_16 = stream.array(data.exploders, 7, data.exploderCount))
+			stream.inline_array(data.oneshotSoundIndices, 3, data.oneshotSoundCount);
+			if (const auto items_16 = stream.inline_array(data.exploders, 7, data.exploderCount))
 			{
 				if (data.exploderCount != 0)
 				{
@@ -3354,39 +3354,39 @@ namespace zonetool::iw8
 					}
 				}
 			}
-			if (const auto items_26 = stream.array(data.intervalSounds, 7, data.intervalSoundCount))
+			if (const auto items_26 = stream.inline_array(data.intervalSounds, 7, data.intervalSoundCount))
 			{
 				if (data.intervalSoundCount != 0)
 				{
 					for (std::size_t i3 = 0; i3 < data.intervalSoundCount; i3++)
 					{
 						stream_sndaliaslookup(stream, items_26[i3].effectSound);
-						if (const auto items_3 = stream.array(items_26[i3].aliasList, 7, 1))
+						if (const auto items_3 = stream.inline_array(items_26[i3].aliasList, 7, 1))
 						{
 							stream_sndaliaslist(stream, *items_3);
 						}
 					}
 				}
 			}
-			if (const auto items_40 = stream.array(data.loopSounds, 7, data.loopSoundCount))
+			if (const auto items_40 = stream.inline_array(data.loopSounds, 7, data.loopSoundCount))
 			{
 				if (data.loopSoundCount != 0)
 				{
 					for (std::size_t i4 = 0; i4 < data.loopSoundCount; i4++)
 					{
 						stream_sndaliaslookup(stream, items_40[i4].effectSound);
-						if (const auto items_3 = stream.array(items_40[i4].aliasList, 7, 1))
+						if (const auto items_3 = stream.inline_array(items_40[i4].aliasList, 7, 1))
 						{
 							stream_sndaliaslist(stream, *items_3);
 						}
 					}
 				}
 			}
-			if (const auto items_54 = stream.array(data.soundsSpatialTree, 7, 1))
+			if (const auto items_54 = stream.inline_array(data.soundsSpatialTree, 7, 1))
 			{
 				stream_spatialpartition_tree(stream, *items_54);
 			}
-			if (const auto items_58 = stream.array(data.reactiveEnts, 7, data.reactiveEntCount))
+			if (const auto items_58 = stream.inline_array(data.reactiveEnts, 7, data.reactiveEntCount))
 			{
 				if (data.reactiveEntCount != 0)
 				{
@@ -3396,7 +3396,7 @@ namespace zonetool::iw8
 					}
 				}
 			}
-			if (const auto items_68 = stream.array(data.reactiveSpatialTree, 7, 1))
+			if (const auto items_68 = stream.inline_array(data.reactiveSpatialTree, 7, 1))
 			{
 				stream_spatialpartition_tree(stream, *items_68);
 			}
@@ -3405,7 +3405,7 @@ namespace zonetool::iw8
 		template <typename Stream>
 		void stream_createfxassetdata(Stream& stream, CreateFxAssetData& data)
 		{
-			if (const auto items_0 = stream.array(data.fxPalette, 3, *reinterpret_cast<const std::uint16_t*>(&data)))
+			if (const auto items_0 = stream.inline_array(data.fxPalette, 3, *reinterpret_cast<const std::uint16_t*>(&data)))
 			{
 				if (*reinterpret_cast<const std::uint16_t*>(&data) != 0)
 				{
@@ -3421,7 +3421,7 @@ namespace zonetool::iw8
 		template <typename Stream>
 		void stream_serversideeffects(Stream& stream, ServerSideEffects& data)
 		{
-			if (const auto items_0 = stream.array(data.exploders, 3, *reinterpret_cast<const std::uint16_t*>(&data)))
+			if (const auto items_0 = stream.inline_array(data.exploders, 3, *reinterpret_cast<const std::uint16_t*>(&data)))
 			{
 				if (*reinterpret_cast<const std::uint16_t*>(&data) != 0)
 				{
@@ -3452,7 +3452,7 @@ namespace zonetool::iw8
 		template <typename Stream>
 		void stream_spawner(Stream& stream, Spawner& data)
 		{
-			if (const auto items_0 = stream.array(data.fields, 3, data.numFields))
+			if (const auto items_0 = stream.inline_array(data.fields, 3, data.numFields))
 			{
 				if (data.numFields != 0)
 				{
@@ -3470,7 +3470,7 @@ namespace zonetool::iw8
 		template <typename Stream>
 		void stream_spawnerlist(Stream& stream, SpawnerList& data)
 		{
-			if (const auto items_0 = stream.array(data.spanwerList, 7, *reinterpret_cast<const std::uint32_t*>(&data)))
+			if (const auto items_0 = stream.inline_array(data.spanwerList, 7, *reinterpret_cast<const std::uint32_t*>(&data)))
 			{
 				if (*reinterpret_cast<const std::uint32_t*>(&data) != 0)
 				{
@@ -3488,18 +3488,18 @@ namespace zonetool::iw8
 			stream.begin_asset();
 			stream.push(5);
 			stream.string(data.name);
-			stream.array(data.entityString, 0, data.numEntityChars);
+			stream.inline_array(data.entityString, 0, data.numEntityChars);
 			stream_maptriggers(stream, data.trigger);
 			stream_clienttriggers(stream, data.clientTrigger);
 			stream_clienttriggerblend(stream, data.clientTriggerBlend);
 			stream_spawnpointrecordlist(stream, data.spawnList);
 			stream_splinerecordlist(stream, data.splineList);
-			stream.array(data.havokEntsShapeData, 15, data.havokEntsShapeDataSize);
-			if (const auto items_10 = stream.array(data.cmodels, 7, data.numSubModels))
+			stream.inline_array(data.havokEntsShapeData, 15, data.havokEntsShapeDataSize);
+			if (const auto items_10 = stream.inline_array(data.cmodels, 7, data.numSubModels))
 			{
 				stream_cmodel_t_array(stream, items_10, data.numSubModels);
 			}
-			if (const auto items_14 = stream.array(data.edgeLists, 7, data.numEdgeLists))
+			if (const auto items_14 = stream.inline_array(data.edgeLists, 7, data.numEdgeLists))
 			{
 				if (data.numEdgeLists != 0)
 				{
@@ -3509,18 +3509,18 @@ namespace zonetool::iw8
 					}
 				}
 			}
-			if (const auto items_24 = stream.array(data.edgeListSpatialTree, 7, 1))
+			if (const auto items_24 = stream.inline_array(data.edgeListSpatialTree, 7, 1))
 			{
 				stream_spatialpartition_tree(stream, *items_24);
 			}
-			if (const auto items_28 = stream.array(data.clientModels, 7, data.numClientModels))
+			if (const auto items_28 = stream.inline_array(data.clientModels, 7, data.numClientModels))
 			{
 				stream_cm_clientmodel_array(stream, items_28, data.numClientModels);
 			}
-			stream.array(data.dynEntListIds, 1, static_cast<std::uint16_t>(data.dynEntityListsCount));
+			stream.inline_array(data.dynEntListIds, 1, static_cast<std::uint16_t>(data.dynEntityListsCount));
 			stream_spatialpartition_population_ptr_array(stream, &data.dynEntSpatialPopulation[0], 2);
 			stream_spatialpartition_population_transientmap_ptr_array(stream, &data.dynEntSpatialTransientMap[0], 2);
-			if (const auto items_35 = stream.array(data.clientEntAnchors, 3, data.clientEntAnchorCount))
+			if (const auto items_35 = stream.inline_array(data.clientEntAnchors, 3, data.clientEntAnchorCount))
 			{
 				if (data.clientEntAnchorCount != 0)
 				{
@@ -3534,7 +3534,7 @@ namespace zonetool::iw8
 			stream_spawngroup(stream, data.spawnGroupLoot);
 			stream_clientsideeffects(stream, data.clientSideEffects);
 			stream_createfxassetdata(stream, data.createFxAssetData);
-			if (const auto items_49 = stream.array(data.exploderNames, 3, data.exploderNameTotal))
+			if (const auto items_49 = stream.inline_array(data.exploderNames, 3, data.exploderNameTotal))
 			{
 				stream.script_strings(items_49, data.exploderNameTotal);
 			}
@@ -3544,10 +3544,10 @@ namespace zonetool::iw8
 				stream_mayheminstance_array(stream, items_54, data.numMayhemScenes);
 			}
 			stream_spawnerlist(stream, data.spawners);
-			stream.array(data.audioPASpeakers, 3, data.audioPASpeakerCount);
-			stream.array(data.audioPropNodes, 3, data.numAudioPropNodes);
-			stream.array(data.audioPropEdges, 1, data.numAudioPropEdges);
-			if (const auto items_62 = stream.array(data.collmapLookups, 7, data.numCollmaps))
+			stream.inline_array(data.audioPASpeakers, 3, data.audioPASpeakerCount);
+			stream.inline_array(data.audioPropNodes, 3, data.numAudioPropNodes);
+			stream.inline_array(data.audioPropEdges, 1, data.numAudioPropEdges);
+			if (const auto items_62 = stream.inline_array(data.collmapLookups, 7, data.numCollmaps))
 			{
 				if (data.numCollmaps != 0)
 				{
@@ -3579,7 +3579,7 @@ namespace zonetool::iw8
 		template <typename Stream>
 		void stream_fxglassglobals(Stream& stream, FxGlassGlobals& data)
 		{
-			if (const auto items_0 = stream.array(data.defs, 7, *reinterpret_cast<const std::uint32_t*>(&data)))
+			if (const auto items_0 = stream.inline_array(data.defs, 7, *reinterpret_cast<const std::uint32_t*>(&data)))
 			{
 				if (*reinterpret_cast<const std::uint32_t*>(&data) != 0)
 				{
@@ -3589,9 +3589,9 @@ namespace zonetool::iw8
 					}
 				}
 			}
-			stream.array(data.glassTransientLookup, 1, data.glassTransientLookupCount);
+			stream.inline_array(data.glassTransientLookup, 1, data.glassTransientLookupCount);
 			stream.push(4);
-			stream.array(data.distances, 3, *reinterpret_cast<const std::uint32_t*>(&data));
+			stream.inline_array(data.distances, 3, *reinterpret_cast<const std::uint32_t*>(&data));
 			stream.pop();
 		}
 
@@ -3599,34 +3599,34 @@ namespace zonetool::iw8
 		void stream_fxglasssystem(Stream& stream, FxGlassSystem& data)
 		{
 			stream.push(4);
-			stream.array(data.piecePlaces, 3, data.pieceLimit);
+			stream.inline_array(data.piecePlaces, 3, data.pieceLimit);
 			stream.pop();
 			stream.push(4);
-			stream.array(data.pieceStates, 3, data.pieceLimit);
+			stream.inline_array(data.pieceStates, 3, data.pieceLimit);
 			stream.pop();
 			stream.push(4);
-			stream.array(data.pieceDynamics, 3, data.pieceLimit);
+			stream.inline_array(data.pieceDynamics, 3, data.pieceLimit);
 			stream.pop();
 			stream.push(4);
-			stream.array(data.geoData, 1, data.geoDataLimit);
+			stream.inline_array(data.geoData, 1, data.geoDataLimit);
 			stream.pop();
 			stream.push(4);
-			stream.array(data.isInUse, 3, data.pieceWordCount);
+			stream.inline_array(data.isInUse, 3, data.pieceWordCount);
 			stream.pop();
 			stream.push(4);
-			stream.array(data.cellBits, 3, (data.cellCount * data.pieceWordCount));
+			stream.inline_array(data.cellBits, 3, (data.cellCount * data.pieceWordCount));
 			stream.pop();
 			stream.push(4);
-			stream.array(data.visData, 15, ((data.pieceLimit + 15) & 0xFFFFFFF0ull));
+			stream.inline_array(data.visData, 15, ((data.pieceLimit + 15) & 0xFFFFFFF0ull));
 			stream.pop();
 			stream.push(4);
-			stream.array(data.linkOrg, 3, data.pieceLimit);
+			stream.inline_array(data.linkOrg, 3, data.pieceLimit);
 			stream.pop();
 			stream.push(4);
-			stream.array(data.halfThickness, 15, ((data.pieceLimit + 3) & 0xFFFFFFFCull));
+			stream.inline_array(data.halfThickness, 15, ((data.pieceLimit + 3) & 0xFFFFFFFCull));
 			stream.pop();
-			stream.array(data.initGeoData, 1, data.initGeoDataCount);
-			stream.array(data.initPieceStates, 3, data.initPieceCount);
+			stream.inline_array(data.initGeoData, 1, data.initGeoDataCount);
+			stream.inline_array(data.initPieceStates, 3, data.initPieceCount);
 		}
 
 		template <typename Stream>
@@ -3648,23 +3648,23 @@ namespace zonetool::iw8
 		template <typename Stream>
 		void stream_gfxworlddpvsplanes(Stream& stream, GfxWorldDpvsPlanes& data)
 		{
-			stream.array(data.planes, 3, data.planeCount);
-			stream.array(data.nodes, 1, data.nodeCount);
+			stream.inline_array(data.planes, 3, data.planeCount);
+			stream.inline_array(data.nodes, 1, data.nodeCount);
 			stream.push(4);
-			stream.array(data.sceneEntCellBits, 3, (*reinterpret_cast<const std::uint32_t*>(&data) * 512));
+			stream.inline_array(data.sceneEntCellBits, 3, (*reinterpret_cast<const std::uint32_t*>(&data) * 512));
 			stream.pop();
 		}
 
 		template <typename Stream>
 		void stream_gfxcell(Stream& stream, GfxCell& data)
 		{
-			if (const auto items_0 = stream.array(data.portals, 7, data.portalCount))
+			if (const auto items_0 = stream.inline_array(data.portals, 7, data.portalCount))
 			{
 				if (data.portalCount != 0)
 				{
 					for (std::size_t i1 = 0; i1 < data.portalCount; i1++)
 					{
-						stream.array(items_0[i1].vertices, 3, items_0[i1].vertexCount);
+						stream.inline_array(items_0[i1].vertices, 3, items_0[i1].vertexCount);
 					}
 				}
 			}
@@ -3673,7 +3673,7 @@ namespace zonetool::iw8
 		template <typename Stream>
 		void stream_gfxworldsurfaces(Stream& stream, GfxWorldSurfaces& data)
 		{
-			if (const auto items_0 = stream.array(data.surfaces, 7, *reinterpret_cast<const std::uint32_t*>(&data)))
+			if (const auto items_0 = stream.inline_array(data.surfaces, 7, *reinterpret_cast<const std::uint32_t*>(&data)))
 			{
 				if (*reinterpret_cast<const std::uint32_t*>(&data) != 0)
 				{
@@ -3683,16 +3683,16 @@ namespace zonetool::iw8
 					}
 				}
 			}
-			stream.array(data.surfaceBounds, 3, *reinterpret_cast<const std::uint32_t*>(&data));
-			stream.array(data.surfaceMaterials, 7, *reinterpret_cast<const std::uint32_t*>(&data));
-			stream.array(data.surfData, 63, data.surfDataCount);
+			stream.inline_array(data.surfaceBounds, 3, *reinterpret_cast<const std::uint32_t*>(&data));
+			stream.inline_array(data.surfaceMaterials, 7, *reinterpret_cast<const std::uint32_t*>(&data));
+			stream.inline_array(data.surfData, 63, data.surfDataCount);
 		}
 
 		template <typename Stream>
 		void stream_gfxworldstaticmodels(Stream& stream, GfxWorldStaticModels& data)
 		{
-			stream.array(data.surfaces, 1, *reinterpret_cast<const std::uint32_t*>(&data));
-			if (const auto items_1 = stream.array(data.models, 7, data.modelCount))
+			stream.inline_array(data.surfaces, 1, *reinterpret_cast<const std::uint32_t*>(&data));
+			if (const auto items_1 = stream.inline_array(data.models, 7, data.modelCount))
 			{
 				if (data.modelCount != 0)
 				{
@@ -3702,30 +3702,30 @@ namespace zonetool::iw8
 					}
 				}
 			}
-			stream.array(data.clutterCollections, 3, data.clutterCollectionCount);
+			stream.inline_array(data.clutterCollections, 3, data.clutterCollectionCount);
 			stream.array(data.collections, 3, data.collectionCount);
-			stream.array(data.instances, 3, data.instanceCount);
-			stream.array(data.instanceFlags, 0, data.instanceCount);
-			stream.array(data.collectionBounds, 3, data.collectionCount);
-			if (const auto items_16 = stream.array(data.materials, 7, data.materialCount))
+			stream.inline_array(data.instances, 3, data.instanceCount);
+			stream.inline_array(data.instanceFlags, 0, data.instanceCount);
+			stream.inline_array(data.collectionBounds, 3, data.collectionCount);
+			if (const auto items_16 = stream.inline_array(data.materials, 7, data.materialCount))
 			{
 				stream_material_ptr_array(stream, items_16, data.materialCount);
 			}
-			stream.array(data.modelStaticIndirection, 3, data.instanceCount);
-			stream.array(data.lmapTransforms, 3, data.lmapTransformsCount);
+			stream.inline_array(data.modelStaticIndirection, 3, data.instanceCount);
+			stream.inline_array(data.lmapTransforms, 3, data.lmapTransformsCount);
 			stream.array(data.smodelSurfData, 15, *reinterpret_cast<const std::uint32_t*>(&data));
-			stream.array(data.smodelInstanceData, 15, data.instanceCount);
-			stream.array(data.clutterTintData, 3, data.clutterTintCount);
-			stream.array(data.clutterCollectionGPUData, 3, data.clutterCollectionCount);
+			stream.inline_array(data.smodelInstanceData, 15, data.instanceCount);
+			stream.inline_array(data.clutterTintData, 3, data.clutterTintCount);
+			stream.inline_array(data.clutterCollectionGPUData, 3, data.clutterCollectionCount);
 			stream.array(data.smodelExpansionData, 3, data.modelCount);
 			stream.array(data.smodelSurfMatIndirection, 1, *reinterpret_cast<const std::uint32_t*>(&data));
-			stream.array(data.smodelSurfUGBIndirection, 3, *reinterpret_cast<const std::uint32_t*>(&data));
+			stream.inline_array(data.smodelSurfUGBIndirection, 3, *reinterpret_cast<const std::uint32_t*>(&data));
 			stream.array(data.splinedModelInstanceBounds, 3, data.splinedModelInstanceCount);
 			stream.array(data.splinedModelInstanceData, 15, data.splinedModelInstanceCount);
 			stream.array(data.splineSegmentData, 15, data.splineSegmentCount);
-			stream.array(data.collectionTransientZonePrevFrameVisibility.array, 3, data.collectionTransientZonePrevFrameVisibility.wordCount);
-			stream.array(data.collectionVisData, 3, data.collectionVisDataCount);
-			stream.array(data.collectionVisRefCount, 0, data.collectionCount);
+			stream.inline_array(data.collectionTransientZonePrevFrameVisibility.array, 3, data.collectionTransientZonePrevFrameVisibility.wordCount);
+			stream.inline_array(data.collectionVisData, 3, data.collectionVisDataCount);
+			stream.inline_array(data.collectionVisRefCount, 0, data.collectionCount);
 		}
 
 		template <typename Stream>
@@ -3746,21 +3746,21 @@ namespace zonetool::iw8
 		void stream_gfxreflectionprobe(Stream& stream, GfxReflectionProbe& data)
 		{
 			stream.string(data.livePath);
-			stream.array(data.probeInstances, 1, data.probeInstanceCount);
+			stream.inline_array(data.probeInstances, 1, data.probeInstanceCount);
 		}
 
 		template <typename Stream>
 		void stream_gfxworldreflectionprobedata(Stream& stream, GfxWorldReflectionProbeData& data)
 		{
-			if (const auto items_0 = stream.array(data.reflectionProbeImages, 7, *reinterpret_cast<const std::uint32_t*>(&data)))
+			if (const auto items_0 = stream.inline_array(data.reflectionProbeImages, 7, *reinterpret_cast<const std::uint32_t*>(&data)))
 			{
 				stream_gfximage_ptr_array(stream, items_0, *reinterpret_cast<const std::uint32_t*>(&data));
 			}
-			if (const auto items_4 = stream.array(data.reflectionProbeImages_octahedron, 7, data.sharedReflectionProbeCount))
+			if (const auto items_4 = stream.inline_array(data.reflectionProbeImages_octahedron, 7, data.sharedReflectionProbeCount))
 			{
 				stream_gfximage_ptr_array(stream, items_4, data.sharedReflectionProbeCount);
 			}
-			if (const auto items_8 = stream.array(data.reflectionProbes, 7, *reinterpret_cast<const std::uint32_t*>(&data)))
+			if (const auto items_8 = stream.inline_array(data.reflectionProbes, 7, *reinterpret_cast<const std::uint32_t*>(&data)))
 			{
 				if (*reinterpret_cast<const std::uint32_t*>(&data) != 0)
 				{
@@ -3772,25 +3772,25 @@ namespace zonetool::iw8
 			}
 			stream.asset(ASSET_TYPE_IMAGE, data.reflectionProbeArrayImage);
 			stream.asset(ASSET_TYPE_IMAGE, data.reflectionProbeArrayImage_octahedron);
-			if (const auto items_20 = stream.array(data.probeRelightingData, 7, data.probeRelightingCount))
+			if (const auto items_20 = stream.inline_array(data.probeRelightingData, 7, data.probeRelightingCount))
 			{
 				if (data.probeRelightingCount != 0)
 				{
 					for (std::size_t i2 = 0; i2 < data.probeRelightingCount; i2++)
 					{
-						stream.array(items_20[i2].zones, 1, items_20[i2].zoneCount);
+						stream.inline_array(items_20[i2].zones, 1, items_20[i2].zoneCount);
 					}
 				}
 			}
-			if (const auto items_30 = stream.array(data.reflectionProbeGBufferImages, 7, data.reflectionProbeGBufferImageCount))
+			if (const auto items_30 = stream.inline_array(data.reflectionProbeGBufferImages, 7, data.reflectionProbeGBufferImageCount))
 			{
 				stream_gfximage_ptr_array(stream, items_30, data.reflectionProbeGBufferImageCount);
 			}
-			if (const auto items_34 = stream.array(data.reflectionProbeGBufferImages_octahedron, 7, data.reflectionProbeGBufferImageCount))
+			if (const auto items_34 = stream.inline_array(data.reflectionProbeGBufferImages_octahedron, 7, data.reflectionProbeGBufferImageCount))
 			{
 				stream_gfximage_ptr_array(stream, items_34, data.reflectionProbeGBufferImageCount);
 			}
-			if (const auto items_38 = stream.array(data.reflectionProbeInstances, 7, data.reflectionProbeInstanceCount))
+			if (const auto items_38 = stream.inline_array(data.reflectionProbeInstances, 7, data.reflectionProbeInstanceCount))
 			{
 				if (data.reflectionProbeInstanceCount != 0)
 				{
@@ -3800,14 +3800,14 @@ namespace zonetool::iw8
 					}
 				}
 			}
-			stream.array(data.reflectionProbeSH, 63, (*reinterpret_cast<const std::uint32_t*>(&data) * 4));
+			stream.inline_array(data.reflectionProbeSH, 63, (*reinterpret_cast<const std::uint32_t*>(&data) * 4));
 		}
 
 		template <typename Stream>
 		void stream_gfxworldlightmapreindexdata(Stream& stream, GfxWorldLightmapReindexData& data)
 		{
-			stream.array(data.reindexElement, 3, data.reindexCount);
-			stream.array(data.packedLightmap, 3, data.packedLightmapCount);
+			stream.inline_array(data.reindexElement, 3, data.reindexCount);
+			stream.inline_array(data.packedLightmap, 3, data.packedLightmapCount);
 		}
 
 		template <typename Stream>
@@ -3823,7 +3823,7 @@ namespace zonetool::iw8
 		template <typename Stream>
 		void stream_gfxworldvolumetrics(Stream& stream, GfxWorldVolumetrics& data)
 		{
-			if (const auto items_0 = stream.array(data.volumetrics, 7, *reinterpret_cast<const std::uint32_t*>(&data)))
+			if (const auto items_0 = stream.inline_array(data.volumetrics, 7, *reinterpret_cast<const std::uint32_t*>(&data)))
 			{
 				if (*reinterpret_cast<const std::uint32_t*>(&data) != 0)
 				{
@@ -3842,7 +3842,7 @@ namespace zonetool::iw8
 			stream_gfxworldreflectionprobedata(stream, data.reflectionProbeData);
 			stream_gfxworldlightmapreindexdata(stream, data.lightmapReindexData);
 			stream.asset(ASSET_TYPE_IMAGE, data.iesLookupTexture);
-			if (const auto items_3 = stream.array(data.decalVolumeMaterials, 7, data.decalVolumeMaterialCount))
+			if (const auto items_3 = stream.inline_array(data.decalVolumeMaterials, 7, data.decalVolumeMaterialCount))
 			{
 				if (data.decalVolumeMaterialCount != 0)
 				{
@@ -3852,7 +3852,7 @@ namespace zonetool::iw8
 					}
 				}
 			}
-			if (const auto items_13 = stream.array(data.decalVolumeMasks, 7, data.decalVolumeMaskCount))
+			if (const auto items_13 = stream.inline_array(data.decalVolumeMasks, 7, data.decalVolumeMaskCount))
 			{
 				if (data.decalVolumeMaskCount != 0)
 				{
@@ -3862,50 +3862,50 @@ namespace zonetool::iw8
 					}
 				}
 			}
-			stream.array(data.decalVolumeCollections, 3, data.decalVolumeCollectionCount);
-			stream.array(data.materialAndMaskIndirection, 3, (data.decalVolumeMaskCount + data.decalVolumeMaterialCount));
+			stream.inline_array(data.decalVolumeCollections, 3, data.decalVolumeCollectionCount);
+			stream.inline_array(data.materialAndMaskIndirection, 3, (data.decalVolumeMaskCount + data.decalVolumeMaterialCount));
 			for (std::size_t i3 = 0; i3 < 1536; i3++)
 			{
 				stream.asset(ASSET_TYPE_GFXWORLD_TRANSIENT_ZONE, data.transientZones[i3]);
 			}
-			stream.array(data.lightmapTransientIndex, 3, data.lightmapCount);
+			stream.inline_array(data.lightmapTransientIndex, 3, data.lightmapCount);
 			stream_gfxworldvolumetrics(stream, data.volumetrics);
-			stream.array(data.compressedSunShadow, 0, data.compressedSunShadowSize);
+			stream.inline_array(data.compressedSunShadow, 0, data.compressedSunShadowSize);
 		}
 
 		template <typename Stream>
 		void stream_gfxdynamiclightsetlmdata(Stream& stream, GfxDynamicLightsetLMData& data)
 		{
-			stream.array(data.chunkGLM, 3, *reinterpret_cast<const std::uint32_t*>(&data));
-			stream.array(data.chunkGLMBF, 1, data.numGChunkLMBF);
-			stream.array(data.chunkWhichLM, 1, data.numLMHave);
-			stream.array(data.chunkLMStart, 3, (data.numLMHave + (data.numLMHave != 0 ? 1 : 0)));
-			stream.array(data.origTexels, 3, (data.numOrigTexels + data.numOrigTexels));
-			stream.array(data.origRecords, 3, data.numOrigTexels);
-			stream.array(data.bfTexels, 3, (data.numBFLMTexels + data.numBFLMTexels));
-			stream.array(data.skipRecords, 1, data.numSkipRecords);
-			stream.array(data.palletteRecords, 3, data.numSkipRecords);
+			stream.inline_array(data.chunkGLM, 3, *reinterpret_cast<const std::uint32_t*>(&data));
+			stream.inline_array(data.chunkGLMBF, 1, data.numGChunkLMBF);
+			stream.inline_array(data.chunkWhichLM, 1, data.numLMHave);
+			stream.inline_array(data.chunkLMStart, 3, (data.numLMHave + (data.numLMHave != 0 ? 1 : 0)));
+			stream.inline_array(data.origTexels, 3, (data.numOrigTexels + data.numOrigTexels));
+			stream.inline_array(data.origRecords, 3, data.numOrigTexels);
+			stream.inline_array(data.bfTexels, 3, (data.numBFLMTexels + data.numBFLMTexels));
+			stream.inline_array(data.skipRecords, 1, data.numSkipRecords);
+			stream.inline_array(data.palletteRecords, 3, data.numSkipRecords);
 		}
 
 		template <typename Stream>
 		void stream_gfxdynamiclightsetprobedata(Stream& stream, GfxDynamicLightsetProbeData& data)
 		{
-			stream.array(data.chunkG, 3, *reinterpret_cast<const std::uint32_t*>(&data));
-			stream.array(data.chunkGBF, 1, data.numGChunkBF);
-			stream.array(data.origProbes, 31, data.numOrigProbes);
-			stream.array(data.bfProbes, 31, data.numBFProbes);
-			stream.array(data.skipRecords, 1, data.numSkipRecords);
-			stream.array(data.palletteRecords, 3, data.numSkipRecords);
-			stream.array(data.tempRemap, 3, data.numOrigProbes);
+			stream.inline_array(data.chunkG, 3, *reinterpret_cast<const std::uint32_t*>(&data));
+			stream.inline_array(data.chunkGBF, 1, data.numGChunkBF);
+			stream.inline_array(data.origProbes, 31, data.numOrigProbes);
+			stream.inline_array(data.bfProbes, 31, data.numBFProbes);
+			stream.inline_array(data.skipRecords, 1, data.numSkipRecords);
+			stream.inline_array(data.palletteRecords, 3, data.numSkipRecords);
+			stream.inline_array(data.tempRemap, 3, data.numOrigProbes);
 		}
 
 		template <typename Stream>
 		void stream_gfxdynamiclightset(Stream& stream, GfxDynamicLightset& data)
 		{
-			stream.array(data.basisFunctions, 3, *reinterpret_cast<const std::uint32_t*>(&data));
-			stream.array(data.basisFunctionLights, 3, data.numBasisFunctionPrimaryLights);
-			stream.array(data.portalGIData, 3, data.numPortalGI);
-			stream.array(data.productGIData, 1, data.numProductGI);
+			stream.inline_array(data.basisFunctions, 3, *reinterpret_cast<const std::uint32_t*>(&data));
+			stream.inline_array(data.basisFunctionLights, 3, data.numBasisFunctionPrimaryLights);
+			stream.inline_array(data.portalGIData, 3, data.numPortalGI);
+			stream.inline_array(data.productGIData, 1, data.numProductGI);
 			stream_gfxdynamiclightsetlmdata(stream, data.lmData);
 			stream_gfxdynamiclightsetprobedata(stream, data.lgProbeData);
 		}
@@ -3917,13 +3917,13 @@ namespace zonetool::iw8
 			{
 				for (std::size_t i1 = 0; i1 < count; i1++)
 				{
-					stream.array(data[i1].voxelTreeHeader, 15, 1);
-					stream.array(data[i1].voxelTopDownViewNodeArray, 3, data[i1].voxelTopDownViewNodeCount);
-					stream.array(data[i1].voxelInternalNodeArray, 3, data[i1].voxelInternalNodeCount);
-					stream.array(data[i1].voxelLeafNodeArray, 1, data[i1].voxelLeafNodeCount);
-					stream.array(data[i1].lightListArray, 3, data[i1].lightListArraySize);
+					stream.inline_array(data[i1].voxelTreeHeader, 15, 1);
+					stream.inline_array(data[i1].voxelTopDownViewNodeArray, 3, data[i1].voxelTopDownViewNodeCount);
+					stream.inline_array(data[i1].voxelInternalNodeArray, 3, data[i1].voxelInternalNodeCount);
+					stream.inline_array(data[i1].voxelLeafNodeArray, 1, data[i1].voxelLeafNodeCount);
+					stream.inline_array(data[i1].lightListArray, 3, data[i1].lightListArraySize);
 					stream.push(4);
-					stream.array(data[i1].voxelInternalNodeDynamicLightListCPU, 3, (data[i1].voxelInternalNodeCount + data[i1].voxelInternalNodeCount));
+					stream.inline_array(data[i1].voxelInternalNodeDynamicLightListCPU, 3, (data[i1].voxelInternalNodeCount + data[i1].voxelInternalNodeCount));
 					stream.pop();
 				}
 			}
@@ -3932,26 +3932,26 @@ namespace zonetool::iw8
 		template <typename Stream>
 		void stream_gfxmayhemselfvis(Stream& stream, GfxMayhemSelfVis& data)
 		{
-			stream.array(data.selfVis, 0, *reinterpret_cast<const std::uint32_t*>(&data));
+			stream.inline_array(data.selfVis, 0, *reinterpret_cast<const std::uint32_t*>(&data));
 		}
 
 		template <typename Stream>
 		void stream_gfxfrustumlights(Stream& stream, GfxFrustumLights& data)
 		{
-			stream.array(data.indicesOffsets, 3, *reinterpret_cast<const std::uint32_t*>(&data));
-			stream.array(data.verticesOffsets, 3, *reinterpret_cast<const std::uint32_t*>(&data));
-			stream.array(data.indicesCounts, 1, *reinterpret_cast<const std::uint32_t*>(&data));
-			stream.array(data.verticesCounts, 1, *reinterpret_cast<const std::uint32_t*>(&data));
-			stream.array(data.indices, 3, data.totalIndicesCount);
-			stream.array(data.vertices, 3, (data.totalVerticesCount * 16));
+			stream.inline_array(data.indicesOffsets, 3, *reinterpret_cast<const std::uint32_t*>(&data));
+			stream.inline_array(data.verticesOffsets, 3, *reinterpret_cast<const std::uint32_t*>(&data));
+			stream.inline_array(data.indicesCounts, 1, *reinterpret_cast<const std::uint32_t*>(&data));
+			stream.inline_array(data.verticesCounts, 1, *reinterpret_cast<const std::uint32_t*>(&data));
+			stream.inline_array(data.indices, 3, data.totalIndicesCount);
+			stream.inline_array(data.vertices, 3, (data.totalVerticesCount * 16));
 		}
 
 		template <typename Stream>
 		void stream_gfxlightviewfrustum(Stream& stream, GfxLightViewFrustum& data)
 		{
-			stream.array(data.planes, 3, *reinterpret_cast<const std::uint8_t*>(&data));
-			stream.array(data.indices, 0, data.indexCount);
-			stream.array(data.vertices, 3, data.vertexCount);
+			stream.inline_array(data.planes, 3, *reinterpret_cast<const std::uint8_t*>(&data));
+			stream.inline_array(data.indices, 0, data.indexCount);
+			stream.inline_array(data.vertices, 3, data.vertexCount);
 		}
 
 		template <typename Stream>
@@ -3973,231 +3973,231 @@ namespace zonetool::iw8
 		template <typename Stream>
 		void stream_gfxshadowgeometry(Stream& stream, GfxShadowGeometry& data)
 		{
-			stream.array(data.sortedSurfIndex, 3, *reinterpret_cast<const std::uint16_t*>(&data));
-			stream.array(data.smodelIndex, 1, data.smodelCount);
+			stream.inline_array(data.sortedSurfIndex, 3, *reinterpret_cast<const std::uint16_t*>(&data));
+			stream.inline_array(data.smodelIndex, 1, data.smodelCount);
 		}
 
 		template <typename Stream>
 		void stream_gfxlightaabb(Stream& stream, GfxLightAABB& data)
 		{
-			stream.array(data.nodeArray, 3, *reinterpret_cast<const std::uint16_t*>(&data));
-			stream.array(data.lightArray, 1, data.lightCount);
+			stream.inline_array(data.nodeArray, 3, *reinterpret_cast<const std::uint16_t*>(&data));
+			stream.inline_array(data.lightArray, 1, data.lightCount);
 		}
 
 		template <typename Stream>
 		void stream_gfxworlddpvsstatic(Stream& stream, GfxWorldDpvsStatic& data)
 		{
 			stream.push(4);
-			stream.array(data.smodelVisData[0], 127, *reinterpret_cast<const std::uint32_t*>(&data));
+			stream.inline_array(data.smodelVisData[0], 127, *reinterpret_cast<const std::uint32_t*>(&data));
 			stream.pop();
 			stream.push(4);
-			stream.array(data.smodelVisData[1], 127, *reinterpret_cast<const std::uint32_t*>(&data));
+			stream.inline_array(data.smodelVisData[1], 127, *reinterpret_cast<const std::uint32_t*>(&data));
 			stream.pop();
 			stream.push(4);
-			stream.array(data.smodelVisData[2], 127, *reinterpret_cast<const std::uint32_t*>(&data));
+			stream.inline_array(data.smodelVisData[2], 127, *reinterpret_cast<const std::uint32_t*>(&data));
 			stream.pop();
 			stream.push(4);
-			stream.array(data.smodelVisData[3], 127, *reinterpret_cast<const std::uint32_t*>(&data));
+			stream.inline_array(data.smodelVisData[3], 127, *reinterpret_cast<const std::uint32_t*>(&data));
 			stream.pop();
 			stream.push(4);
-			stream.array(data.smodelVisData[4], 127, 0);
+			stream.inline_array(data.smodelVisData[4], 127, 0);
 			stream.pop();
 			stream.push(4);
-			stream.array(data.smodelVisData[5], 127, 0);
+			stream.inline_array(data.smodelVisData[5], 127, 0);
 			stream.pop();
 			stream.push(4);
-			stream.array(data.smodelVisData[6], 127, 0);
+			stream.inline_array(data.smodelVisData[6], 127, 0);
 			stream.pop();
 			stream.push(4);
-			stream.array(data.smodelVisData[7], 127, 0);
+			stream.inline_array(data.smodelVisData[7], 127, 0);
 			stream.pop();
 			stream.push(4);
-			stream.array(data.smodelVisData[8], 127, 0);
+			stream.inline_array(data.smodelVisData[8], 127, 0);
 			stream.pop();
 			stream.push(4);
-			stream.array(data.smodelVisData[9], 127, 0);
+			stream.inline_array(data.smodelVisData[9], 127, 0);
 			stream.pop();
 			stream.push(4);
-			stream.array(data.smodelVisData[10], 127, 0);
+			stream.inline_array(data.smodelVisData[10], 127, 0);
 			stream.pop();
 			stream.push(4);
-			stream.array(data.smodelVisData[11], 127, 0);
+			stream.inline_array(data.smodelVisData[11], 127, 0);
 			stream.pop();
 			stream.push(4);
-			stream.array(data.smodelVisData[12], 127, *reinterpret_cast<const std::uint32_t*>(&data));
+			stream.inline_array(data.smodelVisData[12], 127, *reinterpret_cast<const std::uint32_t*>(&data));
 			stream.pop();
 			stream.push(4);
-			stream.array(data.smodelVisData[13], 127, *reinterpret_cast<const std::uint32_t*>(&data));
+			stream.inline_array(data.smodelVisData[13], 127, *reinterpret_cast<const std::uint32_t*>(&data));
 			stream.pop();
 			stream.push(4);
-			stream.array(data.smodelVisData[14], 127, *reinterpret_cast<const std::uint32_t*>(&data));
+			stream.inline_array(data.smodelVisData[14], 127, *reinterpret_cast<const std::uint32_t*>(&data));
 			stream.pop();
 			stream.push(4);
-			stream.array(data.smodelVisData[15], 127, *reinterpret_cast<const std::uint32_t*>(&data));
+			stream.inline_array(data.smodelVisData[15], 127, *reinterpret_cast<const std::uint32_t*>(&data));
 			stream.pop();
 			stream.push(4);
-			stream.array(data.smodelVisData[16], 127, *reinterpret_cast<const std::uint32_t*>(&data));
+			stream.inline_array(data.smodelVisData[16], 127, *reinterpret_cast<const std::uint32_t*>(&data));
 			stream.pop();
 			stream.push(4);
-			stream.array(data.smodelVisData[17], 127, *reinterpret_cast<const std::uint32_t*>(&data));
+			stream.inline_array(data.smodelVisData[17], 127, *reinterpret_cast<const std::uint32_t*>(&data));
 			stream.pop();
 			stream.push(4);
-			stream.array(data.smodelVisData[18], 127, *reinterpret_cast<const std::uint32_t*>(&data));
+			stream.inline_array(data.smodelVisData[18], 127, *reinterpret_cast<const std::uint32_t*>(&data));
 			stream.pop();
 			stream.push(4);
-			stream.array(data.smodelVisData[19], 127, *reinterpret_cast<const std::uint32_t*>(&data));
+			stream.inline_array(data.smodelVisData[19], 127, *reinterpret_cast<const std::uint32_t*>(&data));
 			stream.pop();
 			stream.push(4);
-			stream.array(data.smodelVisData[20], 127, *reinterpret_cast<const std::uint32_t*>(&data));
+			stream.inline_array(data.smodelVisData[20], 127, *reinterpret_cast<const std::uint32_t*>(&data));
 			stream.pop();
 			stream.push(4);
-			stream.array(data.smodelVisData[21], 127, *reinterpret_cast<const std::uint32_t*>(&data));
+			stream.inline_array(data.smodelVisData[21], 127, *reinterpret_cast<const std::uint32_t*>(&data));
 			stream.pop();
 			stream.push(4);
-			stream.array(data.smodelVisData[22], 127, *reinterpret_cast<const std::uint32_t*>(&data));
+			stream.inline_array(data.smodelVisData[22], 127, *reinterpret_cast<const std::uint32_t*>(&data));
 			stream.pop();
 			stream.push(4);
-			stream.array(data.smodelVisData[23], 127, *reinterpret_cast<const std::uint32_t*>(&data));
+			stream.inline_array(data.smodelVisData[23], 127, *reinterpret_cast<const std::uint32_t*>(&data));
 			stream.pop();
 			stream.push(4);
-			stream.array(data.smodelVisData[24], 127, *reinterpret_cast<const std::uint32_t*>(&data));
+			stream.inline_array(data.smodelVisData[24], 127, *reinterpret_cast<const std::uint32_t*>(&data));
 			stream.pop();
 			stream.push(4);
-			stream.array(data.smodelVisData[25], 127, *reinterpret_cast<const std::uint32_t*>(&data));
+			stream.inline_array(data.smodelVisData[25], 127, *reinterpret_cast<const std::uint32_t*>(&data));
 			stream.pop();
 			stream.push(4);
-			stream.array(data.smodelVisData[26], 127, *reinterpret_cast<const std::uint32_t*>(&data));
+			stream.inline_array(data.smodelVisData[26], 127, *reinterpret_cast<const std::uint32_t*>(&data));
 			stream.pop();
 			stream.push(4);
-			stream.array(data.smodelVisData[27], 127, *reinterpret_cast<const std::uint32_t*>(&data));
+			stream.inline_array(data.smodelVisData[27], 127, *reinterpret_cast<const std::uint32_t*>(&data));
 			stream.pop();
 			stream.push(4);
-			stream.array(data.smodelVisData[28], 127, *reinterpret_cast<const std::uint32_t*>(&data));
+			stream.inline_array(data.smodelVisData[28], 127, *reinterpret_cast<const std::uint32_t*>(&data));
 			stream.pop();
 			stream.push(4);
-			stream.array(data.smodelVisData[29], 127, *reinterpret_cast<const std::uint32_t*>(&data));
+			stream.inline_array(data.smodelVisData[29], 127, *reinterpret_cast<const std::uint32_t*>(&data));
 			stream.pop();
 			stream.push(4);
-			stream.array(data.smodelVisData[30], 127, *reinterpret_cast<const std::uint32_t*>(&data));
+			stream.inline_array(data.smodelVisData[30], 127, *reinterpret_cast<const std::uint32_t*>(&data));
 			stream.pop();
 			stream.push(4);
-			stream.array(data.smodelVisData[31], 127, *reinterpret_cast<const std::uint32_t*>(&data));
+			stream.inline_array(data.smodelVisData[31], 127, *reinterpret_cast<const std::uint32_t*>(&data));
 			stream.pop();
 			stream.push(4);
-			stream.array(data.surfaceVisData[0], 127, data.surfaceVisDataCount);
+			stream.inline_array(data.surfaceVisData[0], 127, data.surfaceVisDataCount);
 			stream.pop();
 			stream.push(4);
-			stream.array(data.surfaceVisData[1], 127, data.surfaceVisDataCount);
+			stream.inline_array(data.surfaceVisData[1], 127, data.surfaceVisDataCount);
 			stream.pop();
 			stream.push(4);
-			stream.array(data.surfaceVisData[2], 127, data.surfaceVisDataCount);
+			stream.inline_array(data.surfaceVisData[2], 127, data.surfaceVisDataCount);
 			stream.pop();
 			stream.push(4);
-			stream.array(data.surfaceVisData[3], 127, data.surfaceVisDataCount);
+			stream.inline_array(data.surfaceVisData[3], 127, data.surfaceVisDataCount);
 			stream.pop();
 			stream.push(4);
-			stream.array(data.surfaceVisData[4], 127, 0);
+			stream.inline_array(data.surfaceVisData[4], 127, 0);
 			stream.pop();
 			stream.push(4);
-			stream.array(data.surfaceVisData[5], 127, 0);
+			stream.inline_array(data.surfaceVisData[5], 127, 0);
 			stream.pop();
 			stream.push(4);
-			stream.array(data.surfaceVisData[6], 127, 0);
+			stream.inline_array(data.surfaceVisData[6], 127, 0);
 			stream.pop();
 			stream.push(4);
-			stream.array(data.surfaceVisData[7], 127, 0);
+			stream.inline_array(data.surfaceVisData[7], 127, 0);
 			stream.pop();
 			stream.push(4);
-			stream.array(data.surfaceVisData[8], 127, 0);
+			stream.inline_array(data.surfaceVisData[8], 127, 0);
 			stream.pop();
 			stream.push(4);
-			stream.array(data.surfaceVisData[9], 127, 0);
+			stream.inline_array(data.surfaceVisData[9], 127, 0);
 			stream.pop();
 			stream.push(4);
-			stream.array(data.surfaceVisData[10], 127, 0);
+			stream.inline_array(data.surfaceVisData[10], 127, 0);
 			stream.pop();
 			stream.push(4);
-			stream.array(data.surfaceVisData[11], 127, 0);
+			stream.inline_array(data.surfaceVisData[11], 127, 0);
 			stream.pop();
 			stream.push(4);
-			stream.array(data.surfaceVisData[12], 127, data.surfaceVisDataCount);
+			stream.inline_array(data.surfaceVisData[12], 127, data.surfaceVisDataCount);
 			stream.pop();
 			stream.push(4);
-			stream.array(data.surfaceVisData[13], 127, data.surfaceVisDataCount);
+			stream.inline_array(data.surfaceVisData[13], 127, data.surfaceVisDataCount);
 			stream.pop();
 			stream.push(4);
-			stream.array(data.surfaceVisData[14], 127, data.surfaceVisDataCount);
+			stream.inline_array(data.surfaceVisData[14], 127, data.surfaceVisDataCount);
 			stream.pop();
 			stream.push(4);
-			stream.array(data.surfaceVisData[15], 127, data.surfaceVisDataCount);
+			stream.inline_array(data.surfaceVisData[15], 127, data.surfaceVisDataCount);
 			stream.pop();
 			stream.push(4);
-			stream.array(data.surfaceVisData[16], 127, data.surfaceVisDataCount);
+			stream.inline_array(data.surfaceVisData[16], 127, data.surfaceVisDataCount);
 			stream.pop();
 			stream.push(4);
-			stream.array(data.surfaceVisData[17], 127, data.surfaceVisDataCount);
+			stream.inline_array(data.surfaceVisData[17], 127, data.surfaceVisDataCount);
 			stream.pop();
 			stream.push(4);
-			stream.array(data.surfaceVisData[18], 127, data.surfaceVisDataCount);
+			stream.inline_array(data.surfaceVisData[18], 127, data.surfaceVisDataCount);
 			stream.pop();
 			stream.push(4);
-			stream.array(data.surfaceVisData[19], 127, data.surfaceVisDataCount);
+			stream.inline_array(data.surfaceVisData[19], 127, data.surfaceVisDataCount);
 			stream.pop();
 			stream.push(4);
-			stream.array(data.surfaceVisData[20], 127, data.surfaceVisDataCount);
+			stream.inline_array(data.surfaceVisData[20], 127, data.surfaceVisDataCount);
 			stream.pop();
 			stream.push(4);
-			stream.array(data.surfaceVisData[21], 127, data.surfaceVisDataCount);
+			stream.inline_array(data.surfaceVisData[21], 127, data.surfaceVisDataCount);
 			stream.pop();
 			stream.push(4);
-			stream.array(data.surfaceVisData[22], 127, data.surfaceVisDataCount);
+			stream.inline_array(data.surfaceVisData[22], 127, data.surfaceVisDataCount);
 			stream.pop();
 			stream.push(4);
-			stream.array(data.surfaceVisData[23], 127, data.surfaceVisDataCount);
+			stream.inline_array(data.surfaceVisData[23], 127, data.surfaceVisDataCount);
 			stream.pop();
 			stream.push(4);
-			stream.array(data.surfaceVisData[24], 127, data.surfaceVisDataCount);
+			stream.inline_array(data.surfaceVisData[24], 127, data.surfaceVisDataCount);
 			stream.pop();
 			stream.push(4);
-			stream.array(data.surfaceVisData[25], 127, data.surfaceVisDataCount);
+			stream.inline_array(data.surfaceVisData[25], 127, data.surfaceVisDataCount);
 			stream.pop();
 			stream.push(4);
-			stream.array(data.surfaceVisData[26], 127, data.surfaceVisDataCount);
+			stream.inline_array(data.surfaceVisData[26], 127, data.surfaceVisDataCount);
 			stream.pop();
 			stream.push(4);
-			stream.array(data.surfaceVisData[27], 127, data.surfaceVisDataCount);
+			stream.inline_array(data.surfaceVisData[27], 127, data.surfaceVisDataCount);
 			stream.pop();
 			stream.push(4);
-			stream.array(data.surfaceVisData[28], 127, data.surfaceVisDataCount);
+			stream.inline_array(data.surfaceVisData[28], 127, data.surfaceVisDataCount);
 			stream.pop();
 			stream.push(4);
-			stream.array(data.surfaceVisData[29], 127, data.surfaceVisDataCount);
+			stream.inline_array(data.surfaceVisData[29], 127, data.surfaceVisDataCount);
 			stream.pop();
 			stream.push(4);
-			stream.array(data.surfaceVisData[30], 127, data.surfaceVisDataCount);
+			stream.inline_array(data.surfaceVisData[30], 127, data.surfaceVisDataCount);
 			stream.pop();
 			stream.push(4);
-			stream.array(data.surfaceVisData[31], 127, data.surfaceVisDataCount);
+			stream.inline_array(data.surfaceVisData[31], 127, data.surfaceVisDataCount);
 			stream.pop();
 			stream.push(4);
-			stream.array(data.primaryLightVisData, 127, data.primaryLightVisDataCount);
+			stream.inline_array(data.primaryLightVisData, 127, data.primaryLightVisDataCount);
 			stream.pop();
 			stream.push(4);
-			stream.array(data.reflectionProbeVisData, 127, data.reflectionProbeVisDataCount);
+			stream.inline_array(data.reflectionProbeVisData, 127, data.reflectionProbeVisDataCount);
 			stream.pop();
 			stream.push(4);
-			stream.array(data.volumetricVisData, 127, data.volumetricVisDataCount);
+			stream.inline_array(data.volumetricVisData, 127, data.volumetricVisDataCount);
 			stream.pop();
 			stream.push(4);
-			stream.array(data.decalVisData, 127, data.decalVisDataCount);
+			stream.inline_array(data.decalVisData, 127, data.decalVisDataCount);
 			stream.pop();
-			stream.array(data.sortedSurfIndex, 3, (data.surfaceVisDataCount * 32));
-			stream.array(data.sortedSmodelIndices, 1, ((*reinterpret_cast<const std::uint32_t*>(&data) * 32) + 1));
+			stream.inline_array(data.sortedSurfIndex, 3, (data.surfaceVisDataCount * 32));
+			stream.inline_array(data.sortedSmodelIndices, 1, ((*reinterpret_cast<const std::uint32_t*>(&data) * 32) + 1));
 			stream.push(4);
-			stream.array(data.surfaceCastsSunShadow, 127, data.surfaceVisDataCount);
+			stream.inline_array(data.surfaceCastsSunShadow, 127, data.surfaceVisDataCount);
 			stream.pop();
 			stream.push(4);
-			stream.array(data.surfaceCastsSunShadowOpt, 127, (data.sunSurfVisDataCount * data.sunShadowOptCount));
+			stream.inline_array(data.surfaceCastsSunShadowOpt, 127, (data.sunSurfVisDataCount * data.sunShadowOptCount));
 			stream.pop();
 		}
 
@@ -4205,202 +4205,202 @@ namespace zonetool::iw8
 		void stream_gfxworlddpvsdynamic(Stream& stream, GfxWorldDpvsDynamic& data, [[maybe_unused]] const GfxWorld& outer_gfxworld)
 		{
 			stream.push(4);
-			stream.array(data.dynEntCellBits[0], 3, (*reinterpret_cast<const std::uint32_t*>(&outer_gfxworld.dpvsPlanes) * *reinterpret_cast<const std::uint32_t*>(&data)));
+			stream.inline_array(data.dynEntCellBits[0], 3, (*reinterpret_cast<const std::uint32_t*>(&outer_gfxworld.dpvsPlanes) * *reinterpret_cast<const std::uint32_t*>(&data)));
 			stream.pop();
 			stream.push(4);
-			stream.array(data.dynEntCellBits[1], 3, (*reinterpret_cast<const std::uint32_t*>(&outer_gfxworld.dpvsPlanes) * data.dynEntClientWordCount[1]));
+			stream.inline_array(data.dynEntCellBits[1], 3, (*reinterpret_cast<const std::uint32_t*>(&outer_gfxworld.dpvsPlanes) * data.dynEntClientWordCount[1]));
 			stream.pop();
 			stream.push(4);
-			stream.array(data.dynEntVisData[0][0], 15, (*reinterpret_cast<const std::uint32_t*>(&data) * 32));
+			stream.inline_array(data.dynEntVisData[0][0], 15, (*reinterpret_cast<const std::uint32_t*>(&data) * 32));
 			stream.pop();
 			stream.push(4);
-			stream.array(data.dynEntVisData[1][0], 15, (data.dynEntClientWordCount[1] * 32));
+			stream.inline_array(data.dynEntVisData[1][0], 15, (data.dynEntClientWordCount[1] * 32));
 			stream.pop();
 			stream.push(4);
-			stream.array(data.dynEntVisData[0][1], 15, (*reinterpret_cast<const std::uint32_t*>(&data) * 32));
+			stream.inline_array(data.dynEntVisData[0][1], 15, (*reinterpret_cast<const std::uint32_t*>(&data) * 32));
 			stream.pop();
 			stream.push(4);
-			stream.array(data.dynEntVisData[1][1], 15, (data.dynEntClientWordCount[1] * 32));
+			stream.inline_array(data.dynEntVisData[1][1], 15, (data.dynEntClientWordCount[1] * 32));
 			stream.pop();
 			stream.push(4);
-			stream.array(data.dynEntVisData[0][2], 15, (*reinterpret_cast<const std::uint32_t*>(&data) * 32));
+			stream.inline_array(data.dynEntVisData[0][2], 15, (*reinterpret_cast<const std::uint32_t*>(&data) * 32));
 			stream.pop();
 			stream.push(4);
-			stream.array(data.dynEntVisData[1][2], 15, (data.dynEntClientWordCount[1] * 32));
+			stream.inline_array(data.dynEntVisData[1][2], 15, (data.dynEntClientWordCount[1] * 32));
 			stream.pop();
 			stream.push(4);
-			stream.array(data.dynEntVisData[0][3], 15, 0);
+			stream.inline_array(data.dynEntVisData[0][3], 15, 0);
 			stream.pop();
 			stream.push(4);
-			stream.array(data.dynEntVisData[1][3], 15, 0);
+			stream.inline_array(data.dynEntVisData[1][3], 15, 0);
 			stream.pop();
 			stream.push(4);
-			stream.array(data.dynEntVisData[0][4], 15, (*reinterpret_cast<const std::uint32_t*>(&data) * 32));
+			stream.inline_array(data.dynEntVisData[0][4], 15, (*reinterpret_cast<const std::uint32_t*>(&data) * 32));
 			stream.pop();
 			stream.push(4);
-			stream.array(data.dynEntVisData[1][4], 15, (data.dynEntClientWordCount[1] * 32));
+			stream.inline_array(data.dynEntVisData[1][4], 15, (data.dynEntClientWordCount[1] * 32));
 			stream.pop();
 			stream.push(4);
-			stream.array(data.dynEntVisData[0][5], 15, (*reinterpret_cast<const std::uint32_t*>(&data) * 32));
+			stream.inline_array(data.dynEntVisData[0][5], 15, (*reinterpret_cast<const std::uint32_t*>(&data) * 32));
 			stream.pop();
 			stream.push(4);
-			stream.array(data.dynEntVisData[1][5], 15, (data.dynEntClientWordCount[1] * 32));
+			stream.inline_array(data.dynEntVisData[1][5], 15, (data.dynEntClientWordCount[1] * 32));
 			stream.pop();
 			stream.push(4);
-			stream.array(data.dynEntVisData[0][6], 15, (*reinterpret_cast<const std::uint32_t*>(&data) * 32));
+			stream.inline_array(data.dynEntVisData[0][6], 15, (*reinterpret_cast<const std::uint32_t*>(&data) * 32));
 			stream.pop();
 			stream.push(4);
-			stream.array(data.dynEntVisData[1][6], 15, (data.dynEntClientWordCount[1] * 32));
+			stream.inline_array(data.dynEntVisData[1][6], 15, (data.dynEntClientWordCount[1] * 32));
 			stream.pop();
 			stream.push(4);
-			stream.array(data.dynEntVisData[0][7], 15, (*reinterpret_cast<const std::uint32_t*>(&data) * 32));
+			stream.inline_array(data.dynEntVisData[0][7], 15, (*reinterpret_cast<const std::uint32_t*>(&data) * 32));
 			stream.pop();
 			stream.push(4);
-			stream.array(data.dynEntVisData[1][7], 15, (data.dynEntClientWordCount[1] * 32));
+			stream.inline_array(data.dynEntVisData[1][7], 15, (data.dynEntClientWordCount[1] * 32));
 			stream.pop();
 			stream.push(4);
-			stream.array(data.dynEntVisData[0][8], 15, (*reinterpret_cast<const std::uint32_t*>(&data) * 32));
+			stream.inline_array(data.dynEntVisData[0][8], 15, (*reinterpret_cast<const std::uint32_t*>(&data) * 32));
 			stream.pop();
 			stream.push(4);
-			stream.array(data.dynEntVisData[1][8], 15, (data.dynEntClientWordCount[1] * 32));
+			stream.inline_array(data.dynEntVisData[1][8], 15, (data.dynEntClientWordCount[1] * 32));
 			stream.pop();
 			stream.push(4);
-			stream.array(data.dynEntVisData[0][9], 15, (*reinterpret_cast<const std::uint32_t*>(&data) * 32));
+			stream.inline_array(data.dynEntVisData[0][9], 15, (*reinterpret_cast<const std::uint32_t*>(&data) * 32));
 			stream.pop();
 			stream.push(4);
-			stream.array(data.dynEntVisData[1][9], 15, (data.dynEntClientWordCount[1] * 32));
+			stream.inline_array(data.dynEntVisData[1][9], 15, (data.dynEntClientWordCount[1] * 32));
 			stream.pop();
 			stream.push(4);
-			stream.array(data.dynEntVisData[0][10], 15, (*reinterpret_cast<const std::uint32_t*>(&data) * 32));
+			stream.inline_array(data.dynEntVisData[0][10], 15, (*reinterpret_cast<const std::uint32_t*>(&data) * 32));
 			stream.pop();
 			stream.push(4);
-			stream.array(data.dynEntVisData[1][10], 15, (data.dynEntClientWordCount[1] * 32));
+			stream.inline_array(data.dynEntVisData[1][10], 15, (data.dynEntClientWordCount[1] * 32));
 			stream.pop();
 			stream.push(4);
-			stream.array(data.dynEntVisData[0][11], 15, (*reinterpret_cast<const std::uint32_t*>(&data) * 32));
+			stream.inline_array(data.dynEntVisData[0][11], 15, (*reinterpret_cast<const std::uint32_t*>(&data) * 32));
 			stream.pop();
 			stream.push(4);
-			stream.array(data.dynEntVisData[1][11], 15, (data.dynEntClientWordCount[1] * 32));
+			stream.inline_array(data.dynEntVisData[1][11], 15, (data.dynEntClientWordCount[1] * 32));
 			stream.pop();
 			stream.push(4);
-			stream.array(data.dynEntVisData[0][12], 15, 0);
+			stream.inline_array(data.dynEntVisData[0][12], 15, 0);
 			stream.pop();
 			stream.push(4);
-			stream.array(data.dynEntVisData[1][12], 15, 0);
+			stream.inline_array(data.dynEntVisData[1][12], 15, 0);
 			stream.pop();
 			stream.push(4);
-			stream.array(data.dynEntVisData[0][13], 15, 0);
+			stream.inline_array(data.dynEntVisData[0][13], 15, 0);
 			stream.pop();
 			stream.push(4);
-			stream.array(data.dynEntVisData[1][13], 15, 0);
+			stream.inline_array(data.dynEntVisData[1][13], 15, 0);
 			stream.pop();
 			stream.push(4);
-			stream.array(data.dynEntVisData[0][14], 15, 0);
+			stream.inline_array(data.dynEntVisData[0][14], 15, 0);
 			stream.pop();
 			stream.push(4);
-			stream.array(data.dynEntVisData[1][14], 15, 0);
+			stream.inline_array(data.dynEntVisData[1][14], 15, 0);
 			stream.pop();
 			stream.push(4);
-			stream.array(data.dynEntVisData[0][15], 15, 0);
+			stream.inline_array(data.dynEntVisData[0][15], 15, 0);
 			stream.pop();
 			stream.push(4);
-			stream.array(data.dynEntVisData[1][15], 15, 0);
+			stream.inline_array(data.dynEntVisData[1][15], 15, 0);
 			stream.pop();
 			stream.push(4);
-			stream.array(data.dynEntVisData[0][16], 15, 0);
+			stream.inline_array(data.dynEntVisData[0][16], 15, 0);
 			stream.pop();
 			stream.push(4);
-			stream.array(data.dynEntVisData[1][16], 15, 0);
+			stream.inline_array(data.dynEntVisData[1][16], 15, 0);
 			stream.pop();
 			stream.push(4);
-			stream.array(data.dynEntVisData[0][17], 15, 0);
+			stream.inline_array(data.dynEntVisData[0][17], 15, 0);
 			stream.pop();
 			stream.push(4);
-			stream.array(data.dynEntVisData[1][17], 15, 0);
+			stream.inline_array(data.dynEntVisData[1][17], 15, 0);
 			stream.pop();
 			stream.push(4);
-			stream.array(data.dynEntVisData[0][18], 15, 0);
+			stream.inline_array(data.dynEntVisData[0][18], 15, 0);
 			stream.pop();
 			stream.push(4);
-			stream.array(data.dynEntVisData[1][18], 15, 0);
+			stream.inline_array(data.dynEntVisData[1][18], 15, 0);
 			stream.pop();
 			stream.push(4);
-			stream.array(data.dynEntVisData[0][19], 15, 0);
+			stream.inline_array(data.dynEntVisData[0][19], 15, 0);
 			stream.pop();
 			stream.push(4);
-			stream.array(data.dynEntVisData[1][19], 15, 0);
+			stream.inline_array(data.dynEntVisData[1][19], 15, 0);
 			stream.pop();
 			stream.push(4);
-			stream.array(data.dynEntVisData[0][20], 15, 0);
+			stream.inline_array(data.dynEntVisData[0][20], 15, 0);
 			stream.pop();
 			stream.push(4);
-			stream.array(data.dynEntVisData[1][20], 15, 0);
+			stream.inline_array(data.dynEntVisData[1][20], 15, 0);
 			stream.pop();
 			stream.push(4);
-			stream.array(data.dynEntVisData[0][21], 15, 0);
+			stream.inline_array(data.dynEntVisData[0][21], 15, 0);
 			stream.pop();
 			stream.push(4);
-			stream.array(data.dynEntVisData[1][21], 15, 0);
+			stream.inline_array(data.dynEntVisData[1][21], 15, 0);
 			stream.pop();
 			stream.push(4);
-			stream.array(data.dynEntVisData[0][22], 15, 0);
+			stream.inline_array(data.dynEntVisData[0][22], 15, 0);
 			stream.pop();
 			stream.push(4);
-			stream.array(data.dynEntVisData[1][22], 15, 0);
+			stream.inline_array(data.dynEntVisData[1][22], 15, 0);
 			stream.pop();
 			stream.push(4);
-			stream.array(data.dynEntVisData[0][23], 15, 0);
+			stream.inline_array(data.dynEntVisData[0][23], 15, 0);
 			stream.pop();
 			stream.push(4);
-			stream.array(data.dynEntVisData[1][23], 15, 0);
+			stream.inline_array(data.dynEntVisData[1][23], 15, 0);
 			stream.pop();
 			stream.push(4);
-			stream.array(data.dynEntVisData[0][24], 15, 0);
+			stream.inline_array(data.dynEntVisData[0][24], 15, 0);
 			stream.pop();
 			stream.push(4);
-			stream.array(data.dynEntVisData[1][24], 15, 0);
+			stream.inline_array(data.dynEntVisData[1][24], 15, 0);
 			stream.pop();
 			stream.push(4);
-			stream.array(data.dynEntVisData[0][25], 15, 0);
+			stream.inline_array(data.dynEntVisData[0][25], 15, 0);
 			stream.pop();
 			stream.push(4);
-			stream.array(data.dynEntVisData[1][25], 15, 0);
+			stream.inline_array(data.dynEntVisData[1][25], 15, 0);
 			stream.pop();
 			stream.push(4);
-			stream.array(data.dynEntVisData[0][26], 15, 0);
+			stream.inline_array(data.dynEntVisData[0][26], 15, 0);
 			stream.pop();
 			stream.push(4);
-			stream.array(data.dynEntVisData[1][26], 15, 0);
+			stream.inline_array(data.dynEntVisData[1][26], 15, 0);
 			stream.pop();
 			stream.push(4);
-			stream.array(data.dynEntVisData[0][27], 15, 0);
+			stream.inline_array(data.dynEntVisData[0][27], 15, 0);
 			stream.pop();
 			stream.push(4);
-			stream.array(data.dynEntVisData[1][27], 15, 0);
+			stream.inline_array(data.dynEntVisData[1][27], 15, 0);
 			stream.pop();
 			stream.push(4);
-			stream.array(data.dynEntVisData[0][28], 15, 0);
+			stream.inline_array(data.dynEntVisData[0][28], 15, 0);
 			stream.pop();
 			stream.push(4);
-			stream.array(data.dynEntVisData[1][28], 15, 0);
+			stream.inline_array(data.dynEntVisData[1][28], 15, 0);
 			stream.pop();
 			stream.push(4);
-			stream.array(data.dynEntVisData[0][29], 15, 0);
+			stream.inline_array(data.dynEntVisData[0][29], 15, 0);
 			stream.pop();
 			stream.push(4);
-			stream.array(data.dynEntVisData[1][29], 15, 0);
+			stream.inline_array(data.dynEntVisData[1][29], 15, 0);
 			stream.pop();
 			stream.push(4);
-			stream.array(data.dynEntVisData[0][30], 15, 0);
+			stream.inline_array(data.dynEntVisData[0][30], 15, 0);
 			stream.pop();
 			stream.push(4);
-			stream.array(data.dynEntVisData[1][30], 15, 0);
+			stream.inline_array(data.dynEntVisData[1][30], 15, 0);
 			stream.pop();
 			stream.push(4);
-			stream.array(data.dynEntVisData[0][31], 15, 0);
+			stream.inline_array(data.dynEntVisData[0][31], 15, 0);
 			stream.pop();
 			stream.push(4);
-			stream.array(data.dynEntVisData[1][31], 15, 0);
+			stream.inline_array(data.dynEntVisData[1][31], 15, 0);
 			stream.pop();
 		}
 
@@ -4420,20 +4420,20 @@ namespace zonetool::iw8
 		void stream_streamtreenode(Stream& stream, StreamTreeNode& data)
 		{
 			stream.asset(ASSET_TYPE_STREAM_KEY, data.volumesKey);
-			stream.array(data.infos, 3, (data.imgInfoCount + data.mtlInfoCount));
+			stream.inline_array(data.infos, 3, (data.imgInfoCount + data.mtlInfoCount));
 		}
 
 		template <typename Stream>
 		void stream_streammtlgroup(Stream& stream, StreamMtlGroup& data)
 		{
 			stream.asset(ASSET_TYPE_STREAM_KEY, data.volumesKey);
-			stream.array(data.infos, 3, (data.imgInfoCount + data.mtlInfoCount));
+			stream.inline_array(data.infos, 3, (data.imgInfoCount + data.mtlInfoCount));
 		}
 
 		template <typename Stream>
 		void stream_streamtree(Stream& stream, StreamTree& data)
 		{
-			if (const auto items_0 = stream.array(data.nodes, 7, data.nodeCount))
+			if (const auto items_0 = stream.inline_array(data.nodes, 7, data.nodeCount))
 			{
 				if (data.nodeCount != 0)
 				{
@@ -4443,11 +4443,11 @@ namespace zonetool::iw8
 					}
 				}
 			}
-			if (const auto items_10 = stream.array(data.materials, 7, data.materialCount))
+			if (const auto items_10 = stream.inline_array(data.materials, 7, data.materialCount))
 			{
 				stream_material_ptr_array(stream, items_10, data.materialCount);
 			}
-			if (const auto items_14 = stream.array(data.images, 7, data.imageCount))
+			if (const auto items_14 = stream.inline_array(data.images, 7, data.imageCount))
 			{
 				stream_gfximage_ptr_array(stream, items_14, data.imageCount);
 			}
@@ -4471,7 +4471,7 @@ namespace zonetool::iw8
 		template <typename Stream>
 		void stream_streamtreegrid(Stream& stream, StreamTreeGrid& data)
 		{
-			if (const auto items_0 = stream.array(data.cellKeys, 7, (data.columnCount * data.rowCount)))
+			if (const auto items_0 = stream.inline_array(data.cellKeys, 7, (data.columnCount * data.rowCount)))
 			{
 				if ((data.columnCount * data.rowCount) != 0)
 				{
@@ -4481,19 +4481,19 @@ namespace zonetool::iw8
 					}
 				}
 			}
-			if (const auto items_10 = stream.array(data.materials, 7, data.materialCount))
+			if (const auto items_10 = stream.inline_array(data.materials, 7, data.materialCount))
 			{
 				stream_material_ptr_array(stream, items_10, data.materialCount);
 			}
-			if (const auto items_14 = stream.array(data.images, 7, data.imageCount))
+			if (const auto items_14 = stream.inline_array(data.images, 7, data.imageCount))
 			{
 				stream_gfximage_ptr_array(stream, items_14, data.imageCount);
 			}
-			if (const auto items_18 = stream.array(data.xmodels, 7, data.xmodelCount))
+			if (const auto items_18 = stream.inline_array(data.xmodels, 7, data.xmodelCount))
 			{
 				stream_xmodel_ptr_array(stream, items_18, data.xmodelCount);
 			}
-			stream.array(data.smodelCollectionIndices, 1, data.smodelCollectionIndexCount);
+			stream.inline_array(data.smodelCollectionIndices, 1, data.smodelCollectionIndexCount);
 		}
 
 		template <typename Stream>
@@ -4504,8 +4504,8 @@ namespace zonetool::iw8
 			stream.string(data.name);
 			stream.string(data.baseName);
 			stream_gfxworlddpvsplanes(stream, data.dpvsPlanes);
-			stream.array(data.cellTransientInfos, 1, *reinterpret_cast<const std::uint32_t*>(&data.dpvsPlanes));
-			if (const auto items_6 = stream.array(data.cells, 7, *reinterpret_cast<const std::uint32_t*>(&data.dpvsPlanes)))
+			stream.inline_array(data.cellTransientInfos, 1, *reinterpret_cast<const std::uint32_t*>(&data.dpvsPlanes));
+			if (const auto items_6 = stream.inline_array(data.cells, 7, *reinterpret_cast<const std::uint32_t*>(&data.dpvsPlanes)))
 			{
 				if (*reinterpret_cast<const std::uint32_t*>(&data.dpvsPlanes) != 0)
 				{
@@ -4519,16 +4519,16 @@ namespace zonetool::iw8
 			stream_gfxworldstaticmodels(stream, data.smodels);
 			stream_gfxworlddraw(stream, data.draw);
 			stream_gfxdynamiclightset(stream, data.dynamicLightset);
-			if (const auto items_20 = stream.array(data.voxelTree, 7, data.voxelTreeCount))
+			if (const auto items_20 = stream.inline_array(data.voxelTree, 7, data.voxelTreeCount))
 			{
 				stream_gfxvoxeltree_array(stream, items_20, data.voxelTreeCount);
 			}
 			stream_gfxmayhemselfvis(stream, data.mayhemSelfVis);
 			stream_gfxfrustumlights(stream, data.frustumLights);
 			stream.push(4);
-			stream.array(data.primaryLights, 7, data.primaryLightCount);
+			stream.inline_array(data.primaryLights, 7, data.primaryLightCount);
 			stream.pop();
-			if (const auto items_29 = stream.array(data.lightViewFrustums, 7, data.primaryLightCount))
+			if (const auto items_29 = stream.inline_array(data.lightViewFrustums, 7, data.primaryLightCount))
 			{
 				if (data.primaryLightCount != 0)
 				{
@@ -4538,7 +4538,7 @@ namespace zonetool::iw8
 					}
 				}
 			}
-			if (const auto items_39 = stream.array(data.heightfields, 7, data.heightfieldCount))
+			if (const auto items_39 = stream.inline_array(data.heightfields, 7, data.heightfieldCount))
 			{
 				if (data.heightfieldCount != 0)
 				{
@@ -4548,47 +4548,47 @@ namespace zonetool::iw8
 					}
 				}
 			}
-			stream.array(data.models, 3, data.modelCount);
+			stream.inline_array(data.models, 3, data.modelCount);
 			stream_gfxprecomputedskyillumination(stream, data.precomputedSkyIllumination);
-			stream.array(data.lmapLookup, 3, data.lmapLookupCount);
-			stream.array(data.gfxMapEntLookup, 3, data.gfxMapEntLookupCount);
+			stream.inline_array(data.lmapLookup, 3, data.lmapLookupCount);
+			stream.inline_array(data.gfxMapEntLookup, 3, data.gfxMapEntLookupCount);
 			stream_sunflare_t(stream, data.sun);
 			stream.asset(ASSET_TYPE_IMAGE, data.outdoorImage);
 			stream.asset(ASSET_TYPE_MATERIAL, data.dustMaterial);
 			stream.push(4);
-			stream.array(data.cellCasterBits, 3, (((*reinterpret_cast<const std::uint32_t*>(&data.dpvsPlanes) + 31) >> 5) * *reinterpret_cast<const std::uint32_t*>(&data.dpvsPlanes)));
+			stream.inline_array(data.cellCasterBits, 3, (((*reinterpret_cast<const std::uint32_t*>(&data.dpvsPlanes) + 31) >> 5) * *reinterpret_cast<const std::uint32_t*>(&data.dpvsPlanes)));
 			stream.pop();
 			stream.push(4);
-			stream.array(data.cellHasSunLitSurfsBits, 3, ((*reinterpret_cast<const std::uint32_t*>(&data.dpvsPlanes) + 31) >> 5));
+			stream.inline_array(data.cellHasSunLitSurfsBits, 3, ((*reinterpret_cast<const std::uint32_t*>(&data.dpvsPlanes) + 31) >> 5));
 			stream.pop();
 			stream.push(4);
-			stream.array(data.sceneDynModel, 3, *reinterpret_cast<const std::uint32_t*>(&data.dpvsDyn.dynEntClientCount));
+			stream.inline_array(data.sceneDynModel, 3, *reinterpret_cast<const std::uint32_t*>(&data.dpvsDyn.dynEntClientCount));
 			stream.pop();
 			stream.push(4);
-			stream.array(data.sceneDynBrush, 3, data.dpvsDyn.dynEntClientCount[1]);
+			stream.inline_array(data.sceneDynBrush, 3, data.dpvsDyn.dynEntClientCount[1]);
 			stream.pop();
 			stream.push(4);
-			stream.array(data.primaryLightMotionDetectBits, 3, data.primaryLightMotionDetectBitsEntries);
+			stream.inline_array(data.primaryLightMotionDetectBits, 3, data.primaryLightMotionDetectBitsEntries);
 			stream.pop();
 			stream.push(4);
-			stream.array(data.entityMotionBits, 3, data.entityMotionBitsEntries);
+			stream.inline_array(data.entityMotionBits, 3, data.entityMotionBitsEntries);
 			stream.pop();
 			stream.push(4);
-			stream.array(data.primaryLightEntityShadowVis, 3, data.numPrimaryLightEntityShadowVisEntries);
+			stream.inline_array(data.primaryLightEntityShadowVis, 3, data.numPrimaryLightEntityShadowVisEntries);
 			stream.pop();
 			stream.push(4);
-			stream.array(data.dynEntMotionBits[0], 3, *reinterpret_cast<const std::uint32_t*>(&data.dynEntMotionBitsEntries));
+			stream.inline_array(data.dynEntMotionBits[0], 3, *reinterpret_cast<const std::uint32_t*>(&data.dynEntMotionBitsEntries));
 			stream.pop();
 			stream.push(4);
-			stream.array(data.dynEntMotionBits[1], 3, data.dynEntMotionBitsEntries[1]);
+			stream.inline_array(data.dynEntMotionBits[1], 3, data.dynEntMotionBitsEntries[1]);
 			stream.pop();
 			stream.push(4);
-			stream.array(data.primaryLightDynEntShadowVis[0], 3, *reinterpret_cast<const std::uint32_t*>(&data.numPrimaryLightDynEntShadowVisEntries));
+			stream.inline_array(data.primaryLightDynEntShadowVis[0], 3, *reinterpret_cast<const std::uint32_t*>(&data.numPrimaryLightDynEntShadowVisEntries));
 			stream.pop();
 			stream.push(4);
-			stream.array(data.primaryLightDynEntShadowVis[1], 3, data.numPrimaryLightDynEntShadowVisEntries[1]);
+			stream.inline_array(data.primaryLightDynEntShadowVis[1], 3, data.numPrimaryLightDynEntShadowVisEntries[1]);
 			stream.pop();
-			if (const auto items_89 = stream.array(data.shadowGeomOptimized, 7, data.primaryLightCount))
+			if (const auto items_89 = stream.inline_array(data.shadowGeomOptimized, 7, data.primaryLightCount))
 			{
 				if (data.primaryLightCount != 0)
 				{
@@ -4601,9 +4601,9 @@ namespace zonetool::iw8
 			stream_gfxlightaabb(stream, data.lightAABB);
 			stream_gfxworlddpvsstatic(stream, data.dpvs);
 			stream_gfxworlddpvsdynamic(stream, data.dpvsDyn, data);
-			stream.array(data.umbraGates, 3, data.numUmbraGates);
-			stream.array(data.umbraTomeData, 15, data.umbraTomeSize);
-			if (const auto items_104 = stream.array(data.mdaoVolumes, 7, data.mdaoVolumeCount))
+			stream.inline_array(data.umbraGates, 3, data.numUmbraGates);
+			stream.inline_array(data.umbraTomeData, 15, data.umbraTomeSize);
+			if (const auto items_104 = stream.inline_array(data.mdaoVolumes, 7, data.mdaoVolumeCount))
 			{
 				stream_mdaovolume_array(stream, items_104, data.mdaoVolumeCount);
 			}
@@ -4617,9 +4617,9 @@ namespace zonetool::iw8
 		template <typename Stream>
 		void stream_gfxworlddrawverts(Stream& stream, GfxWorldDrawVerts& data)
 		{
-			stream.array(data.posData, 3, *reinterpret_cast<const std::uint32_t*>(&data));
-			stream.array(data.auxData, 3, data.auxDataSize);
-			stream.array(data.indices, 3, data.indexCount);
+			stream.inline_array(data.posData, 3, *reinterpret_cast<const std::uint32_t*>(&data));
+			stream.inline_array(data.auxData, 3, data.auxDataSize);
+			stream.inline_array(data.indices, 3, data.indexCount);
 		}
 
 		template <typename Stream>
@@ -4632,7 +4632,7 @@ namespace zonetool::iw8
 		void stream_gfxcelltree(Stream& stream, GfxCellTree& data, [[maybe_unused]] const GfxWorldDrawCells& outer_gfxworlddrawcells)
 		{
 			const auto temp_3 = stream.template temp<std::uint32_t>(3, [&]() -> std::uint32_t { return outer_gfxworlddrawcells.aabbTreeCounts[&data - outer_gfxworlddrawcells.aabbTrees].aabbTreeCount; });
-			if (const auto items_1 = stream.array(data.aabbTree, 7, temp_3))
+			if (const auto items_1 = stream.inline_array(data.aabbTree, 7, temp_3))
 			{
 				if (temp_3 != 0)
 				{
@@ -4647,8 +4647,8 @@ namespace zonetool::iw8
 		template <typename Stream>
 		void stream_gfxworlddrawcells(Stream& stream, GfxWorldDrawCells& data)
 		{
-			stream.array(data.aabbTreeCounts, 3, *reinterpret_cast<const std::uint32_t*>(&data));
-			if (const auto items_1 = stream.array(data.aabbTrees, 7, *reinterpret_cast<const std::uint32_t*>(&data)))
+			stream.inline_array(data.aabbTreeCounts, 3, *reinterpret_cast<const std::uint32_t*>(&data));
+			if (const auto items_1 = stream.inline_array(data.aabbTrees, 7, *reinterpret_cast<const std::uint32_t*>(&data)))
 			{
 				if (*reinterpret_cast<const std::uint32_t*>(&data) != 0)
 				{
@@ -4668,7 +4668,7 @@ namespace zonetool::iw8
 				for (std::size_t i1 = 0; i1 < count; i1++)
 				{
 					stream.push(7);
-					stream.array(data[i1].pixels, 15, data[i1].desc.totalSize);
+					stream.inline_array(data[i1].pixels, 15, data[i1].desc.totalSize);
 					stream.pop();
 				}
 			}
@@ -4686,7 +4686,7 @@ namespace zonetool::iw8
 		template <typename Stream>
 		void stream_gfxlightmapatlasdatatemp_ptr(Stream& stream, GfxLightmapAtlasDataTemp*& data)
 		{
-			if (const auto items_0 = stream.array(data, 7, 1))
+			if (const auto items_0 = stream.inline_array(data, 7, 1))
 			{
 				stream_gfxlightmapatlasdatatemp(stream, *items_0);
 			}
@@ -4699,9 +4699,9 @@ namespace zonetool::iw8
 			{
 				for (std::size_t i1 = 0; i1 < count; i1++)
 				{
-					stream.array(data[i1].treeHeader, 15, 1);
-					stream.array(data[i1].topDownViewNodes, 3, *reinterpret_cast<const std::int32_t*>(&data[i1]));
-					stream.array(data[i1].internalNodes, 3, data[i1].internalNodeCount);
+					stream.inline_array(data[i1].treeHeader, 15, 1);
+					stream.inline_array(data[i1].topDownViewNodes, 3, *reinterpret_cast<const std::int32_t*>(&data[i1]));
+					stream.inline_array(data[i1].internalNodes, 3, data[i1].internalNodeCount);
 				}
 			}
 		}
@@ -4709,23 +4709,23 @@ namespace zonetool::iw8
 		template <typename Stream>
 		void stream_gfxgpulightgrid(Stream& stream, GfxGpuLightGrid& data)
 		{
-			stream.array(data.probes, 31, *reinterpret_cast<const std::uint32_t*>(&data));
-			stream.array(data.probePositions, 3, *reinterpret_cast<const std::uint32_t*>(&data));
-			stream.array(data.zones, 63, data.zoneCount);
-			if (const auto items_3 = stream.array(data.zoneVoxelTrees, 7, data.zoneCount))
+			stream.inline_array(data.probes, 31, *reinterpret_cast<const std::uint32_t*>(&data));
+			stream.inline_array(data.probePositions, 3, *reinterpret_cast<const std::uint32_t*>(&data));
+			stream.inline_array(data.zones, 63, data.zoneCount);
+			if (const auto items_3 = stream.inline_array(data.zoneVoxelTrees, 7, data.zoneCount))
 			{
 				stream_gfxgpulightgridvoxeltree_array(stream, items_3, data.zoneCount);
 			}
-			stream.array(data.tetrahedrons, 63, data.tetrahedronCount);
-			stream.array(data.tetrahedronNeighbors, 63, data.tetrahedronCount);
-			stream.array(data.tetrahedronVisibility, 63, data.tetrahedronCountVisible);
-			stream.array(data.voxelStartTetrahedron, 63, data.voxelStartTetrahedronCount);
+			stream.inline_array(data.tetrahedrons, 63, data.tetrahedronCount);
+			stream.inline_array(data.tetrahedronNeighbors, 63, data.tetrahedronCount);
+			stream.inline_array(data.tetrahedronVisibility, 63, data.tetrahedronCountVisible);
+			stream.inline_array(data.voxelStartTetrahedron, 63, data.voxelStartTetrahedronCount);
 		}
 
 		template <typename Stream>
 		void stream_gfxdynamiclightsetlgppzoneinfo(Stream& stream, GfxDynamicLightsetLGppZoneInfo& data)
 		{
-			stream.array(data.lgvReferences, 3, *reinterpret_cast<const std::uint32_t*>(&data));
+			stream.inline_array(data.lgvReferences, 3, *reinterpret_cast<const std::uint32_t*>(&data));
 			stream_gfxdynamiclightsetprobedata(stream, data.lgvProbeData);
 		}
 
@@ -4734,17 +4734,17 @@ namespace zonetool::iw8
 		{
 			stream_gfximageraw_array(stream, &data.m_textures[0], 2);
 			stream.push(7);
-			stream.array(data.m_packingParams, 3, data.m_numVolumes);
+			stream.inline_array(data.m_packingParams, 3, data.m_numVolumes);
 			stream.pop();
 			stream.push(7);
-			stream.array(data.m_transformParams, 3, data.m_numVolumes);
+			stream.inline_array(data.m_transformParams, 3, data.m_numVolumes);
 			stream.pop();
 		}
 
 		template <typename Stream>
 		void stream_gfxlightgridvolumeatlasdatatemp_ptr(Stream& stream, GfxLightGridVolumeAtlasDataTemp*& data)
 		{
-			if (const auto items_0 = stream.array(data, 7, 1))
+			if (const auto items_0 = stream.inline_array(data, 7, 1))
 			{
 				stream_gfxlightgridvolumeatlasdatatemp(stream, *items_0);
 			}
@@ -4753,12 +4753,12 @@ namespace zonetool::iw8
 		template <typename Stream>
 		void stream_gfxgpulightgridtransientdata(Stream& stream, GfxGpuLightGridTransientData& data)
 		{
-			if (const auto items_0 = stream.array(data.gpuLightGrid, 7, 1))
+			if (const auto items_0 = stream.inline_array(data.gpuLightGrid, 7, 1))
 			{
 				stream_gfxgpulightgrid(stream, *items_0);
 			}
-			stream.array(data.staticModelVolumes, 3, data.staticModelVolumeCount);
-			if (const auto items_5 = stream.array(data.SMLGppZone, 7, 1))
+			stream.inline_array(data.staticModelVolumes, 3, data.staticModelVolumeCount);
+			if (const auto items_5 = stream.inline_array(data.SMLGppZone, 7, 1))
 			{
 				stream_gfxdynamiclightsetlgppzoneinfo(stream, *items_5);
 			}
@@ -4768,15 +4768,15 @@ namespace zonetool::iw8
 		template <typename Stream>
 		void stream_gfxreflectionprobetransientdata(Stream& stream, GfxReflectionProbeTransientData& data)
 		{
-			stream.array(data.reflectionProbeInstances, 1, *reinterpret_cast<const std::uint16_t*>(&data));
-			if (const auto items_1 = stream.array(data.exclusiveProbeBuckets, 7, data.exclusiveProbeBucketCount))
+			stream.inline_array(data.reflectionProbeInstances, 1, *reinterpret_cast<const std::uint16_t*>(&data));
+			if (const auto items_1 = stream.inline_array(data.exclusiveProbeBuckets, 7, data.exclusiveProbeBucketCount))
 			{
 				if (data.exclusiveProbeBucketCount != 0)
 				{
 					for (std::size_t i1 = 0; i1 < data.exclusiveProbeBucketCount; i1++)
 					{
 						stream.push(1);
-						stream.array(items_1[i1].pixels, 15, *reinterpret_cast<const std::uint32_t*>(&items_1[i1]));
+						stream.inline_array(items_1[i1].pixels, 15, *reinterpret_cast<const std::uint32_t*>(&items_1[i1]));
 						stream.pop();
 					}
 				}
@@ -4787,24 +4787,24 @@ namespace zonetool::iw8
 		void stream_gfxdecalvolumetransientdata(Stream& stream, GfxDecalVolumeTransientData& data)
 		{
 			stream.array(data.decalVolumes, 3, *reinterpret_cast<const std::uint32_t*>(&data));
-			stream.array(data.collectionBounds, 3, data.collectionCount);
-			stream.array(data.decalVolumeUids, 3, *reinterpret_cast<const std::uint32_t*>(&data));
+			stream.inline_array(data.collectionBounds, 3, data.collectionCount);
+			stream.inline_array(data.decalVolumeUids, 3, *reinterpret_cast<const std::uint32_t*>(&data));
 		}
 
 		template <typename Stream>
 		void stream_gfxcompressedsunshadowdatatemp(Stream& stream, GfxCompressedSunShadowDataTemp& data)
 		{
-			stream.array(data.tilesIndices, 3, data.tilesCount);
-			stream.array(data.tilesOffsets, 3, data.tilesCount);
+			stream.inline_array(data.tilesIndices, 3, data.tilesCount);
+			stream.inline_array(data.tilesOffsets, 3, data.tilesCount);
 			stream.push(7);
-			stream.array(data.tilesData, 0, data.tilesDataSize);
+			stream.inline_array(data.tilesData, 0, data.tilesDataSize);
 			stream.pop();
 		}
 
 		template <typename Stream>
 		void stream_gfxcompressedsunshadowdatatemp_ptr(Stream& stream, GfxCompressedSunShadowDataTemp*& data)
 		{
-			if (const auto items_0 = stream.array(data, 7, 1))
+			if (const auto items_0 = stream.inline_array(data, 7, 1))
 			{
 				stream_gfxcompressedsunshadowdatatemp(stream, *items_0);
 			}
@@ -4820,12 +4820,12 @@ namespace zonetool::iw8
 			stream_gfxworlddrawcells(stream, data.drawCells);
 			stream_gfxlightmapatlasdatatemp_ptr(stream, data.tempLightmapData);
 			stream_gfxgpulightgridtransientdata(stream, data.gpuLightGrid);
-			if (const auto items_7 = stream.array(data.reflectionProbes, 7, 1))
+			if (const auto items_7 = stream.inline_array(data.reflectionProbes, 7, 1))
 			{
 				stream_gfxreflectionprobetransientdata(stream, *items_7);
 			}
-			stream.array(data.collections, 1, data.collectionCount);
-			if (const auto items_12 = stream.array(data.decalVolumes, 7, 1))
+			stream.inline_array(data.collections, 1, data.collectionCount);
+			if (const auto items_12 = stream.inline_array(data.decalVolumes, 7, 1))
 			{
 				stream_gfxdecalvolumetransientdata(stream, *items_12);
 			}
@@ -4871,7 +4871,7 @@ namespace zonetool::iw8
 		void stream_animalias(Stream& stream, AnimAlias& data)
 		{
 			stream.script_string(data.aliasName);
-			stream.array(data.aliasInfo, 3, data.animCount);
+			stream.inline_array(data.aliasInfo, 3, data.animCount);
 		}
 
 		template <typename Stream>
@@ -4894,9 +4894,9 @@ namespace zonetool::iw8
 						}
 					}
 					stream.push(4);
-					stream.array(data[i1].animIndices, 7, data[i1].entryCount);
+					stream.inline_array(data[i1].animIndices, 7, data[i1].entryCount);
 					stream.pop();
-					if (const auto items_17 = stream.array(data[i1].aliasList, 7, data[i1].aliasCount))
+					if (const auto items_17 = stream.inline_array(data[i1].aliasList, 7, data[i1].aliasCount))
 					{
 						if (data[i1].aliasCount != 0)
 						{
@@ -4915,15 +4915,15 @@ namespace zonetool::iw8
 		{
 			stream.script_string(data.name);
 			stream.script_string(data.rootName);
-			if (const auto items_2 = stream.array(data.animName, 3, data.animCount))
+			if (const auto items_2 = stream.inline_array(data.animName, 3, data.animCount))
 			{
 				stream.script_strings(items_2, data.animCount);
 			}
 			stream.push(4);
-			stream.array(data.animIndices, 7, data.animCount);
+			stream.inline_array(data.animIndices, 7, data.animCount);
 			stream.pop();
 			stream.push(4);
-			stream.array(data.aimNodeIndices, 7, data.animCount);
+			stream.inline_array(data.aimNodeIndices, 7, data.animCount);
 			stream.pop();
 		}
 
@@ -5024,7 +5024,7 @@ namespace zonetool::iw8
 			stream.begin_asset();
 			stream.push(5);
 			stream.string(data.scriptName);
-			if (const auto items_3 = stream.array(data.animations, 7, data.animationCount))
+			if (const auto items_3 = stream.inline_array(data.animations, 7, data.animationCount))
 			{
 				if (data.animationCount != 0)
 				{
@@ -5036,15 +5036,15 @@ namespace zonetool::iw8
 					}
 				}
 			}
-			if (const auto items_15 = stream.array(data.scriptAnims, 7, 128))
+			if (const auto items_15 = stream.inline_array(data.scriptAnims, 7, 128))
 			{
 				stream_playeranimscriptentry_array(stream, items_15, 128);
 			}
-			if (const auto items_19 = stream.array(data.scriptEvents, 7, 91))
+			if (const auto items_19 = stream.inline_array(data.scriptEvents, 7, 91))
 			{
 				stream_playeranimscriptentry_array(stream, items_19, 91);
 			}
-			if (const auto items_23 = stream.array(data.scriptItems, 7, data.scriptItemCount))
+			if (const auto items_23 = stream.inline_array(data.scriptItems, 7, data.scriptItemCount))
 			{
 				if (data.scriptItemCount != 0)
 				{
@@ -5054,24 +5054,24 @@ namespace zonetool::iw8
 					}
 				}
 			}
-			stream.array(data.scriptTransitions, 3, data.scriptTransitionCount);
-			stream.array(data.scriptIdleTurns, 1, data.scriptIdleTurnCount);
-			if (const auto items_35 = stream.array(data.scriptIdleTwitches, 7, data.scriptIdleTwitchCount))
+			stream.inline_array(data.scriptTransitions, 3, data.scriptTransitionCount);
+			stream.inline_array(data.scriptIdleTurns, 1, data.scriptIdleTurnCount);
+			if (const auto items_35 = stream.inline_array(data.scriptIdleTwitches, 7, data.scriptIdleTwitchCount))
 			{
 				if (data.scriptIdleTwitchCount != 0)
 				{
 					for (std::size_t i3 = 0; i3 < data.scriptIdleTwitchCount; i3++)
 					{
-						stream.array(items_35[i3].twitches, 1, *reinterpret_cast<const std::uint32_t*>(&items_35[i3]));
+						stream.inline_array(items_35[i3].twitches, 1, *reinterpret_cast<const std::uint32_t*>(&items_35[i3]));
 					}
 				}
 			}
-			stream.array(data.scriptAimSets, 1, data.scriptAimSetCount);
-			stream.array(data.scriptLeanSets, 1, data.scriptLeanSetCount);
-			stream.array(data.torsoAnimPackMap, 1, data.animationCount);
-			stream.array(data.torsoAnimUnpackMap, 1, data.torsoAnimCount);
-			stream.array(data.legsAnimPackMap, 1, data.animationCount);
-			stream.array(data.legsAnimUnpackMap, 1, data.legsAnimCount);
+			stream.inline_array(data.scriptAimSets, 1, data.scriptAimSetCount);
+			stream.inline_array(data.scriptLeanSets, 1, data.scriptLeanSetCount);
+			stream.inline_array(data.torsoAnimPackMap, 1, data.animationCount);
+			stream.inline_array(data.torsoAnimUnpackMap, 1, data.torsoAnimCount);
+			stream.inline_array(data.legsAnimPackMap, 1, data.animationCount);
+			stream.inline_array(data.legsAnimUnpackMap, 1, data.legsAnimCount);
 			if (const auto items_51 = stream.array(data.xAnims, 7, data.xAnimCount))
 			{
 				if (data.xAnimCount != 0)
@@ -5273,13 +5273,13 @@ namespace zonetool::iw8
 		template <typename Stream>
 		void stream_ballisticinfocalculated(Stream& stream, BallisticInfoCalculated& data)
 		{
-			stream.array(data.distances, 3, data.numDistanceEntries);
+			stream.inline_array(data.distances, 3, data.numDistanceEntries);
 		}
 
 		template <typename Stream>
 		void stream_ballisticinfo(Stream& stream, BallisticInfo& data)
 		{
-			if (const auto items_0 = stream.array(data.calculated, 7, 1))
+			if (const auto items_0 = stream.inline_array(data.calculated, 7, 1))
 			{
 				stream_ballisticinfocalculated(stream, *items_0);
 			}
@@ -5332,94 +5332,94 @@ namespace zonetool::iw8
 			{
 				stream_reticledef_ptr_array(stream, items_33, data.numAltReticles);
 			}
-			stream.array(data.ammogeneral, 3, 1);
-			if (const auto items_38 = stream.array(data.ammotype, 7, 1))
+			stream.inline_array(data.ammogeneral, 3, 1);
+			if (const auto items_38 = stream.inline_array(data.ammotype, 7, 1))
 			{
 				stream.string(items_38[0].szAmmoName);
 			}
-			stream.array(data.impact, 3, 1);
+			stream.inline_array(data.impact, 3, 1);
 			stream.string(data.dynamicAttachmentAnimateSeq);
 			stream.string(data.dynamicAttachmentIcon);
-			if (const auto items_45 = stream.array(data.tracer, 7, 1))
+			if (const auto items_45 = stream.inline_array(data.tracer, 7, 1))
 			{
 				stream.asset(ASSET_TYPE_TRACER, items_45[0].tracerType);
 			}
-			stream.array(data.penetration, 3, 1);
-			stream.array(data.sight, 3, 1);
-			stream.array(data.holdBreath, 0, 1);
-			stream.array(data.reload, 0, 1);
-			stream.array(data.addOns, 0, 1);
-			if (const auto items_54 = stream.array(data.general, 7, 1))
+			stream.inline_array(data.penetration, 3, 1);
+			stream.inline_array(data.sight, 3, 1);
+			stream.inline_array(data.holdBreath, 0, 1);
+			stream.inline_array(data.reload, 0, 1);
+			stream.inline_array(data.addOns, 0, 1);
+			if (const auto items_54 = stream.inline_array(data.general, 7, 1))
 			{
 				stream_attgeneral(stream, *items_54);
 			}
-			if (const auto items_58 = stream.array(data.laser, 7, 1))
+			if (const auto items_58 = stream.inline_array(data.laser, 7, 1))
 			{
 				stream_attlaser(stream, *items_58);
 			}
-			stream.array(data.post, 3, 1);
-			stream.array(data.aimAssist, 3, 1);
-			stream.array(data.targetAssist, 3, 1);
+			stream.inline_array(data.post, 3, 1);
+			stream.inline_array(data.aimAssist, 3, 1);
+			stream.inline_array(data.targetAssist, 3, 1);
 			reinterpret_cast<AttAmmunition*>(stream.elements(data.ammunition, 3, 1, 28));
-			stream.array(data.damage, 3, 1);
-			stream.array(data.melee, 3, 1);
-			stream.array(data.idleSettings, 3, 1);
-			stream.array(data.adsSettings, 3, 1);
-			stream.array(data.adsSettingsMain, 3, 1);
-			stream.array(data.adsGunBobSettings, 3, 1);
-			stream.array(data.adsGunBobSettingsMain, 3, 1);
-			stream.array(data.adsReloadSettings, 0, 1);
-			stream.array(data.scopeDriftSettings, 3, 1);
-			stream.array(data.scopeDriftSettingsMain, 3, 1);
-			if (const auto items_76 = stream.array(data.adsStanceScales, 7, 1))
+			stream.inline_array(data.damage, 3, 1);
+			stream.inline_array(data.melee, 3, 1);
+			stream.inline_array(data.idleSettings, 3, 1);
+			stream.inline_array(data.adsSettings, 3, 1);
+			stream.inline_array(data.adsSettingsMain, 3, 1);
+			stream.inline_array(data.adsGunBobSettings, 3, 1);
+			stream.inline_array(data.adsGunBobSettingsMain, 3, 1);
+			stream.inline_array(data.adsReloadSettings, 0, 1);
+			stream.inline_array(data.scopeDriftSettings, 3, 1);
+			stream.inline_array(data.scopeDriftSettingsMain, 3, 1);
+			if (const auto items_76 = stream.inline_array(data.adsStanceScales, 7, 1))
 			{
 				stream_attadsstancescales(stream, *items_76);
 			}
-			stream.array(data.hipSpread, 3, 1);
-			stream.array(data.slideSpread, 3, 1);
-			stream.array(data.gunKick, 3, 1);
-			stream.array(data.gunTilt, 3, 1);
-			stream.array(data.kickScaling, 3, 1);
-			stream.array(data.viewKick, 3, 1);
-			if (const auto items_86 = stream.array(data.adsOverlay, 7, 1))
+			stream.inline_array(data.hipSpread, 3, 1);
+			stream.inline_array(data.slideSpread, 3, 1);
+			stream.inline_array(data.gunKick, 3, 1);
+			stream.inline_array(data.gunTilt, 3, 1);
+			stream.inline_array(data.kickScaling, 3, 1);
+			stream.inline_array(data.viewKick, 3, 1);
+			if (const auto items_86 = stream.inline_array(data.adsOverlay, 7, 1))
 			{
 				stream_attadsoverlay(stream, *items_86);
 			}
-			stream.array(data.outline, 3, 1);
-			if (const auto items_91 = stream.array(data.ui, 7, 1))
+			stream.inline_array(data.outline, 3, 1);
+			if (const auto items_91 = stream.inline_array(data.ui, 7, 1))
 			{
 				stream_attui(stream, *items_91);
 			}
-			if (const auto items_95 = stream.array(data.rumbles, 7, 1))
+			if (const auto items_95 = stream.inline_array(data.rumbles, 7, 1))
 			{
 				stream_attrumbles(stream, *items_95);
 			}
-			if (const auto items_99 = stream.array(data.projectile, 7, 1))
+			if (const auto items_99 = stream.inline_array(data.projectile, 7, 1))
 			{
 				stream_attprojectile(stream, *items_99);
 			}
-			if (const auto items_103 = stream.array(data.charged, 7, 1))
+			if (const auto items_103 = stream.inline_array(data.charged, 7, 1))
 			{
 				stream_attcharged(stream, *items_103);
 			}
-			stream.array(data.adsAltSwitch, 3, 1);
-			stream.array(data.regeneration, 3, 1);
-			stream.array(data.heat, 3, 1);
-			stream.array(data.movement, 3, 1);
-			stream.array(data.movementScale, 3, 1);
-			stream.array(data.movementScaleMain, 3, 1);
-			stream.array(data.burst, 3, 1);
-			stream.array(data.hitmarker, 3, 1);
-			stream.array(data.adsMovement, 3, 1);
-			if (const auto items_116 = stream.array(data.ballisticInfo, 7, 1))
+			stream.inline_array(data.adsAltSwitch, 3, 1);
+			stream.inline_array(data.regeneration, 3, 1);
+			stream.inline_array(data.heat, 3, 1);
+			stream.inline_array(data.movement, 3, 1);
+			stream.inline_array(data.movementScale, 3, 1);
+			stream.inline_array(data.movementScaleMain, 3, 1);
+			stream.inline_array(data.burst, 3, 1);
+			stream.inline_array(data.hitmarker, 3, 1);
+			stream.inline_array(data.adsMovement, 3, 1);
+			if (const auto items_116 = stream.inline_array(data.ballisticInfo, 7, 1))
 			{
 				stream_ballisticinfo(stream, *items_116);
 			}
-			if (const auto items_120 = stream.array(data.swaySettings, 7, 1))
+			if (const auto items_120 = stream.inline_array(data.swaySettings, 7, 1))
 			{
 				stream_swaysettings(stream, *items_120);
 			}
-			if (const auto items_124 = stream.array(data.weaponOffsetPatternScales, 7, 1))
+			if (const auto items_124 = stream.inline_array(data.weaponOffsetPatternScales, 7, 1))
 			{
 				stream_weaponoffsetpatternscaleinfo(stream, *items_124);
 			}
@@ -5429,8 +5429,8 @@ namespace zonetool::iw8
 			stream.string(data.szLUIWeaponInfoWidgetName);
 			stream.string(data.szLUIWeaponInfoWidgetTag);
 			stream.asset(ASSET_TYPE_IMAGE, data.altModeIcon);
-			stream.array(data.dlcOverrides, 3, 1);
-			stream.array(data.dlcScalars, 3, 1);
+			stream.inline_array(data.dlcOverrides, 3, 1);
+			stream.inline_array(data.dlcScalars, 3, 1);
 			stream.pop();
 			stream.end_asset();
 		}
@@ -5463,7 +5463,7 @@ namespace zonetool::iw8
 			{
 				for (std::size_t i1 = 0; i1 < count; i1++)
 				{
-					stream.array(data[i1].bindingLists, 3, *reinterpret_cast<const std::uint32_t*>(&data[i1]));
+					stream.inline_array(data[i1].bindingLists, 3, *reinterpret_cast<const std::uint32_t*>(&data[i1]));
 				}
 			}
 		}
@@ -5471,7 +5471,7 @@ namespace zonetool::iw8
 		template <typename Stream>
 		void stream_animoverride(Stream& stream, AnimOverride& data)
 		{
-			if (const auto items_0 = stream.array(data.bindings, 7, *reinterpret_cast<const std::uint32_t*>(&data)))
+			if (const auto items_0 = stream.inline_array(data.bindings, 7, *reinterpret_cast<const std::uint32_t*>(&data)))
 			{
 				stream_overridebinding_array(stream, items_0, *reinterpret_cast<const std::uint32_t*>(&data));
 			}
@@ -5661,7 +5661,7 @@ namespace zonetool::iw8
 			stream.asset(ASSET_TYPE_XMODEL, data.stowOffsetModel);
 			stream.script_string(data.stowOffsetAttachTag);
 			stream_fxcombineddef(stream, data.deployEffect);
-			if (const auto items_151 = stream.array(data.animOverrides, 7, data.numAnimOverrides))
+			if (const auto items_151 = stream.inline_array(data.animOverrides, 7, data.numAnimOverrides))
 			{
 				if (data.numAnimOverrides != 0)
 				{
@@ -5676,7 +5676,7 @@ namespace zonetool::iw8
 				stream.asset(ASSET_TYPE_ANIM_PACKAGE, data.carryAnimOverrides[i4].animPackage);
 				stream.asset(ASSET_TYPE_ANIM_PACKAGE, data.carryAnimOverrides[i4].animPackageAlt);
 			}
-			if (const auto items_166 = stream.array(data.sfxOverrides, 7, data.numSfxOverrides))
+			if (const auto items_166 = stream.inline_array(data.sfxOverrides, 7, data.numSfxOverrides))
 			{
 				if (data.numSfxOverrides != 0)
 				{
@@ -5686,7 +5686,7 @@ namespace zonetool::iw8
 					}
 				}
 			}
-			if (const auto items_176 = stream.array(data.vfxOverrides, 7, data.numVfxOverrides))
+			if (const auto items_176 = stream.inline_array(data.vfxOverrides, 7, data.numVfxOverrides))
 			{
 				if (data.numVfxOverrides != 0)
 				{
@@ -5785,7 +5785,7 @@ namespace zonetool::iw8
 			{
 				stream.script_strings(items_21, data.numNotetrackSoundMappings);
 			}
-			if (const auto items_25 = stream.array(data.notetrackOverrides, 7, data.numNotetrackOverrides))
+			if (const auto items_25 = stream.inline_array(data.notetrackOverrides, 7, data.numNotetrackOverrides))
 			{
 				if (data.numNotetrackOverrides != 0)
 				{
@@ -5795,7 +5795,7 @@ namespace zonetool::iw8
 					}
 				}
 			}
-			if (const auto items_35 = stream.array(data.notetrackSuitEntries, 7, data.numNotetrackSuitEntries))
+			if (const auto items_35 = stream.inline_array(data.notetrackSuitEntries, 7, data.numNotetrackSuitEntries))
 			{
 				if (data.numNotetrackSuitEntries != 0)
 				{
@@ -5838,7 +5838,7 @@ namespace zonetool::iw8
 		template <typename Stream>
 		void stream_particlelinkedassetlistdef(Stream& stream, ParticleLinkedAssetListDef& data, [[maybe_unused]] const ParticleModuleDef& outer_particlemoduledef)
 		{
-			if (const auto items_0 = stream.array(data.assetList, 7, data.numAssets))
+			if (const auto items_0 = stream.inline_array(data.assetList, 7, data.numAssets))
 			{
 				if (data.numAssets != 0)
 				{
@@ -5979,7 +5979,7 @@ namespace zonetool::iw8
 			{
 				for (std::size_t i1 = 0; i1 < count; i1++)
 				{
-					stream.array(data[i1].controlPoints, 15, data[i1].numControlPoints);
+					stream.inline_array(data[i1].controlPoints, 15, data[i1].numControlPoints);
 				}
 			}
 		}
@@ -6096,7 +6096,7 @@ namespace zonetool::iw8
 		void stream_particlemoduleinitspawnshapemesh(Stream& stream, ParticleModuleInitSpawnShapeMesh& data, [[maybe_unused]] const ParticleModuleDef& outer_particlemoduledef)
 		{
 			stream_particlelinkedassetlistdef(stream, data.m_linkedAssetList, outer_particlemoduledef);
-			stream.array(data.m_meshAssetData, 3, *reinterpret_cast<const std::uint32_t*>(&outer_particlemoduledef.moduleData.initAtlas.m_curves[1]));
+			stream.inline_array(data.m_meshAssetData, 3, *reinterpret_cast<const std::uint32_t*>(&outer_particlemoduledef.moduleData.initAtlas.m_curves[1]));
 			stream_particlecurvedef_array(stream, &data.m_curves[0], 3);
 		}
 
@@ -6187,7 +6187,7 @@ namespace zonetool::iw8
 		template <typename Stream>
 		void stream_particlemodulegroupdef(Stream& stream, ParticleModuleGroupDef& data)
 		{
-			if (const auto items_0 = stream.array(data.moduleDefs, 15, data.numModules))
+			if (const auto items_0 = stream.inline_array(data.moduleDefs, 15, data.numModules))
 			{
 				if (data.numModules != 0)
 				{
@@ -6548,7 +6548,7 @@ namespace zonetool::iw8
 		template <typename Stream>
 		void stream_particlestatedef(Stream& stream, ParticleStateDef& data)
 		{
-			if (const auto items_0 = stream.array(data.moduleGroupDefs, 15, 3))
+			if (const auto items_0 = stream.inline_array(data.moduleGroupDefs, 15, 3))
 			{
 				for (std::size_t i1 = 0; i1 < 3; i1++)
 				{
@@ -6560,13 +6560,13 @@ namespace zonetool::iw8
 		template <typename Stream>
 		void stream_particlecurvedef(Stream& stream, ParticleCurveDef& data)
 		{
-			stream.array(data.controlPoints, 15, data.numControlPoints);
+			stream.inline_array(data.controlPoints, 15, data.numControlPoints);
 		}
 
 		template <typename Stream>
 		void stream_particleemitterdef(Stream& stream, ParticleEmitterDef& data)
 		{
-			if (const auto items_0 = stream.array(data.stateDefs, 15, data.numStates))
+			if (const auto items_0 = stream.inline_array(data.stateDefs, 15, data.numStates))
 			{
 				if (data.numStates != 0)
 				{
@@ -6585,7 +6585,7 @@ namespace zonetool::iw8
 			stream.begin_asset();
 			stream.push(5);
 			stream.string(data.name);
-			if (const auto items_3 = stream.array(data.emitterDefs, 15, data.numEmitters))
+			if (const auto items_3 = stream.inline_array(data.emitterDefs, 15, data.numEmitters))
 			{
 				if (data.numEmitters != 0)
 				{
@@ -6595,7 +6595,7 @@ namespace zonetool::iw8
 					}
 				}
 			}
-			stream.array(data.scriptedInputNodeDefs, 15, data.numScriptedInputNodes);
+			stream.inline_array(data.scriptedInputNodeDefs, 15, data.numScriptedInputNodes);
 			stream.pop();
 			stream.end_asset();
 		}
@@ -6616,11 +6616,11 @@ namespace zonetool::iw8
 		template <typename Stream>
 		void stream_fximpactentry(Stream& stream, FxImpactEntry& data)
 		{
-			if (const auto items_0 = stream.array(data.normal, 7, 2))
+			if (const auto items_0 = stream.inline_array(data.normal, 7, 2))
 			{
 				stream_fximpactpack_array(stream, items_0, 2);
 			}
-			if (const auto items_4 = stream.array(data.exit, 7, 2))
+			if (const auto items_4 = stream.inline_array(data.exit, 7, 2))
 			{
 				stream_fximpactpack_array(stream, items_4, 2);
 			}
@@ -6632,7 +6632,7 @@ namespace zonetool::iw8
 			stream.begin_asset();
 			stream.push(5);
 			stream.string(data.name);
-			if (const auto items_3 = stream.array(data.table, 7, data.impactTypeCount))
+			if (const auto items_3 = stream.inline_array(data.table, 7, data.impactTypeCount))
 			{
 				if (data.impactTypeCount != 0)
 				{
@@ -6642,8 +6642,8 @@ namespace zonetool::iw8
 					}
 				}
 			}
-			stream.array(data.genericToRegistered, 3, data.impactTypeCount);
-			stream.array(data.registeredToGeneric, 3, 33);
+			stream.inline_array(data.genericToRegistered, 3, data.impactTypeCount);
+			stream.inline_array(data.registeredToGeneric, 3, 33);
 			stream.pop();
 			stream.end_asset();
 		}
@@ -6654,7 +6654,7 @@ namespace zonetool::iw8
 			stream.begin_asset();
 			stream.push(5);
 			stream.string(data.name);
-			if (const auto items_3 = stream.array(data.table, 7, data.numTableEntry))
+			if (const auto items_3 = stream.inline_array(data.table, 7, data.numTableEntry))
 			{
 				if (data.numTableEntry != 0)
 				{
@@ -6666,7 +6666,7 @@ namespace zonetool::iw8
 				}
 			}
 			stream.push(4);
-			stream.array(data.mapPoolBuffer, 3, data.mapPoolBufferSize);
+			stream.inline_array(data.mapPoolBuffer, 3, data.mapPoolBufferSize);
 			stream.pop();
 			stream.pop();
 			stream.end_asset();
@@ -6678,7 +6678,7 @@ namespace zonetool::iw8
 			stream.begin_asset();
 			stream.push(5);
 			stream.string(data.name);
-			stream.array(data.buffer, 0, data.compressedLen);
+			stream.inline_array(data.buffer, 0, data.compressedLen);
 			stream.pop();
 			stream.end_asset();
 		}
@@ -6690,10 +6690,10 @@ namespace zonetool::iw8
 			stream.push(5);
 			stream.string(data.name);
 			stream.push(6);
-			stream.array(data.buffer, 0, data.compressedLen);
+			stream.inline_array(data.buffer, 0, data.compressedLen);
 			stream.pop();
 			stream.push(6);
-			stream.array(data.bytecode, 0, data.bytecodeLen);
+			stream.inline_array(data.bytecode, 0, data.bytecodeLen);
 			stream.pop();
 			stream.pop();
 			stream.end_asset();
@@ -6725,9 +6725,9 @@ namespace zonetool::iw8
 			stream.begin_asset();
 			stream.push(5);
 			stream.string(data.name);
-			stream.array(data.cellIndices, 1, (data.rowCount * data.columnCount));
-			stream.array(data.hashes, 3, data.uniqueCellCount);
-			if (const auto items_5 = stream.array(data.strings, 7, data.uniqueCellCount))
+			stream.inline_array(data.cellIndices, 1, (data.rowCount * data.columnCount));
+			stream.inline_array(data.hashes, 3, data.uniqueCellCount);
+			if (const auto items_5 = stream.inline_array(data.strings, 7, data.uniqueCellCount))
 			{
 				for (std::size_t string_7 = 0; string_7 < data.uniqueCellCount; string_7++)
 				{
@@ -6744,7 +6744,7 @@ namespace zonetool::iw8
 			stream.begin_asset();
 			stream.push(5);
 			stream.string(data.name);
-			if (const auto items_3 = stream.array(data.columns, 7, data.columnCount))
+			if (const auto items_3 = stream.inline_array(data.columns, 7, data.columnCount))
 			{
 				if (data.columnCount != 0)
 				{
@@ -6766,7 +6766,7 @@ namespace zonetool::iw8
 			stream.push(5);
 			stream.string(data.name);
 			stream.string(data.sourceName);
-			if (const auto items_4 = stream.array(data.columns, 7, data.columnCount))
+			if (const auto items_4 = stream.inline_array(data.columns, 7, data.columnCount))
 			{
 				if (data.columnCount != 0)
 				{
@@ -6790,14 +6790,14 @@ namespace zonetool::iw8
 		template <typename Stream>
 		void stream_ddlhashtable(Stream& stream, DDLHashTable& data)
 		{
-			stream.array(data.list, 3, data.count);
+			stream.inline_array(data.list, 3, data.count);
 		}
 
 		template <typename Stream>
 		void stream_ddlstruct(Stream& stream, DDLStruct& data)
 		{
 			stream.string(data.name);
-			if (const auto items_1 = stream.array(data.members, 7, data.memberCount))
+			if (const auto items_1 = stream.inline_array(data.members, 7, data.memberCount))
 			{
 				if (data.memberCount != 0)
 				{
@@ -6815,7 +6815,7 @@ namespace zonetool::iw8
 		void stream_ddlenum(Stream& stream, DDLEnum& data)
 		{
 			stream.string(data.name);
-			if (const auto items_1 = stream.array(data.members, 7, data.memberCount))
+			if (const auto items_1 = stream.inline_array(data.members, 7, data.memberCount))
 			{
 				for (std::size_t string_3 = 0; string_3 < data.memberCount; string_3++)
 				{
@@ -6829,7 +6829,7 @@ namespace zonetool::iw8
 		void stream_ddldef(Stream& stream, DDLDef& data)
 		{
 			stream.string(data.name);
-			if (const auto items_1 = stream.array(data.structList, 7, data.structCount))
+			if (const auto items_1 = stream.inline_array(data.structList, 7, data.structCount))
 			{
 				if (data.structCount != 0)
 				{
@@ -6839,7 +6839,7 @@ namespace zonetool::iw8
 					}
 				}
 			}
-			if (const auto items_11 = stream.array(data.enumList, 7, data.enumCount))
+			if (const auto items_11 = stream.inline_array(data.enumList, 7, data.enumCount))
 			{
 				if (data.enumCount != 0)
 				{
@@ -6849,7 +6849,7 @@ namespace zonetool::iw8
 					}
 				}
 			}
-			if (const auto items_21 = stream.array(data.next, 7, 1))
+			if (const auto items_21 = stream.inline_array(data.next, 7, 1))
 			{
 				stream_ddldef(stream, items_21[0]);
 			}
@@ -6861,7 +6861,7 @@ namespace zonetool::iw8
 			stream.begin_asset();
 			stream.push(5);
 			stream.string(data.name);
-			if (const auto items_3 = stream.array(data.ddlDef, 7, 1))
+			if (const auto items_3 = stream.inline_array(data.ddlDef, 7, 1))
 			{
 				stream_ddldef(stream, *items_3);
 			}
@@ -7018,13 +7018,13 @@ namespace zonetool::iw8
 			stream.begin_asset();
 			stream.push(5);
 			stream.string(data.name);
-			stream.array(data.entityString, 0, data.numEntityChars);
+			stream.inline_array(data.entityString, 0, data.numEntityChars);
 			stream_maptriggers(stream, data.trigger);
-			if (const auto items_5 = stream.array(data.cmodels, 7, data.numSubModels))
+			if (const auto items_5 = stream.inline_array(data.cmodels, 7, data.numSubModels))
 			{
 				stream_cmodel_t_array(stream, items_5, data.numSubModels);
 			}
-			stream.array(data.models, 3, data.numSubModels);
+			stream.inline_array(data.models, 3, data.numSubModels);
 			stream.pop();
 			stream.end_asset();
 		}
@@ -7052,7 +7052,7 @@ namespace zonetool::iw8
 			stream.begin_asset();
 			stream.push(5);
 			stream.string(data.name);
-			stream.array(data.buffer, 15, data.len);
+			stream.inline_array(data.buffer, 15, data.len);
 			stream.pop();
 			stream.end_asset();
 		}
@@ -7990,7 +7990,6 @@ namespace zonetool::iw8
 					}
 				}
 			}
-			// These pointer fields indicate inline data; Replay does not resolve packed aliases for them.
 			if (const auto items_39 = stream.inline_array(data.childParts, 7, data.numChildParts))
 			{
 				if (data.numChildParts != 0)
@@ -8047,13 +8046,13 @@ namespace zonetool::iw8
 			{
 				for (std::size_t i1 = 0; i1 < count; i1++)
 				{
-					if (const auto items_2 = stream.array(data[i1].chances, 7, outer_equipmentsoundtable.numWeaponRattleTypes))
+					if (const auto items_2 = stream.inline_array(data[i1].chances, 7, outer_equipmentsoundtable.numWeaponRattleTypes))
 					{
 						if (outer_equipmentsoundtable.numWeaponRattleTypes != 0)
 						{
 							for (std::size_t i2 = 0; i2 < outer_equipmentsoundtable.numWeaponRattleTypes; i2++)
 							{
-								stream.array(items_2[i2].chances, 3, outer_equipmentsoundtable.numMoveTypes);
+								stream.inline_array(items_2[i2].chances, 3, outer_equipmentsoundtable.numMoveTypes);
 							}
 						}
 					}
@@ -8064,14 +8063,14 @@ namespace zonetool::iw8
 		template <typename Stream>
 		void stream_equipsoundsetmoveleadtypes(Stream& stream, EquipSoundSetMoveLeadTypes& data, [[maybe_unused]] const EquipmentSoundTable& outer_equipmentsoundtable)
 		{
-			stream.array(data.soundSetsPre, 7, outer_equipmentsoundtable.numMoveTypes);
-			stream.array(data.soundSetsPost, 7, outer_equipmentsoundtable.numMoveTypes);
+			stream.inline_array(data.soundSetsPre, 7, outer_equipmentsoundtable.numMoveTypes);
+			stream.inline_array(data.soundSetsPost, 7, outer_equipmentsoundtable.numMoveTypes);
 		}
 
 		template <typename Stream>
 		void stream_equipsoundsetmovetypes(Stream& stream, EquipSoundSetMoveTypes& data, [[maybe_unused]] const EquipmentSoundTable& outer_equipmentsoundtable)
 		{
-			stream.array(data.soundSets, 7, outer_equipmentsoundtable.numMoveTypes);
+			stream.inline_array(data.soundSets, 7, outer_equipmentsoundtable.numMoveTypes);
 		}
 
 		template <typename Stream>
@@ -8080,7 +8079,7 @@ namespace zonetool::iw8
 			stream.begin_asset();
 			stream.push(5);
 			stream.string(data.szName);
-			if (const auto items_3 = stream.array(data.clothTypes, 7, data.numClothTypes))
+			if (const auto items_3 = stream.inline_array(data.clothTypes, 7, data.numClothTypes))
 			{
 				if (data.numClothTypes != 0)
 				{
@@ -8091,7 +8090,7 @@ namespace zonetool::iw8
 					}
 				}
 			}
-			if (const auto items_14 = stream.array(data.weaponRattleTypes, 7, data.numWeaponRattleTypes))
+			if (const auto items_14 = stream.inline_array(data.weaponRattleTypes, 7, data.numWeaponRattleTypes))
 			{
 				if (data.numWeaponRattleTypes != 0)
 				{
@@ -8101,17 +8100,17 @@ namespace zonetool::iw8
 					}
 				}
 			}
-			if (const auto items_24 = stream.array(data.chancesPLR, 7, data.numClothTypes))
+			if (const auto items_24 = stream.inline_array(data.chancesPLR, 7, data.numClothTypes))
 			{
 				stream_equipmentchancerattletypes_array(stream, items_24, data.numClothTypes, data);
 			}
-			if (const auto items_28 = stream.array(data.chancesNPC, 7, data.numClothTypes))
+			if (const auto items_28 = stream.inline_array(data.chancesNPC, 7, data.numClothTypes))
 			{
 				stream_equipmentchancerattletypes_array(stream, items_28, data.numClothTypes, data);
 			}
-			stream.array(data.mvmtClothFootstepSoundSets, 7, data.numClothTypes);
-			stream.array(data.mvmtClothFootstepCeilingSoundSets, 7, data.numClothTypes);
-			if (const auto items_34 = stream.array(data.mvmtClothFoleySoundSets, 7, data.numClothTypes))
+			stream.inline_array(data.mvmtClothFootstepSoundSets, 7, data.numClothTypes);
+			stream.inline_array(data.mvmtClothFootstepCeilingSoundSets, 7, data.numClothTypes);
+			if (const auto items_34 = stream.inline_array(data.mvmtClothFoleySoundSets, 7, data.numClothTypes))
 			{
 				if (data.numClothTypes != 0)
 				{
@@ -8121,22 +8120,22 @@ namespace zonetool::iw8
 					}
 				}
 			}
-			if (const auto items_44 = stream.array(data.mvmtRattleSoundSets, 7, data.numWeaponRattleTypes))
+			if (const auto items_44 = stream.inline_array(data.mvmtRattleSoundSets, 7, data.numWeaponRattleTypes))
 			{
 				if (data.numWeaponRattleTypes != 0)
 				{
 					for (std::size_t i4 = 0; i4 < data.numWeaponRattleTypes; i4++)
 					{
-						stream.array(items_44[i4].soundSets, 7, data.numMoveTypes);
+						stream.inline_array(items_44[i4].soundSets, 7, data.numMoveTypes);
 					}
 				}
 			}
 			stream_equipsoundsetmovetypes(stream, data.mvmtAccentSoundSets, data);
-			stream.array(data.mvmtMantleSoundSets, 7, data.numClothTypes);
-			stream.array(data.mvmtStanceSoundSets, 7, data.numClothTypes);
-			stream.array(data.meleeAttackVMSoundSets, 7, data.numClothTypes);
-			stream.array(data.meleeAttackWMSoundSets, 7, data.numClothTypes);
-			stream.array(data.meleeCharacterSoundSets, 7, data.numClothTypes);
+			stream.inline_array(data.mvmtMantleSoundSets, 7, data.numClothTypes);
+			stream.inline_array(data.mvmtStanceSoundSets, 7, data.numClothTypes);
+			stream.inline_array(data.meleeAttackVMSoundSets, 7, data.numClothTypes);
+			stream.inline_array(data.meleeAttackWMSoundSets, 7, data.numClothTypes);
+			stream.inline_array(data.meleeCharacterSoundSets, 7, data.numClothTypes);
 			stream.pop();
 			stream.end_asset();
 		}
@@ -8174,11 +8173,11 @@ namespace zonetool::iw8
 			stream.push(5);
 			stream.string(data.name);
 			stream.asset(ASSET_TYPE_MATERIAL, data.material);
-			stream.array(data.particleData, 31, data.header.particleDataCount);
-			stream.array(data.particleDataOrientation3D, 7, (static_cast<std::uint8_t>(data.header.hasOrientation3D) == 0 ? 0 : data.header.particleDataCount));
-			stream.array(data.particleDataIndex, 0, (static_cast<std::uint8_t>(data.header.hasIndex) == 0 ? 0 : data.header.particleDataCount));
-			stream.array(data.frames, 3, data.header.frameCount);
-			stream.array(data.colorTable, 3, data.header.colorTableSize);
+			stream.inline_array(data.particleData, 31, data.header.particleDataCount);
+			stream.inline_array(data.particleDataOrientation3D, 7, (static_cast<std::uint8_t>(data.header.hasOrientation3D) == 0 ? 0 : data.header.particleDataCount));
+			stream.inline_array(data.particleDataIndex, 0, (static_cast<std::uint8_t>(data.header.hasIndex) == 0 ? 0 : data.header.particleDataCount));
+			stream.inline_array(data.frames, 3, data.header.frameCount);
+			stream.inline_array(data.colorTable, 3, data.header.colorTableSize);
 			stream.pop();
 			stream.end_asset();
 		}
@@ -8186,7 +8185,7 @@ namespace zonetool::iw8
 		template <typename Stream>
 		void stream_alwaysloadedflags(Stream& stream, AlwaysloadedFlags& data)
 		{
-			if (const auto items_0 = stream.array(data.images, 7, data.imageCount))
+			if (const auto items_0 = stream.inline_array(data.images, 7, data.imageCount))
 			{
 				if (data.imageCount != 0)
 				{
@@ -8196,7 +8195,7 @@ namespace zonetool::iw8
 					}
 				}
 			}
-			stream.array(data.imageFlags, 3, (((data.imageCount * 4) + 31) >> 5));
+			stream.inline_array(data.imageFlags, 3, (((data.imageCount * 4) + 31) >> 5));
 		}
 
 		template <typename Stream>
@@ -8217,7 +8216,7 @@ namespace zonetool::iw8
 		void stream_alwaysloadedflagset(Stream& stream, AlwaysloadedFlagSet& data)
 		{
 			stream_alwaysloadedflags(stream, data.globalFlags);
-			if (const auto items_1 = stream.array(data.perModelFlags, 7, data.modelCount))
+			if (const auto items_1 = stream.inline_array(data.perModelFlags, 7, data.modelCount))
 			{
 				if (data.modelCount != 0)
 				{
@@ -8228,7 +8227,7 @@ namespace zonetool::iw8
 					}
 				}
 			}
-			if (const auto items_12 = stream.array(data.modelSurfs, 7, data.modelSurfCount))
+			if (const auto items_12 = stream.inline_array(data.modelSurfs, 7, data.modelSurfCount))
 			{
 				stream_xmodelsurfs_ptr_array(stream, items_12, data.modelSurfCount);
 			}
@@ -8237,27 +8236,27 @@ namespace zonetool::iw8
 		template <typename Stream>
 		void stream_transientsets(Stream& stream, TransientSets& data)
 		{
-			if (const auto items_0 = stream.array(data.names, 7, *reinterpret_cast<const std::uint32_t*>(&data)))
+			if (const auto items_0 = stream.inline_array(data.names, 7, *reinterpret_cast<const std::uint32_t*>(&data)))
 			{
 				for (std::size_t string_2 = 0; string_2 < *reinterpret_cast<const std::uint32_t*>(&data); string_2++)
 				{
 					stream.string((items_0)[string_2]);
 				}
 			}
-			stream.array(data.masks, 3, *reinterpret_cast<const std::uint32_t*>(&data));
+			stream.inline_array(data.masks, 3, *reinterpret_cast<const std::uint32_t*>(&data));
 		}
 
 		template <typename Stream>
 		void stream_streamingcontentset(Stream& stream, StreamingContentSet& data, [[maybe_unused]] const TransientCosts& outer_transientcosts)
 		{
-			stream.array(data.contentCounts, 1, outer_transientcosts.transientCostCount);
-			if (const auto items_1 = stream.array(data.contents, 7, outer_transientcosts.transientCostCount))
+			stream.inline_array(data.contentCounts, 1, outer_transientcosts.transientCostCount);
+			if (const auto items_1 = stream.inline_array(data.contents, 7, outer_transientcosts.transientCostCount))
 			{
 				if (outer_transientcosts.transientCostCount != 0)
 				{
 					for (std::size_t i1 = 0; i1 < outer_transientcosts.transientCostCount; i1++)
 					{
-						stream.array(items_1[i1].contents, 1, data.contentCounts[i1]);
+						stream.inline_array(items_1[i1].contents, 1, data.contentCounts[i1]);
 					}
 				}
 			}
@@ -8266,10 +8265,10 @@ namespace zonetool::iw8
 		template <typename Stream>
 		void stream_transientcosts(Stream& stream, TransientCosts& data)
 		{
-			stream.array(data.streamingCosts, 3, data.streamingItemCount);
+			stream.inline_array(data.streamingCosts, 3, data.streamingItemCount);
 			stream_streamingcontentset(stream, data.streamContents, data);
-			stream.array(data.residentPageSizes, 1, data.transientCostCount);
-			stream.array(data.tempPageSizes, 1, data.transientCostCount);
+			stream.inline_array(data.residentPageSizes, 1, data.transientCostCount);
+			stream.inline_array(data.tempPageSizes, 1, data.transientCostCount);
 		}
 
 		template <typename Stream>
@@ -8277,7 +8276,7 @@ namespace zonetool::iw8
 		{
 			stream_transientsets(stream, data.transientSets);
 			stream_transientcosts(stream, data.transientCosts);
-			if (const auto items_2 = stream.array(data.forcedStubAssets, 7, data.forcedStubAssetCount))
+			if (const auto items_2 = stream.inline_array(data.forcedStubAssets, 7, data.forcedStubAssetCount))
 			{
 				if (data.forcedStubAssetCount != 0)
 				{
@@ -8287,7 +8286,7 @@ namespace zonetool::iw8
 					}
 				}
 			}
-			if (const auto items_12 = stream.array(data.transientFiles, 7, data.transientFileCount))
+			if (const auto items_12 = stream.inline_array(data.transientFiles, 7, data.transientFileCount))
 			{
 				if (data.transientFileCount != 0)
 				{
@@ -8297,7 +8296,7 @@ namespace zonetool::iw8
 					}
 				}
 			}
-			if (const auto items_22 = stream.array(data.transientAssets, 7, data.transientAssetCount))
+			if (const auto items_22 = stream.inline_array(data.transientAssets, 7, data.transientAssetCount))
 			{
 				if (data.transientAssetCount != 0)
 				{
@@ -8307,23 +8306,23 @@ namespace zonetool::iw8
 					}
 				}
 			}
-			if (const auto items_32 = stream.array(data.transientWorldGridTileMaps, 7, data.transientWorldGridTileMapCount))
+			if (const auto items_32 = stream.inline_array(data.transientWorldGridTileMaps, 7, data.transientWorldGridTileMapCount))
 			{
 				if (data.transientWorldGridTileMapCount != 0)
 				{
 					for (std::size_t i4 = 0; i4 < data.transientWorldGridTileMapCount; i4++)
 					{
-						stream.array(items_32[i4].spaceToTransientIndex, 1, items_32[i4].indexCount);
+						stream.inline_array(items_32[i4].spaceToTransientIndex, 1, items_32[i4].indexCount);
 					}
 				}
 			}
-			if (const auto items_42 = stream.array(data.transientWorldGridSpatial, 7, 1))
+			if (const auto items_42 = stream.inline_array(data.transientWorldGridSpatial, 7, 1))
 			{
 				stream_spatialpartition_tree(stream, *items_42);
 			}
-			stream.array(data.transientWorldGridBounds, 3, data.transientWorldGridBoundsCount);
-			stream.array(data.transientWorldGridHighLodLookup, 1, data.transientWorldGridHighLodLookupCount);
-			stream.array(data.transientSkipLoading.array, 3, data.transientSkipLoading.wordCount);
+			stream.inline_array(data.transientWorldGridBounds, 3, data.transientWorldGridBoundsCount);
+			stream.inline_array(data.transientWorldGridHighLodLookup, 1, data.transientWorldGridHighLodLookupCount);
+			stream.inline_array(data.transientSkipLoading.array, 3, data.transientSkipLoading.wordCount);
 		}
 
 		template <typename Stream>
@@ -8333,7 +8332,7 @@ namespace zonetool::iw8
 			stream.push(5);
 			stream.string(data.name);
 			stream_alwaysloadedflagset(stream, data.alwaysloadedFlagSets[0]);
-			if (const auto items_4 = stream.array(data.transientInfo, 7, 1))
+			if (const auto items_4 = stream.inline_array(data.transientInfo, 7, 1))
 			{
 				stream_transientinfo(stream, *items_4);
 			}
@@ -8361,7 +8360,7 @@ namespace zonetool::iw8
 			stream.begin_asset();
 			stream.push(5);
 			stream.string(data.name);
-			stream.array(data.file, 0, (data.fileLen + 1));
+			stream.inline_array(data.file, 0, (data.fileLen + 1));
 			stream.pop();
 			stream.end_asset();
 		}
@@ -8587,16 +8586,16 @@ namespace zonetool::iw8
 			stream.begin_asset();
 			stream.push(5);
 			stream.string(data.name);
-			if (const auto items_3 = stream.array(data.anims, 7, 614))
+			if (const auto items_3 = stream.inline_array(data.anims, 7, 614))
 			{
 				stream_xanimparts_ptr_array(stream, items_3, 614);
 			}
-			stream.array(data.timers, 1, 1);
-			if (const auto items_8 = stream.array(data.blendSpaces, 7, 8))
+			stream.inline_array(data.timers, 1, 1);
+			if (const auto items_8 = stream.inline_array(data.blendSpaces, 7, 8))
 			{
 				stream_blendspace2ddef_ptr_array(stream, items_8, 8);
 			}
-			stream.array(data.footstep, 3, 13);
+			stream.inline_array(data.footstep, 3, 13);
 			stream.pop();
 			stream.end_asset();
 		}
@@ -8709,7 +8708,7 @@ namespace zonetool::iw8
 			stream.begin_asset();
 			stream.push(5);
 			stream.string(data.name);
-			if (const auto items_3 = stream.array(data.sounds, 7, 1))
+			if (const auto items_3 = stream.inline_array(data.sounds, 7, 1))
 			{
 				stream_weaponsfxpackagesounds(stream, *items_3);
 			}
@@ -8765,7 +8764,7 @@ namespace zonetool::iw8
 			stream.begin_asset();
 			stream.push(5);
 			stream.string(data.name);
-			if (const auto items_3 = stream.array(data.vfx, 7, 1))
+			if (const auto items_3 = stream.inline_array(data.vfx, 7, 1))
 			{
 				stream_weaponvfxpackagedefs(stream, *items_3);
 			}
@@ -8791,7 +8790,7 @@ namespace zonetool::iw8
 			stream.begin_asset();
 			stream.push(5);
 			stream.string(data.name);
-			if (const auto items_3 = stream.array(data.nodes, 7, data.nodeCount))
+			if (const auto items_3 = stream.inline_array(data.nodes, 7, data.nodeCount))
 			{
 				if (data.nodeCount != 0)
 				{
@@ -8801,8 +8800,8 @@ namespace zonetool::iw8
 					}
 				}
 			}
-			stream.array(data.funcIDs, 3, data.numFuncIDs);
-			stream.array(data.decorators, 1, data.decoratorCount);
+			stream.inline_array(data.funcIDs, 3, data.numFuncIDs);
+			stream.inline_array(data.decorators, 1, data.decoratorCount);
 			stream.pop();
 			stream.end_asset();
 		}
@@ -8842,7 +8841,7 @@ namespace zonetool::iw8
 			{
 				for (std::size_t i1 = 0; i1 < count; i1++)
 				{
-					if (const auto items_2 = stream.array(data[i1].m_Params, 3, data[i1].m_NumParams))
+					if (const auto items_2 = stream.inline_array(data[i1].m_Params, 3, data[i1].m_NumParams))
 					{
 						stream_asm_function_param_array(stream, items_2, data[i1].m_NumParams);
 					}
@@ -8861,7 +8860,7 @@ namespace zonetool::iw8
 		template <typename Stream>
 		void stream_playeranimsetaliaspatch(Stream& stream, PlayerAnimsetAliasPatch& data)
 		{
-			if (const auto items_0 = stream.array(data.strings, 3, data.numStrings))
+			if (const auto items_0 = stream.inline_array(data.strings, 3, data.numStrings))
 			{
 				stream.script_strings(items_0, data.numStrings);
 			}
@@ -8928,7 +8927,7 @@ namespace zonetool::iw8
 					{
 						if (static_cast<std::uint32_t>(outer_animset.mode) == 1)
 						{
-							if (const auto items_0 = stream.array(data[i1].u.m_PlayerAnimsetAlias, 7, 1))
+							if (const auto items_0 = stream.inline_array(data[i1].u.m_PlayerAnimsetAlias, 7, 1))
 							{
 								stream_playeranimsetalias(stream, *items_0);
 							}
@@ -8936,7 +8935,7 @@ namespace zonetool::iw8
 					}
 					else
 					{
-						if (const auto items_0 = stream.array(data[i1].u.m_AIAnimsetAlias, 7, 1))
+						if (const auto items_0 = stream.inline_array(data[i1].u.m_AIAnimsetAlias, 7, 1))
 						{
 							stream_aianimsetalias(stream, *items_0);
 						}
@@ -8960,13 +8959,13 @@ namespace zonetool::iw8
 		template <typename Stream>
 		void stream_playeranimsetstate_bakedaliasesperconditiontype(Stream& stream, PlayerAnimsetState_BakedAliasesPerConditionType& data)
 		{
-			if (const auto items_0 = stream.array(data.aliases, 7, data.numConditionValues))
+			if (const auto items_0 = stream.inline_array(data.aliases, 7, data.numConditionValues))
 			{
 				if (data.numConditionValues != 0)
 				{
 					for (std::size_t i1 = 0; i1 < data.numConditionValues; i1++)
 					{
-						stream.array(items_0[i1].array, 3, items_0[i1].wordCount);
+						stream.inline_array(items_0[i1].array, 3, items_0[i1].wordCount);
 					}
 				}
 			}
@@ -8975,7 +8974,7 @@ namespace zonetool::iw8
 		template <typename Stream>
 		void stream_playeranimsetstate(Stream& stream, PlayerAnimsetState& data)
 		{
-			if (const auto items_0 = stream.array(data.aliasesPerConditionType, 7, data.numConditionTypes))
+			if (const auto items_0 = stream.inline_array(data.aliasesPerConditionType, 7, data.numConditionTypes))
 			{
 				if (data.numConditionTypes != 0)
 				{
@@ -9017,7 +9016,7 @@ namespace zonetool::iw8
 					{
 						if (static_cast<std::uint32_t>(outer_animset.mode) == 1)
 						{
-							if (const auto items_0 = stream.array(data[i1].u.m_PlayerAnimsetState, 7, 1))
+							if (const auto items_0 = stream.inline_array(data[i1].u.m_PlayerAnimsetState, 7, 1))
 							{
 								stream_playeranimsetstate(stream, *items_0);
 							}
@@ -9025,7 +9024,7 @@ namespace zonetool::iw8
 					}
 					else
 					{
-						stream.array(data[i1].u.m_AIAnimsetState, 0, 1);
+						stream.inline_array(data[i1].u.m_AIAnimsetState, 0, 1);
 					}
 				}
 			}
@@ -9060,7 +9059,7 @@ namespace zonetool::iw8
 			{
 				if (static_cast<std::uint32_t>(data.mode) == 1)
 				{
-					if (const auto items_0 = stream.array(data.u.m_PlayerAnimset, 7, 1))
+					if (const auto items_0 = stream.inline_array(data.u.m_PlayerAnimset, 7, 1))
 					{
 						stream_playeranimset(stream, *items_0);
 					}
@@ -9068,7 +9067,7 @@ namespace zonetool::iw8
 			}
 			else
 			{
-				stream.array(data.u.m_AIAnimset, 3, 1);
+				stream.inline_array(data.u.m_AIAnimset, 3, 1);
 			}
 			stream.pop();
 			stream.end_asset();
@@ -9077,7 +9076,7 @@ namespace zonetool::iw8
 		template <typename Stream>
 		void stream_asm_function(Stream& stream, ASM_Function& data)
 		{
-			if (const auto items_0 = stream.array(data.m_Params, 3, data.m_NumParams))
+			if (const auto items_0 = stream.inline_array(data.m_Params, 3, data.m_NumParams))
 			{
 				stream_asm_function_param_array(stream, items_0, data.m_NumParams);
 			}
@@ -9087,7 +9086,7 @@ namespace zonetool::iw8
 		void stream_player_asm_state(Stream& stream, Player_ASM_State& data)
 		{
 			stream_asm_function(stream, data.m_UpdateFunc);
-			if (const auto items_1 = stream.array(data.m_ScriptedAnimParams, 3, data.m_ScriptedAnimNumParams))
+			if (const auto items_1 = stream.inline_array(data.m_ScriptedAnimParams, 3, data.m_ScriptedAnimNumParams))
 			{
 				stream_asm_function_param_array(stream, items_1, data.m_ScriptedAnimNumParams);
 			}
@@ -9096,7 +9095,7 @@ namespace zonetool::iw8
 		template <typename Stream>
 		void stream_ai_asm_state(Stream& stream, AI_ASM_State& data)
 		{
-			if (const auto items_0 = stream.array(data.m_PowerDownParams, 3, data.m_PowerDownNumParams))
+			if (const auto items_0 = stream.inline_array(data.m_PowerDownParams, 3, data.m_PowerDownNumParams))
 			{
 				stream_asm_function_param_array(stream, items_0, data.m_PowerDownNumParams);
 			}
@@ -9109,13 +9108,13 @@ namespace zonetool::iw8
 		template <typename Stream>
 		void stream_asm_state(Stream& stream, ASM_State& data, [[maybe_unused]] const ASM& outer_asm)
 		{
-			if (const auto items_0 = stream.array(data.m_Transitions, 7, data.m_NumTransitions))
+			if (const auto items_0 = stream.inline_array(data.m_Transitions, 7, data.m_NumTransitions))
 			{
 				if (data.m_NumTransitions != 0)
 				{
 					for (std::size_t i1 = 0; i1 < data.m_NumTransitions; i1++)
 					{
-						if (const auto items_2 = stream.array(items_0[i1].m_FuncName.m_Params, 3, items_0[i1].m_FuncName.m_NumParams))
+						if (const auto items_2 = stream.inline_array(items_0[i1].m_FuncName.m_Params, 3, items_0[i1].m_FuncName.m_NumParams))
 						{
 							stream_asm_function_param_array(stream, items_2, items_0[i1].m_FuncName.m_NumParams);
 						}
@@ -9123,7 +9122,7 @@ namespace zonetool::iw8
 				}
 			}
 			stream.script_string(data.m_Name);
-			if (const auto items_14 = stream.array(data.m_Subtrees, 3, data.m_NumSubtrees))
+			if (const auto items_14 = stream.inline_array(data.m_Subtrees, 3, data.m_NumSubtrees))
 			{
 				stream.script_strings(items_14, data.m_NumSubtrees);
 			}
@@ -9133,15 +9132,15 @@ namespace zonetool::iw8
 			stream_asm_function(stream, data.m_TerminateFunc);
 			stream.script_string(data.m_ExitNotify);
 			stream.script_string(data.m_FacialState);
-			if (const auto items_24 = stream.array(data.m_DeathParams, 3, data.m_DeathNumParams))
+			if (const auto items_24 = stream.inline_array(data.m_DeathParams, 3, data.m_DeathNumParams))
 			{
 				stream_asm_function_param_array(stream, items_24, data.m_DeathNumParams);
 			}
-			if (const auto items_28 = stream.array(data.m_PainParams, 3, data.m_PainNumParams))
+			if (const auto items_28 = stream.inline_array(data.m_PainParams, 3, data.m_PainNumParams))
 			{
 				stream_asm_function_param_array(stream, items_28, data.m_PainNumParams);
 			}
-			if (const auto items_32 = stream.array(data.m_ExecutionParams, 3, data.m_ExecutionNumParams))
+			if (const auto items_32 = stream.inline_array(data.m_ExecutionParams, 3, data.m_ExecutionNumParams))
 			{
 				stream_asm_function_param_array(stream, items_32, data.m_ExecutionNumParams);
 			}
@@ -9149,7 +9148,7 @@ namespace zonetool::iw8
 			{
 				if (static_cast<std::uint32_t>(outer_asm.m_Mode) == 1)
 				{
-					if (const auto items_0 = stream.array(data.u.m_PlayerState, 7, 1))
+					if (const auto items_0 = stream.inline_array(data.u.m_PlayerState, 7, 1))
 					{
 						stream_player_asm_state(stream, *items_0);
 					}
@@ -9157,7 +9156,7 @@ namespace zonetool::iw8
 			}
 			else
 			{
-				if (const auto items_0 = stream.array(data.u.m_AIState, 7, 1))
+				if (const auto items_0 = stream.inline_array(data.u.m_AIState, 7, 1))
 				{
 					stream_ai_asm_state(stream, *items_0);
 				}
@@ -9167,7 +9166,7 @@ namespace zonetool::iw8
 		template <typename Stream>
 		void stream_ai_asm(Stream& stream, AI_ASM& data)
 		{
-			stream.array(data.m_Services, 3, data.m_NumServices);
+			stream.inline_array(data.m_Services, 3, data.m_NumServices);
 		}
 
 		template <typename Stream>
@@ -9177,7 +9176,7 @@ namespace zonetool::iw8
 			stream.push(5);
 			stream.string(data.m_szName);
 			stream.script_string(data.m_Name);
-			if (const auto items_4 = stream.array(data.m_States, 7, data.m_NumStates))
+			if (const auto items_4 = stream.inline_array(data.m_States, 7, data.m_NumStates))
 			{
 				if (data.m_NumStates != 0)
 				{
@@ -9187,34 +9186,34 @@ namespace zonetool::iw8
 					}
 				}
 			}
-			if (const auto items_14 = stream.array(data.m_LogicGroups, 7, data.m_NumLogicGroups))
+			if (const auto items_14 = stream.inline_array(data.m_LogicGroups, 7, data.m_NumLogicGroups))
 			{
 				if (data.m_NumLogicGroups != 0)
 				{
 					for (std::size_t i2 = 0; i2 < data.m_NumLogicGroups; i2++)
 					{
-						if (const auto items_2 = stream.array(items_14[i2].m_InitFunc.m_Params, 3, items_14[i2].m_InitFunc.m_NumParams))
+						if (const auto items_2 = stream.inline_array(items_14[i2].m_InitFunc.m_Params, 3, items_14[i2].m_InitFunc.m_NumParams))
 						{
 							stream_asm_function_param_array(stream, items_2, items_14[i2].m_InitFunc.m_NumParams);
 						}
-						if (const auto items_6 = stream.array(items_14[i2].m_TerminateFunc.m_Params, 3, items_14[i2].m_TerminateFunc.m_NumParams))
+						if (const auto items_6 = stream.inline_array(items_14[i2].m_TerminateFunc.m_Params, 3, items_14[i2].m_TerminateFunc.m_NumParams))
 						{
 							stream_asm_function_param_array(stream, items_6, items_14[i2].m_TerminateFunc.m_NumParams);
 						}
 					}
 				}
 			}
-			stream.array(data.m_FuncIDs, 3, data.m_NumFuncIDs);
+			stream.inline_array(data.m_FuncIDs, 3, data.m_NumFuncIDs);
 			if (static_cast<std::uint32_t>(data.m_Mode) != 0)
 			{
 				if (static_cast<std::uint32_t>(data.m_Mode) == 1)
 				{
-					stream.array(data.u.m_PlayerASM, 0, 1);
+					stream.inline_array(data.u.m_PlayerASM, 0, 1);
 				}
 			}
 			else
 			{
-				if (const auto items_0 = stream.array(data.u.m_AIASM, 7, 1))
+				if (const auto items_0 = stream.inline_array(data.u.m_AIASM, 7, 1))
 				{
 					stream_ai_asm(stream, *items_0);
 				}
@@ -9238,7 +9237,7 @@ namespace zonetool::iw8
 			stream.begin_asset();
 			stream.push(5);
 			stream.string(data.name);
-			if (const auto items_3 = stream.array(data.constraints, 3, data.numConstraints))
+			if (const auto items_3 = stream.inline_array(data.constraints, 3, data.numConstraints))
 			{
 				if (data.numConstraints != 0)
 				{
@@ -9248,7 +9247,7 @@ namespace zonetool::iw8
 					}
 				}
 			}
-			if (const auto items_13 = stream.array(data.targetBoneNames, 3, data.numTargetBones))
+			if (const auto items_13 = stream.inline_array(data.targetBoneNames, 3, data.numTargetBones))
 			{
 				stream.script_strings(items_13, data.numTargetBones);
 			}
@@ -9281,7 +9280,7 @@ namespace zonetool::iw8
 			stream.begin_asset();
 			stream.push(5);
 			stream.string(data.name);
-			if (const auto items_3 = stream.array(data.dynamicBoneProperties, 7, data.numDynamicBones))
+			if (const auto items_3 = stream.inline_array(data.dynamicBoneProperties, 7, data.numDynamicBones))
 			{
 				if (data.numDynamicBones != 0)
 				{
@@ -9291,7 +9290,7 @@ namespace zonetool::iw8
 					}
 				}
 			}
-			if (const auto items_13 = stream.array(data.collidableBones, 3, data.numCollidableBones))
+			if (const auto items_13 = stream.inline_array(data.collidableBones, 3, data.numCollidableBones))
 			{
 				if (data.numCollidableBones != 0)
 				{
@@ -9301,9 +9300,9 @@ namespace zonetool::iw8
 					}
 				}
 			}
-			stream.array(data.collisionShapes, 3, data.numCollisionShapes);
-			stream.array(data.customPinConstraints, 3, data.numCustomPinConstraints);
-			if (const auto items_25 = stream.array(data.pinConstraintBoneNames, 3, data.numPinConstraintBoneNames))
+			stream.inline_array(data.collisionShapes, 3, data.numCollisionShapes);
+			stream.inline_array(data.customPinConstraints, 3, data.numCustomPinConstraints);
+			if (const auto items_25 = stream.inline_array(data.pinConstraintBoneNames, 3, data.numPinConstraintBoneNames))
 			{
 				stream.script_strings(items_25, data.numPinConstraintBoneNames);
 			}
@@ -9317,7 +9316,7 @@ namespace zonetool::iw8
 			stream.begin_asset();
 			stream.push(5);
 			stream.string(data.name);
-			stream.array(data.controlPoints, 3, data.numControlPoints);
+			stream.inline_array(data.controlPoints, 3, data.numControlPoints);
 			stream.pop();
 			stream.end_asset();
 		}
@@ -9415,8 +9414,8 @@ namespace zonetool::iw8
 			stream.begin_asset();
 			stream.push(5);
 			stream.string(data.name);
-			stream.array(data.strPool, 0, data.strPoolSize);
-			stream.array(data.___u4.root, 3, data.rootSize);
+			stream.inline_array(data.strPool, 0, data.strPoolSize);
+			stream.inline_array(data.___u4.root, 3, data.rootSize);
 			stream.pop();
 			stream.end_asset();
 		}
@@ -9425,14 +9424,14 @@ namespace zonetool::iw8
 		void stream_xcamtargetmodel(Stream& stream, XCamTargetModel& data)
 		{
 			stream.string(data.name);
-			stream.array(data.animationFrames, 3, data.frames);
+			stream.inline_array(data.animationFrames, 3, data.frames);
 		}
 
 		template <typename Stream>
 		void stream_xcamcamera(Stream& stream, XCamCamera& data)
 		{
 			stream.string(data.name);
-			stream.array(data.animationFrames, 3, data.frames);
+			stream.inline_array(data.animationFrames, 3, data.frames);
 		}
 
 		template <typename Stream>
@@ -9442,11 +9441,11 @@ namespace zonetool::iw8
 			stream.push(5);
 			stream.string(data.name);
 			stream.string(data.parent_scene);
-			if (const auto items_4 = stream.array(data.targetModelBoneRoots, 7, 1))
+			if (const auto items_4 = stream.inline_array(data.targetModelBoneRoots, 7, 1))
 			{
 				stream_xcamtargetmodel(stream, *items_4);
 			}
-			if (const auto items_8 = stream.array(data.cameras, 7, data.cameraCount))
+			if (const auto items_8 = stream.inline_array(data.cameras, 7, data.cameraCount))
 			{
 				if (data.cameraCount != 0)
 				{
@@ -9456,8 +9455,8 @@ namespace zonetool::iw8
 					}
 				}
 			}
-			stream.array(data.cameraSwitchParams, 3, data.frames);
-			if (const auto items_19 = stream.array(data.frameNames, 7, data.frameNameCount))
+			stream.inline_array(data.cameraSwitchParams, 3, data.frames);
+			if (const auto items_19 = stream.inline_array(data.frameNames, 7, data.frameNameCount))
 			{
 				if (data.frameNameCount != 0)
 				{
@@ -9467,15 +9466,15 @@ namespace zonetool::iw8
 					}
 				}
 			}
-			if (const auto items_29 = stream.array(data.notify, 3, data.notifyCount))
+			if (const auto items_29 = stream.inline_array(data.notify, 3, data.notifyCount))
 			{
 				stream_xanimnotifyinfo_array(stream, items_29, data.notifyCount);
 			}
-			if (const auto items_33 = stream.array(data.startupNotify, 3, data.startupNotifyCount))
+			if (const auto items_33 = stream.inline_array(data.startupNotify, 3, data.startupNotifyCount))
 			{
 				stream_xanimnotifyinfo_array(stream, items_33, data.startupNotifyCount);
 			}
-			if (const auto items_37 = stream.array(data.shutdownNotify, 3, data.shutdownNotifyCount))
+			if (const auto items_37 = stream.inline_array(data.shutdownNotify, 3, data.shutdownNotifyCount))
 			{
 				stream_xanimnotifyinfo_array(stream, items_37, data.shutdownNotifyCount);
 			}
@@ -9502,7 +9501,7 @@ namespace zonetool::iw8
 			stream.push(5);
 			stream.string(data.name);
 			stream.script_string(data.internalName);
-			if (const auto items_4 = stream.array(data.textureDefs, 7, data.textureDefCount))
+			if (const auto items_4 = stream.inline_array(data.textureDefs, 7, data.textureDefCount))
 			{
 				stream_materialtexturedef_array(stream, items_4, data.textureDefCount);
 			}
@@ -9532,14 +9531,14 @@ namespace zonetool::iw8
 			stream.begin_asset();
 			stream.push(5);
 			stream.string(data.name);
-			if (const auto items_3 = stream.array(data.submodels, 7, 10))
+			if (const auto items_3 = stream.inline_array(data.submodels, 7, 10))
 			{
 				for (std::size_t i1 = 0; i1 < 10; i1++)
 				{
 					stream_xcompositesubmodel(stream, items_3[i1]);
 				}
 			}
-			if (const auto items_10 = stream.array(data.subCompositeModels, 7, 10))
+			if (const auto items_10 = stream.inline_array(data.subCompositeModels, 7, 10))
 			{
 				for (std::size_t i2 = 0; i2 < 10; i2++)
 				{
@@ -9556,8 +9555,8 @@ namespace zonetool::iw8
 			stream.begin_asset();
 			stream.push(5);
 			stream.string(data.name);
-			stream.array(data.physicsLODData, 15, data.physicsLODDataSize);
-			if (const auto items_4 = stream.array(data.physicsLODDataNames, 3, data.physicsLODDataNameCount))
+			stream.inline_array(data.physicsLODData, 15, data.physicsLODDataSize);
+			if (const auto items_4 = stream.inline_array(data.physicsLODDataNames, 3, data.physicsLODDataNameCount))
 			{
 				stream.script_strings(items_4, data.physicsLODDataNameCount);
 			}
@@ -9585,7 +9584,7 @@ namespace zonetool::iw8
 			stream.begin_asset();
 			stream.push(5);
 			stream.string(data.name);
-			if (const auto items_3 = stream.array(data.imageNodes, 7, data.imageNodeCount))
+			if (const auto items_3 = stream.inline_array(data.imageNodes, 7, data.imageNodeCount))
 			{
 				if (data.imageNodeCount != 0)
 				{
@@ -9605,7 +9604,7 @@ namespace zonetool::iw8
 			stream.begin_asset();
 			stream.push(5);
 			stream.string(data.name);
-			if (const auto items_3 = stream.array(data.keyValuePairs, 7, data.numVariables))
+			if (const auto items_3 = stream.inline_array(data.keyValuePairs, 7, data.numVariables))
 			{
 				if (data.numVariables != 0)
 				{
@@ -9622,13 +9621,13 @@ namespace zonetool::iw8
 		template <typename Stream>
 		void stream_stvertexdata0(Stream& stream, StVertexData0& data, [[maybe_unused]] const StMesh& outer_stmesh)
 		{
-			stream.array(data.data, 127, (outer_stmesh.vertexCount * ((*reinterpret_cast<const std::uint8_t*>(&outer_stmesh.flags) & 4) != 0 ? 4 : 8)));
+			stream.inline_array(data.data, 127, (outer_stmesh.vertexCount * ((*reinterpret_cast<const std::uint8_t*>(&outer_stmesh.flags) & 4) != 0 ? 4 : 8)));
 		}
 
 		template <typename Stream>
 		void stream_stmeshlayermaskdata(Stream& stream, StMeshLayerMaskData& data, [[maybe_unused]] const StMesh& outer_stmesh)
 		{
-			stream.array(data.data, 127, (((*reinterpret_cast<const std::uint8_t*>(&outer_stmesh.flags) & 16) == 0 ? 0 : (outer_stmesh.triCount - outer_stmesh.cutoutTriCount)) * 4));
+			stream.inline_array(data.data, 127, (((*reinterpret_cast<const std::uint8_t*>(&outer_stmesh.flags) & 16) == 0 ? 0 : (outer_stmesh.triCount - outer_stmesh.cutoutTriCount)) * 4));
 		}
 
 		template <typename Stream>
@@ -9636,14 +9635,14 @@ namespace zonetool::iw8
 		{
 			stream_stvertexdata0(stream, data.vd0, data);
 			stream_stmeshlayermaskdata(stream, data.layerMask, data);
-			stream.array(data.indices, 3, (data.triCount + (data.triCount * 2)));
+			stream.inline_array(data.indices, 3, (data.triCount + (data.triCount * 2)));
 			stream.asset(ASSET_TYPE_STREAM_KEY, data.streamKey);
 		}
 
 		template <typename Stream>
 		void stream_stterraingridlevel(Stream& stream, StTerrainGridLevel& data)
 		{
-			if (const auto items_0 = stream.array(data.nodes, 7, (data.height * *reinterpret_cast<const std::uint32_t*>(&data))))
+			if (const auto items_0 = stream.inline_array(data.nodes, 7, (data.height * *reinterpret_cast<const std::uint32_t*>(&data))))
 			{
 				if ((data.height * *reinterpret_cast<const std::uint32_t*>(&data)) != 0)
 				{
@@ -9658,7 +9657,7 @@ namespace zonetool::iw8
 		template <typename Stream>
 		void stream_stterraingrid(Stream& stream, StTerrainGrid& data)
 		{
-			if (const auto items_0 = stream.array(data.levels, 7, *reinterpret_cast<const std::uint32_t*>(&data)))
+			if (const auto items_0 = stream.inline_array(data.levels, 7, *reinterpret_cast<const std::uint32_t*>(&data)))
 			{
 				if (*reinterpret_cast<const std::uint32_t*>(&data) != 0)
 				{
@@ -9687,7 +9686,7 @@ namespace zonetool::iw8
 		template <typename Stream>
 		void stream_stdiskterrainsurface(Stream& stream, StDiskTerrainSurface& data)
 		{
-			stream.array(data.highLODIndices, 3, *reinterpret_cast<const std::uint32_t*>(&data));
+			stream.inline_array(data.highLODIndices, 3, *reinterpret_cast<const std::uint32_t*>(&data));
 			stream_stterraingrid(stream, data.grid);
 			if (const auto items_2 = stream.array(data.layerMaterials, 7, data.layerMaterialsCount))
 			{
@@ -9722,7 +9721,7 @@ namespace zonetool::iw8
 			stream.begin_asset();
 			stream.push(5);
 			stream.string(data.name);
-			if (const auto items_3 = stream.array(data.surfaces, 7, data.surfaceCount))
+			if (const auto items_3 = stream.inline_array(data.surfaces, 7, data.surfaceCount))
 			{
 				if (data.surfaceCount != 0)
 				{
@@ -9738,7 +9737,7 @@ namespace zonetool::iw8
 				stream_gfximage_ptr_array(stream, items_14, data.flattenedImagesCount);
 			}
 			stream_stcluttersamplepoints(stream, data.clutterSamplePoints);
-			if (const auto items_19 = stream.array(data.lightmaps, 7, data.lightmapCount))
+			if (const auto items_19 = stream.inline_array(data.lightmaps, 7, data.lightmapCount))
 			{
 				if (data.lightmapCount != 0)
 				{
@@ -9759,7 +9758,7 @@ namespace zonetool::iw8
 			stream.push(5);
 			stream.string(data.name);
 			stream.asset(ASSET_TYPE_SCRIPTFILE, data.scriptFile);
-			if (const auto items_4 = stream.array(data.patchFunctions, 7, data.numPatchFunctions))
+			if (const auto items_4 = stream.inline_array(data.patchFunctions, 7, data.numPatchFunctions))
 			{
 				if (data.numPatchFunctions != 0)
 				{
@@ -9779,13 +9778,13 @@ namespace zonetool::iw8
 			stream.script_string(data.name);
 			stream.asset(ASSET_TYPE_PHYSICSASSET, data.physicsAsset);
 			stream.asset(ASSET_TYPE_XMODEL_DETAIL_COLLISION, data.detailCollision);
-			stream.array(data.instances, 1, data.numInstances);
+			stream.inline_array(data.instances, 1, data.numInstances);
 		}
 
 		template <typename Stream>
 		void stream_staticmodelcollisioncompressedmodellist(Stream& stream, StaticModelCollisionCompressedModelList& data)
 		{
-			if (const auto items_0 = stream.array(data.models, 7, *reinterpret_cast<const std::uint32_t*>(&data)))
+			if (const auto items_0 = stream.inline_array(data.models, 7, *reinterpret_cast<const std::uint32_t*>(&data)))
 			{
 				if (*reinterpret_cast<const std::uint32_t*>(&data) != 0)
 				{
@@ -9803,12 +9802,12 @@ namespace zonetool::iw8
 			stream.begin_asset();
 			stream.push(5);
 			stream.string(data.name);
-			if (const auto items_3 = stream.array(data.staticModelCollision, 7, 1))
+			if (const auto items_3 = stream.inline_array(data.staticModelCollision, 7, 1))
 			{
 				stream_staticmodelcollisioncompressedmodellist(stream, *items_3);
 			}
-			stream.array(data.havokTileShapeData, 15, data.havokTileShapeDataSize);
-			stream.array(data.havokTileShapePointer, 0, 1);
+			stream.inline_array(data.havokTileShapeData, 15, data.havokTileShapeDataSize);
+			stream.inline_array(data.havokTileShapePointer, 0, 1);
 			stream.pop();
 			stream.end_asset();
 		}
@@ -9916,11 +9915,11 @@ namespace zonetool::iw8
 			stream.begin_asset();
 			stream.push(5);
 			stream.string(data.name);
-			if (const auto items_3 = stream.array(data.dynEntDefList[0], 7, *reinterpret_cast<const std::uint32_t*>(&data.dynEntCount)))
+			if (const auto items_3 = stream.inline_array(data.dynEntDefList[0], 7, *reinterpret_cast<const std::uint32_t*>(&data.dynEntCount)))
 			{
 				stream_dynentitydef_array(stream, items_3, *reinterpret_cast<const std::uint32_t*>(&data.dynEntCount));
 			}
-			if (const auto items_7 = stream.array(data.dynEntDefList[1], 7, data.dynEntCount[1]))
+			if (const auto items_7 = stream.inline_array(data.dynEntDefList[1], 7, data.dynEntCount[1]))
 			{
 				stream_dynentitydef_array(stream, items_7, data.dynEntCount[1]);
 			}
@@ -10108,12 +10107,12 @@ namespace zonetool::iw8
 			stream.push(5);
 			stream.string(data.name);
 			reinterpret_cast<float4*>(stream.elements(data.edges, 31, 32, data.numEdges));
-			stream.array(data.edgeMetadata, 3, data.numEdges);
-			stream.array(data.edgeOctrees, 15, data.numEdgeOctrees);
-			stream.array(data.edgeOctreeNodeSets, 127, data.numEdgeOctreeNodeSet);
-			stream.array(data.edgeIndices, 3, data.numEdgeIndices);
-			stream.array(data.edgeAdjacencyMetadata, 3, data.numEdgeAdjacencyMetadata);
-			stream.array(data.edgeAdjacency, 3, data.numEdgeAdjacency);
+			stream.inline_array(data.edgeMetadata, 3, data.numEdges);
+			stream.inline_array(data.edgeOctrees, 15, data.numEdgeOctrees);
+			stream.inline_array(data.edgeOctreeNodeSets, 127, data.numEdgeOctreeNodeSet);
+			stream.inline_array(data.edgeIndices, 3, data.numEdgeIndices);
+			stream.inline_array(data.edgeAdjacencyMetadata, 3, data.numEdgeAdjacencyMetadata);
+			stream.inline_array(data.edgeAdjacency, 3, data.numEdgeAdjacency);
 			stream.pop();
 			stream.end_asset();
 		}
@@ -10124,7 +10123,7 @@ namespace zonetool::iw8
 			stream.begin_asset();
 			stream.push(5);
 			stream.string(data.name);
-			stream.array(data.havokData, 15, data.havokDataSize);
+			stream.inline_array(data.havokData, 15, data.havokDataSize);
 			stream.pop();
 			stream.end_asset();
 		}
