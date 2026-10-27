@@ -3162,19 +3162,6 @@ iw7_out_of_bounds_clear()
 					}
 				}
 
-				for (const auto name : {"playfxontag", "stopfxontag"})
-				{
-					body = rewrite_calls(body, name, [&](std::vector<std::string> arguments)
-					{
-						if (arguments.size() == 3 && arguments[2].starts_with('"'))
-						{
-							arguments[2] = "\"tag_origin\"";
-						}
-
-						return std::format("{}( {} )", name, join(arguments));
-					});
-				}
-
 				// A model that the script names by a string converts with the map's models; one that the zones do not
 				// hold would stop the script. A model that a variable names (Rivet's drone panels: setmodel( random(
 				// level.panels ) )) sets through iw7_setmodel, which sets only the converted models that the script's
