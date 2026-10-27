@@ -21,6 +21,49 @@ namespace zonetool::iw8
 			return name ? name : "";
 		}
 
+		void validate_scriptable(const ScriptableDef& definition)
+		{
+			if (definition.name && definition.name[0] == ',')
+			{
+				return;
+			}
+
+			std::unordered_set<const ScriptablePartDef*> active;
+			std::function<void(const ScriptablePartDef*, std::uint32_t)> visit;
+			visit = [&](const ScriptablePartDef* parts, const std::uint32_t count)
+			{
+				if (count && !parts)
+				{
+					throw std::runtime_error("part array is null with a nonzero count");
+				}
+				for (auto i = 0u; i < count; i++)
+				{
+					const auto& part = parts[i];
+					if (!active.insert(&part).second)
+					{
+						throw std::runtime_error("cyclic Scriptable part tree");
+					}
+					if (part.flatId >= definition.partCount)
+					{
+						throw std::runtime_error(std::format("part flatId {} exceeds declared partCount {}", part.flatId, definition.partCount));
+					}
+					if (part.numStates && !part.states)
+					{
+						throw std::runtime_error("part states are null with a nonzero count");
+					}
+					// Replay 0x12EA830 initializes first-state health at the part's client stream offset.
+					if (part.numStates && (part.states[0].base.flags & 0x80) &&
+						static_cast<std::size_t>(part.eventStreamBufferOffsetClient) + sizeof(float) > definition.eventStreamSizeRequiredClient)
+					{
+						throw std::runtime_error("part initial health exceeds the declared client event stream");
+					}
+					visit(part.childParts, part.numChildParts);
+					active.erase(&part);
+				}
+			};
+			visit(definition.parts, definition.numParts);
+		}
+
 		class script_string_table
 		{
 		public:
@@ -311,6 +354,10 @@ namespace zonetool::iw8
 				writer.write_copy(source, format->size);
 				try
 				{
+					if (type == ASSET_TYPE_SCRIPTABLE && !stub)
+					{
+						validate_scriptable(*static_cast<const ScriptableDef*>(source));
+					}
 					format->write(stream, source);
 				}
 				catch (const std::exception& e)
