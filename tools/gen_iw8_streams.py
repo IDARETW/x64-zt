@@ -732,6 +732,9 @@ def emit_pointer(ctx, op, out):
         raise Unsupported('pointer op on %s (%s)' % (expr, type_name))
     target = pointer_target(type_name)
     align = op['align']['const'] if op['align'] and 'const' in op['align'] else 0
+    # A pointer whose loader takes only null or present (marker 0) holds its data inline: Replay resolves no
+    # packed alias there, so the writer must not share an earlier copy.
+    array_call = 'stream.inline_array' if set(op['markers']) == {0} else 'stream.array'
     # An asset pointer loader inlined into its caller: the pointee begins an asset of a known type.
     if -3 in op['markers']:
         begins = [o for o in walk(body) if o['op'] == 'asset_begin' and 'const' in o['type']]
@@ -771,14 +774,14 @@ def emit_pointer(ctx, op, out):
             read = 'reinterpret_cast<%s*>(stream.elements(%s, %d, %d, %s))' % (
                 cxx_type(target), expr, align, per_element, count)
         else:
-            read = 'stream.array(%s, %d, %s)' % (expr, align, count)
+            read = '%s(%s, %d, %s)' % (array_call, expr, align, count)
         rest = body[1:]
     elif first['op'] == 'data':
         if not tsize:
             raise Unsupported('pointer to %s of unknown size' % target)
         try:
             count = expression(ctx, divide(first['size'], tsize))
-            read = 'stream.array(%s, %d, %s)' % (expr, align, count)
+            read = '%s(%s, %d, %s)' % (array_call, expr, align, count)
         except Unsupported:
             # A byte count that is not a whole number of elements: read the bytes.
             count = None
