@@ -11218,13 +11218,16 @@ namespace zonetool::iw7
 		ScriptableEventBaseDef* base;
 		ScriptablePartReference partReference;
 		float amount;
-		//bool destroy;
+		unsigned char unknown60[4];
 		float amountDoT;
 		float intervalDoT;
-		unsigned short eventStreamBufferOffsetServer;
-		unsigned short eventStreamBufferOffsetClient;
-		ScriptablePartDef* part;
+		unsigned char unknown72[8]; // Remaining union bytes have no verified source layout.
 	}; assert_sizeof(ScriptableEventPartDamageDef, 80);
+	assert_offsetof(ScriptableEventPartDamageDef, amount, 56);
+	assert_offsetof(ScriptableEventPartDamageDef, unknown60, 60);
+	assert_offsetof(ScriptableEventPartDamageDef, amountDoT, 64);
+	assert_offsetof(ScriptableEventPartDamageDef, intervalDoT, 68);
+	assert_offsetof(ScriptableEventPartDamageDef, unknown72, 72);
 
 	struct ScriptableEventSetMayhemDef
 	{
