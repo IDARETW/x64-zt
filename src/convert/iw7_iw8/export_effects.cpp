@@ -3390,14 +3390,14 @@ iw7_out_of_bounds_clear()
 			}
 		}
 
-		// The effects of the scriptables' first states, as one-shot effects that start with the map (IW7's createfx delay).
+		// Start first-state Scriptable effects when the state enters, without inventing a createfx pre-roll.
 		for (const auto& effect : output.scriptable_effects)
 		{
 			effects.try_emplace(effect.effect, effect.effect);
 			effect_placement scripted{"createoneshoteffect", effect.effect};
 			scripted.origin = std::format("{}, {}, {}", effect.origin[0], effect.origin[1], effect.origin[2]);
 			scripted.angles = std::format("{}, {}, {}", effect.angles[0], effect.angles[1], effect.angles[2]);
-			scripted.values.emplace_back("delay", "-4");
+			scripted.values.emplace_back("delay", "0");
 			placements.push_back(std::move(scripted));
 		}
 
