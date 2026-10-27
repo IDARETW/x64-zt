@@ -8955,6 +8955,13 @@ std::vector<NativeFx> ReadNativeFx(const std::filesystem::path &root)
                                 child.curve = true;
                                 child.points = NativeCurve(*curve);
                             }
+                            else if (const auto mesh = childNode.find("mesh_data"); mesh != childNode.end())
+                            {
+                                child.meshData = true;
+                                for (const auto &entry : *mesh)
+                                    child.meshAssets.push_back(
+                                        NativeRecord<iw8_focus::ParticleSpawnMeshAssetDef>(entry, "particle mesh asset"));
+                            }
                             else
                                 for (const auto &entryNode : childNode.at("entries"))
                                 {

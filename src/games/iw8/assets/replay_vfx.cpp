@@ -59,12 +59,64 @@ void WriteModules(ZoneWriter &writer, const std::vector<Module> &modules)
         auto record = module.native;
         if (module.imported)
         {
+            constexpr auto meshSelector =
+                static_cast<uint16_t>(iw8_focus::ParticleModuleType::initSpawnShapeMesh);
+            constexpr auto payloadOffset = offsetof(iw8_focus::ParticleModuleDef, moduleData);
+            constexpr auto meshPointer = payloadOffset +
+                offsetof(iw8_focus::ParticleModuleInitSpawnShapeMesh, meshAssetData);
+            constexpr auto listPointer = payloadOffset +
+                offsetof(iw8_focus::ParticleModuleInitSpawnShapeMesh, linkedAssets);
+            if (record.moduleType == meshSelector)
+            {
+                iw8_focus::ParticleModuleInitSpawnShapeMesh mesh{};
+                std::memcpy(&mesh, record.moduleData, sizeof(mesh));
+                const auto count = static_cast<std::size_t>(mesh.numMeshAssets);
+                if (mesh.linkedAssets.numAssets < 0 ||
+                    count != static_cast<std::size_t>(mesh.linkedAssets.numAssets))
+                    throw std::runtime_error("Replay VFX mesh model and count arrays differ");
+                const Module::ImportedChild *meshChild = nullptr;
+                const Module::ImportedChild *listChild = nullptr;
+                std::size_t previousOffset = 0;
+                bool havePrevious = false;
+                for (const auto &child : module.importedChildren)
+                {
+                    if (havePrevious && child.offset <= previousOffset)
+                        throw std::runtime_error("Replay VFX mesh children are not in loader order");
+                    previousOffset = child.offset;
+                    havePrevious = true;
+                    if (child.offset == listPointer)
+                    {
+                        if (listChild || child.curve || child.meshData || !child.points.empty() ||
+                            !child.meshAssets.empty())
+                            throw std::runtime_error("Replay VFX has an invalid mesh-model array");
+                        listChild = &child;
+                    }
+                    if (child.meshData)
+                    {
+                        if (meshChild || child.offset != meshPointer || child.curve || !child.entries.empty() ||
+                            !child.points.empty())
+                            throw std::runtime_error("Replay VFX has an invalid mesh-count array");
+                        meshChild = &child;
+                    }
+                }
+                if ((meshChild ? meshChild->meshAssets.size() : 0) != count ||
+                    (listChild ? listChild->entries.size() : 0) != count)
+                    throw std::runtime_error("Replay VFX mesh-count array size does not match the module");
+                if (listChild)
+                    for (const auto &entry : listChild->entries)
+                        if (entry.assets.size() != 1 || entry.assets[0].first != 0 ||
+                            entry.assets[0].second.first != ASSET_TYPE_XMODEL ||
+                            entry.assets[0].second.second.empty() || !entry.strings.empty())
+                            throw std::runtime_error("Replay VFX mesh entry must reference one model");
+            }
             // Shipped layout: only the pointer slots change (counts stay).
             for (const auto &child : module.importedChildren)
             {
-                if (child.offset + 16 > sizeof(record))
+                if (child.offset > sizeof(record) - (child.meshData ? 8 : 16) ||
+                    (child.meshData && (record.moduleType != meshSelector || child.offset != meshPointer)))
                     throw std::runtime_error("Replay VFX imported child lies outside its module");
-                const bool any = child.curve ? !child.points.empty() : !child.entries.empty();
+                const bool any = child.meshData ? !child.meshAssets.empty() :
+                    (child.curve ? !child.points.empty() : !child.entries.empty());
                 StorePointer(&record, child.offset, any ? PTR_FOLLOWS : PTR_NULL);
             }
             writer.writeT(record);
@@ -325,6 +377,16 @@ void WriteModules(ZoneWriter &writer, const std::vector<Module> &modules)
             // (Preload_ParticleLinkedAssetDef: INIT_SOUND reads a TempString).
             for (const auto &child : module.importedChildren)
             {
+                if (child.meshData)
+                {
+                    if (!child.meshAssets.empty())
+                    {
+                        writer.align(3);
+                        writer.write(child.meshAssets.data(), child.meshAssets.size() *
+                                                                  sizeof(iw8_focus::ParticleSpawnMeshAssetDef));
+                    }
+                    continue;
+                }
                 if (child.curve)
                 {
                     if (child.points.empty())

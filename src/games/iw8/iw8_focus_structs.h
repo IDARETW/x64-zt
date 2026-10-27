@@ -458,6 +458,7 @@ enum class ParticleModuleType : uint16_t
     initSpawn = 23,
     initSpawnShapeBox = 24,
     initSpawnShapeCylinder = 25,
+    initSpawnShapeMesh = 27,
     initSpawnShapeSphere = 28,
     initTail = 29,
     colorGraph = 34,
@@ -833,6 +834,23 @@ struct ParticleModuleInitSpawnShapeSphere
     ParticleFloatRange radius;
     ParticleCurveDef curves[4];
 };
+// Replay's mesh-spawn module references one count record per linked model.
+struct ParticleSpawnMeshAssetDef
+{
+    uint32_t numVertsTotal;
+    uint32_t numTrisTotal;
+    uint32_t pad[2];
+};
+struct ParticleModuleInitSpawnShapeMesh
+{
+    ParticleModuleInitSpawnShape base;
+    uint32_t numMeshAssets;
+    uint8_t useFaces;
+    uint8_t pad[3];
+    ParticleLinkedAssetListDef linkedAssets;
+    ParticleSpawnMeshAssetDef *meshAssetData;
+    ParticleCurveDef curves[3];
+};
 struct ParticleModuleForceDragGraph
 {
     ParticleModuleBase base;
@@ -854,6 +872,13 @@ static_assert(sizeof(ParticleModuleInitSpawnShapeCylinder) == 0xA0);
 static_assert(offsetof(ParticleModuleInitSpawnShapeCylinder, curves) == 0x50);
 static_assert(sizeof(ParticleModuleInitSpawnShapeSphere) == 0x80);
 static_assert(offsetof(ParticleModuleInitSpawnShapeSphere, curves) == 0x40);
+static_assert(sizeof(ParticleSpawnMeshAssetDef) == 0x10);
+static_assert(sizeof(ParticleModuleInitSpawnShapeMesh) == 0x80);
+static_assert(offsetof(ParticleModuleInitSpawnShapeMesh, numMeshAssets) == 0x30);
+static_assert(offsetof(ParticleModuleInitSpawnShapeMesh, useFaces) == 0x34);
+static_assert(offsetof(ParticleModuleInitSpawnShapeMesh, linkedAssets) == 0x38);
+static_assert(offsetof(ParticleModuleInitSpawnShapeMesh, meshAssetData) == 0x48);
+static_assert(offsetof(ParticleModuleInitSpawnShapeMesh, curves) == 0x50);
 static_assert(sizeof(ParticleModuleForceDragGraph) == 0x30);
 static_assert(offsetof(ParticleModuleForceDragGraph, curves) == 0x10);
 static_assert(sizeof(ParticleModuleVelocityGraph) == 0x90);

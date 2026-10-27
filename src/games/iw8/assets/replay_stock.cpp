@@ -562,6 +562,28 @@ vfx::Effect ParseEffect(const Json &fields, std::vector<Reference> &references)
                                         static_cast<int32_t>(child.points.size()))
                                         throw std::runtime_error("stock: " + moduleWhat + " curve count mismatch");
                                 }
+                                else if (type == "ParticleSpawnMeshAssetDef")
+                                {
+                                    constexpr auto dataOffset = offsetof(iw8_focus::ParticleModuleDef, moduleData);
+                                    constexpr auto pointerOffset = dataOffset +
+                                        offsetof(iw8_focus::ParticleModuleInitSpawnShapeMesh, meshAssetData);
+                                    constexpr auto countOffset = dataOffset +
+                                        offsetof(iw8_focus::ParticleModuleInitSpawnShapeMesh, numMeshAssets);
+                                    if ((Load(record.data(), 0) & 0xFFFF) !=
+                                            static_cast<uint16_t>(iw8_focus::ParticleModuleType::initSpawnShapeMesh) ||
+                                        child.offset != pointerOffset ||
+                                        static_cast<uint32_t>(Load(record.data(), countOffset)) != values.size())
+                                        throw std::runtime_error("stock: " + moduleWhat + " mesh asset count or offset mismatch");
+                                    child.meshData = true;
+                                    for (const auto &entryNode : values)
+                                    {
+                                        const auto bytes = Native(entryNode, sizeof(iw8_focus::ParticleSpawnMeshAssetDef),
+                                                                  "particle mesh asset");
+                                        iw8_focus::ParticleSpawnMeshAssetDef entry{};
+                                        std::memcpy(&entry, bytes.data(), bytes.size());
+                                        child.meshAssets.push_back(entry);
+                                    }
+                                }
                                 else if (type == "ParticleLinkedAssetDef")
                                 {
                                     for (const auto &entryNode : values)
