@@ -244,14 +244,14 @@ namespace zonetool::convert::iw7_iw8
 		}
 
 		// The world placement of a tag of a model at an instance's origin and angles, in the model's bind pose (DObjAnimMat
-		// base poses are in model space). An empty tag or tag_origin is the model's origin.
+		// base poses are in model space). An empty tag uses the model origin; tag_origin is resolved like any other bone.
 		std::optional<extraction::scriptable_effect> tag_placement(const iw7::XModel* model, const std::string& tag, const float* origin,
 			const float* angles)
 		{
 			const auto instance = angles_to_axes(angles);
 			std::array<double, 3> position{};
 			axes rotation{{{1.0, 0.0, 0.0}, {0.0, 1.0, 0.0}, {0.0, 0.0, 1.0}}};
-			if (!tag.empty() && tag != "tag_origin")
+			if (!tag.empty())
 			{
 				const iw7::DObjAnimMat* pose{};
 				for (auto bone = 0u; model && model->boneNames && model->baseMat && bone < model->numBones; bone++)
@@ -263,23 +263,27 @@ namespace zonetool::convert::iw7_iw8
 					}
 				}
 
-				if (!pose)
+				// Some source models have no tag_origin. Retain the origin fallback for that name only.
+				if (!pose && tag != "tag_origin")
 				{
 					return {};
 				}
 
-				const double length = std::sqrt(pose->quat[0] * pose->quat[0] + pose->quat[1] * pose->quat[1] +
-					pose->quat[2] * pose->quat[2] + pose->quat[3] * pose->quat[3]);
-				if (!(length > 0.0))
+				if (pose)
 				{
-					return {};
-				}
+					const double length = std::sqrt(pose->quat[0] * pose->quat[0] + pose->quat[1] * pose->quat[1] +
+						pose->quat[2] * pose->quat[2] + pose->quat[3] * pose->quat[3]);
+					if (!(length > 0.0))
+					{
+						return {};
+					}
 
-				const auto x = pose->quat[0] / length, y = pose->quat[1] / length, z = pose->quat[2] / length, w = pose->quat[3] / length;
-				rotation = {{{1 - 2 * (y * y + z * z), 2 * (x * y + w * z), 2 * (x * z - w * y)},
-					{2 * (x * y - w * z), 1 - 2 * (x * x + z * z), 2 * (y * z + w * x)},
-					{2 * (x * z + w * y), 2 * (y * z - w * x), 1 - 2 * (x * x + y * y)}}};
-				position = {pose->trans[0], pose->trans[1], pose->trans[2]};
+					const auto x = pose->quat[0] / length, y = pose->quat[1] / length, z = pose->quat[2] / length, w = pose->quat[3] / length;
+					rotation = {{{1 - 2 * (y * y + z * z), 2 * (x * y + w * z), 2 * (x * z - w * y)},
+						{2 * (x * y - w * z), 1 - 2 * (x * x + z * z), 2 * (y * z + w * x)},
+						{2 * (x * z + w * y), 2 * (y * z - w * x), 1 - 2 * (x * x + y * y)}}};
+					position = {pose->trans[0], pose->trans[1], pose->trans[2]};
+				}
 			}
 
 			extraction::scriptable_effect result;
