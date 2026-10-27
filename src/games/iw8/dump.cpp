@@ -9,6 +9,7 @@
 #include "zone/loader.hpp"
 #include "zone/writer.hpp"
 #include "neutral/image.hpp"
+#include "neutral/lighting.hpp"
 #include "neutral/rumble.hpp"
 #include "neutral/text.hpp"
 #include "neutral/xanim.hpp"
@@ -253,7 +254,7 @@ namespace zonetool::iw8
 		// The neutral data of an asset that has a neutral adapter (neutral/*.hpp).
 		using neutral_data = std::variant<asset_data::localize_entry, asset_data::net_const_strings, asset_data::raw_file,
 			asset_data::string_table, asset_data::rumble_graph, asset_data::rumble_info, neutral::image_source,
-			neutral::xanim_source>;
+			neutral::xanim_source, neutral::light_def_source, neutral::grading_clut_source>;
 
 		template <typename T>
 		std::optional<neutral_data> accepted(std::expected<T, std::string> value, const char* kind, std::string* kept)
@@ -299,6 +300,10 @@ namespace zonetool::iw8
 				}
 
 				return std::nullopt;
+			case ASSET_TYPE_LIGHT_DEF:
+				return neutral::to_neutral(*static_cast<const GfxLightDef*>(header));
+			case ASSET_TYPE_GRADING_CLUT:
+				return neutral::to_neutral(*static_cast<const GfxGradingClut*>(header));
 			case ASSET_TYPE_STRINGTABLE:
 				return accepted(neutral::to_neutral(*static_cast<const StringTable*>(header)), "string table", kept);
 			case ASSET_TYPE_XANIMPARTS:
@@ -346,48 +351,64 @@ namespace zonetool::iw8
 			}
 
 			zone_memory memory(std::max<std::size_t>(size, 1));
-			std::map<void*, void*> rebuilt;
-			// A rumble points to its graphs: the graphs of the zone (rebuilt when they are held) come first.
-			std::map<std::string, RumbleGraph*> graphs;
+			// The header of each asset of the zone by type and definition name (a reference stub without its comma).
+			std::map<asset_key, void*> headers;
 			for (const auto& asset : zone.assets)
 			{
-				if (asset.type == ASSET_TYPE_RUMBLE_GRAPH)
-				{
-					auto* header = static_cast<RumbleGraph*>(asset.header);
-					if (const auto found = data.find(asset.header); found != data.end() && !rebuilt.contains(asset.header))
-					{
-						rebuilt.emplace(asset.header, neutral::from_neutral(std::get<asset_data::rumble_graph>(found->second), memory));
-					}
-
-					graphs.try_emplace(asset_name(asset.type, header), static_cast<RumbleGraph*>(rebuilt.contains(asset.header)
-						? rebuilt.at(asset.header) : asset.header));
-				}
+				auto name = asset_name(asset.type, asset.header);
+				headers.try_emplace({asset.type, name.starts_with(',') ? name.substr(1) : name}, asset.header);
 			}
 
-			const auto resolve = [&graphs](const std::string& name) -> RumbleGraph*
+			// An asset that a rebuilt asset points to is rebuilt first when it has neutral data.
+			std::map<void*, void*> rebuilt;
+			std::function<void*(void*)> rebuild;
+			const neutral::asset_resolver resolve = [&](const std::int32_t type, const std::string& name) -> void*
 			{
-				const auto found = graphs.find(name);
-				return found != graphs.end() ? found->second : nullptr;
+				const auto found = headers.find({type, name});
+				return found != headers.end() ? rebuild(found->second) : nullptr;
 			};
 
-			for (const auto& [header, value] : data)
+			const auto resolve_graph = [&resolve](const std::string& name)
 			{
-				if (rebuilt.contains(header))
+				return static_cast<RumbleGraph*>(resolve(ASSET_TYPE_RUMBLE_GRAPH, name));
+			};
+
+			rebuild = [&](void* header) -> void*
+			{
+				const auto value = data.find(header);
+				if (value == data.end())
 				{
-					continue;
+					return header;
 				}
 
-				rebuilt.emplace(header, std::visit([&](const auto& item) -> void*
+				if (const auto found = rebuilt.find(header); found != rebuilt.end())
 				{
-					if constexpr (std::is_same_v<std::decay_t<decltype(item)>, asset_data::rumble_info>)
+					return found->second;
+				}
+
+				auto* result = std::visit([&](const auto& item) -> void*
+				{
+					using type = std::decay_t<decltype(item)>;
+					if constexpr (std::is_same_v<type, asset_data::rumble_info>)
 					{
-						return neutral::from_neutral(item, memory, resolve);
+						return neutral::from_neutral(item, memory, resolve_graph);
+					}
+					else if constexpr (requires { neutral::from_neutral(item, resolve, memory); })
+					{
+						return neutral::from_neutral(item, resolve, memory);
 					}
 					else
 					{
 						return neutral::from_neutral(item, memory);
 					}
-				}, value));
+				}, value->second);
+				rebuilt.emplace(header, result);
+				return result;
+			};
+
+			for (const auto& [header, value] : data)
+			{
+				rebuild(header);
 			}
 
 			const auto replace = [&rebuilt](std::vector<zone_asset> assets)
