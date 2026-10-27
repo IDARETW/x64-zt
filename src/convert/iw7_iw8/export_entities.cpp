@@ -405,6 +405,41 @@ namespace zonetool::convert::iw7_iw8
 						if (anim && anim->name)
 						{
 							states.push_back({part.name ? part.name : "", state.base.name ? state.base.name : "", anim, s == 0});
+							auto& result = states.back();
+							result.event = &event.data.animation;
+							auto* current = result.event;
+							auto* current_anim = anim;
+							std::set<const iw7::ScriptableEventAnimationDef*> visited;
+							const auto supported = [](const iw7::ScriptableEventAnimationDef& value)
+							{
+								return value.stateful && value.clientOnlyInMP && !value.overrideAnimation && !value.pauseOnExit &&
+									value.startTimeMin == 0.0f && value.startTimeMax == 0.0f && !value.startTimeNormalized &&
+									value.playbackRateMin == 1.0f && value.playbackRateMax == 1.0f && value.blendTime == 0.0f;
+							};
+							const auto label = std::string(def.name ? def.name : "<unnamed>");
+							while (current->eventAtEndCount)
+							{
+								// Replay's script-mover path below supports a sequential, non-looping animation
+								// followed by one animation with the source's default playback settings.
+								if (!visited.insert(current).second || current->eventAtEndCount != 1 || !current->eventsAtEnd ||
+									(current_anim->flags & 1) || !current_anim->numframes || !std::isfinite(current_anim->framerate) ||
+									current_anim->framerate <= 0.0f || !supported(*current))
+								{
+									throw std::runtime_error("unsupported IW7 Scriptable animation end event: " + label);
+								}
+								const auto& end = current->eventsAtEnd[0];
+								if (end.type != iw7::Scriptable_EventType_Animation || !end.data.animation.animation)
+								{
+									throw std::runtime_error("unsupported IW7 Scriptable animation end action: " + label);
+								}
+								current = &end.data.animation;
+								current_anim = source.resolve(iw7::ASSET_TYPE_XANIMPARTS, current->animation);
+								if (!current_anim || !current_anim->name || !supported(*current))
+								{
+									throw std::runtime_error("unsupported IW7 Scriptable end animation: " + label);
+								}
+								result.on_end.push_back({current, current_anim});
+							}
 							break;
 						}
 					}
