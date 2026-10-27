@@ -11112,6 +11112,7 @@ namespace zonetool::iw7
 		float beamLength;
 		char __pad0[8];
 	}; assert_sizeof(ScriptableEventPFXDef, 104);
+	assert_offsetof(ScriptableEventPFXDef, useTagAngles, 44);
 	assert_offsetof(ScriptableEventPFXDef, effectDef, 56);
 
 	struct ScriptableEventSoundDef

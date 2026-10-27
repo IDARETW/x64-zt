@@ -2354,7 +2354,7 @@ iw7_state( mode, animation, to, time )
 // IW7 kills on exit stop, loop sounds stop). Damage goes to the part of the tag that it hit, else to the first part in a
 // health state; a part that took its state's health moves to its next state, and passes its share of the damage to its
 // parent.
-iw7_mev( t, a, b, c, d )
+iw7_mev( t, a, b, c, d, use_tag_angles )
 {
 	e = spawnstruct();
 	e.t = t;
@@ -2362,6 +2362,7 @@ iw7_mev( t, a, b, c, d )
 	e.b = b;
 	e.c = c;
 	e.d = d;
+	e.use_tag_angles = use_tag_angles;
 	return e;
 }
 
@@ -2496,7 +2497,7 @@ iw7_scriptable_run( part, events )
 		else if ( e.t == "addmodel" )
 			self iw7_scriptable_attach( e.a, e.b );
 		else if ( e.t == "fx" )
-			self thread iw7_scriptable_fx( part, e.a, e.b, e.c, e.d );
+			self thread iw7_scriptable_fx( part, e.a, e.b, e.c, e.d, e.use_tag_angles );
 		else if ( e.t == "sound" )
 			self iw7_scriptable_sound( part, e.a );
 		else if ( e.t == "anim" )
@@ -2599,18 +2600,21 @@ iw7_scriptable_attach( tag, model )
 // The effects play as effect entities at their tags, which every client receives (also one that connects later, as the
 // host's own client does after the first states at the start): playfxontag is an entity event that reaches only the
 // clients in the game at the time. An effect that IW7 kills on exit is deleted when its part leaves the state.
-iw7_scriptable_fx( part, effect, tag, loop, kill )
+iw7_scriptable_fx( part, effect, tag, loop, kill, use_tag_angles )
 {
 	self endon( "iw7_part_" + part );
 	self endon( "death" );
 	if ( !isdefined( level._effect[effect] ) )
 		return;
 	origin = self.origin;
-	angles = self.angles;
+	angles = ( 0, 0, 0 );
+	if ( use_tag_angles )
+		angles = self.angles;
 	if ( tag != "" && isdefined( self gettagorigin( tag, 1 ) ) )
 	{
 		origin = self gettagorigin( tag );
-		angles = self gettagangles( tag );
+		if ( use_tag_angles )
+			angles = self gettagangles( tag );
 	}
 
 	fx = spawnfx( level._effect[effect], origin, anglestoforward( angles ), anglestoup( angles ) );
@@ -3776,8 +3780,9 @@ iw7_destructible_think( model, effect, sound, health )
 							effects.try_emplace(effect, effect);
 							placed.insert(effect);
 							const auto& tags = event.at("tags");
-							args = std::format("{}, {}, {}, {}", quote(effect),
-								quote(tags.empty() ? std::string{} : tags.front().get<std::string>()), num("loop"), num("kill"));
+							args = std::format("{}, {}, {}, {}, {}", quote(effect),
+								quote(tags.empty() ? std::string{} : tags.front().get<std::string>()), num("loop"), num("kill"),
+								num("use_tag_angles"));
 						}
 						else if (t == "sound")
 						{
