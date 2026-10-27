@@ -643,16 +643,11 @@ namespace zonetool::convert::iw7_iw8
 						break;
 					case iw7::Scriptable_EventType_PartDamage:
 					{
-						// IW7's event keeps IW8's layout after its amount (verified on Riot's cars: a destroy flag, then the
-						// damage over time 12 and its interval 0.2), which ScriptableEventPartDamageDef leaves out.
-						const auto* bytes = reinterpret_cast<const std::uint8_t*>(&data.partDamage);
-						float amount{}, dot{}, interval{};
-						std::memcpy(&amount, bytes + 56, sizeof(amount));
-						std::memcpy(&dot, bytes + 64, sizeof(dot));
-						std::memcpy(&interval, bytes + 68, sizeof(interval));
-						const bool destroy = bytes[60] != 0;
-						result.push_back({{"t", "damage"}, {"part", reference_part(data.partDamage.partReference, self)},
-							{"amount", destroy ? 1.0e9f : amount}, {"dot", dot}, {"interval", interval}});
+						const auto& damage = data.partDamage;
+						// The byte-60 interpretation is retained until its source meaning is verified.
+						const auto destroy = damage.unknown60[0] != 0;
+						result.push_back({{"t", "damage"}, {"part", reference_part(damage.partReference, self)},
+							{"amount", destroy ? 1.0e9f : damage.amount}, {"dot", damage.amountDoT}, {"interval", damage.intervalDoT}});
 						break;
 					}
 					case iw7::Scriptable_EventType_SpawnDynent:
