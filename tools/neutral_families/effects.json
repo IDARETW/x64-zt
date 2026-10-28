@@ -1,0 +1,15 @@
+{
+ "family": "effects",
+ "assets": [
+  {
+   "type": "ASSET_TYPE_PARTICLE_SIM_ANIMATION",
+   "struct": "FxParticleSimAnimation",
+   "neutral": "particle_sim_animation",
+   "name": "name"
+  }
+ ],
+ "tokens": {
+  "sfx": "sound",
+  "vfx": "effect"
+ }
+}

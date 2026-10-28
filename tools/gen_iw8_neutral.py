@@ -96,8 +96,8 @@ class Rules:
             field, count = owner.group(1), arguments[-1].strip()
             if re.fullmatch(r'\d+', count):
                 rule = ('literal', int(count))
-            elif re.fullmatch(r'(?:\w+(?:\[\w+\])?\.)*(\w+)', count):
-                rule = ('member', re.fullmatch(r'(?:\w+(?:\[\w+\])?\.)*(\w+)', count).group(1))
+            elif re.fullmatch(r'\w+(?:\[\w+\])?\.(\w+)', count):
+                rule = ('member', re.fullmatch(r'\w+(?:\[\w+\])?\.(\w+)', count).group(1))
             elif re.fullmatch(r'\*reinterpret_cast<const ([\w:]+)\*>\(&\w+(?:\[\w+\])?\)', count):
                 rule = ('first', re.fullmatch(r'\*reinterpret_cast<const ([\w:]+)\*>\(&\w+(?:\[\w+\])?\)', count).group(1))
             elif 'outer_' not in count and 'reinterpret_cast' not in count and re.search(r'\.\w+', count):
@@ -149,6 +149,25 @@ class Rules:
             members = Source.members(self.source.structs[first['type']][1])
         return None
 
+    def expression_applies(self, text, members):
+        """True when every member path of a count expression exists in the owner and ends in a plain scalar."""
+        for first, rest in re.findall(r'\b\w+(?:\[\w+\])?\.(\w+)((?:\.\w+)*)', text):
+            current = members
+            names = [first] + [p for p in rest.split('.') if p]
+            for depth, name in enumerate(names):
+                found = next((m for m in current if m['name'] == name), None)
+                if not found:
+                    return False
+                if depth == len(names) - 1:
+                    if not self.plain_scalar(found):
+                        return False
+                elif found['pointer'] or found['dims'] or found['type'] not in self.source.structs or \
+                        self.source.structs[found['type']][0] != 'struct':
+                    return False
+                else:
+                    current = Source.members(self.source.structs[found['type']][1])
+        return True
+
     def array_count(self, field, members):
         """The count rule of an array member: the first candidate that the owner can satisfy."""
         names = {m['name'] for m in members}
@@ -161,10 +180,8 @@ class Rules:
                 path = self.leading_scalar(members)
                 if path and path[-1]['type'].split('::')[-1] == rule[1].split('::')[-1]:
                     return ('expr', 'data.' + '.'.join(p['name'] for p in path))
-            if rule[0] == 'expr':
-                used = re.findall(r'\b\w+(?:\[\w+\])?\.(\w+)(?:\.\w+)*', rule[1])
-                if all(n in names for n in used) and all(self.plain_scalar(m) for m in members if m['name'] in used):
-                    return rule
+            if rule[0] == 'expr' and self.expression_applies(rule[1], members):
+                return rule
         return None
 
 
