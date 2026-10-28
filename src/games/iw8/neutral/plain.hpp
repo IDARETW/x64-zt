@@ -1,0 +1,274 @@
+#pragma once
+
+#include "resolver.hpp"
+#include "../iw8.hpp"
+#include "../zone/loader.hpp"
+
+#include <zone/zone_memory.hpp>
+
+#include <algorithm>
+#include <array>
+#include <cstring>
+#include <map>
+#include <optional>
+#include <span>
+#include <stdexcept>
+#include <string>
+#include <string_view>
+#include <vector>
+
+// The reads and writes that the generated adapters (tools/gen_iw8_neutral.py) share: strings, character buffers, enum
+// names, arrays with a count, asset references by name, and the members that must hold nothing.
+namespace zonetool::iw8::neutral::plain
+{
+	constexpr std::size_t rounded(const std::size_t size)
+	{
+		return (size + 7) & ~std::size_t(7);
+	}
+
+	// The memory one asset is rebuilt in. Equal strings of an asset are one string, as in the zones the game ships.
+	class context
+	{
+	public:
+		explicit context(zone_memory& memory)
+			: memory_(memory)
+		{
+		}
+
+		template <typename T>
+		T* allocate(const std::size_t count = 1)
+		{
+			return this->memory_.allocate<T>(count);
+		}
+
+		template <typename T>
+		T* manual_allocate(const std::size_t size, const std::size_t count = 1)
+		{
+			return this->memory_.manual_allocate<T>(size, count);
+		}
+
+		const char* text(const std::string& value)
+		{
+			auto& pooled = this->strings_[value];
+			if (!pooled)
+			{
+				auto* copy = this->memory_.manual_allocate<char>(rounded(value.size() + 1));
+				std::memcpy(copy, value.data(), value.size());
+				pooled = copy;
+			}
+
+			return pooled;
+		}
+
+	private:
+		zone_memory& memory_;
+		std::map<std::string, const char*> strings_;
+	};
+
+	inline void fail(const std::string& what, const char* problem)
+	{
+		throw std::runtime_error(what + " " + problem);
+	}
+
+	// A character buffer holds a zero-terminated text; whatever follows the terminator has to be zero.
+	template <std::size_t Size>
+	std::string read_text(const char (&buffer)[Size], const char* what)
+	{
+		const auto* end = static_cast<const char*>(std::memchr(buffer, 0, Size));
+		if (!end)
+		{
+			fail(what, "has no terminator in its character buffer");
+		}
+
+		for (auto* byte = end; byte < buffer + Size; ++byte)
+		{
+			if (*byte)
+			{
+				fail(what, "has data after the terminator of its character buffer");
+			}
+		}
+
+		return std::string(buffer, end);
+	}
+
+	template <std::size_t Size>
+	void write_text(char (&buffer)[Size], const std::string& text, const char* what)
+	{
+		if (text.size() >= Size || text.find('\0') != std::string::npos)
+		{
+			fail(what, "has a text that does not fit its character buffer");
+		}
+
+		std::memset(buffer, 0, Size);
+		std::memcpy(buffer, text.data(), text.size());
+	}
+
+	inline std::optional<std::string> read_string(const char* text)
+	{
+		return text ? std::optional<std::string>(text) : std::nullopt;
+	}
+
+	inline const char* write_string(context& memory, const std::optional<std::string>& text)
+	{
+		return text ? memory.text(*text) : nullptr;
+	}
+
+	inline std::size_t string_size(const std::optional<std::string>& text)
+	{
+		return text ? rounded(text->size() + 1) : 0;
+	}
+
+	inline std::string enum_name(const std::span<const std::pair<std::int64_t, std::string_view>> table, const std::int64_t value,
+		const char* what)
+	{
+		for (const auto& [number, name] : table)
+		{
+			if (number == value)
+			{
+				return std::string(name);
+			}
+		}
+
+		fail(what, "has an enum value without a name");
+		return {};
+	}
+
+	inline std::int64_t enum_value(const std::span<const std::pair<std::int64_t, std::string_view>> table, const std::string& name,
+		const char* what)
+	{
+		for (const auto& [number, text] : table)
+		{
+			if (text == name)
+			{
+				return number;
+			}
+		}
+
+		fail(what, "has an enum name that is not known");
+		return 0;
+	}
+
+	// A pointer member that no stream rule describes holds nothing in a zone; a value would be lost.
+	template <typename T>
+	void require_zero(const T& value, const char* what)
+	{
+		if constexpr (std::is_pointer_v<T>)
+		{
+			if (value)
+			{
+				fail(what, "points at data that no stream rule describes");
+			}
+		}
+		else if constexpr (std::is_array_v<T>)
+		{
+			for (const auto& item : value)
+			{
+				require_zero(item, what);
+			}
+		}
+		else
+		{
+			std::array<std::uint8_t, sizeof(T)> bytes{};
+			std::memcpy(bytes.data(), &value, sizeof(T));
+			if (std::ranges::any_of(bytes, [](const std::uint8_t byte) { return byte != 0; }))
+			{
+				fail(what, "holds a value in a member that is padding or unused");
+			}
+		}
+	}
+
+	// The elements of an array member. The pointer is null when the asset has none; a count without an array is an error.
+	template <typename Element, typename Count, typename Read>
+	auto read_array(const Element* elements, const Count count, const char* what, Read&& read)
+		-> std::optional<std::vector<decltype(read(*elements))>>
+	{
+		if (!elements)
+		{
+			if (count)
+			{
+				fail(what, "has a count and no array");
+			}
+
+			return std::nullopt;
+		}
+
+		std::vector<decltype(read(*elements))> out;
+		out.reserve(static_cast<std::size_t>(count));
+		for (std::size_t index = 0; index < static_cast<std::size_t>(count); ++index)
+		{
+			out.push_back(read(elements[index]));
+		}
+
+		return out;
+	}
+
+	template <typename Element, std::size_t Count>
+	std::optional<std::array<Element, Count>> read_fixed(const Element* elements)
+	{
+		if (!elements)
+		{
+			return std::nullopt;
+		}
+
+		std::array<Element, Count> out;
+		std::copy_n(elements, Count, out.begin());
+		return out;
+	}
+
+	template <typename Element, typename Items, typename Write>
+	Element* write_array(const std::optional<Items>& items, context& memory, Write&& write)
+	{
+		if (!items)
+		{
+			return nullptr;
+		}
+
+		auto* elements = memory.manual_allocate<Element>(rounded(std::max<std::size_t>(items->size(), 1) * sizeof(Element)));
+		for (std::size_t index = 0; index < items->size(); ++index)
+		{
+			write(elements[index], (*items)[index]);
+		}
+
+		return elements;
+	}
+
+	template <typename Count, typename Items>
+	Count count_of(const std::optional<Items>& items)
+	{
+		return items ? static_cast<Count>(items->size()) : Count{};
+	}
+
+	// The definition name of the asset that a pointer holds (a reference stub's name without its comma).
+	inline std::optional<std::string> read_asset(const std::int32_t type, const void* header)
+	{
+		if (!header)
+		{
+			return std::nullopt;
+		}
+
+		const auto* name = get_asset_name(type, header);
+		if (!name || !*name)
+		{
+			fail("an asset reference", "points at an asset without a name");
+		}
+
+		return name[0] == ',' ? name + 1 : name;
+	}
+
+	template <typename Header>
+	Header* resolve_asset(const asset_resolver& resolve, const std::int32_t type, const std::optional<std::string>& name)
+	{
+		if (!name)
+		{
+			return nullptr;
+		}
+
+		auto* header = static_cast<Header*>(resolve(type, *name));
+		if (!header)
+		{
+			fail("the referenced asset " + *name, "is absent");
+		}
+
+		return header;
+	}
+}
