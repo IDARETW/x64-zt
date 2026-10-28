@@ -1,0 +1,31 @@
+{
+ "family": "aiasm",
+ "strip_prefix": "m_",
+ "assets": [
+  {"type": "ASSET_TYPE_ASM", "struct": "ASM", "neutral": "aiasm", "name": "m_szName"},
+  {"type": "ASSET_TYPE_ANIMSET", "struct": "Animset", "neutral": "aianimset", "name": "name"}
+ ],
+ "tagged": [
+  {"owner": "ASM", "member": "u", "tag": "m_Mode", "cases": {"m_AIASM": 0}},
+  {"owner": "ASM_State", "member": "u", "tag": "m_Mode", "tag_owner": "ASM", "cases": {"m_AIState": 0}},
+  {"owner": "Animset", "member": "u", "tag": "mode", "cases": {"m_AIAnimset": 0}},
+  {"owner": "AnimsetState", "member": "u", "tag": "mode", "tag_owner": "Animset", "cases": {"m_AIAnimsetState": 0}},
+  {"owner": "AnimsetAlias", "member": "u", "tag": "mode", "tag_owner": "Animset", "cases": {"m_AIAnimsetAlias": 0}}
+ ],
+ "external": {
+  "ASM_Function_Param": {
+   "neutral": "asm_function_param",
+   "read": "read_asm_function_param",
+   "write": "write_asm_function_param",
+   "size": "size_asm_function_param"
+  }
+ },
+ "runtime": [
+  "AnimsetAnim.anim",
+  "AnimsetState.aimsetRootAnim",
+  "AnimsetBlendtreeAlias.graftAnim",
+  "AnimsetBlendtreeAlias.blendtree"
+ ],
+ "data_includes": ["asm_param_data.hpp"],
+ "adapter_includes": ["asm_param.hpp"]
+}

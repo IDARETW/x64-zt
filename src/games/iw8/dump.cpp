@@ -8,6 +8,7 @@
 #include "zone/asset_files.hpp"
 #include "zone/loader.hpp"
 #include "zone/writer.hpp"
+#include "neutral/aiasm.hpp"
 #include "neutral/behavior.hpp"
 #include "neutral/bones.hpp"
 #include "neutral/content.hpp"
@@ -290,6 +291,8 @@ namespace zonetool::iw8
 			asset_data::fxworld::fx_world,
 			asset_data::fxworld::fx_world_transient_zone,
 			asset_data::behavior::behaviortree,
+			asset_data::aiasm::aiasm,
+			asset_data::aiasm::aianimset,
 			asset_data::path_data::path_data,
 			asset_data::tacgraph::tac_graph,
 			asset_data::bones::dynamicbones,
@@ -556,6 +559,10 @@ namespace zonetool::iw8
 				return accepted(neutral::to_neutral(*static_cast<const PathData*>(header)), "path data", kept);
 			case ASSET_TYPE_TACGRAPH:
 				return accepted(neutral::to_neutral(*static_cast<const TacticalGraphData*>(header)), "tactical graph", kept);
+			case ASSET_TYPE_ASM:
+				return accepted(neutral::to_neutral(*static_cast<const ASM*>(header)), "state machine", kept);
+			case ASSET_TYPE_ANIMSET:
+				return accepted(neutral::to_neutral(*static_cast<const Animset*>(header)), "animation set", kept);
 			case ASSET_TYPE_BEHAVIOR_TREE:
 				return accepted(neutral::to_neutral(*static_cast<const BehaviorTree*>(header)), "behavior tree", kept);
 			case ASSET_TYPE_XANIM_PROCEDURALBONES:

@@ -356,6 +356,7 @@ class Family:
         self.source = Source()
         self.rules = Rules(self.source)
         self.token_names = spec.get('tokens', {})
+        self.strip_prefix = spec.get('strip_prefix', '')
         self.struct_names = spec.get('structs', {})
         self.field_names = spec.get('fields', {})
         self.structs = collections.OrderedDict()
@@ -369,6 +370,7 @@ class Family:
         self.outer_counts = spec.get('outer_counts', False)
         self.count_overrides = spec.get('count_overrides', {})
         self.outer_needed = {}
+        self.reading_owner = None
         self.kept_counts = set(spec.get('kept_counts', []))
         self.data_members = set(spec.get('data_members', []))
         self.prefix_arrays = spec.get('prefix_arrays', {})
@@ -395,6 +397,8 @@ class Family:
     def words(self, name):
         if name.endswith(']'):
             name = name[:name.index('[')] + '_' + name[name.index('[') + 1:-1]
+        if self.strip_prefix and name.startswith(self.strip_prefix):
+            name = name[len(self.strip_prefix):]
         return '_'.join(self.token_names.get(t.lower(), t.lower()) for t in tokens(name))
 
     def struct_name(self, name):
@@ -414,7 +418,7 @@ class Family:
         only mentions the members that have something to stream, has to agree where it names a member."""
         union_type = next(m['type'] for m in Source.members(self.source.structs[entry['owner']][1]) if m['name'] == entry['member'])
         union_members = {m['name']: m['type'] for m in Source.members(self.source.structs[union_type][1])}
-        tag_type = next(m['type'] for m in Source.members(self.source.structs[entry['owner']][1]) if m['name'] == entry['tag'])
+        tag_type = next(m['type'] for m in Source.members(self.source.structs[entry.get('tag_owner', entry['owner'])][1]) if m['name'] == entry['tag'])
         values = self.source.enum_names[tag_type]
         skip = set(entry.get('skip', []))
         cases = {}
@@ -499,8 +503,11 @@ class Family:
                 return {'kind': 'array', 'element': type_name, 'native_element': type_name, 'count': ('indexed', counts)}
         tagged = self.tagged.get((owner, name))
         if tagged:
-            return {'kind': 'tagged', 'tag': tagged['tag'], 'cases': tagged['cases']}
-        if any(owner == o and name == t['tag'] for (o, _), t in self.tagged.items()):
+            if tagged.get('tag_owner'):
+                # The tag is a member of the struct that holds this one: the reader takes that struct, the writer leaves the tag to it.
+                self.outer_needed[owner] = tagged['tag_owner']
+            return {'kind': 'tagged', 'tag': tagged['tag'], 'cases': tagged['cases'], 'tag_owner': tagged.get('tag_owner')}
+        if any(owner == o and name == t['tag'] and not t.get('tag_owner') for (o, _), t in self.tagged.items()):
             return {'kind': 'tag'}
         if PADDING.match(name) and '%s.%s' % (owner, name) not in self.data_members and '*.%s' % name not in self.data_members:
             return {'kind': 'padding'}
@@ -737,6 +744,11 @@ class Family:
                 self.visit(m['type'])
             if c['kind'] in ('enum', 'flags'):
                 self.enums[m['type']] = self.source.enums[m['type']]
+        # A struct that holds one which needs an outer struct above itself hands that struct down.
+        for m, c in self.structs[name]:
+            outer = self.outer_needed.get(m['type']) if c['kind'] in ('struct', 'array') else None
+            if outer and outer != name and self.outer_needed.setdefault(name, outer) != outer:
+                self.problems.append('%s: needs the outer structs %s and %s' % (name, self.outer_needed[name], outer))
         self.path.pop()
 
     # ---- types -----------------------------------------------------------------------------------
@@ -1042,7 +1054,15 @@ class Family:
     def native_type(self, name):
         return name
 
+    def outer_argument(self, child, parent):
+        """The outer struct that the reader of a child takes: the parent's own struct when that is the outer one, otherwise the
+        outer struct that the parent was handed."""
+        if child not in self.outer_needed:
+            return ''
+        return ', native' if self.outer_needed[child] == parent else ', outer'
+
     def read_expr(self, owner, m, c, suffix=''):
+        self.reading_owner = owner
         field = 'native.' + m['name'] + suffix
         what = '"%s.%s"' % (owner, m['name'])
         kind = c['kind']
@@ -1073,7 +1093,7 @@ class Family:
         if kind == 'tagged':
             variant = self.neutral_type(m, c)
             lines = ['[&]() -> %s {' % variant,
-                     'switch (static_cast<std::uint32_t>(native.%s)) {' % c['tag']]
+                     'switch (static_cast<std::uint32_t>(%s.%s)) {' % ('outer' if c.get('tag_owner') else 'native', c['tag'])]
             for value, member, case_type in c['cases']:
                 access = 'native.%s' % m['name'] if case_type in self.synthetic else 'native.%s.%s' % (m['name'], member)
                 fixes = ''
@@ -1097,7 +1117,7 @@ class Family:
         if kind == 'struct':
             reader = 'read_%s' % self.struct_name(m['type'])
             if m['type'] in self.outer_needed and not m['dims']:
-                return '%s(%s, native)' % (reader, field)
+                return '%s(%s%s)' % (reader, field, self.outer_argument(m['type'], owner))
             if m['dims']:
                 return self.loop_read(m, '%s(%s[i])' % (reader, field), self.neutral_type(m, c))
             return '%s(%s)' % (reader, field)
@@ -1197,8 +1217,7 @@ class Family:
         if vector:
             return 'plain::read_scalars<%s, %d>(&%s)' % (vector[0], vector[1], item)
         if type_name in self.source.structs:
-            outer = ', native' if type_name in self.outer_needed else ''
-            return 'read_%s(%s%s)' % (self.struct_name(type_name), item, outer)
+            return 'read_%s(%s%s)' % (self.struct_name(type_name), item, self.outer_argument(type_name, self.reading_owner))
         return item if type_name in SCALARS else 'static_cast<%s>(%s)' % (self.scalar_type(type_name), item)
 
     def loop_read(self, m, element, result_type):
@@ -1237,15 +1256,16 @@ class Family:
                         '\t%s(%s[i], %s[i], resolve, memory);' % (writer, field, data), '}']
             return ['%s(%s, %s, resolve, memory);' % (writer, field, data)]
         if kind == 'tagged':
-            tag_member = next(t for t, _ in self.structs[owner] if t['name'] == c['tag'])
+            tag_member = None if c.get('tag_owner') else next(t for t, _ in self.structs[owner] if t['name'] == c['tag'])
             lines = ['std::visit([&](const auto& value)', '{', '\tusing value_type = std::decay_t<decltype(value)>;',
                      '\tif constexpr (std::is_same_v<value_type, std::monostate>)', '\t{',
                      '\t\tplain::fail("%s.%s", "holds no module");' % (owner, m['name']), '\t}']
             for value, member, case_type in c['cases']:
                 neutral = self.qual + self.struct_name(case_type)
-                lines += ['\telse if constexpr (std::is_same_v<value_type, %s>)' % neutral, '\t{',
-                          '\t\tnative.%s = static_cast<%s>(%d);' % (c['tag'], tag_member['type'], value),
-                          '\t\tplain::module_scope scope(%d);' % value,
+                lines += ['\telse if constexpr (std::is_same_v<value_type, %s>)' % neutral, '\t{']
+                if tag_member:
+                    lines.append('\t\tnative.%s = static_cast<%s>(%d);' % (c['tag'], tag_member['type'], value))
+                lines += ['\t\tplain::module_scope scope(%d);' % value,
                           '\t\twrite_%s(%s, value, resolve, memory);' % (self.struct_name(case_type),
                               'native.%s' % m['name'] if case_type in self.synthetic else 'native.%s.%s' % (m['name'], member))]
                 for pointer, info, flag in self.owner_pointers_of(case_type):
