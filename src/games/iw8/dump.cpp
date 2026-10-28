@@ -17,6 +17,7 @@
 #include "neutral/physics.hpp"
 #include "neutral/plain.hpp"
 #include "neutral/rumble.hpp"
+#include "neutral/scriptable.hpp"
 #include "neutral/shader.hpp"
 #include "neutral/sound.hpp"
 #include "neutral/sound_globals.hpp"
@@ -274,7 +275,7 @@ namespace zonetool::iw8
 			neutral::material_source, neutral::shader_source, asset_data::technique_set, asset_data::physics_fx_shape,
 			asset_data::detail_collision, asset_data::physics_asset, asset_data::sound::sound_bank_resident, asset_data::sound::sound_bank_transient,
 			asset_data::sound_globals::sound_globals, asset_data::world::com_world, asset_data::world::glass_world, asset_data::world::map_edge_list,
-			asset_data::world::nav_mesh, asset_data::world::clip_map, asset_data::world::fog_spline, asset_data::effects::particle_sim_animation, asset_data::vfx::particle_system,
+			asset_data::world::nav_mesh, asset_data::world::clip_map, asset_data::world::fog_spline, asset_data::effects::particle_sim_animation, asset_data::vfx::particle_system, asset_data::scriptable::scriptable,
 			asset_data::impact_table, asset_data::surface_effect_table, asset_data::physics_fx_pipeline,
 			neutral::vector_field_source>;
 
@@ -402,6 +403,8 @@ namespace zonetool::iw8
 				return accepted(neutral::to_neutral(*static_cast<const GfxFogSpline*>(header)), "fog spline", kept);
 			case ASSET_TYPE_VFX:
 				return accepted(neutral::to_neutral(*static_cast<const ParticleSystemDef*>(header)), "particle system", kept);
+			case ASSET_TYPE_SCRIPTABLE:
+				return accepted(neutral::to_neutral(*static_cast<const ScriptableDef*>(header)), "scriptable", kept);
 			case ASSET_TYPE_COMWORLD:
 				return accepted(neutral::to_neutral(*static_cast<const ComWorld*>(header)), "com world", kept);
 			case ASSET_TYPE_GLASSWORLD:
@@ -484,6 +487,8 @@ namespace zonetool::iw8
 
 			// An asset that a rebuilt asset points to is rebuilt first when it has neutral data.
 			std::map<void*, void*> rebuilt;
+			std::map<void*, void*> building;
+			std::set<void*> cyclic;
 			neutral::technique_cache techniques;
 			std::function<void*(void*)> rebuild;
 			const neutral::asset_resolver resolve = [&](const std::int32_t type, const std::string& name) -> void*
@@ -510,6 +515,16 @@ namespace zonetool::iw8
 					return found->second;
 				}
 
+				// A reference that comes back to an asset being rebuilt (a model and the scriptable that destroys it point to
+				// each other) gets the root of that asset: an adapter allocates its root before it resolves references.
+				if (const auto found = building.find(header); found != building.end())
+				{
+					cyclic.insert(header);
+					return found->second;
+				}
+
+				void* const root = memory.cursor();
+				building.emplace(header, root);
 				auto* result = std::visit([&](const auto& item) -> void*
 				{
 					using type = std::decay_t<decltype(item)>;
@@ -530,6 +545,14 @@ namespace zonetool::iw8
 						return neutral::from_neutral(item, memory);
 					}
 				}, value->second);
+				building.erase(header);
+				if (cyclic.contains(header) && result != root)
+				{
+					const auto named = std::ranges::find_if(headers, [&](const auto& entry) { return entry.second == header; });
+					throw std::runtime_error(std::format("{} is in a reference cycle, but its adapter does not allocate its root first",
+						named != headers.end() ? named->first.second : std::string("an asset")));
+				}
+
 				rebuilt.emplace(header, result);
 				return result;
 			};

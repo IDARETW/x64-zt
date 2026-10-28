@@ -1,0 +1,60 @@
+{
+ "family": "scriptable",
+ "assets": [
+  {
+   "type": "ASSET_TYPE_SCRIPTABLE",
+   "struct": "ScriptableDef",
+   "neutral": "scriptable",
+   "name": "name"
+  }
+ ],
+ "tagged": [
+  {
+   "owner": "ScriptableEventDef",
+   "member": "data",
+   "tag": "type",
+   "prefix": "Scriptable_EventType_",
+   "skip": [
+    "anonymous"
+   ],
+   "aliases": {
+    "particleFX": "PFX"
+   }
+  },
+  {
+   "owner": "ScriptableStateDef",
+   "member": "data",
+   "tag": "type",
+   "prefix": "Scriptable_StateType_"
+  },
+  {
+   "owner": "ScriptableEventModelDef",
+   "member": "data",
+   "tag": "dataType",
+   "cases": {
+    "model": 1,
+    "compositeModel": 2
+   }
+  }
+ ],
+ "owner_pointers": [
+  {
+   "owner": "ScriptableEventDef",
+   "member": "base",
+   "owner_member": "base",
+   "flag": "baseIsEventBase"
+  },
+  {
+   "owner": "ScriptableStateDef",
+   "member": "base",
+   "owner_member": "base",
+   "flag": "baseIsStateBase"
+  }
+ ],
+ "shared": [
+  "ScriptableStateBaseDef.events"
+ ],
+ "shared_scopes": [
+  "ScriptablePartDef.states"
+ ]
+}
