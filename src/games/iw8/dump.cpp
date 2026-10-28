@@ -17,6 +17,7 @@
 #include "neutral/image.hpp"
 #include "neutral/impact.hpp"
 #include "neutral/lighting.hpp"
+#include "neutral/mapents.hpp"
 #include "neutral/material.hpp"
 #include "neutral/physics.hpp"
 #include "neutral/physics_events.hpp"
@@ -284,12 +285,14 @@ namespace zonetool::iw8
 			asset_data::impact_table, asset_data::surface_effect_table, asset_data::physics_fx_pipeline,
 			asset_data::fxworld::fx_world,
 			asset_data::fxworld::fx_world_transient_zone,
+			asset_data::mapents::map_ents,
 			asset_data::gfxworld::gfx_world,
 			asset_data::gfxworld::gfx_world_transient_zone,
 			asset_data::physics_events::physics_sfx_event,
 			asset_data::physics_events::physics_vfx_event,
 			asset_data::content::vehicle,
 			asset_data::content::xcam,
+			asset_data::content::dynentitylist,
 			asset_data::content::attachment,
 			asset_data::content::animclass,
 			asset_data::content::luafile,
@@ -540,10 +543,14 @@ namespace zonetool::iw8
 				return accepted(neutral::to_neutral(*static_cast<const FxWorld*>(header)), "effects world", kept);
 			case ASSET_TYPE_FXWORLD_TRANSIENT_ZONE:
 				return accepted(neutral::to_neutral(*static_cast<const FxWorldTransientZone*>(header)), "effects transient zone", kept);
+			case ASSET_TYPE_MAP_ENTS:
+				return accepted(neutral::to_neutral(*static_cast<const MapEnts*>(header)), "map entities", kept);
 			case ASSET_TYPE_GFXWORLD:
 				return accepted(neutral::to_neutral(*static_cast<const GfxWorld*>(header)), "graphics world", kept);
 			case ASSET_TYPE_GFXWORLD_TRANSIENT_ZONE:
 				return accepted(neutral::to_neutral(*static_cast<const GfxWorldTransientZone*>(header)), "graphics transient zone", kept);
+			case ASSET_TYPE_DYNENTITY_LIST:
+				return accepted(neutral::to_neutral(*static_cast<const DynEntityList*>(header)), "dynamic entity list", kept);
 			case ASSET_TYPE_XCAM:
 				return accepted(neutral::to_neutral(*static_cast<const XCam*>(header)), "camera animation", kept);
 			case ASSET_TYPE_SCRIPTABLE:

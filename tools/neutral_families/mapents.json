@@ -1,0 +1,16 @@
+{
+ "family": "mapents",
+ "assets": [
+  {
+   "type": "ASSET_TYPE_MAP_ENTS",
+   "struct": "MapEnts",
+   "neutral": "map_ents",
+   "name": "name"
+  }
+ ],
+ "runtime": [
+  "SpatialPartition_Population.getNodeFromIndex",
+  "SpatialPartition_Population.getIndexFromNode",
+  "SpatialPartition_Population.userData"
+ ]
+}

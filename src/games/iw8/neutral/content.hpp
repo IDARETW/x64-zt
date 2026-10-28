@@ -56,4 +56,8 @@ namespace zonetool::iw8::neutral
 	XCam* from_neutral(const asset_data::content::xcam& data, const asset_resolver& resolve, zone_memory& memory);
 	std::size_t native_size(const asset_data::content::xcam& data);
 
+	std::expected<asset_data::content::dynentitylist, std::string> to_neutral(const DynEntityList& native);
+	DynEntityList* from_neutral(const asset_data::content::dynentitylist& data, const asset_resolver& resolve, zone_memory& memory);
+	std::size_t native_size(const asset_data::content::dynentitylist& data);
+
 }

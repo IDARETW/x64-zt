@@ -359,6 +359,33 @@ inline constexpr std::array<std::pair<std::int64_t, std::string_view>, 3> x_cam_
 	{2, "count_xcam_aperture"},
 }};
 
+inline constexpr std::array<std::pair<std::int64_t, std::string_view>, 3> dyn_entity_basis_names{{
+	{0, "model"},
+	{1, "brush"},
+	{2, "count"},
+}};
+
+inline constexpr std::array<std::pair<std::int64_t, std::string_view>, 8> dyn_entity_type_names{{
+	{0, "invalid"},
+	{1, "clutter"},
+	{2, "clutter_noshadow"},
+	{3, "scriptableinst"},
+	{4, "scriptablephysics"},
+	{5, "linked"},
+	{6, "linked_noshadow"},
+	{7, "count"},
+}};
+
+inline constexpr std::array<std::pair<std::int64_t, std::string_view>, 7> dyn_entity_spatial_activation_mode_names{{
+	{0, "radial_priority_level_low"},
+	{1, "radial_priority_level_high"},
+	{2, "radial_priority_level_count"},
+	{3, "priority_sparse_occluder"},
+	{4, "priority_no_spatial_deactivatable"},
+	{254, "invalid_priority_level"},
+	{255, "priority_level_always_active"},
+}};
+
 struct attachment;
 struct att_ammo_general;
 struct att_ammo_type;
@@ -477,6 +504,11 @@ struct x_cam_frame;
 struct x_cam_camera_switch_params;
 struct x_cam_frame_name;
 struct x_anim_notify_info;
+struct dynentitylist;
+struct dyn_entity_def;
+struct client_entity_link_to_def;
+struct spatial_partition_population_node;
+struct spatial_partition_transient_population;
 
 inline void validate(const attachment& data);
 inline void validate(const att_ammo_general& data);
@@ -596,6 +628,11 @@ inline void validate(const x_cam_frame& data);
 inline void validate(const x_cam_camera_switch_params& data);
 inline void validate(const x_cam_frame_name& data);
 inline void validate(const x_anim_notify_info& data);
+inline void validate(const dynentitylist& data);
+inline void validate(const dyn_entity_def& data);
+inline void validate(const client_entity_link_to_def& data);
+inline void validate(const spatial_partition_population_node& data);
+inline void validate(const spatial_partition_transient_population& data);
 
 struct att_ammo_general
 {
@@ -2902,6 +2939,77 @@ struct x_anim_notify_info
 	bool operator==(const x_anim_notify_info&) const = default;
 };
 
+struct spatial_partition_transient_population
+{
+	std::optional<std::vector<spatial_partition_population_node>> buckets{};
+	std::optional<std::vector<spatial_partition_population_node>> bucket_tails{};
+	std::optional<std::vector<std::uint32_t>> partition_ids{};
+	std::uint32_t current_population{};
+
+	bool operator==(const spatial_partition_transient_population&) const = default;
+};
+
+struct spatial_partition_population_node
+{
+	std::uint32_t spatial_node_next{};
+
+	bool operator==(const spatial_partition_population_node&) const = default;
+};
+
+struct dynentitylist
+{
+	std::optional<std::string> name{};
+	std::uint16_t index{};
+	std::array<std::uint32_t, 2> dyn_ent_count{};
+	std::uint32_t dyn_ent_count_total{};
+	std::optional<std::vector<dyn_entity_def>> dyn_ent_def_list_0{};
+	std::optional<std::vector<dyn_entity_def>> dyn_ent_def_list_1{};
+	std::optional<spatial_partition_transient_population> dyn_ent_spatial_population_0{};
+	std::optional<spatial_partition_transient_population> dyn_ent_spatial_population_1{};
+	spatial_partition_population_node dyn_ent_no_spatial_list{};
+	spatial_partition_population_node dyn_ent_no_spatial_list_tail{};
+
+	bool operator==(const dynentitylist&) const = default;
+};
+
+struct client_entity_link_to_def
+{
+	std::int32_t anchor_index{};
+	std::array<float, 3> origin_offset{};
+	std::array<float, 3> angle_offset{};
+
+	bool operator==(const client_entity_link_to_def&) const = default;
+};
+
+struct dyn_entity_def
+{
+	std::optional<std::string> base_model{};
+	std::optional<client_entity_link_to_def> link_to{};
+	gfx_placement initial_pose{};
+	spatial_partition_population_node spatial_node{};
+	std::uint8_t client_active_mask{};
+	std::string basis{};
+	std::string type{};
+	std::string priority{};
+	std::uint32_t spatial_partition_index{};
+	std::array<std::uint16_t, 2> client_id{};
+	std::uint32_t scriptable_map_index{};
+	std::uint16_t dyn_entity_list_id{};
+	std::uint16_t brush_model{};
+	std::uint16_t scriptable_sub_index{};
+	std::uint16_t transient_index_stored{};
+	std::uint8_t scriptable_max_part_count_or_physics_asset_rigid_bodies_count{}; // the bits of scriptableMaxPartCount or physicsAssetRigidBodiesCount
+	bool spawn_active{};
+	bool no_physics{};
+	bool distant_shadows{};
+	bool no_spot_shadows{};
+	std::uint8_t collision_flags{};
+	bool is_transient{};
+	bool transient_zone_loaded{};
+
+	bool operator==(const dyn_entity_def&) const = default;
+};
+
 inline void validate(const att_ammo_general& data)
 {
 	if (std::ranges::none_of(weap_fire_type_t_names, [&](const auto& entry) { return entry.second == data.fire_type; }))
@@ -4757,6 +4865,120 @@ inline void validate(const x_cam_frame_name& data)
 inline void validate(const x_anim_notify_info& data)
 {
 	(void) data;
+}
+
+inline void validate(const spatial_partition_transient_population& data)
+{
+	if (data.buckets)
+	{
+		for (const auto& item : *data.buckets)
+		{
+			validate(item);
+		}
+	}
+
+	if (data.bucket_tails)
+	{
+		for (const auto& item : *data.bucket_tails)
+		{
+			validate(item);
+		}
+	}
+
+	if ((data.buckets && data.buckets->size() > 0xFFFFFFFFull) || (data.bucket_tails && data.bucket_tails->size() > 0xFFFFFFFFull) || (data.partition_ids && data.partition_ids->size() > 0xFFFFFFFFull) || (!data.buckets != !data.bucket_tails) || (data.buckets && data.bucket_tails && data.buckets->size() != data.bucket_tails->size()) || (!data.buckets != !data.partition_ids) || (data.buckets && data.partition_ids && data.buckets->size() != data.partition_ids->size()))
+	{
+		throw std::runtime_error("spatial_partition_transient_population has arrays that its count does not fit");
+	}
+
+}
+
+inline void validate(const spatial_partition_population_node& data)
+{
+	(void) data;
+}
+
+inline void validate(const dynentitylist& data)
+{
+	if (!data.name)
+	{
+		throw std::runtime_error("dynentitylist has no name");
+	}
+
+	detail::name(*data.name, "dynentitylist");
+
+	if (data.dyn_ent_def_list_0)
+	{
+		for (const auto& item : *data.dyn_ent_def_list_0)
+		{
+			validate(item);
+		}
+	}
+
+	if (data.dyn_ent_def_list_1)
+	{
+		for (const auto& item : *data.dyn_ent_def_list_1)
+		{
+			validate(item);
+		}
+	}
+
+	if (data.dyn_ent_spatial_population_0)
+	{
+		validate(*data.dyn_ent_spatial_population_0);
+	}
+
+	if (data.dyn_ent_spatial_population_1)
+	{
+		validate(*data.dyn_ent_spatial_population_1);
+	}
+
+	validate(data.dyn_ent_no_spatial_list);
+
+	validate(data.dyn_ent_no_spatial_list_tail);
+
+	if (static_cast<std::int64_t>(data.dyn_ent_count[0]) != (data.dyn_ent_def_list_0 ? static_cast<std::int64_t>(data.dyn_ent_def_list_0->size()) : 0))
+	{
+		throw std::runtime_error("dynentitylist.dyn_ent_def_list_0 has a length that its count does not give");
+	}
+
+	if (static_cast<std::int64_t>(data.dyn_ent_count[1]) != (data.dyn_ent_def_list_1 ? static_cast<std::int64_t>(data.dyn_ent_def_list_1->size()) : 0))
+	{
+		throw std::runtime_error("dynentitylist.dyn_ent_def_list_1 has a length that its count does not give");
+	}
+
+}
+
+inline void validate(const client_entity_link_to_def& data)
+{
+	(void) data;
+}
+
+inline void validate(const dyn_entity_def& data)
+{
+	if (data.link_to)
+	{
+		validate(*data.link_to);
+	}
+
+	validate(data.initial_pose);
+
+	validate(data.spatial_node);
+
+	if (std::ranges::none_of(dyn_entity_basis_names, [&](const auto& entry) { return entry.second == data.basis; }))
+	{
+		throw std::runtime_error("dyn_entity_def.basis names no value");
+	}
+
+	if (std::ranges::none_of(dyn_entity_type_names, [&](const auto& entry) { return entry.second == data.type; }))
+	{
+		throw std::runtime_error("dyn_entity_def.type names no value");
+	}
+
+	if (std::ranges::none_of(dyn_entity_spatial_activation_mode_names, [&](const auto& entry) { return entry.second == data.priority; }))
+	{
+		throw std::runtime_error("dyn_entity_def.priority names no value");
+	}
+
 }
 
 } // namespace content

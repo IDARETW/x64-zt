@@ -116,6 +116,14 @@ class Rules:
                 self.owner_arrays.setdefault((function[-1], call.group(1)), [])
                 if ('literal', 1) not in self.owner_arrays[(function[-1], call.group(1))]:
                     self.owner_arrays[(function[-1], call.group(1))].append(('literal', 1))
+        # `stream_x_ptr_array(stream, &data.member[0], 2)`: each element of the pointer array is one struct.
+        for call in re.finditer(r'stream_(\w+)_ptr_array\(stream, &data\.(\w+)\[0\], (\d+)\);', text):
+            if 'stream_%s_ptr_array' % call.group(1) in self.ptr_array_assets:
+                continue
+            for index in range(int(call.group(3))):
+                entry = self.indexed.setdefault((call.group(2), index), [])
+                if ('literal', 1) not in entry:
+                    entry.append(('literal', 1))
         for call in re.finditer(r'stream\.(?:inline_array|array|elements)\(', text):
             arguments = self.arguments(text, call.end())
             if len(arguments) < 3:
