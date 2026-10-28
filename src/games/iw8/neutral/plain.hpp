@@ -162,19 +162,70 @@ namespace zonetool::iw8::neutral::plain
 		return 0;
 	}
 
-	// The floats of a vector type (a union or a register type): copied as they are, so that a NaN keeps its bits.
-	template <std::size_t Count>
-	std::array<float, Count> read_floats(const void* vector)
+	// A set of flags as the names of the bits that are set; a bit without a name cannot be carried.
+	inline std::vector<std::string> flag_names(const std::span<const std::pair<std::int64_t, std::string_view>> table,
+		std::uint64_t value, const char* what)
 	{
-		std::array<float, Count> out;
+		std::vector<std::string> names;
+		for (const auto& [number, name] : table)
+		{
+			const auto bits = static_cast<std::uint64_t>(number);
+			if (bits && (value & bits) == bits)
+			{
+				names.emplace_back(name);
+				value &= ~bits;
+			}
+		}
+
+		if (value)
+		{
+			fail(what, "has flag bits without a name");
+		}
+
+		return names;
+	}
+
+	inline std::uint64_t flag_value(const std::span<const std::pair<std::int64_t, std::string_view>> table,
+		const std::vector<std::string>& names, const char* what)
+	{
+		std::uint64_t value = 0;
+		for (const auto& name : names)
+		{
+			value |= static_cast<std::uint64_t>(enum_value(table, name, what));
+		}
+
+		return value;
+	}
+
+	// The scalars of a vector type (a union or a register type) or of an overlay: copied as they are, so that a NaN keeps
+	// its bits.
+	template <typename Scalar, std::size_t Count>
+	std::array<Scalar, Count> read_scalars(const void* vector)
+	{
+		std::array<Scalar, Count> out;
 		std::memcpy(out.data(), vector, sizeof(out));
 		return out;
 	}
 
-	template <std::size_t Count>
-	void write_floats(void* vector, const std::array<float, Count>& values)
+	template <typename Scalar, std::size_t Count>
+	void write_scalars(void* vector, const std::array<Scalar, Count>& values)
 	{
 		std::memcpy(vector, values.data(), sizeof(values));
+	}
+
+	// A block of scalars of more than one dimension: the neutral type is nested arrays of the same layout.
+	template <typename Block>
+	Block read_block(const void* block)
+	{
+		Block out;
+		std::memcpy(&out, block, sizeof(out));
+		return out;
+	}
+
+	template <typename Block>
+	void write_block(void* block, const Block& values)
+	{
+		std::memcpy(block, &values, sizeof(values));
 	}
 
 	// A pointer member that no stream rule describes holds nothing in a zone; a value would be lost.

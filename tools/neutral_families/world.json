@@ -12,6 +12,48 @@
    "struct": "GlassWorld",
    "neutral": "glass_world",
    "name": "name"
+  },
+  {
+   "type": "ASSET_TYPE_EDGE_LIST",
+   "struct": "MapEdgeList",
+   "neutral": "map_edge_list",
+   "name": "name"
+  },
+  {
+   "type": "ASSET_TYPE_NAVMESH",
+   "struct": "NavMeshData",
+   "neutral": "nav_mesh",
+   "name": "name"
+  },
+  {
+   "type": "ASSET_TYPE_TACGRAPH",
+   "struct": "TacticalGraphData",
+   "neutral": "tactical_graph_data",
+   "name": "m_Name"
+  },
+  {
+   "type": "ASSET_TYPE_CLIPMAP",
+   "struct": "clipMap_t",
+   "neutral": "clip_map",
+   "name": "name"
+  },
+  {
+   "type": "ASSET_TYPE_MAP_ENTS",
+   "struct": "MapEnts",
+   "neutral": "map_ents",
+   "name": "name"
+  },
+  {
+   "type": "ASSET_TYPE_GFXWORLD_TRANSIENT_ZONE",
+   "struct": "GfxWorldTransientZone",
+   "neutral": "gfx_transient_zone",
+   "name": "name"
+  },
+  {
+   "type": "ASSET_TYPE_FOG_SPLINE",
+   "struct": "GfxFogSpline",
+   "neutral": "fog_spline",
+   "name": "name"
   }
  ],
  "tokens": {},
@@ -20,5 +62,11 @@
   "G_GlassPiece": "glass_piece",
   "G_GlassName": "glass_name"
  },
- "fields": {}
+ "fields": {},
+ "flag_enums": [
+  "PMROctreeFlags"
+ ],
+ "groups": {
+  "edges": 2
+ }
 }
