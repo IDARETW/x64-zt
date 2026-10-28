@@ -270,7 +270,9 @@ namespace zonetool::iw8
 			neutral::xmodel_surfs_source, neutral::decal_volume_material_source, neutral::stream_key_source,
 			neutral::material_source, neutral::shader_source, asset_data::technique_set, asset_data::physics_fx_shape,
 			asset_data::detail_collision, asset_data::physics_asset, asset_data::sound_bank_resident, asset_data::sound_bank_transient,
-			asset_data::sound_globals, asset_data::com_world, asset_data::glass_world, asset_data::impact_table, asset_data::surface_effect_table,
+			asset_data::sound_globals, asset_data::com_world, asset_data::glass_world, asset_data::map_edge_list,
+			asset_data::nav_mesh, asset_data::tactical_graph_data, asset_data::clip_map, asset_data::map_ents, asset_data::gfx_transient_zone,
+			asset_data::fog_spline, asset_data::impact_table, asset_data::surface_effect_table,
 			asset_data::physics_fx_pipeline, neutral::vector_field_source>;
 
 		template <typename T>
@@ -371,6 +373,20 @@ namespace zonetool::iw8
 				return accepted(neutral::to_neutral(*static_cast<const SurfaceFxTable*>(header)), "surface effect table", kept);
 			case ASSET_TYPE_SOUND_GLOBALS:
 				return accepted(neutral::to_neutral(*static_cast<const SndGlobals*>(header)), "sound globals", kept);
+			case ASSET_TYPE_EDGE_LIST:
+				return accepted(neutral::to_neutral(*static_cast<const MapEdgeList*>(header)), "edge list", kept);
+			case ASSET_TYPE_NAVMESH:
+				return accepted(neutral::to_neutral(*static_cast<const NavMeshData*>(header)), "nav mesh", kept);
+			case ASSET_TYPE_TACGRAPH:
+				return accepted(neutral::to_neutral(*static_cast<const TacticalGraphData*>(header)), "tactical graph", kept);
+			case ASSET_TYPE_CLIPMAP:
+				return accepted(neutral::to_neutral(*static_cast<const clipMap_t*>(header)), "clip map", kept);
+			case ASSET_TYPE_MAP_ENTS:
+				return accepted(neutral::to_neutral(*static_cast<const MapEnts*>(header)), "map entities", kept);
+			case ASSET_TYPE_GFXWORLD_TRANSIENT_ZONE:
+				return accepted(neutral::to_neutral(*static_cast<const GfxWorldTransientZone*>(header)), "graphics transient zone", kept);
+			case ASSET_TYPE_FOG_SPLINE:
+				return accepted(neutral::to_neutral(*static_cast<const GfxFogSpline*>(header)), "fog spline", kept);
 			case ASSET_TYPE_COMWORLD:
 				return accepted(neutral::to_neutral(*static_cast<const ComWorld*>(header)), "com world", kept);
 			case ASSET_TYPE_GLASSWORLD:

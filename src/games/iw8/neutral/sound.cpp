@@ -1331,7 +1331,7 @@ namespace zonetool::iw8::neutral
 			data.name = plain::read_text(native.name, "SndCurve.name");
 			data.id = native.id;
 			data.num_points = native.numPoints;
-			data.points = [&] { std::array<std::array<float, 2>, 16> out; for (std::size_t i = 0; i < out.size(); ++i) { out[i] = plain::read_floats<2>(&native.points[i]); } return out; }();
+			data.points = [&] { std::array<std::array<float, 2>, 16> out; for (std::size_t i = 0; i < out.size(); ++i) { out[i] = plain::read_scalars<float, 2>(&native.points[i]); } return out; }();
 			return data;
 		}
 
@@ -1342,7 +1342,7 @@ namespace zonetool::iw8::neutral
 			native.numPoints = data.num_points;
 			for (std::size_t i = 0; i < data.points.size(); ++i)
 			{
-				std::ranges::copy(data.points[i], native.points[i].v);
+				plain::write_scalars(&native.points[i], data.points[i]);
 			}
 		}
 
