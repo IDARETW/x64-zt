@@ -1,0 +1,29 @@
+{
+ "family": "sound",
+ "assets": [
+  {
+   "type": "ASSET_TYPE_SOUND_BANK",
+   "struct": "SndBankResident",
+   "neutral": "sound_bank_resident",
+   "name": "bank.name"
+  },
+  {
+   "type": "ASSET_TYPE_SOUND_BANK_TRANSIENT",
+   "struct": "SndBankTransient",
+   "neutral": "sound_bank_transient",
+   "name": "bank.name"
+  }
+ ],
+ "tokens": {
+  "snd": "sound",
+  "plr": "player",
+  "weap": "weapon",
+  "refl": "reflection",
+  "rvb": "reverb",
+  "vf": "volume_falloff"
+ },
+ "structs": {},
+ "fields": {
+  "SndBank.soundTable": "tables"
+ }
+}
