@@ -4736,6 +4736,7 @@ namespace zonetool::iw8::neutral
 		asset_data::gfx_image_reflection_probe read_gfx_image_reflection_probe(const GfxImageReflectionProbe& native)
 		{
 			asset_data::gfx_image_reflection_probe data;
+			data.total_size = native.totalSize;
 			data.element_count = native.elementCount;
 			data.texture_id = plain::enum_name(asset_data::gfx_texture_id_names, static_cast<std::int64_t>(native.textureId), "GfxImageReflectionProbe.textureId");
 			data.pixels = plain::read_array(native.pixels, native.totalSize, "GfxImageReflectionProbe.pixels", [&](const auto& item) { return item; });
@@ -4744,10 +4745,10 @@ namespace zonetool::iw8::neutral
 
 		void write_gfx_image_reflection_probe(GfxImageReflectionProbe& native, const asset_data::gfx_image_reflection_probe& data, [[maybe_unused]] const asset_resolver& resolve, [[maybe_unused]] plain::context& memory)
 		{
+			native.totalSize = data.total_size;
 			native.elementCount = data.element_count;
 			native.textureId = static_cast<GfxTextureId>(plain::enum_value(asset_data::gfx_texture_id_names, data.texture_id, "GfxImageReflectionProbe.textureId"));
 			native.pixels = plain::write_array<std::uint8_t>(data.pixels, memory, [&](auto& out, const auto& in) { out = in; });
-			native.totalSize = plain::count_of<std::uint32_t>(data.pixels);
 		}
 
 		std::size_t size_gfx_image_reflection_probe([[maybe_unused]] const asset_data::gfx_image_reflection_probe& data)

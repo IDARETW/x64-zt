@@ -1616,6 +1616,7 @@ struct gfx_gpu_light_grid_transient_data
 
 struct gfx_image_reflection_probe
 {
+	std::uint32_t total_size{};
 	std::uint32_t element_count{};
 	std::string texture_id{};
 	std::optional<std::vector<std::uint8_t>> pixels{};
@@ -3855,9 +3856,9 @@ inline void validate(const gfx_image_reflection_probe& data)
 		throw std::runtime_error("gfx_image_reflection_probe.texture_id names no value");
 	}
 
-	if ((data.pixels && data.pixels->size() > 0xFFFFFFFFull))
+	if (static_cast<std::int64_t>(data.total_size) != (data.pixels ? static_cast<std::int64_t>(data.pixels->size()) : 0))
 	{
-		throw std::runtime_error("gfx_image_reflection_probe has arrays that its count does not fit");
+		throw std::runtime_error("gfx_image_reflection_probe.pixels has a length that its count does not give");
 	}
 
 }

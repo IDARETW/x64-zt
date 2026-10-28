@@ -8,6 +8,7 @@
 #include "zone/asset_files.hpp"
 #include "zone/loader.hpp"
 #include "zone/writer.hpp"
+#include "neutral/effects.hpp"
 #include "neutral/fx.hpp"
 #include "neutral/image.hpp"
 #include "neutral/impact.hpp"
@@ -272,7 +273,7 @@ namespace zonetool::iw8
 			asset_data::detail_collision, asset_data::physics_asset, asset_data::sound_bank_resident, asset_data::sound_bank_transient,
 			asset_data::sound_globals, asset_data::com_world, asset_data::glass_world, asset_data::map_edge_list,
 			asset_data::nav_mesh, asset_data::tactical_graph_data, asset_data::clip_map, asset_data::map_ents, asset_data::gfx_transient_zone,
-			asset_data::fog_spline, asset_data::impact_table, asset_data::surface_effect_table,
+			asset_data::fog_spline, asset_data::particle_sim_animation, asset_data::impact_table, asset_data::surface_effect_table,
 			asset_data::physics_fx_pipeline, neutral::vector_field_source>;
 
 		template <typename T>
@@ -373,6 +374,8 @@ namespace zonetool::iw8
 				return accepted(neutral::to_neutral(*static_cast<const SurfaceFxTable*>(header)), "surface effect table", kept);
 			case ASSET_TYPE_SOUND_GLOBALS:
 				return accepted(neutral::to_neutral(*static_cast<const SndGlobals*>(header)), "sound globals", kept);
+			case ASSET_TYPE_PARTICLE_SIM_ANIMATION:
+				return accepted(neutral::to_neutral(*static_cast<const FxParticleSimAnimation*>(header)), "particle simulation animation", kept);
 			case ASSET_TYPE_EDGE_LIST:
 				return accepted(neutral::to_neutral(*static_cast<const MapEdgeList*>(header)), "edge list", kept);
 			case ASSET_TYPE_NAVMESH:
