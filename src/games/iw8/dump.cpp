@@ -8,6 +8,8 @@
 #include "zone/asset_files.hpp"
 #include "zone/loader.hpp"
 #include "zone/writer.hpp"
+#include "neutral/behavior.hpp"
+#include "neutral/bones.hpp"
 #include "neutral/content.hpp"
 #include "neutral/effects.hpp"
 #include "neutral/fx.hpp"
@@ -285,6 +287,9 @@ namespace zonetool::iw8
 			asset_data::impact_table, asset_data::surface_effect_table, asset_data::physics_fx_pipeline,
 			asset_data::fxworld::fx_world,
 			asset_data::fxworld::fx_world_transient_zone,
+			asset_data::behavior::behaviortree,
+			asset_data::bones::dynamicbones,
+			asset_data::bones::proceduralbones,
 			asset_data::mapents::map_ents,
 			asset_data::gfxworld::gfx_world,
 			asset_data::gfxworld::gfx_world_transient_zone,
@@ -543,6 +548,12 @@ namespace zonetool::iw8
 				return accepted(neutral::to_neutral(*static_cast<const FxWorld*>(header)), "effects world", kept);
 			case ASSET_TYPE_FXWORLD_TRANSIENT_ZONE:
 				return accepted(neutral::to_neutral(*static_cast<const FxWorldTransientZone*>(header)), "effects transient zone", kept);
+			case ASSET_TYPE_BEHAVIOR_TREE:
+				return accepted(neutral::to_neutral(*static_cast<const BehaviorTree*>(header)), "behavior tree", kept);
+			case ASSET_TYPE_XANIM_PROCEDURALBONES:
+				return accepted(neutral::to_neutral(*static_cast<const XAnimProceduralBones*>(header)), "procedural bones", kept);
+			case ASSET_TYPE_XANIM_DYNAMICBONES:
+				return accepted(neutral::to_neutral(*static_cast<const XAnimDynamicBones*>(header)), "dynamic bones", kept);
 			case ASSET_TYPE_MAP_ENTS:
 				return accepted(neutral::to_neutral(*static_cast<const MapEnts*>(header)), "map entities", kept);
 			case ASSET_TYPE_GFXWORLD:

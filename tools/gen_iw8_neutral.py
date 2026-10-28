@@ -353,6 +353,7 @@ class Family:
         self.prefix_arrays = spec.get('prefix_arrays', {})
         self.problems = []
         self.synthetic = {}
+        self.aliases = {}
         self.synthetic_member = {}
         self.tagged = {}
         for entry in spec.get('tagged', []):
@@ -402,6 +403,12 @@ class Family:
             result = []
             for member, value in explicit.items():
                 info = union_all[member]
+                if isinstance(value, dict):
+                    # Several tag values share a member: each gets a struct of its own, named by the spec, over the same native struct.
+                    for number, alias in value.items():
+                        self.aliases[alias] = info['type']
+                        result.append((int(number), member, alias))
+                    continue
                 if info['pointer']:
                     synthetic = '%s__%s' % (entry['owner'], member)
                     self.synthetic[synthetic] = union_type
@@ -627,10 +634,17 @@ class Family:
         # Alternatives shorter than the longest share its first bytes: the bits of the longest hold all of them.
         return {'kind': 'overlay', 'bits': max(sizes) * 8, 'alternatives': [a['name'] for a in alternatives]}
 
+    def native_of(self, name):
+        """The Replay struct that an adapter struct reads and writes."""
+        return self.synthetic.get(name) or self.aliases.get(name) or name
+
     def visit(self, name):
-        if name in self.structs or name in self.blocks or self.vector_of(name) or (name not in self.source.structs and name not in self.synthetic):
+        if name in self.structs or name in self.blocks or self.vector_of(name) or (
+                name not in self.source.structs and name not in self.synthetic and name not in self.aliases):
             return
-        if name in self.synthetic:
+        if name in self.aliases:
+            kind, members = 'struct', Source.members(self.source.structs[self.aliases[name]][1])
+        elif name in self.synthetic:
             kind, members = 'struct', [self.synthetic_member[name]]
         else:
             kind, body = self.source.structs[name]
@@ -1358,7 +1372,7 @@ class Family:
               ['#include "%s"' % h for h in self.spec.get('adapter_includes', [])] + ['',
                'namespace zonetool::iw8::neutral', '{', '\tnamespace', '\t{']
         for name in self.structs:
-            short, native = self.struct_name(name), self.synthetic.get(name, name)
+            short, native = self.struct_name(name), self.native_of(name)
             neutral = self.qual + short
             outer = ', const %s& outer' % self.outer_needed[name] if name in self.outer_needed else ''
             out.append('\t\t%s read_%s(const %s& native%s);' % (neutral, short, native, outer))
@@ -1381,7 +1395,7 @@ class Family:
         neutral = self.qual + self.struct_name(name)
         short = self.struct_name(name)
         members = self.structs[name]
-        native_name = self.synthetic.get(name, name)
+        native_name = self.native_of(name)
         outer = ', [[maybe_unused]] const %s& outer' % self.outer_needed[name] if name in self.outer_needed else ''
         read = ['%s read_%s(const %s& native%s)' % (neutral, short, native_name, outer), '{', '\tplain::trace("read_%s");' % short,
                 '\t%s data;' % neutral]
