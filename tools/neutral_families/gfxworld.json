@@ -1,0 +1,53 @@
+{
+ "family": "gfxworld",
+ "assets": [
+  {
+   "type": "ASSET_TYPE_GFXWORLD",
+   "struct": "GfxWorld",
+   "neutral": "gfx_world",
+   "name": "name"
+  },
+  {
+   "type": "ASSET_TYPE_GFXWORLD_TRANSIENT_ZONE",
+   "struct": "GfxWorldTransientZone",
+   "neutral": "gfx_world_transient_zone",
+   "name": "name"
+  }
+ ],
+ "blocks": {
+  "tmat44_t_vec4_t": "std::array<std::array<float, 4>, 4>",
+  "GfxDrawSurf": "std::array<std::uint64_t, 2>"
+ },
+ "prefix_arrays": {
+  "GfxWorldDraw.transientZones": {
+   "count": "transientZoneCount",
+   "asset": "ASSET_TYPE_GFXWORLD_TRANSIENT_ZONE"
+  }
+ },
+ "flag_enums": [
+  "GfxDynamicLightsetGChunkFlags",
+  "GfxImageFlags",
+  "GfxSurfaceFlags",
+  "StaticModelCollectionFlags",
+  "StaticModelFlags"
+ ],
+ "data_members": [
+  "*.reserved"
+ ],
+ "kept_counts": [
+  "*"
+ ],
+ "outer_counts": true,
+ "count_overrides": {
+  "GfxCellTree.aabbTree": {
+   "native": "outer.aabbTreeCounts[&native - outer.aabbTrees].aabbTreeCount",
+   "outer": "GfxWorldDrawCells"
+  }
+ },
+ "scalar_enums": [
+  "GfxStaticModelLightGridVolumeFlags"
+ ],
+ "borrowed": [
+  "GfxAabbTree.smodelIndexes"
+ ]
+}
