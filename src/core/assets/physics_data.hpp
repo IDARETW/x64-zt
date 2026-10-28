@@ -43,6 +43,49 @@ inline std::string havok_tagfile_version(const std::vector<std::uint8_t>& bytes)
 	return std::string(reinterpret_cast<const char*>(bytes.data()) + 16, 8);
 }
 
+// What a physics asset is used for, and how each of its bodies is simulated, by name.
+inline constexpr const char* physics_use_categories[] = {"static_model", "common_entity", "vehicle", "dynent", "entity_or_dynent",
+	"ragdoll", "particle", "custom"};
+inline constexpr const char* physics_simulation_categories[] = {"static", "keyframed_entity", "keyframed_animated",
+	"keyframed_bone_offset", "dynamic_entity", "dynamic_debris", "ragdoll", "vehicle_chassis", "vehicle_chassis_no_force", "custom"};
+
+// A rigid body of a physics asset: how it is simulated and the contents (collision classes) it has.
+struct physics_body
+{
+	std::string simulation_category;
+	std::uint32_t contents{};
+
+	bool operator==(const physics_body&) const = default;
+};
+
+// How many entities of each kind use a physics asset; the game counts them at run time.
+struct physics_usage_counter
+{
+	std::int32_t server_entities{};
+	std::int32_t client_entities{};
+	std::int32_t dynent_entities{};
+
+	bool operator==(const physics_usage_counter&) const = default;
+};
+
+// The physics of a model: the Havok bodies and constraints, how they are used and simulated, and the sound and effect
+// events that they trigger (by asset name).
+struct physics_asset
+{
+	std::string name;
+	havok_tagfile shape;
+	std::string use_category;
+	std::int32_t constraint_count{};
+	// Absent when the asset has no body arrays.
+	std::optional<std::vector<physics_body>> bodies;
+	std::optional<std::vector<std::optional<std::string>>> sound_events;
+	std::optional<std::vector<std::optional<std::string>>> effect_events;
+	physics_usage_counter usage;
+	bool contains_dynamic_bodies{};
+
+	bool operator==(const physics_asset&) const = default;
+};
+
 // The shape of a physics effect and the sound it makes when it hits: the impulse range maps to the volume range.
 struct physics_fx_shape
 {
@@ -87,6 +130,48 @@ inline void validate(const havok_tagfile& data, const std::string& what)
 	if (data.bytes.size() > 0xFFFFFFFFull)
 	{
 		throw std::runtime_error(what + " holds a tagfile larger than 4 GiB");
+	}
+}
+
+inline void validate(const physics_asset& data)
+{
+	detail::name(data.name, "physicsasset");
+	validate(data.shape, "physicsasset " + data.name);
+	const auto fail = [&data](const std::string& what) { throw std::runtime_error("physicsasset " + data.name + " has " + what); };
+	if (std::ranges::find(physics_use_categories, data.use_category) == std::end(physics_use_categories))
+	{
+		fail("an unknown use category");
+	}
+
+	if (data.constraint_count < 0 || (data.bodies && data.bodies->size() > 0x7FFFFFFFull) ||
+		(data.sound_events && data.sound_events->size() > 0x7FFFFFFFull) || (data.effect_events && data.effect_events->size() > 0x7FFFFFFFull))
+	{
+		fail("a count that is negative or beyond its range");
+	}
+
+	if (data.bodies)
+	{
+		for (const auto& body : *data.bodies)
+		{
+			if (std::ranges::find(physics_simulation_categories, body.simulation_category) == std::end(physics_simulation_categories))
+			{
+				fail("a body with an unknown simulation category");
+			}
+		}
+	}
+
+	for (const auto* events : {&data.sound_events, &data.effect_events})
+	{
+		if (*events)
+		{
+			for (const auto& event : **events)
+			{
+				if (event)
+				{
+					detail::name(*event, "physicsasset event");
+				}
+			}
+		}
 	}
 }
 

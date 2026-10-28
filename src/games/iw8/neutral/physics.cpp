@@ -1,6 +1,7 @@
 #include <std_include.hpp>
 #include "physics.hpp"
 #include "../iw8.hpp"
+#include "../zone/loader.hpp"
 
 #include <zone/script_strings.hpp>
 #include <zone/zone_memory.hpp>
@@ -38,6 +39,70 @@ namespace zonetool::iw8::neutral
 			return data;
 		}
 
+		// The definition names of the assets that an array of asset pointers holds (a reference stub's name without its
+		// comma); a null pointer is an empty slot.
+		template <typename Header>
+		std::optional<std::vector<std::optional<std::string>>> read_event_names(const std::int32_t type, Header* const* headers, const std::int32_t count,
+			const char* what)
+		{
+			if (count < 0 || (count && !headers))
+			{
+				throw std::runtime_error(std::string("the physics asset has ") + what + " events and no array");
+			}
+
+			if (!headers)
+			{
+				return std::nullopt;
+			}
+
+			std::vector<std::optional<std::string>> names;
+			for (std::int32_t index = 0; index < count; ++index)
+			{
+				if (!headers[index])
+				{
+					names.emplace_back(std::nullopt);
+					continue;
+				}
+
+				const auto* name = get_asset_name(type, headers[index]);
+				if (!name || !*name)
+				{
+					throw std::runtime_error(std::string("the physics asset has a ") + what + " event without a name");
+				}
+
+				names.emplace_back(name[0] == ',' ? name + 1 : name);
+			}
+
+			return names;
+		}
+
+		template <typename Header>
+		Header** write_event_names(const std::int32_t type, const std::optional<std::vector<std::optional<std::string>>>& names,
+			const asset_resolver& resolve, zone_memory& memory)
+		{
+			if (!names)
+			{
+				return nullptr;
+			}
+
+			auto** headers = memory.manual_allocate<Header*>(rounded(names->size() * sizeof(Header*)));
+			for (std::size_t index = 0; index < names->size(); ++index)
+			{
+				if (!(*names)[index])
+				{
+					continue;
+				}
+
+				headers[index] = static_cast<Header*>(resolve(type, *(*names)[index]));
+				if (!headers[index])
+				{
+					throw std::runtime_error("the physics event asset " + *(*names)[index] + " is absent");
+				}
+			}
+
+			return headers;
+		}
+
 		char* write_tagfile(const asset_data::havok_tagfile& data, zone_memory& memory)
 		{
 			if (data.bytes.empty())
@@ -49,6 +114,100 @@ namespace zonetool::iw8::neutral
 			std::memcpy(bytes, data.bytes.data(), data.bytes.size());
 			return bytes;
 		}
+	}
+
+	std::expected<asset_data::physics_asset, std::string> to_neutral(const PhysicsAsset& native)
+	{
+		try
+		{
+			if (!native.name)
+			{
+				throw std::runtime_error("the physics asset has no name");
+			}
+
+			asset_data::physics_asset data;
+			data.name = native.name;
+			data.shape = read_tagfile(native.havokData, native.havokDataSize, "physicsasset " + data.name);
+			if (native.useCategory >= std::size(asset_data::physics_use_categories))
+			{
+				throw std::runtime_error("the physics asset has an unknown use category");
+			}
+
+			data.use_category = asset_data::physics_use_categories[native.useCategory];
+			data.constraint_count = native.numConstraints;
+			if (native.numRigidBodies < 0 || (native.numRigidBodies && (!native.simulationCategories || !native.bodyContents)) ||
+				(!native.simulationCategories != !native.bodyContents))
+			{
+				throw std::runtime_error("the physics asset has bodies that its category and contents arrays do not match");
+			}
+
+			if (native.simulationCategories)
+			{
+				auto& bodies = data.bodies.emplace();
+				for (std::int32_t body = 0; body < native.numRigidBodies; ++body)
+				{
+					if (native.simulationCategories[body] >= std::size(asset_data::physics_simulation_categories))
+					{
+						throw std::runtime_error("the physics asset has a body with an unknown simulation category");
+					}
+
+					bodies.push_back({asset_data::physics_simulation_categories[native.simulationCategories[body]], native.bodyContents[body]});
+				}
+			}
+
+			data.sound_events = read_event_names(ASSET_TYPE_PHYSICS_SFX_EVENT_ASSET, native.sfxEventAssets, native.numSFXEventAssets, "sound");
+			data.effect_events = read_event_names(ASSET_TYPE_PHYSICS_VFX_EVENT_ASSET, native.vfxEventAssets, native.numVFXEventAssets, "effect");
+			data.usage = {native.usageCounter.serverEnt, native.usageCounter.clientEnt, native.usageCounter.dynEnt};
+			data.contains_dynamic_bodies = native.containsDynamicBodies;
+			asset_data::validate(data);
+			return data;
+		}
+		catch (const std::exception& error)
+		{
+			return std::unexpected(error.what());
+		}
+	}
+
+	PhysicsAsset* from_neutral(const asset_data::physics_asset& data, const asset_resolver& resolve, zone_memory& memory)
+	{
+		asset_data::validate(data);
+		auto* native = memory.allocate<PhysicsAsset>();
+		native->name = copy_text(memory, data.name);
+		native->havokDataSize = static_cast<std::uint32_t>(data.shape.bytes.size());
+		native->havokData = write_tagfile(data.shape, memory);
+		native->useCategory = static_cast<PhysicsAssetUseCategory>(
+			std::ranges::find(asset_data::physics_use_categories, data.use_category) - std::begin(asset_data::physics_use_categories));
+		native->numConstraints = data.constraint_count;
+		native->numRigidBodies = data.bodies ? static_cast<std::int32_t>(data.bodies->size()) : 0;
+		if (data.bodies)
+		{
+			native->simulationCategories = memory.manual_allocate<PhysicsAssetSimulationCategory>(
+				rounded(data.bodies->size() * sizeof(PhysicsAssetSimulationCategory)));
+			native->bodyContents = memory.manual_allocate<std::uint32_t>(rounded(data.bodies->size() * sizeof(std::uint32_t)));
+			for (std::size_t body = 0; body < data.bodies->size(); ++body)
+			{
+				native->simulationCategories[body] = static_cast<PhysicsAssetSimulationCategory>(
+					std::ranges::find(asset_data::physics_simulation_categories, (*data.bodies)[body].simulation_category) -
+					std::begin(asset_data::physics_simulation_categories));
+				native->bodyContents[body] = (*data.bodies)[body].contents;
+			}
+		}
+
+		native->numSFXEventAssets = data.sound_events ? static_cast<std::int32_t>(data.sound_events->size()) : 0;
+		native->sfxEventAssets = write_event_names<PhysicsSFXEventAsset>(ASSET_TYPE_PHYSICS_SFX_EVENT_ASSET, data.sound_events, resolve, memory);
+		native->numVFXEventAssets = data.effect_events ? static_cast<std::int32_t>(data.effect_events->size()) : 0;
+		native->vfxEventAssets = write_event_names<PhysicsVFXEventAsset>(ASSET_TYPE_PHYSICS_VFX_EVENT_ASSET, data.effect_events, resolve, memory);
+		native->usageCounter = {data.usage.server_entities, data.usage.client_entities, data.usage.dynent_entities};
+		native->containsDynamicBodies = data.contains_dynamic_bodies;
+		return native;
+	}
+
+	std::size_t native_size(const asset_data::physics_asset& data)
+	{
+		return rounded(sizeof(PhysicsAsset)) + rounded(data.name.size() + 1) + rounded(data.shape.bytes.size()) +
+			(data.bodies ? 2 * rounded(data.bodies->size() * sizeof(std::uint32_t)) : 0) +
+			(data.sound_events ? rounded(data.sound_events->size() * sizeof(void*)) : 0) +
+			(data.effect_events ? rounded(data.effect_events->size() * sizeof(void*)) : 0) + 64;
 	}
 
 	std::expected<asset_data::physics_fx_shape, std::string> to_neutral(const PhysicsFXShape& native)
