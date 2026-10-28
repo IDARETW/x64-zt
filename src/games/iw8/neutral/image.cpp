@@ -161,6 +161,12 @@ namespace zonetool::iw8::neutral
 			return std::nullopt;
 		}
 
+		// The four bytes between freqDomainMetricBias and the streams hold a value per image in stock zones (the byte at +0x35
+		// takes dozens of values), whose meaning is not mapped.
+		static_assert(offsetof(GfxImage, freqDomainMetricBias) == 0x33 && offsetof(GfxImage, streams) == 0x38);
+		std::array<std::uint8_t, 4> metric{};
+		std::memcpy(metric.data(), reinterpret_cast<const std::uint8_t*>(&native) + 0x34, metric.size());
+
 		auto& provenance = source.provenance;
 		provenance.profile = image_profile;
 		provenance.kind = "image";
@@ -168,7 +174,8 @@ namespace zonetool::iw8::neutral
 		provenance.fields = {{"flags", asset_data::hex(rest)}, {"textureId", asset_data::hex(native.textureId)},
 			{"semanticSpecific", asset_data::hex(native.semanticSpecific)}, {"atlasInfo", asset_data::hex(native.atlasInfo)},
 			{"category", asset_data::hex(native.category)}, {"unknown_0x31", asset_data::hex(native.unknown_0x31)},
-			{"freqDomainMetricBias", asset_data::hex(native.freqDomainMetricBias)}, {"streams", asset_data::hex(native.streams)}};
+			{"freqDomainMetricBias", asset_data::hex(native.freqDomainMetricBias)}, {"streams", asset_data::hex(native.streams)},
+			{"unknown_0x34", asset_data::hex(metric)}};
 		asset_data::validate(data);
 		return source;
 	}
@@ -230,6 +237,8 @@ namespace zonetool::iw8::neutral
 			native->freqDomainMetricBias = source->value<char>("freqDomainMetricBias");
 			const auto streams = source->value<std::array<GfxImageStreamData, std::size(native->streams)>>("streams");
 			std::ranges::copy(streams, native->streams);
+			const auto metric = source->value<std::array<std::uint8_t, 4>>("unknown_0x34");
+			std::memcpy(reinterpret_cast<std::uint8_t*>(native) + 0x34, metric.data(), metric.size());
 		}
 
 		native->flags = static_cast<GfxImageFlags>(native_flags);
