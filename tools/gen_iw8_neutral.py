@@ -76,10 +76,17 @@ class Rules:
     def __init__(self, source):
         self.source = source
         text = open(STREAMS, encoding='utf-8').read()
+        self.ptr_array_assets = {}
+        for helper in re.finditer(r'void (stream_\w+_ptr_array)\(Stream& stream, [^)]*\)\n\t\t\{\n(.*?)\n\t\t\}', text, re.S):
+            asset = re.search(r'stream\.asset\((ASSET_TYPE_\w+), data\[', helper.group(2))
+            if asset:
+                self.ptr_array_assets[helper.group(1)] = asset.group(1)
         self.strings = set()
         self.assets = {}
         self.arrays = {}
         self.element_sizes = {}
+        self.asset_arrays = {}
+        self.referenced = set()
         member = r'(?:\w+(?:\[\w+\])?\.)*?(\w+)'
         for m in re.finditer(r'stream\.string\(' + member + r'\);', text):
             self.strings.add(m.group(1))
@@ -106,6 +113,18 @@ class Rules:
                 continue
             if rule not in self.arrays.setdefault(field, []):
                 self.arrays[field].append(rule)
+            self.referenced.update(re.findall(r'\.(\w+)', count))
+            self.referenced.add(count)
+            # `if (const auto items_N = stream.inline_array(...))` followed by a helper over the pointers, or a loop of asset calls
+            variable = re.search(r'const auto (items_\d+) = $', text[max(0, call.start() - 40):call.start()])
+            if variable:
+                following = text[call.end():call.end() + 700]
+                helper = re.search(r'stream_(\w+?)_ptr_array\(stream, ' + variable.group(1) + ',', following)
+                direct = re.search(r'stream\.asset\((ASSET_TYPE_\w+), ' + variable.group(1) + r'\[', following)
+                if direct:
+                    self.asset_arrays[field] = direct.group(1)
+                elif helper and ('stream_%s_ptr_array' % helper.group(1)) in self.ptr_array_assets:
+                    self.asset_arrays[field] = self.ptr_array_assets['stream_%s_ptr_array' % helper.group(1)]
             if call.group(0).startswith('stream.elements') and re.fullmatch(r'\d+', arguments[2]):
                 self.element_sizes.setdefault(field, set()).add(int(arguments[2]))
 
@@ -130,10 +149,10 @@ class Rules:
         out.append(current)
         return [a.strip() for a in out]
 
-    @staticmethod
-    def plain_scalar(m):
-        """A member whose value can stand in a count expression: a number, not a pointer, array or named enum."""
-        return not m['pointer'] and not m['dims'] and m['type'] in SCALARS
+    def plain_scalar(self, m):
+        """A member whose value can stand in a count expression: a number, or an enum that counts are taken from."""
+        return not m['pointer'] and not m['dims'] and (
+            m['type'] in SCALARS or (m['type'] in self.source.enums and m['name'] in self.referenced))
 
     def leading_scalar(self, members):
         """The members that lead to the scalar at offset 0 of a struct: the first member, or through nested structs."""
@@ -171,7 +190,8 @@ class Rules:
     def array_count(self, field, members):
         """The count rule of an array member: the first candidate that the owner can satisfy."""
         names = {m['name'] for m in members}
-        for rule in self.arrays.get(field, []):
+        # A literal count carries no check against the owner: it is tried last.
+        for rule in sorted(self.arrays.get(field, []), key=lambda r: r[0] == 'literal'):
             if rule[0] == 'literal':
                 return rule
             if rule[0] == 'member' and rule[1] in names:
@@ -196,6 +216,8 @@ class Family:
         self.structs = collections.OrderedDict()
         self.enums = collections.OrderedDict()
         self.overlay_names = {}
+        self.path = []
+        self.runtime = set(spec.get('runtime', []))
         self.spec_flag_enums = set(spec.get('flag_enums', []))
         self.groups = spec.get('groups', {})
         self.problems = []
@@ -221,6 +243,8 @@ class Family:
         name, type_name = m['name'], m['type']
         if PADDING.match(name):
             return {'kind': 'padding'}
+        if '%s.%s' % (owner, name) in self.runtime:
+            return {'kind': 'runtime'}
         if type_name == 'scr_string_t' and not m['pointer']:
             if m['dims']:
                 self.problems.append('%s.%s: an inline array of script strings' % (owner, name))
@@ -238,6 +262,16 @@ class Family:
             if count:
                 return {'kind': 'array', 'element': 'char', 'native_element': 'char', 'count': count}
             return {'kind': 'padding'}
+        if m['pointer'] == 2 and name in self.rules.asset_arrays:
+            count = self.rules.array_count(name, members)
+            if count:
+                return {'kind': 'array', 'element': 'asset|%s|%s' % (self.rules.asset_arrays[name], type_name),
+                        'native_element': type_name + '*', 'count': count}
+        if m['pointer'] == 2 and name not in self.rules.asset_arrays and type_name in self.source.structs and \
+                self.source.structs[type_name][0] == 'struct':
+            count = self.rules.array_count(name, members)
+            if count:
+                return {'kind': 'array', 'element': 'ptr|%s' % type_name, 'native_element': type_name + '*', 'count': count}
         if m['pointer']:
             count = self.rules.array_count(name, members)
             if name in self.rules.assets:
@@ -261,6 +295,8 @@ class Family:
             return {'kind': 'padding'}
         if type_name == 'char' and len(m['dims']) == 1:
             return {'kind': 'text', 'size': m['dims'][0]}
+        if type_name in self.source.enums and self.source.enums[type_name][1] and name in self.rules.referenced:
+            return {'kind': 'scalar'}
         if type_name in self.source.enums and self.source.enums[type_name][1]:
             if type_name in self.spec_flag_enums:
                 return {'kind': 'flags', 'enum': type_name}
@@ -336,6 +372,7 @@ class Family:
         members = Source.members(body)
         classes = [self.classify(name, m, members) for m in members]
         self.structs[name] = list(zip(members, classes))
+        self.path.append(name)
         for m, c in self.structs[name]:
             if c['kind'] == 'overlay':
                 self.overlay_names[(name, m['name'])] = '_or_'.join(self.words(a) for a in c['alternatives'])
@@ -353,10 +390,13 @@ class Family:
                 self.problems.append('%s.%s: its count %s is not in the struct' % (name, m['name'], c['count'][1]))
             if c['kind'] in ('struct',):
                 self.visit(m['type'])
-            if c['kind'] == 'array' and m['type'] in self.source.structs:
+            if c['kind'] == 'array' and c['element'].startswith('ptr|') and m['type'] in self.path:
+                self.problems.append('%s.%s: pointers to %s make the struct contain itself' % (name, m['name'], m['type']))
+            if c['kind'] == 'array' and m['type'] in self.source.structs and not c['element'].startswith('asset|'):
                 self.visit(m['type'])
             if c['kind'] in ('enum', 'flags'):
                 self.enums[m['type']] = self.source.enums[m['type']]
+        self.path.pop()
 
     # ---- types -----------------------------------------------------------------------------------
     KEYWORDS = {'class', 'default', 'delete', 'new', 'operator', 'register', 'template', 'union', 'this', 'not', 'and', 'or',
@@ -379,8 +419,10 @@ class Family:
 
     def element_type(self, type_name):
         """The neutral type of an array element or an inline value of a type."""
-        if type_name in ('scr_string_t', 'char*'):
+        if type_name in ('scr_string_t', 'char*') or type_name.startswith('asset|'):
             return 'std::optional<std::string>'
+        if type_name.startswith('ptr|'):
+            return 'std::optional<%s>' % (self.qual + self.struct_name(type_name.split('|')[1]))
         vector = self.vector_of(type_name)
         if vector:
             return 'std::array<%s, %d>' % vector
@@ -425,7 +467,7 @@ class Family:
 
     def emitted(self, members):
         """The members that become neutral fields: not padding and not a count that an array derives."""
-        return [(m, c) for m, c in members if c['kind'] not in ('padding', 'unknown') and 'counts' not in c]
+        return [(m, c) for m, c in members if c['kind'] not in ('padding', 'unknown', 'runtime') and 'counts' not in c]
 
     def enum_table(self, type_name):
         base, values = self.source.enums[type_name]
@@ -444,7 +486,7 @@ class Family:
                 return
             done.add(name)
             for m, c in self.structs[name]:
-                if c['kind'] in ('struct', 'array') and m['type'] in self.structs:
+                if c['kind'] in ('struct', 'array') and m['type'] in self.structs and not c.get('element', '').startswith('asset|'):
                     visit(m['type'])
             out.append(name)
         for name in self.structs:
@@ -515,9 +557,11 @@ class Family:
                         body.append('\tvalidate(%s);\n' % field)
                 elif False:
                     pass
-                elif c['kind'] == 'array' and m['type'] in self.structs and c['count'] == ('literal', 1):
+                elif c['kind'] == 'array' and c['element'].startswith('ptr|'):
+                    body.append('\tif (%s)\n\t{\n\t\tfor (const auto& item : *%s)\n\t\t{\n\t\t\tif (item)\n\t\t\t{\n\t\t\t\tvalidate(*item);\n\t\t\t}\n\t\t}\n\t}\n' % (field, field))
+                elif c['kind'] == 'array' and m['type'] in self.structs and not c['element'].startswith('asset|') and c['count'] == ('literal', 1):
                     body.append('\tif (%s)\n\t{\n\t\tvalidate(*%s);\n\t}\n' % (field, field))
-                elif c['kind'] == 'array' and m['type'] in self.structs:
+                elif c['kind'] == 'array' and m['type'] in self.structs and not c['element'].startswith('asset|'):
                     body.append('\tif (%s)\n\t{\n\t\tfor (const auto& item : *%s)\n\t\t{\n\t\t\tvalidate(item);\n\t\t}\n\t}\n' % (field, field))
             for m, c in self.emitted(self.structs[name]):
                 if c['kind'] == 'array' and c['count'][0] == 'expr':
@@ -641,6 +685,11 @@ class Family:
         return out
 
     def element_read(self, type_name, item):
+        if type_name.startswith('ptr|'):
+            return 'plain::read_pointee(%s, [&](const auto& pointee) { return read_%s(pointee); })' % (
+                item, self.struct_name(type_name.split('|')[1]))
+        if type_name.startswith('asset|'):
+            return 'plain::read_asset(%s, %s)' % (type_name.split('|')[1], item)
         if type_name == 'scr_string_t':
             return 'plain::read_script_string(%s)' % item
         if type_name == 'char*':
@@ -713,6 +762,13 @@ class Family:
         raise SystemExit('no write for %s' % kind)
 
     def element_write(self, out, source, type_name):
+        if type_name.startswith('ptr|'):
+            target = type_name.split('|')[1]
+            return '%s = plain::write_pointee<%s>(%s, memory, [&](auto& pointee, const auto& value) { write_%s(pointee, value, resolve, memory); });' % (
+                out, target, source, self.struct_name(target))
+        if type_name.startswith('asset|'):
+            _, asset, target = type_name.split('|')
+            return '%s = plain::resolve_asset<%s>(resolve, %s, %s);' % (out, target, asset, source)
         if type_name == 'scr_string_t':
             return '%s = static_cast<scr_string_t>(plain::write_script_string(%s));' % (out, source)
         if type_name == 'char*':
@@ -748,6 +804,10 @@ class Family:
             lines = ['if (%s)' % data, '{', '\tsize += plain::rounded(std::max<std::size_t>(%s->size(), 1) * sizeof(%s));' % (data, native_element)]
             if c['element'] in self.structs:
                 lines += ['\tfor (const auto& item : *%s)' % data, '\t{', '\t\tsize += size_%s(item);' % self.struct_name(c['element']), '\t}']
+            if c['element'].startswith('ptr|'):
+                target = c['element'].split('|')[1]
+                lines += ['\tfor (const auto& item : *%s)' % data, '\t{', '\t\tif (item)', '\t\t{',
+                          '\t\t\tsize += plain::rounded(sizeof(%s)) + size_%s(*item);' % (target, self.struct_name(target)), '\t\t}', '\t}']
             if c['element'] == 'char*':
                 lines += ['\tfor (const auto& item : *%s)' % data, '\t{', '\t\tsize += plain::string_size(item);', '\t}']
             return lines + ['}']
@@ -780,6 +840,8 @@ class Family:
                  '[[maybe_unused]] plain::context& memory)' % (short, name, neutral), '{']
         size = ['std::size_t size_%s([[maybe_unused]] const %s& data)' % (short, neutral), '{', '\tstd::size_t size = 0;']
         for m, c in members:
+            if c['kind'] == 'runtime':
+                continue
             if c['kind'] == 'padding':
                 read.append('\tplain::require_zero(native.%s, "%s.%s");' % (m['name'], name, m['name']))
             elif c['kind'] == 'unknown':

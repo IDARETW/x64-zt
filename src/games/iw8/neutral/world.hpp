@@ -32,21 +32,9 @@ namespace zonetool::iw8::neutral
 	NavMeshData* from_neutral(const asset_data::nav_mesh& data, const asset_resolver& resolve, zone_memory& memory);
 	std::size_t native_size(const asset_data::nav_mesh& data);
 
-	std::expected<asset_data::tactical_graph_data, std::string> to_neutral(const TacticalGraphData& native);
-	TacticalGraphData* from_neutral(const asset_data::tactical_graph_data& data, const asset_resolver& resolve, zone_memory& memory);
-	std::size_t native_size(const asset_data::tactical_graph_data& data);
-
 	std::expected<asset_data::clip_map, std::string> to_neutral(const clipMap_t& native);
 	clipMap_t* from_neutral(const asset_data::clip_map& data, const asset_resolver& resolve, zone_memory& memory);
 	std::size_t native_size(const asset_data::clip_map& data);
-
-	std::expected<asset_data::map_ents, std::string> to_neutral(const MapEnts& native);
-	MapEnts* from_neutral(const asset_data::map_ents& data, const asset_resolver& resolve, zone_memory& memory);
-	std::size_t native_size(const asset_data::map_ents& data);
-
-	std::expected<asset_data::gfx_transient_zone, std::string> to_neutral(const GfxWorldTransientZone& native);
-	GfxWorldTransientZone* from_neutral(const asset_data::gfx_transient_zone& data, const asset_resolver& resolve, zone_memory& memory);
-	std::size_t native_size(const asset_data::gfx_transient_zone& data);
 
 	std::expected<asset_data::fog_spline, std::string> to_neutral(const GfxFogSpline& native);
 	GfxFogSpline* from_neutral(const asset_data::fog_spline& data, const asset_resolver& resolve, zone_memory& memory);

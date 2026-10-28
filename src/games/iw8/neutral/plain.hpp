@@ -282,6 +282,31 @@ namespace zonetool::iw8::neutral::plain
 		return out;
 	}
 
+	// A pointer to a struct that is one slot of an array: null is an empty slot.
+	template <typename Pointee, typename Read>
+	auto read_pointee(const Pointee* pointee, Read&& read) -> std::optional<decltype(read(*pointee))>
+	{
+		if (!pointee)
+		{
+			return std::nullopt;
+		}
+
+		return read(*pointee);
+	}
+
+	template <typename Pointee, typename Item, typename Write>
+	Pointee* write_pointee(const std::optional<Item>& item, context& memory, Write&& write)
+	{
+		if (!item)
+		{
+			return nullptr;
+		}
+
+		auto* pointee = memory.manual_allocate<Pointee>(rounded(sizeof(Pointee)));
+		write(*pointee, *item);
+		return pointee;
+	}
+
 	// A pointer to one object.
 	template <typename Element, typename Read>
 	auto read_single(const Element* element, Read&& read) -> std::optional<decltype(read(*element))>
