@@ -1524,6 +1524,7 @@ namespace zonetool::iw8::neutral
 		{
 			plain::trace("read_static_model_collision_model_list");
 			asset_data::world::static_model_collision_model_list data;
+			data.num_models = native.numModels;
 			data.models = plain::read_array(native.models, native.numModels, "StaticModelCollisionModelList.models", [&](const auto& item) { return read_static_model_collision_model(item); });
 			data.structure_memory_cost = native.structureMemoryCost;
 			return data;
@@ -1531,9 +1532,9 @@ namespace zonetool::iw8::neutral
 
 		void write_static_model_collision_model_list(StaticModelCollisionModelList& native, const asset_data::world::static_model_collision_model_list& data, [[maybe_unused]] const asset_resolver& resolve, [[maybe_unused]] plain::context& memory)
 		{
+			native.numModels = data.num_models;
 			native.models = plain::write_array<StaticModelCollisionModel>(data.models, memory, [&](auto& out, const auto& in) { write_static_model_collision_model(out, in, resolve, memory); });
 			native.structureMemoryCost = data.structure_memory_cost;
-			native.numModels = plain::count_of<std::uint32_t>(data.models);
 		}
 
 		std::size_t size_static_model_collision_model_list([[maybe_unused]] const asset_data::world::static_model_collision_model_list& data)

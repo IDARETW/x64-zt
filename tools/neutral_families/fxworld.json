@@ -1,0 +1,28 @@
+{
+ "family": "fxworld",
+ "assets": [
+  {
+   "type": "ASSET_TYPE_FXWORLD",
+   "struct": "FxWorld",
+   "neutral": "fx_world",
+   "name": "name"
+  },
+  {
+   "type": "ASSET_TYPE_FXWORLD_TRANSIENT_ZONE",
+   "struct": "FxWorldTransientZone",
+   "neutral": "fx_world_transient_zone",
+   "name": "name"
+  }
+ ],
+ "blocks": {
+  "GfxColor": "std::array<std::uint8_t, 4>",
+  "FxGlassPiecePlace": "std::uint32_t",
+  "FxGlassGeometryData": "std::array<std::uint8_t, 4>"
+ },
+ "prefix_arrays": {
+  "FxWorld.transientZones": {
+   "count": "transientZoneCount",
+   "asset": "ASSET_TYPE_FXWORLD_TRANSIENT_ZONE"
+  }
+ }
+}

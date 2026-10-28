@@ -550,6 +550,7 @@ struct clip_map
 
 struct static_model_collision_model_list
 {
+	std::uint32_t num_models{};
 	std::optional<std::vector<static_model_collision_model>> models{};
 	std::uint32_t structure_memory_cost{};
 
@@ -1340,9 +1341,9 @@ inline void validate(const static_model_collision_model_list& data)
 		}
 	}
 
-	if ((data.models && data.models->size() > 0xFFFFFFFFull))
+	if (static_cast<std::int64_t>(data.num_models) != (data.models ? static_cast<std::int64_t>(data.models->size()) : 0))
 	{
-		throw std::runtime_error("static_model_collision_model_list has arrays that its count does not fit");
+		throw std::runtime_error("static_model_collision_model_list.models has a length that its count does not give");
 	}
 
 }

@@ -481,6 +481,64 @@ namespace zonetool::iw8::neutral::plain
 		return memory.shared<Element>(id, [&] { return write_array<Element>(items, memory, write); });
 	}
 
+	// The first `count` elements of a fixed array, whose other elements are zero (a list of assets in an array of the largest
+	// size a zone can hold).
+	template <typename Element, std::size_t Size, typename Read>
+	auto read_prefix(const Element (&elements)[Size], const std::size_t count, const char* what, Read&& read)
+		-> std::optional<std::vector<decltype(read(elements[0]))>>
+	{
+		if (count > Size)
+		{
+			fail(what, "has a count beyond its array");
+		}
+
+		for (std::size_t index = count; index < Size; ++index)
+		{
+			require_zero(elements[index], what);
+		}
+
+		std::vector<decltype(read(elements[0]))> out;
+		out.reserve(count);
+		for (std::size_t index = 0; index < count; ++index)
+		{
+			out.push_back(read(elements[index]));
+		}
+
+		return out;
+	}
+
+	template <typename Element, std::size_t Size, typename Items, typename Write>
+	void write_prefix(Element (&elements)[Size], const std::optional<Items>& items, Write&& write)
+	{
+		if (!items)
+		{
+			return;
+		}
+
+		if (items->size() > Size)
+		{
+			fail("an array", "has more elements than its fixed size");
+		}
+
+		for (std::size_t index = 0; index < items->size(); ++index)
+		{
+			write(elements[index], (*items)[index]);
+		}
+	}
+
+	// An array whose count stays a field: the array may be absent while the count is not (its elements are in another zone).
+	template <typename Element, typename Count, typename Read>
+	auto read_array_if_present(const Element* elements, const Count count, const char* what, Read&& read)
+		-> std::optional<std::vector<decltype(read(*elements))>>
+	{
+		if (!elements)
+		{
+			return std::nullopt;
+		}
+
+		return read_array(elements, count, what, read);
+	}
+
 	template <typename Element, typename Item, typename Write>
 	Element* write_single(const std::optional<Item>& item, context& memory, Write&& write)
 	{
