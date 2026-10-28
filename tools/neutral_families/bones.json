@@ -1,0 +1,42 @@
+{
+ "family": "bones",
+ "assets": [
+  {
+   "type": "ASSET_TYPE_XANIM_DYNAMICBONES",
+   "struct": "XAnimDynamicBones",
+   "neutral": "dynamicbones",
+   "name": "name"
+  },
+  {
+   "type": "ASSET_TYPE_XANIM_PROCEDURALBONES",
+   "struct": "XAnimProceduralBones",
+   "neutral": "proceduralbones",
+   "name": "name"
+  }
+ ],
+ "tagged": [
+  {
+   "owner": "XAnimCollisionShape",
+   "member": "u",
+   "tag": "type",
+   "prefix": "XANIM_COLLISION_SHAPE_TYPE_",
+   "skip": [
+    "count"
+   ]
+  },
+  {
+   "owner": "XAnimConstraint",
+   "member": "u",
+   "tag": "type",
+   "cases": {
+    "positionConstraint": 0,
+    "rotationConstraint": 1,
+    "aimConstraint": 2,
+    "distanceDrivenOffsetConstraint": {
+     "3": "distanceDrivenTranslationOffsetConstraint",
+     "4": "distanceDrivenRotationOffsetConstraint"
+    }
+   }
+  }
+ ]
+}

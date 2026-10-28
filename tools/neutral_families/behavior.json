@@ -1,0 +1,13 @@
+{
+ "family": "behavior",
+ "assets": [
+  {"type": "ASSET_TYPE_BEHAVIOR_TREE", "struct": "BehaviorTree", "neutral": "behaviortree", "name": "name"}
+ ],
+ "tagged": [
+  {"owner": "BehaviorTreeNode", "member": "data", "tag": "type",
+   "cases": {"actionData": 7,
+             "children": {"1": "selectorChildren", "2": "sequenceChildren", "3": "activeSelectorChildren", "4": "activeSequenceChildren",
+                          "5": "parallelChildren", "6": "bsmChildren", "8": "negateChildren", "9": "prefabChildren"}}},
+  {"owner": "BehaviorTreeDecorator", "member": "data", "tag": "type", "prefix": "BT_DEC_TYPE_", "skip": ["count", "invalid"]}
+ ]
+}
