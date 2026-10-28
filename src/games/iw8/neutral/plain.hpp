@@ -57,6 +57,19 @@ namespace zonetool::iw8::neutral::plain
 			return this->memory_.manual_allocate<T>(size, count);
 		}
 
+		// The pointer written for an id of pointer_ids in this asset, or the result of make() when there is none yet.
+		template <typename Native, typename Make>
+		Native* shared(const std::uint32_t id, Make&& make)
+		{
+			auto& written = this->shared_[id];
+			if (!written)
+			{
+				written = make();
+			}
+
+			return static_cast<Native*>(written);
+		}
+
 		char* text(const std::string& value)
 		{
 			auto& pooled = this->strings_[value];
@@ -73,6 +86,43 @@ namespace zonetool::iw8::neutral::plain
 	private:
 		zone_memory& memory_;
 		std::map<std::string, char*> strings_;
+		std::map<std::uint32_t, void*> shared_;
+	};
+
+	// While it lives, the pointers that an asset reads get ids in the order they are met, so that members that point to the
+	// same object (the events that two states share) show it: 0 for no pointer, then 1, 2, ...
+	class pointer_ids
+	{
+	public:
+		pointer_ids()
+			: previous_(current_)
+		{
+			current_ = this;
+		}
+
+		~pointer_ids()
+		{
+			current_ = previous_;
+		}
+
+		pointer_ids(const pointer_ids&) = delete;
+		pointer_ids& operator=(const pointer_ids&) = delete;
+
+		static std::uint32_t of(const void* pointer)
+		{
+			if (!pointer)
+			{
+				return 0;
+			}
+
+			const auto found = current_->ids_.try_emplace(pointer, static_cast<std::uint32_t>(current_->ids_.size() + 1));
+			return found.first->second;
+		}
+
+	private:
+		pointer_ids* previous_;
+		std::map<const void*, std::uint32_t> ids_;
+		static inline pointer_ids* current_ = nullptr;
 	};
 
 	// The type of the module that an event list or a module member is read or written in, for the structs whose meaning
@@ -280,13 +330,6 @@ namespace zonetool::iw8::neutral::plain
 		std::memcpy(block, &values, sizeof(values));
 	}
 
-	// A pointer that should alias a member of its owner and does not: where it points, in bytes from that member.
-	[[noreturn]] inline void fail_alias(const std::string& what, const void* actual, const void* expected)
-	{
-		throw std::runtime_error(what + " has a pointer " + std::to_string(reinterpret_cast<std::intptr_t>(actual) -
-			reinterpret_cast<std::intptr_t>(expected)) + " bytes from the member of its owner that it should be");
-	}
-
 	// A pointer member that no stream rule describes holds nothing in a zone; a value would be lost.
 	template <typename T>
 	void require_zero(const T& value, const char* what)
@@ -424,6 +467,18 @@ namespace zonetool::iw8::neutral::plain
 		}
 
 		return elements;
+	}
+
+	// An array that the members with the same id share: written for the first of them.
+	template <typename Element, typename Items, typename Write>
+	Element* write_shared_array(const std::uint32_t id, const std::optional<Items>& items, context& memory, Write&& write)
+	{
+		if (!items)
+		{
+			return nullptr;
+		}
+
+		return memory.shared<Element>(id, [&] { return write_array<Element>(items, memory, write); });
 	}
 
 	template <typename Element, typename Item, typename Write>

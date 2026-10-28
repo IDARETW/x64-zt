@@ -76,6 +76,13 @@ namespace zonetool
 			return this->duplicate_string(name.data());
 		}
 
+		// Where the next allocation will be: the address of the first object that an adapter allocates is the root of its asset.
+		void* cursor()
+		{
+			std::lock_guard<std::recursive_mutex> g(this->mutex_);
+			return reinterpret_cast<char*>(this->memory_pool_) + this->mem_pos_;
+		}
+
 		template <typename T>
 		T* allocate(std::size_t count = 1)
 		{

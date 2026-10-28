@@ -230,6 +230,7 @@ class Family:
             self.tagged[(entry['owner'], entry['member'])] = dict(entry, cases=self.dispatch_cases(entry))
         self.groups = spec.get('groups', {})
         self.owner_pointers = spec.get('owner_pointers', [])
+        self.shared = set(spec.get('shared', []))
         self.case_owner = {}
         for key, entry in self.tagged.items():
             for _, _, case_type in entry['cases']:
@@ -314,9 +315,6 @@ class Family:
         name, type_name = m['name'], m['type']
         if type_name in self.external and not m['pointer']:
             return {'kind': 'external', 'ext': self.external[type_name]}
-        for alias in self.owner_pointers:
-            if m['pointer'] == 1 and name == alias['member'] and self.case_owner.get(owner) == alias['owner']:
-                return {'kind': 'alias', 'owner_member': alias['owner_member'], 'owner': alias['owner']}
         tagged = self.tagged.get((owner, name))
         if tagged:
             return {'kind': 'tagged', 'tag': tagged['tag'], 'cases': tagged['cases']}
@@ -466,6 +464,25 @@ class Family:
                 return
             members = Source.members(body)
         classes = [self.classify(name, m, members) for m in members]
+        for alias in self.owner_pointers:
+            if self.case_owner.get(name) == alias['owner']:
+                pointer = next((c for m, c in zip(members, classes) if m['name'] == alias['member']), None)
+                if pointer is None or pointer.get('count') != ('literal', 1):
+                    self.problems.append('%s.%s: an owner pointer is not a single object' % (name, alias['member']))
+                    continue
+                pointer['owner_member'] = alias['owner_member']
+                members = members + [{'name': alias['flag'], 'type': 'bool', 'pointer': 0, 'dims': []}]
+                classes = classes + [{'kind': 'owner_flag', 'pointer': alias['member']}]
+        extras = []
+        for m, c in zip(members, classes):
+            if '%s.%s' % (name, m['name']) in self.shared:
+                if c['kind'] != 'array' or c['count'][0] == 'literal':
+                    self.problems.append('%s.%s: a shared member is not an array with a count' % (name, m['name']))
+                    continue
+                c['share_id'] = m['name'] + 'Id'
+                extras.append(({'name': c['share_id'], 'type': 'std::uint32_t', 'pointer': 0, 'dims': []}, {'kind': 'share_id', 'array': m['name']}))
+        members = members + [m for m, _ in extras]
+        classes = classes + [c for _, c in extras]
         self.structs[name] = list(zip(members, classes))
         self.path.append(name)
         for m, c in self.structs[name]:
@@ -512,9 +529,11 @@ class Family:
             return ALIASES.get(self.source.enums[type_name][0], self.source.enums[type_name][0])
         return type_name
 
-    def aliases_of(self, case_type):
-        """The members of a case struct that alias a member of the owner of the tagged union."""
-        return [(m, c) for m, c in self.structs.get(case_type, []) if c['kind'] == 'alias']
+    def owner_pointers_of(self, case_type):
+        """(pointer member, its classification, flag member) of the case struct pointers that may be the owner's own member."""
+        members = self.structs.get(case_type, [])
+        return [(m, c, next(f for f, fc in members if fc['kind'] == 'owner_flag' and fc['pointer'] == m['name']))
+                for m, c in members if 'owner_member' in c]
 
     def external_ns(self):
         return 'asset_data::' if self.qual else ''
@@ -550,6 +569,10 @@ class Family:
         kind = c['kind']
         if kind == 'scalar':
             return self.nest(self.scalar_type(m['type']), m['dims'])
+        if kind == 'owner_flag':
+            return 'bool'
+        if kind == 'share_id':
+            return 'std::uint32_t'
         if kind == 'text':
             return 'std::string'
         if kind in ('string', 'asset', 'script_string'):
@@ -581,7 +604,7 @@ class Family:
 
     def emitted(self, members):
         """The members that become neutral fields: not padding and not a count that an array derives."""
-        return [(m, c) for m, c in members if c['kind'] not in ('padding', 'unknown', 'runtime', 'tag', 'alias') and 'counts' not in c]
+        return [(m, c) for m, c in members if c['kind'] not in ('padding', 'unknown', 'runtime', 'tag') and 'counts' not in c]
 
     def enum_table(self, type_name):
         base, values = self.source.enums[type_name]
@@ -698,6 +721,14 @@ class Family:
                 elif c['kind'] == 'array' and m['type'] in self.structs and not c['element'].startswith('asset|'):
                     body.append('\tif (%s)\n\t{\n\t\tfor (const auto& item : *%s)\n\t\t{\n\t\t\tvalidate(item);\n\t\t}\n\t}\n' % (field, field))
             for m, c in self.emitted(self.structs[name]):
+                if c['kind'] == 'share_id':
+                    array = next(x for x, _ in self.structs[name] if x['name'] == c['array'])
+                    body.append('\tif ((%s == 0) != !%s)\n\t{\n\t\tthrow std::runtime_error("%s has an id without its %s or the reverse");\n\t}\n'
+                                % ('data.' + self.member_name(name, m), 'data.' + self.member_name(name, array), neutral, self.member_name(name, array)))
+                if c['kind'] == 'owner_flag':
+                    pointer = next(x for x, _ in self.structs[name] if x['name'] == c['pointer'])
+                    body.append('\tif (data.%s && data.%s)\n\t{\n\t\tthrow std::runtime_error("%s has a %s that is both the member of its owner and a separate object");\n\t}\n'
+                                % (self.member_name(name, m), self.member_name(name, pointer), neutral, self.member_name(name, pointer)))
                 if c['kind'] == 'array' and c['count'][0] == 'expr':
                     field = 'data.' + self.member_name(name, m)
                     expression = self.expression(name, c['count'][1], 'neutral')
@@ -771,12 +802,12 @@ class Family:
                      'switch (static_cast<std::uint32_t>(native.%s)) {' % c['tag']]
             for value, member, case_type in c['cases']:
                 access = 'native.%s' % m['name'] if case_type in self.synthetic else 'native.%s.%s' % (m['name'], member)
-                check = ''
-                for alias_member, alias in self.aliases_of(case_type):
-                    check += ' if (%s.%s != &native.%s) { plain::fail_alias("%s.%s", %s.%s, &native.%s); }' % (
-                        access, alias_member['name'], alias['owner_member'], owner, m['name'], access, alias_member['name'], alias['owner_member'])
-                lines.append('case %d: { plain::module_scope scope(%d);%s return %s(read_%s(%s)); }' % (
-                    value, value, check, variant, self.struct_name(case_type), access))
+                fixes = ''
+                for pointer, info, flag in self.owner_pointers_of(case_type):
+                    fixes += ' if (%s.%s == &native.%s) { item.%s.reset(); item.%s = true; }' % (
+                        access, pointer['name'], info['owner_member'], self.member_name(case_type, pointer), self.member_name(case_type, flag))
+                lines.append('case %d: { plain::module_scope scope(%d); auto item = read_%s(%s);%s return %s(std::move(item)); }' % (
+                    value, value, self.struct_name(case_type), access, fixes, variant))
             lines.append('default: plain::fail("%s.%s", "has a tag value without a case"); } }()' % (owner, m['name']))
             return ' '.join(lines)
         if kind == 'flags':
@@ -894,8 +925,9 @@ class Family:
                           '\t\tplain::module_scope scope(%d);' % value,
                           '\t\twrite_%s(%s, value, resolve, memory);' % (self.struct_name(case_type),
                               'native.%s' % m['name'] if case_type in self.synthetic else 'native.%s.%s' % (m['name'], member))]
-                for alias_member, alias in self.aliases_of(case_type):
-                    lines.append('\t\tnative.%s.%s.%s = &native.%s;' % (m['name'], member, alias_member['name'], alias['owner_member']))
+                for pointer, info, flag in self.owner_pointers_of(case_type):
+                    lines += ['\t\tif (value.%s)' % self.member_name(case_type, flag), '\t\t{',
+                              '\t\t\tnative.%s.%s.%s = &native.%s;' % (m['name'], member, pointer['name'], info['owner_member']), '\t\t}']
                 lines.append('\t}')
             lines.append('}, %s);' % data)
             return lines
@@ -935,6 +967,10 @@ class Family:
                         '\t%s = memory.manual_allocate<%s>(plain::rounded(%d * sizeof(%s)));' % (field, native_element, count[1], native_element),
                         '\tfor (std::size_t i = 0; i < %d; ++i)' % count[1], '\t{',
                         '\t\t%s' % self.element_write('%s[i]' % field, '(*%s)[i]' % data, c['element']), '\t}', '}']
+            if 'share_id' in c:
+                return ['%s = plain::write_shared_array<%s>(data.%s, %s, memory, [&](auto& out, const auto& in) { %s });' % (
+                    field, native_element, self.member_name(owner, {'name': c['share_id']}), data,
+                    self.element_write('out', 'in', c['element']))]
             return ['%s = plain::write_array<%s>(%s, memory, [&](auto& out, const auto& in) { %s });' % (
                 field, native_element, data, self.element_write('out', 'in', c['element']))]
         raise SystemExit('no write for %s' % kind)
@@ -1049,7 +1085,10 @@ class Family:
                  '[[maybe_unused]] plain::context& memory)' % (short, native_name, neutral), '{']
         size = ['std::size_t size_%s([[maybe_unused]] const %s& data)' % (short, neutral), '{', '\tstd::size_t size = 0;']
         for m, c in members:
-            if c['kind'] in ('runtime', 'tag', 'alias'):
+            if c['kind'] in ('runtime', 'tag', 'owner_flag'):
+                continue
+            if c['kind'] == 'share_id':
+                read.append('\tdata.%s = plain::pointer_ids::of(native.%s);' % (self.member_name(name, m), c['array']))
                 continue
             if c['kind'] == 'padding':
                 read.append('\tplain::require_zero(native.%s, "%s.%s");' % (m['name'], name, m['name']))
@@ -1078,6 +1117,7 @@ class Family:
         native, neutral = asset['struct'], self.family_ns() + asset['neutral']
         return [
             '\tstd::expected<%s, std::string> to_neutral(const %s& native)' % (neutral, native), '\t{', '\t\ttry', '\t\t{',
+            ] + (['\t\t\tplain::pointer_ids ids;'] if self.shared else []) + [
             '\t\t\tauto data = read_%s(native);' % asset['neutral'], '\t\t\tvalidate(data);', '\t\t\treturn data;', '\t\t}',
             '\t\tcatch (const std::exception& error)', '\t\t{', '\t\t\treturn std::unexpected(error.what());', '\t\t}', '\t}', '',
             '\t%s* from_neutral(const %s& data, const asset_resolver& resolve, zone_memory& memory)' % (native, neutral), '\t{',
