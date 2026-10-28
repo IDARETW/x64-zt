@@ -207,66 +207,90 @@ namespace zonetool::iw8::neutral
 			return surface;
 		}
 
-		// Appends the streams of a surface to the shared data and sets the surface's offsets. As in every stock model,
-		// a surface starts on 16 bytes and its streams follow one another without padding: the triangles and their work
-		// region, the vertices, the colors, the second UV and normal transform codes, and the triangle clusters.
-		void write_streams(const asset_data::mesh_surface& surface, XSurface& native, std::vector<std::uint8_t>& data)
+		// The shared data of a set of surfaces: its bytes, and the place of each stream already in it by kind and content.
+		struct shared_buffer
 		{
-			data.resize(rounded(data.size(), 16));
-			const auto stream = [&data](const std::size_t size)
+			std::vector<std::uint8_t> data;
+			std::map<std::pair<char, std::string>, std::uint32_t> streams;
+		};
+
+		// Appends the streams of a surface to the shared data and sets the surface's offsets, as every stock model does: a
+		// stream that equals one of an earlier surface (the same kind and bytes) is not written again; a new triangle stream
+		// starts on 16 bytes and is followed by its work region of the same size; the other streams follow without padding, in
+		// the order of the vertices, the colors, the second UV and normal transform codes, and the triangle clusters.
+		void write_streams(const asset_data::mesh_surface& surface, XSurface& native, shared_buffer& buffer)
+		{
+			// size is the bytes that the stream takes (the triangle stream also takes its work region); bytes is its content.
+			const auto place = [&buffer](const char kind, const std::string& bytes, const std::size_t size, const bool aligned)
 			{
-				const auto offset = data.size();
+				const auto key = std::pair{kind, bytes};
+				if (const auto found = buffer.streams.find(key); found != buffer.streams.end())
+				{
+					return found->second;
+				}
+
+				if (aligned)
+				{
+					buffer.data.resize(rounded(buffer.data.size(), 16));
+				}
+
+				const auto offset = buffer.data.size();
 				if (offset + size > std::numeric_limits<std::uint32_t>::max())
 				{
 					throw std::runtime_error("model surfaces exceed Replay's shared data offsets");
 				}
 
-				data.resize(offset + size);
+				buffer.data.resize(offset + size);
+				std::memcpy(buffer.data.data() + offset, bytes.data(), bytes.size());
+				buffer.streams.emplace(key, static_cast<std::uint32_t>(offset));
 				return static_cast<std::uint32_t>(offset);
 			};
 
-			const auto triangles = surface.triangles.size();
-			native.sharedIndexDataOffset = stream(2 * triangles * triangle_size);
-			for (std::size_t triangle = 0; triangle < triangles; ++triangle)
+			const auto text = [](const auto& values) -> std::string
 			{
-				write_at(data, native.sharedIndexDataOffset + triangle * triangle_size, surface.triangles[triangle]);
-			}
+				return {reinterpret_cast<const char*>(values.data()), values.size() * sizeof(values.front())};
+			};
 
-			native.sharedVertDataOffset = stream(surface.vertices.size() * vertex_size);
+			native.sharedIndexDataOffset = place('i', text(surface.triangles), 2 * surface.triangles.size() * triangle_size, true);
+
+			std::string vertices(surface.vertices.size() * vertex_size, char{});
 			for (std::size_t vertex = 0; vertex < surface.vertices.size(); ++vertex)
 			{
 				const auto& value = surface.vertices[vertex];
-				const auto offset = native.sharedVertDataOffset + vertex * vertex_size;
-				write_at(data, offset, std::uint64_t{value.position[0]} | std::uint64_t{value.position[1]} << 21 | std::uint64_t{value.position[2]} << 42);
-				write_at(data, offset + 8, value.self_visibility);
-				write_at(data, offset + 12, static_cast<std::uint32_t>(xsurf_conv::floatToHalf(value.uv[0]) |
-					std::uint32_t{xsurf_conv::floatToHalf(value.uv[1])} << 16));
-				write_at(data, offset + 16, value.tangent_frame);
+				const auto position = std::uint64_t{value.position[0]} | std::uint64_t{value.position[1]} << 21 | std::uint64_t{value.position[2]} << 42;
+				const auto uv = static_cast<std::uint32_t>(xsurf_conv::floatToHalf(value.uv[0]) | std::uint32_t{xsurf_conv::floatToHalf(value.uv[1])} << 16);
+				auto* at = vertices.data() + vertex * vertex_size;
+				std::memcpy(at, &position, sizeof(position));
+				std::memcpy(at + 8, &value.self_visibility, sizeof(value.self_visibility));
+				std::memcpy(at + 12, &uv, sizeof(uv));
+				std::memcpy(at + 16, &value.tangent_frame, sizeof(value.tangent_frame));
 			}
 
-			const auto codes = [&](const std::optional<std::vector<std::uint32_t>>& values)
+			native.sharedVertDataOffset = place('v', vertices, vertices.size(), false);
+
+			const auto codes = [&](const char kind, const std::optional<std::vector<std::uint32_t>>& values)
 			{
 				if (!values)
 				{
 					return no_stream;
 				}
 
-				const auto offset = stream(values->size() * sizeof(std::uint32_t));
-				std::memcpy(data.data() + offset, values->data(), values->size() * sizeof(std::uint32_t));
-				return offset;
+				const auto bytes = text(*values);
+				return place(kind, bytes, bytes.size(), false);
 			};
 
-			native.sharedColorDataOffset = codes(surface.colors);
-			native.sharedSecondUVDataOffset = codes(surface.second_uv);
-			native.sharedNormalTransformDataOffset = codes(surface.normal_transforms);
+			native.sharedColorDataOffset = codes('c', surface.colors);
+			native.sharedSecondUVDataOffset = codes('u', surface.second_uv);
+			native.sharedNormalTransformDataOffset = codes('n', surface.normal_transforms);
 
-			native.sharedTriClusterDataOffset = stream(surface.clusters.size() * cluster_size);
+			std::string clusters(surface.clusters.size() * cluster_size, char{});
 			for (std::size_t cluster = 0; cluster < surface.clusters.size(); ++cluster)
 			{
-				write_at(data, native.sharedTriClusterDataOffset + cluster * cluster_size, surface.clusters[cluster].bounds);
-				write_at(data, native.sharedTriClusterDataOffset + cluster * cluster_size + 12, surface.clusters[cluster].cone);
+				std::memcpy(clusters.data() + cluster * cluster_size, surface.clusters[cluster].bounds.data(), 12);
+				std::memcpy(clusters.data() + cluster * cluster_size + 12, surface.clusters[cluster].cone.data(), 12);
 			}
 
+			native.sharedTriClusterDataOffset = place('t', clusters, clusters.size(), false);
 			native.sharedTensionAccumTableOffset = no_stream;
 			native.sharedTensionDataOffset = no_stream;
 		}
@@ -343,7 +367,7 @@ namespace zonetool::iw8::neutral
 		native->shared = memory.allocate<XSurfaceShared>();
 		native->shared->flags = source->value<XSurfaceSharedFlags>("sharedFlags");
 
-		std::vector<std::uint8_t> shared;
+		shared_buffer shared;
 		for (std::size_t index = 0; index < data.surfaces.size(); ++index)
 		{
 			const auto& surface = data.surfaces[index];
@@ -395,9 +419,9 @@ namespace zonetool::iw8::neutral
 			}
 		}
 
-		shared.resize(rounded(shared.size(), 16));
-		native->shared->dataSize = static_cast<std::uint32_t>(shared.size());
-		native->shared->data.residentData = copy_array(memory, shared.data(), shared.size());
+		shared.data.resize(rounded(shared.data.size(), 16));
+		native->shared->dataSize = static_cast<std::uint32_t>(shared.data.size());
+		native->shared->data.residentData = copy_array(memory, shared.data.data(), shared.data.size());
 		return native;
 	}
 
