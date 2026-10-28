@@ -256,19 +256,18 @@ namespace zonetool::iw8::neutral
 		native->columnCount = static_cast<std::int32_t>(data.columns);
 		native->rowCount = static_cast<std::int32_t>(data.rows);
 		native->uniqueCellCount = static_cast<std::int32_t>(strings.size());
-		if (!indices.empty())
+		// The arrays are present even without cells, as in every empty stock table: a table without cells keeps zero-length
+		// arrays, and each gets its own address.
+		native->cellIndices = memory.manual_allocate<std::uint16_t>(rounded(std::max<std::size_t>(indices.size() * sizeof(std::uint16_t), 1)));
+		std::ranges::copy(indices, native->cellIndices);
+		native->hashes = memory.manual_allocate<std::int32_t>(rounded(std::max<std::size_t>(strings.size() * sizeof(std::int32_t), 1)));
+		native->strings = memory.manual_allocate<const char*>(rounded(std::max<std::size_t>(strings.size() * sizeof(const char*), 1)));
+		for (std::size_t index = 0; index < strings.size(); ++index)
 		{
-			native->cellIndices = memory.manual_allocate<std::uint16_t>(rounded(indices.size() * sizeof(std::uint16_t)));
-			std::ranges::copy(indices, native->cellIndices);
-			native->hashes = memory.manual_allocate<std::int32_t>(rounded(strings.size() * sizeof(std::int32_t)));
-			native->strings = memory.manual_allocate<const char*>(strings.size() * sizeof(const char*));
-			for (std::size_t index = 0; index < strings.size(); ++index)
+			if (const auto& value = *strings[index])
 			{
-				if (const auto& value = *strings[index])
-				{
-					native->strings[index] = copy_text(memory, *value);
-					native->hashes[index] = string_table_hash(*value);
-				}
+				native->strings[index] = copy_text(memory, *value);
+				native->hashes[index] = string_table_hash(*value);
 			}
 		}
 
@@ -303,7 +302,7 @@ namespace zonetool::iw8::neutral
 			size += sizeof(std::int32_t) + sizeof(const char*) + (cell ? rounded(cell->size() + 1) : 0);
 		}
 
-		return size + 8;
+		return size + 32;
 	}
 
 	std::size_t native_size(const asset_data::raw_file& data)

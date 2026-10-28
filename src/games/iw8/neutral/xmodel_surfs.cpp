@@ -207,12 +207,14 @@ namespace zonetool::iw8::neutral
 			return surface;
 		}
 
-		// Appends the streams of a surface to the shared data, each on 16 bytes, and sets the surface's offsets.
+		// Appends the streams of a surface to the shared data and sets the surface's offsets. As in every stock model,
+		// a surface starts on 16 bytes and its streams follow one another without padding: the triangles and their work
+		// region, the vertices, the colors, the second UV and normal transform codes, and the triangle clusters.
 		void write_streams(const asset_data::mesh_surface& surface, XSurface& native, std::vector<std::uint8_t>& data)
 		{
+			data.resize(rounded(data.size(), 16));
 			const auto stream = [&data](const std::size_t size)
 			{
-				data.resize(rounded(data.size(), 16));
 				const auto offset = data.size();
 				if (offset + size > std::numeric_limits<std::uint32_t>::max())
 				{
@@ -242,20 +244,6 @@ namespace zonetool::iw8::neutral
 				write_at(data, offset + 16, value.tangent_frame);
 			}
 
-			native.sharedTriClusterDataOffset = stream(surface.clusters.size() * cluster_size);
-			for (std::size_t cluster = 0; cluster < surface.clusters.size(); ++cluster)
-			{
-				write_at(data, native.sharedTriClusterDataOffset + cluster * cluster_size, surface.clusters[cluster].bounds);
-				write_at(data, native.sharedTriClusterDataOffset + cluster * cluster_size + 12, surface.clusters[cluster].cone);
-			}
-
-			native.sharedColorDataOffset = no_stream;
-			if (surface.colors)
-			{
-				native.sharedColorDataOffset = stream(surface.colors->size() * sizeof(std::uint32_t));
-				std::memcpy(data.data() + native.sharedColorDataOffset, surface.colors->data(), surface.colors->size() * sizeof(std::uint32_t));
-			}
-
 			const auto codes = [&](const std::optional<std::vector<std::uint32_t>>& values)
 			{
 				if (!values)
@@ -268,8 +256,17 @@ namespace zonetool::iw8::neutral
 				return offset;
 			};
 
+			native.sharedColorDataOffset = codes(surface.colors);
 			native.sharedSecondUVDataOffset = codes(surface.second_uv);
 			native.sharedNormalTransformDataOffset = codes(surface.normal_transforms);
+
+			native.sharedTriClusterDataOffset = stream(surface.clusters.size() * cluster_size);
+			for (std::size_t cluster = 0; cluster < surface.clusters.size(); ++cluster)
+			{
+				write_at(data, native.sharedTriClusterDataOffset + cluster * cluster_size, surface.clusters[cluster].bounds);
+				write_at(data, native.sharedTriClusterDataOffset + cluster * cluster_size + 12, surface.clusters[cluster].cone);
+			}
+
 			native.sharedTensionAccumTableOffset = no_stream;
 			native.sharedTensionDataOffset = no_stream;
 		}
