@@ -10,8 +10,10 @@
 #include "zone/writer.hpp"
 #include "neutral/fx.hpp"
 #include "neutral/image.hpp"
+#include "neutral/impact.hpp"
 #include "neutral/lighting.hpp"
 #include "neutral/material.hpp"
+#include "neutral/physics.hpp"
 #include "neutral/rumble.hpp"
 #include "neutral/shader.hpp"
 #include "neutral/techset.hpp"
@@ -262,8 +264,10 @@ namespace zonetool::iw8
 		using neutral_data = std::variant<asset_data::localize_entry, asset_data::net_const_strings, asset_data::raw_file,
 			asset_data::string_table, asset_data::rumble_graph, asset_data::rumble_info, neutral::image_source,
 			neutral::xanim_source, neutral::light_def_source, neutral::grading_clut_source, neutral::xmodel_source,
-			neutral::xmodel_surfs_source, neutral::decal_volume_material_source, neutral::stream_key_source, neutral::material_source, neutral::shader_source, asset_data::technique_set, asset_data::physics_fx_pipeline,
-			neutral::vector_field_source>;
+			neutral::xmodel_surfs_source, neutral::decal_volume_material_source, neutral::stream_key_source,
+			neutral::material_source, neutral::shader_source, asset_data::technique_set, asset_data::physics_fx_shape,
+			asset_data::detail_collision, asset_data::impact_table, asset_data::surface_effect_table,
+			asset_data::physics_fx_pipeline, neutral::vector_field_source>;
 
 		template <typename T>
 		std::optional<neutral_data> accepted(std::expected<T, std::string> value, const char* kind, std::string* kept)
@@ -357,6 +361,14 @@ namespace zonetool::iw8
 			case ASSET_TYPE_COMPUTESHADER:
 			case ASSET_TYPE_LIBSHADER:
 				return accepted(neutral::to_neutral(*static_cast<const ComputeShader*>(header), type), "shader", kept);
+			case ASSET_TYPE_IMPACT_FX:
+				return accepted(neutral::to_neutral(*static_cast<const FxImpactTable*>(header)), "impact effect table", kept);
+			case ASSET_TYPE_SURFACE_FX:
+				return accepted(neutral::to_neutral(*static_cast<const SurfaceFxTable*>(header)), "surface effect table", kept);
+			case ASSET_TYPE_PHYSICS_FX_SHAPE:
+				return accepted(neutral::to_neutral(*static_cast<const PhysicsFXShape*>(header)), "physics fx shape", kept);
+			case ASSET_TYPE_XMODEL_DETAIL_COLLISION:
+				return accepted(neutral::to_neutral(*static_cast<const XModelDetailCollision*>(header)), "detail collision", kept);
 			case ASSET_TYPE_TECHNIQUE_SET:
 				return accepted(neutral::to_neutral(*static_cast<const MaterialTechniqueSet*>(header)), "technique set", kept);
 			case ASSET_TYPE_MATERIAL:
