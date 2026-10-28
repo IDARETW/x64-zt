@@ -258,7 +258,7 @@ class Family:
         for member, member_type in union_members.items():
             if member in skip:
                 continue
-            wanted = member.lower()
+            wanted = entry.get('aliases', {}).get(member, member).lower()
             found = next((number for name, number in values.items()
                           if name.startswith(entry['prefix']) and name[len(entry['prefix']):].replace('_', '').lower() == wanted), None)
             if found is None:
@@ -266,6 +266,8 @@ class Family:
                 continue
             cases[found] = member
         # the dispatch, where it names a member
+        if not entry.get('dispatch'):
+            return [(value, member, union_members[member]) for value, member in sorted(cases.items())]
         text = open(STREAMS, encoding='utf-8').read()
         first = text.index('void %s(Stream& stream' % entry['dispatch'])
         start = text.index('void %s(Stream& stream' % entry['dispatch'], first + 10)
