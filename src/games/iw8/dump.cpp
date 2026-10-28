@@ -13,6 +13,7 @@
 #include "neutral/lighting.hpp"
 #include "neutral/material.hpp"
 #include "neutral/rumble.hpp"
+#include "neutral/shader.hpp"
 #include "neutral/stream.hpp"
 #include "neutral/text.hpp"
 #include "neutral/xanim.hpp"
@@ -260,7 +261,7 @@ namespace zonetool::iw8
 		using neutral_data = std::variant<asset_data::localize_entry, asset_data::net_const_strings, asset_data::raw_file,
 			asset_data::string_table, asset_data::rumble_graph, asset_data::rumble_info, neutral::image_source,
 			neutral::xanim_source, neutral::light_def_source, neutral::grading_clut_source, neutral::xmodel_source,
-			neutral::xmodel_surfs_source, neutral::decal_volume_material_source, neutral::stream_key_source, neutral::material_source, asset_data::physics_fx_pipeline,
+			neutral::xmodel_surfs_source, neutral::decal_volume_material_source, neutral::stream_key_source, neutral::material_source, neutral::shader_source, asset_data::physics_fx_pipeline,
 			neutral::vector_field_source>;
 
 		template <typename T>
@@ -348,6 +349,13 @@ namespace zonetool::iw8
 				return accepted(neutral::to_neutral(*static_cast<const VectorField*>(header)), "vector field", kept);
 			case ASSET_TYPE_STREAM_KEY:
 				return accepted(neutral::to_neutral(*static_cast<const StreamKey*>(header)), "stream key", kept);
+			case ASSET_TYPE_VERTEXSHADER:
+			case ASSET_TYPE_HULLSHADER:
+			case ASSET_TYPE_DOMAINSHADER:
+			case ASSET_TYPE_PIXELSHADER:
+			case ASSET_TYPE_COMPUTESHADER:
+			case ASSET_TYPE_LIBSHADER:
+				return accepted(neutral::to_neutral(*static_cast<const ComputeShader*>(header), type), "shader", kept);
 			case ASSET_TYPE_MATERIAL:
 				return accepted(neutral::to_neutral(*static_cast<const Material*>(header)), "material", kept);
 			case ASSET_TYPE_DECAL_VOLUME_MATERIAL:
