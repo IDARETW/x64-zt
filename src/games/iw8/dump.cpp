@@ -13,6 +13,7 @@
 #include "neutral/fx.hpp"
 #include "neutral/fxworld.hpp"
 #include "neutral/gameplay.hpp"
+#include "neutral/gfxworld.hpp"
 #include "neutral/image.hpp"
 #include "neutral/impact.hpp"
 #include "neutral/lighting.hpp"
@@ -283,6 +284,8 @@ namespace zonetool::iw8
 			asset_data::impact_table, asset_data::surface_effect_table, asset_data::physics_fx_pipeline,
 			asset_data::fxworld::fx_world,
 			asset_data::fxworld::fx_world_transient_zone,
+			asset_data::gfxworld::gfx_world,
+			asset_data::gfxworld::gfx_world_transient_zone,
 			asset_data::physics_events::physics_sfx_event,
 			asset_data::physics_events::physics_vfx_event,
 			asset_data::content::vehicle,
@@ -536,6 +539,10 @@ namespace zonetool::iw8
 				return accepted(neutral::to_neutral(*static_cast<const FxWorld*>(header)), "effects world", kept);
 			case ASSET_TYPE_FXWORLD_TRANSIENT_ZONE:
 				return accepted(neutral::to_neutral(*static_cast<const FxWorldTransientZone*>(header)), "effects transient zone", kept);
+			case ASSET_TYPE_GFXWORLD:
+				return accepted(neutral::to_neutral(*static_cast<const GfxWorld*>(header)), "graphics world", kept);
+			case ASSET_TYPE_GFXWORLD_TRANSIENT_ZONE:
+				return accepted(neutral::to_neutral(*static_cast<const GfxWorldTransientZone*>(header)), "graphics transient zone", kept);
 			case ASSET_TYPE_SCRIPTABLE:
 				return accepted(neutral::to_neutral(*static_cast<const ScriptableDef*>(header)), "scriptable", kept);
 			case ASSET_TYPE_COMWORLD:

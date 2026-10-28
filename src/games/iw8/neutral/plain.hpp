@@ -108,6 +108,18 @@ namespace zonetool::iw8::neutral::plain
 		pointer_ids(const pointer_ids&) = delete;
 		pointer_ids& operator=(const pointer_ids&) = delete;
 
+		// The id of the pointer and whether this is the first member that points to it.
+		static std::pair<std::uint32_t, bool> claim(const void* pointer)
+		{
+			if (!pointer)
+			{
+				return {0, false};
+			}
+
+			const auto found = current_->ids_.try_emplace(pointer, static_cast<std::uint32_t>(current_->ids_.size() + 1));
+			return {found.first->second, found.second};
+		}
+
 		static std::uint32_t of(const void* pointer)
 		{
 			if (!pointer)
@@ -537,6 +549,37 @@ namespace zonetool::iw8::neutral::plain
 		}
 
 		return read_array(elements, count, what, read);
+	}
+
+	// An array that members with different counts point to: the first member holds it, the others only its id.
+	template <typename Element, typename Count, typename Read>
+	auto read_borrowed(const Element* elements, const Count count, const char* what, Read&& read)
+		-> std::optional<std::vector<decltype(read(*elements))>>
+	{
+		if (!pointer_ids::claim(elements).second)
+		{
+			return std::nullopt;
+		}
+
+		return read_array(elements, count, what, read);
+	}
+
+	template <typename Element, typename Items, typename Write>
+	Element* write_borrowed_array(const std::uint32_t id, const std::optional<Items>& items, context& memory, Write&& write)
+	{
+		if (!id)
+		{
+			return nullptr;
+		}
+
+		return memory.shared<Element>(id, [&]() -> Element* {
+			if (!items)
+			{
+				fail("a borrowed array", "is used before the member that holds it");
+			}
+
+			return write_array<Element>(items, memory, write);
+		});
 	}
 
 	template <typename Element, typename Item, typename Write>
