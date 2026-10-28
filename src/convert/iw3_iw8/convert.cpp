@@ -357,6 +357,7 @@ struct ZoneValidation
 {
     uint32_t assetCount{};
     std::array<uint32_t, ASSET_TYPE_COUNT> typeCounts{};
+    std::vector<std::string> images;
 };
 
 bool validateZoneFile(const std::string &path, ZoneValidation *details = nullptr)
@@ -424,10 +425,10 @@ bool validateZoneFile(const std::string &path, ZoneValidation *details = nullptr
     if (!g_converterLayout)
     {
         // The zones of the x64-zt writer must load with the IW8 zone loader, which reads every asset.
-        std::vector<std::int32_t> types;
+        std::vector<std::pair<std::int32_t, std::string>> assets;
         try
         {
-            types = zonetool::iw8::zone_list_types(path, std::move(bytes));
+            assets = zonetool::iw8::zone_list_assets(path, std::move(bytes));
         }
         catch (const std::exception &e)
         {
@@ -436,7 +437,8 @@ bool validateZoneFile(const std::string &path, ZoneValidation *details = nullptr
         }
 
         std::array<uint32_t, ASSET_TYPE_COUNT> typeCounts{};
-        for (const auto type : types)
+        std::vector<std::string> images;
+        for (const auto &[type, name] : assets)
         {
             if (type < 0 || type >= ASSET_TYPE_COUNT)
             {
@@ -444,12 +446,15 @@ bool validateZoneFile(const std::string &path, ZoneValidation *details = nullptr
                 return false;
             }
             ++typeCounts[type];
+            if (type == ASSET_TYPE_IMAGE)
+                images.push_back(name);
         }
-        info("validate: %s loads with %zu top-level asset(s)", path.c_str(), types.size());
+        info("validate: %s loads with %zu top-level asset(s)", path.c_str(), assets.size());
         if (details)
         {
-            details->assetCount = static_cast<uint32_t>(types.size());
+            details->assetCount = static_cast<uint32_t>(assets.size());
             details->typeCounts = typeCounts;
+            details->images = std::move(images);
         }
         return true;
     }
@@ -618,11 +623,21 @@ bool validatePackage(const std::string &packageDirectory, const std::string &map
             main[ASSET_TYPE_MATERIAL] != techsets[ASSET_TYPE_MATERIAL] ||
             !techsets[ASSET_TYPE_TECHSET] ||
             !techsets[ASSET_TYPE_VERTEXSHADER] || !techsets[ASSET_TYPE_PIXELSHADER] ||
-            techsets[ASSET_TYPE_IMAGE] || main[ASSET_TYPE_TECHSET] ||
-            main[ASSET_TYPE_VERTEXSHADER] || main[ASSET_TYPE_PIXELSHADER])
+            main[ASSET_TYPE_TECHSET] || main[ASSET_TYPE_VERTEXSHADER] || main[ASSET_TYPE_PIXELSHADER])
         {
-            err("validate: map render definitions must reside in the techset zone and images in the main zone");
+            err("validate: map render definitions must reside in the techset zone");
             valid = false;
+        }
+        // Images live in the main zone. Past the main zone's image budget the largest share the techset zone, which
+        // Replay queues first; each image has one definition across the two.
+        const std::set<std::string> mainImages(validation[0].images.begin(), validation[0].images.end());
+        for (const auto &image : validation[4].images)
+        {
+            if (mainImages.contains(image))
+            {
+                err("validate: image %s is defined in both the main and the techset zone", image.c_str());
+                valid = false;
+            }
         }
         // eng_<map> carries the map's English strings (LocalizeEntry) and the
         // stock CODCaster image stock packs there; ww_<map> only the worldwide
