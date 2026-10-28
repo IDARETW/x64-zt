@@ -1,6 +1,6 @@
 #pragma once
 
-#include <core/assets/asset_data.hpp>
+#include "asset_data.hpp"
 #include <algorithm>
 #include <array>
 #include <cmath>
@@ -260,5 +260,86 @@ inline void validate(const xanim& data)
 		throw std::runtime_error("animation " + data.name + " has an empty blend shape name or a weight count that is not "
 			"frames + 1 rows of its blend shapes");
 	}
+}
+namespace detail
+{
+inline data_json write_channel(const identity_rotation&)
+{
+	return {{"kind", "identity"}};
+}
+
+inline data_json write_channel(const zero_translation&)
+{
+	return {{"kind", "zero"}};
+}
+
+inline data_json write_channel(const constant_rotation& value)
+{
+	return {{"kind", "constant"}, {"codes", value.codes}};
+}
+
+inline data_json write_channel(const constant_translation& value)
+{
+	return {{"kind", "constant"}, {"value", value.value}};
+}
+
+inline data_json write_channel(const keyed_rotation& value)
+{
+	auto keys = data_json::array();
+	for (const auto& key : value.keys)
+	{
+		keys.push_back({{"frame", key.frame}, {"codes", key.codes}});
+	}
+
+	return {{"kind", "keyed"}, {"keys", std::move(keys)}};
+}
+
+inline data_json write_channel(const keyed_translation& value)
+{
+	auto keys = data_json::array();
+	for (const auto& key : value.keys)
+	{
+		keys.push_back({{"frame", key.frame}, {"codes", key.codes}});
+	}
+
+	return {{"kind", "keyed"}, {"origin", value.origin}, {"scale", value.scale}, {"code_bits", value.code_bits},
+		{"keys", std::move(keys)}};
+}
+
+template <typename Channel>
+data_json write_optional_channel(const std::optional<Channel>& channel)
+{
+	return channel ? std::visit([](const auto& value) { return write_channel(value); }, *channel) : data_json(nullptr);
+}
+}
+
+inline detail::data_json write_xanim(const xanim& data)
+{
+	validate(data);
+	auto bones = detail::data_json::array();
+	for (const auto& bone : data.bones)
+	{
+		bones.push_back({{"name", bone.name}, {"rotation", std::visit([](const auto& value) { return detail::write_channel(value); }, bone.rotation)},
+			{"translation", std::visit([](const auto& value) { return detail::write_channel(value); }, bone.translation)}});
+	}
+
+	auto delta = detail::data_json(nullptr);
+	if (data.delta)
+	{
+		delta = {{"translation", detail::write_optional_channel(data.delta->translation)},
+			{"rotation_2d", detail::write_optional_channel(data.delta->rotation_2d)},
+			{"rotation_3d", detail::write_optional_channel(data.delta->rotation_3d)}};
+	}
+
+	auto notes = detail::data_json::array();
+	for (const auto& note : data.notes)
+	{
+		notes.push_back({{"name", note.name}, {"time", note.time}});
+	}
+
+	return {{"format", "canonical-xanim"}, {"schema_version", 1}, {"name", data.name}, {"frames", data.frames},
+		{"framerate", data.framerate}, {"frequency", data.frequency}, {"flags", data.flags}, {"bones", std::move(bones)},
+		{"delta", std::move(delta)}, {"notes", std::move(notes)}, {"blend_shapes", data.blend_shapes},
+		{"blend_shape_weights", data.blend_shape_weights}};
 }
 } // namespace zonetool::asset_data

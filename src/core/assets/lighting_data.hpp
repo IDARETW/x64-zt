@@ -1,6 +1,6 @@
 #pragma once
 
-#include <core/assets/asset_data.hpp>
+#include "asset_data.hpp"
 #include <cstdint>
 #include <optional>
 #include <stdexcept>

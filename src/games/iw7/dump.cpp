@@ -1,6 +1,9 @@
 #include <std_include.hpp>
 #include "iw7.hpp"
 #include "zone/loader.hpp"
+#include "neutral/xanim.hpp"
+
+#include <core/assets/neutral_files.hpp>
 
 #include <game.hpp>
 
@@ -268,6 +271,35 @@ namespace zonetool::iw7
 		const auto _ = gsl::finally(db_clear);
 
 		prepare_paths(zone_folder, zone_path);
-		load_zone(zone_path);
+		const auto zone = load_zone(zone_path);
+		const auto folder = asset_data::neutral_output_folder();
+		if (!folder)
+		{
+			return;
+		}
+
+		std::size_t written{};
+		for (const auto& asset : zone->assets)
+		{
+			// A patch zone names the assets of its base zone with a comma, without the referenced mark.
+			const auto* header = static_cast<const XAnimParts*>(asset.header);
+			if (asset.referenced || asset.type != ASSET_TYPE_XANIMPARTS || (header->name && header->name[0] == ','))
+			{
+				continue;
+			}
+
+			const auto source = neutral::to_neutral(*header);
+			if (!source)
+			{
+				ZONETOOL_INFO("%s: animation %s has no neutral data: %s", zone->name.data(), header->name, source.error().data());
+				continue;
+			}
+
+			asset_data::write_neutral_file(*folder, "xanim", source->xanim.name, asset_data::write_xanim(source->xanim));
+			++written;
+		}
+
+		ZONETOOL_INFO("%s: neutral data of %zu animations written to %s", zone->name.data(), written,
+			folder->string().data());
 	}
 }
