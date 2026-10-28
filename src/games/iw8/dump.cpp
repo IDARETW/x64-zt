@@ -260,7 +260,7 @@ namespace zonetool::iw8
 		using neutral_data = std::variant<asset_data::localize_entry, asset_data::net_const_strings, asset_data::raw_file,
 			asset_data::string_table, asset_data::rumble_graph, asset_data::rumble_info, neutral::image_source,
 			neutral::xanim_source, neutral::light_def_source, neutral::grading_clut_source, neutral::xmodel_source,
-			neutral::xmodel_surfs_source, neutral::decal_volume_material_source, neutral::stream_key_source, asset_data::physics_fx_pipeline,
+			neutral::xmodel_surfs_source, neutral::decal_volume_material_source, neutral::stream_key_source, neutral::material_source, asset_data::physics_fx_pipeline,
 			neutral::vector_field_source>;
 
 		template <typename T>
@@ -348,6 +348,8 @@ namespace zonetool::iw8
 				return accepted(neutral::to_neutral(*static_cast<const VectorField*>(header)), "vector field", kept);
 			case ASSET_TYPE_STREAM_KEY:
 				return accepted(neutral::to_neutral(*static_cast<const StreamKey*>(header)), "stream key", kept);
+			case ASSET_TYPE_MATERIAL:
+				return accepted(neutral::to_neutral(*static_cast<const Material*>(header)), "material", kept);
 			case ASSET_TYPE_DECAL_VOLUME_MATERIAL:
 				return accepted(neutral::to_neutral(*static_cast<const GfxDecalVolumeMaterial*>(header)), "decal volume material", kept);
 			case ASSET_TYPE_XMODEL_SURFS:
@@ -396,11 +398,18 @@ namespace zonetool::iw8
 
 			zone_memory memory(std::max<std::size_t>(size, 1));
 			// The header of each asset of the zone by type and definition name (a reference stub without its comma).
+			// A definition is preferred to a reference stub of the same asset.
 			std::map<asset_key, void*> headers;
-			for (const auto& asset : zone.assets)
+			for (const auto defined : {true, false})
 			{
-				auto name = asset_name(asset.type, asset.header);
-				headers.try_emplace({asset.type, name.starts_with(',') ? name.substr(1) : name}, asset.header);
+				for (const auto& asset : zone.assets)
+				{
+					if (asset.referenced != defined)
+					{
+						auto name = asset_name(asset.type, asset.header);
+						headers.try_emplace({asset.type, name.starts_with(',') ? name.substr(1) : name}, asset.header);
+					}
+				}
 			}
 
 			// An asset that a rebuilt asset points to is rebuilt first when it has neutral data.
