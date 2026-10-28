@@ -9,6 +9,7 @@
 
 #include <algorithm>
 #include <array>
+#include <cstdio>
 #include <cstring>
 #include <map>
 #include <optional>
@@ -102,6 +103,19 @@ namespace zonetool::iw8::neutral::plain
 		inline static thread_local std::uint32_t current_ = 0xFFFFFFFFu;
 		std::uint32_t previous_;
 	};
+
+	// Set by the verifier while it reads an asset whose type IW8_NEUTRAL_TRACE names: each generated reader logs its name, so
+	// that a crash in an adapter shows the struct it was reading.
+	inline bool trace_enabled = false;
+
+	inline void trace(const char* what)
+	{
+		if (trace_enabled)
+		{
+			std::fprintf(stderr, "  %s\n", what);
+			std::fflush(stderr);
+		}
+	}
 
 	[[noreturn]] inline void fail(const std::string& what, const char* problem)
 	{
@@ -264,6 +278,13 @@ namespace zonetool::iw8::neutral::plain
 	void write_block(void* block, const Block& values)
 	{
 		std::memcpy(block, &values, sizeof(values));
+	}
+
+	// A pointer that should alias a member of its owner and does not: where it points, in bytes from that member.
+	[[noreturn]] inline void fail_alias(const std::string& what, const void* actual, const void* expected)
+	{
+		throw std::runtime_error(what + " has a pointer " + std::to_string(reinterpret_cast<std::intptr_t>(actual) -
+			reinterpret_cast<std::intptr_t>(expected)) + " bytes from the member of its owner that it should be");
 	}
 
 	// A pointer member that no stream rule describes holds nothing in a zone; a value would be lost.

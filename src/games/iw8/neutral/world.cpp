@@ -7,8 +7,268 @@ namespace zonetool::iw8::neutral
 {
 	namespace
 	{
+		asset_data::world::com_world read_com_world(const ComWorld& native);
+		void write_com_world(ComWorld& native, const asset_data::world::com_world& data, const asset_resolver& resolve, plain::context& memory);
+		std::size_t size_com_world(const asset_data::world::com_world& data);
+		asset_data::world::com_primary_light read_com_primary_light(const ComPrimaryLight& native);
+		void write_com_primary_light(ComPrimaryLight& native, const asset_data::world::com_primary_light& data, const asset_resolver& resolve, plain::context& memory);
+		std::size_t size_com_primary_light(const asset_data::world::com_primary_light& data);
+		asset_data::world::com_change_list_info read_com_change_list_info(const ComChangeListInfo& native);
+		void write_com_change_list_info(ComChangeListInfo& native, const asset_data::world::com_change_list_info& data, const asset_resolver& resolve, plain::context& memory);
+		std::size_t size_com_change_list_info(const asset_data::world::com_change_list_info& data);
+		asset_data::world::bitarray_384 read_bitarray_384(const bitarray_384& native);
+		void write_bitarray_384(bitarray_384& native, const asset_data::world::bitarray_384& data, const asset_resolver& resolve, plain::context& memory);
+		std::size_t size_bitarray_384(const asset_data::world::bitarray_384& data);
+		asset_data::world::glass_world read_glass_world(const GlassWorld& native);
+		void write_glass_world(GlassWorld& native, const asset_data::world::glass_world& data, const asset_resolver& resolve, plain::context& memory);
+		std::size_t size_glass_world(const asset_data::world::glass_world& data);
+		asset_data::world::glass_data read_glass_data(const G_GlassData& native);
+		void write_glass_data(G_GlassData& native, const asset_data::world::glass_data& data, const asset_resolver& resolve, plain::context& memory);
+		std::size_t size_glass_data(const asset_data::world::glass_data& data);
+		asset_data::world::glass_piece read_glass_piece(const G_GlassPiece& native);
+		void write_glass_piece(G_GlassPiece& native, const asset_data::world::glass_piece& data, const asset_resolver& resolve, plain::context& memory);
+		std::size_t size_glass_piece(const asset_data::world::glass_piece& data);
+		asset_data::world::glass_name read_glass_name(const G_GlassName& native);
+		void write_glass_name(G_GlassName& native, const asset_data::world::glass_name& data, const asset_resolver& resolve, plain::context& memory);
+		std::size_t size_glass_name(const asset_data::world::glass_name& data);
+		asset_data::world::spatial_partition_tree read_spatial_partition_tree(const SpatialPartition_Tree& native);
+		void write_spatial_partition_tree(SpatialPartition_Tree& native, const asset_data::world::spatial_partition_tree& data, const asset_resolver& resolve, plain::context& memory);
+		std::size_t size_spatial_partition_tree(const asset_data::world::spatial_partition_tree& data);
+		asset_data::world::map_edge_list read_map_edge_list(const MapEdgeList& native);
+		void write_map_edge_list(MapEdgeList& native, const asset_data::world::map_edge_list& data, const asset_resolver& resolve, plain::context& memory);
+		std::size_t size_map_edge_list(const asset_data::world::map_edge_list& data);
+		asset_data::world::flagged_edge_metadata read_flagged_edge_metadata(const FlaggedEdgeMetadata& native);
+		void write_flagged_edge_metadata(FlaggedEdgeMetadata& native, const asset_data::world::flagged_edge_metadata& data, const asset_resolver& resolve, plain::context& memory);
+		std::size_t size_flagged_edge_metadata(const asset_data::world::flagged_edge_metadata& data);
+		asset_data::world::pmr_octree_metadata read_pmr_octree_metadata(const PMROctreeMetadata& native);
+		void write_pmr_octree_metadata(PMROctreeMetadata& native, const asset_data::world::pmr_octree_metadata& data, const asset_resolver& resolve, plain::context& memory);
+		std::size_t size_pmr_octree_metadata(const asset_data::world::pmr_octree_metadata& data);
+		asset_data::world::pmr_octree_node read_pmr_octree_node(const PMROctreeNode& native);
+		void write_pmr_octree_node(PMROctreeNode& native, const asset_data::world::pmr_octree_node& data, const asset_resolver& resolve, plain::context& memory);
+		std::size_t size_pmr_octree_node(const asset_data::world::pmr_octree_node& data);
+		asset_data::world::pmr_octree_node_set read_pmr_octree_node_set(const PMROctreeNodeSet& native);
+		void write_pmr_octree_node_set(PMROctreeNodeSet& native, const asset_data::world::pmr_octree_node_set& data, const asset_resolver& resolve, plain::context& memory);
+		std::size_t size_pmr_octree_node_set(const asset_data::world::pmr_octree_node_set& data);
+		asset_data::world::edge_adjacency_metadata read_edge_adjacency_metadata(const EdgeAdjacencyMetadata& native);
+		void write_edge_adjacency_metadata(EdgeAdjacencyMetadata& native, const asset_data::world::edge_adjacency_metadata& data, const asset_resolver& resolve, plain::context& memory);
+		std::size_t size_edge_adjacency_metadata(const asset_data::world::edge_adjacency_metadata& data);
+		asset_data::world::edge_adjacency read_edge_adjacency(const EdgeAdjacency& native);
+		void write_edge_adjacency(EdgeAdjacency& native, const asset_data::world::edge_adjacency& data, const asset_resolver& resolve, plain::context& memory);
+		std::size_t size_edge_adjacency(const asset_data::world::edge_adjacency& data);
+		asset_data::world::nav_mesh read_nav_mesh(const NavMeshData& native);
+		void write_nav_mesh(NavMeshData& native, const asset_data::world::nav_mesh& data, const asset_resolver& resolve, plain::context& memory);
+		std::size_t size_nav_mesh(const asset_data::world::nav_mesh& data);
+		asset_data::world::nav_resource_s read_nav_resource_s(const nav_resource_s& native);
+		void write_nav_resource_s(nav_resource_s& native, const asset_data::world::nav_resource_s& data, const asset_resolver& resolve, plain::context& memory);
+		std::size_t size_nav_resource_s(const asset_data::world::nav_resource_s& data);
+		asset_data::world::nav_obstacle_bounds_s read_nav_obstacle_bounds_s(const nav_obstacle_bounds_s& native);
+		void write_nav_obstacle_bounds_s(nav_obstacle_bounds_s& native, const asset_data::world::nav_obstacle_bounds_s& data, const asset_resolver& resolve, plain::context& memory);
+		std::size_t size_nav_obstacle_bounds_s(const asset_data::world::nav_obstacle_bounds_s& data);
+		asset_data::world::nav_obstacle_hull_s read_nav_obstacle_hull_s(const nav_obstacle_hull_s& native);
+		void write_nav_obstacle_hull_s(nav_obstacle_hull_s& native, const asset_data::world::nav_obstacle_hull_s& data, const asset_resolver& resolve, plain::context& memory);
+		std::size_t size_nav_obstacle_hull_s(const asset_data::world::nav_obstacle_hull_s& data);
+		asset_data::world::nav_boundary_plane_s read_nav_boundary_plane_s(const nav_boundary_plane_s& native);
+		void write_nav_boundary_plane_s(nav_boundary_plane_s& native, const asset_data::world::nav_boundary_plane_s& data, const asset_resolver& resolve, plain::context& memory);
+		std::size_t size_nav_boundary_plane_s(const asset_data::world::nav_boundary_plane_s& data);
+		asset_data::world::nav_glass_bounds_s read_nav_glass_bounds_s(const nav_glass_bounds_s& native);
+		void write_nav_glass_bounds_s(nav_glass_bounds_s& native, const asset_data::world::nav_glass_bounds_s& data, const asset_resolver& resolve, plain::context& memory);
+		std::size_t size_nav_glass_bounds_s(const asset_data::world::nav_glass_bounds_s& data);
+		asset_data::world::nav_modifier_s read_nav_modifier_s(const nav_modifier_s& native);
+		void write_nav_modifier_s(nav_modifier_s& native, const asset_data::world::nav_modifier_s& data, const asset_resolver& resolve, plain::context& memory);
+		std::size_t size_nav_modifier_s(const asset_data::world::nav_modifier_s& data);
+		asset_data::world::nav_link_creation_data_s read_nav_link_creation_data_s(const nav_link_creation_data_s& native);
+		void write_nav_link_creation_data_s(nav_link_creation_data_s& native, const asset_data::world::nav_link_creation_data_s& data, const asset_resolver& resolve, plain::context& memory);
+		std::size_t size_nav_link_creation_data_s(const asset_data::world::nav_link_creation_data_s& data);
+		asset_data::world::nav_link_point_s read_nav_link_point_s(const nav_link_point_s& native);
+		void write_nav_link_point_s(nav_link_point_s& native, const asset_data::world::nav_link_point_s& data, const asset_resolver& resolve, plain::context& memory);
+		std::size_t size_nav_link_point_s(const asset_data::world::nav_link_point_s& data);
+		asset_data::world::nav_raw_volume_s read_nav_raw_volume_s(const nav_raw_volume_s& native);
+		void write_nav_raw_volume_s(nav_raw_volume_s& native, const asset_data::world::nav_raw_volume_s& data, const asset_resolver& resolve, plain::context& memory);
+		std::size_t size_nav_raw_volume_s(const asset_data::world::nav_raw_volume_s& data);
+		asset_data::world::nav_raw_custom_volume_s read_nav_raw_custom_volume_s(const nav_raw_custom_volume_s& native);
+		void write_nav_raw_custom_volume_s(nav_raw_custom_volume_s& native, const asset_data::world::nav_raw_custom_volume_s& data, const asset_resolver& resolve, plain::context& memory);
+		std::size_t size_nav_raw_custom_volume_s(const asset_data::world::nav_raw_custom_volume_s& data);
+		asset_data::world::nav_raw_custom_volume_tri_s read_nav_raw_custom_volume_tri_s(const nav_raw_custom_volume_tri_s& native);
+		void write_nav_raw_custom_volume_tri_s(nav_raw_custom_volume_tri_s& native, const asset_data::world::nav_raw_custom_volume_tri_s& data, const asset_resolver& resolve, plain::context& memory);
+		std::size_t size_nav_raw_custom_volume_tri_s(const asset_data::world::nav_raw_custom_volume_tri_s& data);
+		asset_data::world::nav_misc_s read_nav_misc_s(const nav_misc_s& native);
+		void write_nav_misc_s(nav_misc_s& native, const asset_data::world::nav_misc_s& data, const asset_resolver& resolve, plain::context& memory);
+		std::size_t size_nav_misc_s(const asset_data::world::nav_misc_s& data);
+		asset_data::world::clip_map read_clip_map(const clipMap_t& native);
+		void write_clip_map(clipMap_t& native, const asset_data::world::clip_map& data, const asset_resolver& resolve, plain::context& memory);
+		std::size_t size_clip_map(const asset_data::world::clip_map& data);
+		asset_data::world::static_model_collision_model_list read_static_model_collision_model_list(const StaticModelCollisionModelList& native);
+		void write_static_model_collision_model_list(StaticModelCollisionModelList& native, const asset_data::world::static_model_collision_model_list& data, const asset_resolver& resolve, plain::context& memory);
+		std::size_t size_static_model_collision_model_list(const asset_data::world::static_model_collision_model_list& data);
+		asset_data::world::static_model_collision_model read_static_model_collision_model(const StaticModelCollisionModel& native);
+		void write_static_model_collision_model(StaticModelCollisionModel& native, const asset_data::world::static_model_collision_model& data, const asset_resolver& resolve, plain::context& memory);
+		std::size_t size_static_model_collision_model(const asset_data::world::static_model_collision_model& data);
+		asset_data::world::static_model_collision_instance read_static_model_collision_instance(const StaticModelCollisionInstance& native);
+		void write_static_model_collision_instance(StaticModelCollisionInstance& native, const asset_data::world::static_model_collision_instance& data, const asset_resolver& resolve, plain::context& memory);
+		std::size_t size_static_model_collision_instance(const asset_data::world::static_model_collision_instance& data);
+		asset_data::world::stage read_stage(const Stage& native);
+		void write_stage(Stage& native, const asset_data::world::stage& data, const asset_resolver& resolve, plain::context& memory);
+		std::size_t size_stage(const asset_data::world::stage& data);
+		asset_data::world::map_triggers read_map_triggers(const MapTriggers& native);
+		void write_map_triggers(MapTriggers& native, const asset_data::world::map_triggers& data, const asset_resolver& resolve, plain::context& memory);
+		std::size_t size_map_triggers(const asset_data::world::map_triggers& data);
+		asset_data::world::trigger_model read_trigger_model(const TriggerModel& native);
+		void write_trigger_model(TriggerModel& native, const asset_data::world::trigger_model& data, const asset_resolver& resolve, plain::context& memory);
+		std::size_t size_trigger_model(const asset_data::world::trigger_model& data);
+		asset_data::world::trigger_hull read_trigger_hull(const TriggerHull& native);
+		void write_trigger_hull(TriggerHull& native, const asset_data::world::trigger_hull& data, const asset_resolver& resolve, plain::context& memory);
+		std::size_t size_trigger_hull(const asset_data::world::trigger_hull& data);
+		asset_data::world::bounds read_bounds(const Bounds& native);
+		void write_bounds(Bounds& native, const asset_data::world::bounds& data, const asset_resolver& resolve, plain::context& memory);
+		std::size_t size_bounds(const asset_data::world::bounds& data);
+		asset_data::world::trigger_slab read_trigger_slab(const TriggerSlab& native);
+		void write_trigger_slab(TriggerSlab& native, const asset_data::world::trigger_slab& data, const asset_resolver& resolve, plain::context& memory);
+		std::size_t size_trigger_slab(const asset_data::world::trigger_slab& data);
+		asset_data::world::trigger_winding read_trigger_winding(const TriggerWinding& native);
+		void write_trigger_winding(TriggerWinding& native, const asset_data::world::trigger_winding& data, const asset_resolver& resolve, plain::context& memory);
+		std::size_t size_trigger_winding(const asset_data::world::trigger_winding& data);
+		asset_data::world::trigger_winding_point read_trigger_winding_point(const TriggerWindingPoint& native);
+		void write_trigger_winding_point(TriggerWindingPoint& native, const asset_data::world::trigger_winding_point& data, const asset_resolver& resolve, plain::context& memory);
+		std::size_t size_trigger_winding_point(const asset_data::world::trigger_winding_point& data);
+		asset_data::world::physics_capacities read_physics_capacities(const PhysicsCapacities& native);
+		void write_physics_capacities(PhysicsCapacities& native, const asset_data::world::physics_capacities& data, const asset_resolver& resolve, plain::context& memory);
+		std::size_t size_physics_capacities(const asset_data::world::physics_capacities& data);
+		asset_data::world::collision_heatmap_entry read_collision_heatmap_entry(const CollisionHeatmapEntry& native);
+		void write_collision_heatmap_entry(CollisionHeatmapEntry& native, const asset_data::world::collision_heatmap_entry& data, const asset_resolver& resolve, plain::context& memory);
+		std::size_t size_collision_heatmap_entry(const asset_data::world::collision_heatmap_entry& data);
+		asset_data::world::top_down_map_data read_top_down_map_data(const TopDownMapData& native);
+		void write_top_down_map_data(TopDownMapData& native, const asset_data::world::top_down_map_data& data, const asset_resolver& resolve, plain::context& memory);
+		std::size_t size_top_down_map_data(const asset_data::world::top_down_map_data& data);
+		asset_data::world::top_down_map_data_header read_top_down_map_data_header(const TopDownMapDataHeader& native);
+		void write_top_down_map_data_header(TopDownMapDataHeader& native, const asset_data::world::top_down_map_data_header& data, const asset_resolver& resolve, plain::context& memory);
+		std::size_t size_top_down_map_data_header(const asset_data::world::top_down_map_data_header& data);
+		asset_data::world::top_down_map_data_content read_top_down_map_data_content(const TopDownMapDataContent& native);
+		void write_top_down_map_data_content(TopDownMapDataContent& native, const asset_data::world::top_down_map_data_content& data, const asset_resolver& resolve, plain::context& memory);
+		std::size_t size_top_down_map_data_content(const asset_data::world::top_down_map_data_content& data);
+		asset_data::world::fog_spline read_fog_spline(const GfxFogSpline& native);
+		void write_fog_spline(GfxFogSpline& native, const asset_data::world::fog_spline& data, const asset_resolver& resolve, plain::context& memory);
+		std::size_t size_fog_spline(const asset_data::world::fog_spline& data);
+		asset_data::world::gfx_fog_spline_data read_gfx_fog_spline_data(const GfxFogSplineData& native);
+		void write_gfx_fog_spline_data(GfxFogSplineData& native, const asset_data::world::gfx_fog_spline_data& data, const asset_resolver& resolve, plain::context& memory);
+		std::size_t size_gfx_fog_spline_data(const asset_data::world::gfx_fog_spline_data& data);
+
+		asset_data::world::com_change_list_info read_com_change_list_info(const ComChangeListInfo& native)
+		{
+			plain::trace("read_com_change_list_info");
+			asset_data::world::com_change_list_info data;
+			data.change_list_number = native.changeListNumber;
+			data.time = native.time;
+			data.user_name = plain::read_string(native.userName);
+			return data;
+		}
+
+		void write_com_change_list_info(ComChangeListInfo& native, const asset_data::world::com_change_list_info& data, [[maybe_unused]] const asset_resolver& resolve, [[maybe_unused]] plain::context& memory)
+		{
+			native.changeListNumber = data.change_list_number;
+			native.time = data.time;
+			native.userName = plain::write_string(memory, data.user_name);
+		}
+
+		std::size_t size_com_change_list_info([[maybe_unused]] const asset_data::world::com_change_list_info& data)
+		{
+			std::size_t size = 0;
+			size += plain::string_size(data.user_name);
+			return size;
+		}
+
+		asset_data::world::bitarray_384 read_bitarray_384(const bitarray_384& native)
+		{
+			plain::trace("read_bitarray_384");
+			asset_data::world::bitarray_384 data;
+			data.array = std::to_array(native.array);
+			return data;
+		}
+
+		void write_bitarray_384(bitarray_384& native, const asset_data::world::bitarray_384& data, [[maybe_unused]] const asset_resolver& resolve, [[maybe_unused]] plain::context& memory)
+		{
+			std::ranges::copy(data.array, native.array);
+		}
+
+		std::size_t size_bitarray_384([[maybe_unused]] const asset_data::world::bitarray_384& data)
+		{
+			std::size_t size = 0;
+			return size;
+		}
+
+		asset_data::world::com_world read_com_world(const ComWorld& native)
+		{
+			plain::trace("read_com_world");
+			asset_data::world::com_world data;
+			data.name = plain::read_string(native.name);
+			data.is_in_use = native.isInUse;
+			data.use_forward_plus = native.useForwardPlus;
+			data.bake_quality = native.bakeQuality;
+			data.proxy_lod_quality = native.proxyLODQuality;
+			data.tr_vis_radii = std::to_array(native.trVisRadii);
+			data.tr_vis_facing_dist_add = native.trVisFacingDistAdd;
+			data.primary_lights = plain::read_array(native.primaryLights, native.primaryLightCount, "ComWorld.primaryLights", [&](const auto& item) { return read_com_primary_light(item); });
+			data.scriptable_primary_light_count = native.scriptablePrimaryLightCount;
+			data.first_scriptable_primary_light = native.firstScriptablePrimaryLight;
+			data.transient_table = plain::read_array(native.transientTable, native.transientTableSize, "ComWorld.transientTable", [&](const auto& item) { return item; });
+			data.change_list_info = read_com_change_list_info(native.changeListInfo);
+			data.umbra_gate_names = plain::read_array(native.umbraGateNames, native.numUmbraGates, "ComWorld.umbraGateNames", [&](const auto& item) { return plain::read_string(item); });
+			data.umbra_gate_initial_states = read_bitarray_384(native.umbraGateInitialStates);
+			return data;
+		}
+
+		void write_com_world(ComWorld& native, const asset_data::world::com_world& data, [[maybe_unused]] const asset_resolver& resolve, [[maybe_unused]] plain::context& memory)
+		{
+			native.name = plain::write_string(memory, data.name);
+			native.isInUse = data.is_in_use;
+			native.useForwardPlus = data.use_forward_plus;
+			native.bakeQuality = data.bake_quality;
+			native.proxyLODQuality = data.proxy_lod_quality;
+			std::ranges::copy(data.tr_vis_radii, native.trVisRadii);
+			native.trVisFacingDistAdd = data.tr_vis_facing_dist_add;
+			native.primaryLights = plain::write_array<ComPrimaryLight>(data.primary_lights, memory, [&](auto& out, const auto& in) { write_com_primary_light(out, in, resolve, memory); });
+			native.scriptablePrimaryLightCount = data.scriptable_primary_light_count;
+			native.firstScriptablePrimaryLight = data.first_scriptable_primary_light;
+			native.transientTable = plain::write_array<std::uint16_t>(data.transient_table, memory, [&](auto& out, const auto& in) { out = in; });
+			write_com_change_list_info(native.changeListInfo, data.change_list_info, resolve, memory);
+			native.umbraGateNames = plain::write_array<const char*>(data.umbra_gate_names, memory, [&](auto& out, const auto& in) { out = plain::write_string(memory, in); });
+			write_bitarray_384(native.umbraGateInitialStates, data.umbra_gate_initial_states, resolve, memory);
+			native.primaryLightCount = plain::count_of<std::uint32_t>(data.primary_lights);
+			native.transientTableSize = plain::count_of<std::uint32_t>(data.transient_table);
+			native.numUmbraGates = plain::count_of<std::uint32_t>(data.umbra_gate_names);
+		}
+
+		std::size_t size_com_world([[maybe_unused]] const asset_data::world::com_world& data)
+		{
+			std::size_t size = 0;
+			size += plain::string_size(data.name);
+			if (data.primary_lights)
+			{
+				size += plain::sized(std::max<std::size_t>(data.primary_lights->size(), 1) * sizeof(ComPrimaryLight));
+				for (const auto& item : *data.primary_lights)
+				{
+					size += size_com_primary_light(item);
+				}
+			}
+			if (data.transient_table)
+			{
+				size += plain::sized(std::max<std::size_t>(data.transient_table->size(), 1) * sizeof(std::uint16_t));
+			}
+			size += size_com_change_list_info(data.change_list_info);
+			if (data.umbra_gate_names)
+			{
+				size += plain::sized(std::max<std::size_t>(data.umbra_gate_names->size(), 1) * sizeof(const char*));
+				for (const auto& item : *data.umbra_gate_names)
+				{
+					size += plain::string_size(item);
+				}
+			}
+			size += size_bitarray_384(data.umbra_gate_initial_states);
+			return size;
+		}
+
 		asset_data::world::com_primary_light read_com_primary_light(const ComPrimaryLight& native)
 		{
+			plain::trace("read_com_primary_light");
 			asset_data::world::com_primary_light data;
 			data.spawn_flags = native.spawnFlags;
 			data.type = native.type;
@@ -84,173 +344,9 @@ namespace zonetool::iw8::neutral
 			return size;
 		}
 
-		asset_data::world::com_change_list_info read_com_change_list_info(const ComChangeListInfo& native)
-		{
-			asset_data::world::com_change_list_info data;
-			data.change_list_number = native.changeListNumber;
-			data.time = native.time;
-			data.user_name = plain::read_string(native.userName);
-			return data;
-		}
-
-		void write_com_change_list_info(ComChangeListInfo& native, const asset_data::world::com_change_list_info& data, [[maybe_unused]] const asset_resolver& resolve, [[maybe_unused]] plain::context& memory)
-		{
-			native.changeListNumber = data.change_list_number;
-			native.time = data.time;
-			native.userName = plain::write_string(memory, data.user_name);
-		}
-
-		std::size_t size_com_change_list_info([[maybe_unused]] const asset_data::world::com_change_list_info& data)
-		{
-			std::size_t size = 0;
-			size += plain::string_size(data.user_name);
-			return size;
-		}
-
-		asset_data::world::bitarray_384 read_bitarray_384(const bitarray_384& native)
-		{
-			asset_data::world::bitarray_384 data;
-			data.array = std::to_array(native.array);
-			return data;
-		}
-
-		void write_bitarray_384(bitarray_384& native, const asset_data::world::bitarray_384& data, [[maybe_unused]] const asset_resolver& resolve, [[maybe_unused]] plain::context& memory)
-		{
-			std::ranges::copy(data.array, native.array);
-		}
-
-		std::size_t size_bitarray_384([[maybe_unused]] const asset_data::world::bitarray_384& data)
-		{
-			std::size_t size = 0;
-			return size;
-		}
-
-		asset_data::world::com_world read_com_world(const ComWorld& native)
-		{
-			asset_data::world::com_world data;
-			data.name = plain::read_string(native.name);
-			data.is_in_use = native.isInUse;
-			data.use_forward_plus = native.useForwardPlus;
-			data.bake_quality = native.bakeQuality;
-			data.proxy_lod_quality = native.proxyLODQuality;
-			data.tr_vis_radii = std::to_array(native.trVisRadii);
-			data.tr_vis_facing_dist_add = native.trVisFacingDistAdd;
-			data.primary_lights = plain::read_array(native.primaryLights, native.primaryLightCount, "ComWorld.primaryLights", [&](const auto& item) { return read_com_primary_light(item); });
-			data.scriptable_primary_light_count = native.scriptablePrimaryLightCount;
-			data.first_scriptable_primary_light = native.firstScriptablePrimaryLight;
-			data.transient_table = plain::read_array(native.transientTable, native.transientTableSize, "ComWorld.transientTable", [&](const auto& item) { return item; });
-			data.change_list_info = read_com_change_list_info(native.changeListInfo);
-			data.umbra_gate_names = plain::read_array(native.umbraGateNames, native.numUmbraGates, "ComWorld.umbraGateNames", [&](const auto& item) { return plain::read_string(item); });
-			data.umbra_gate_initial_states = read_bitarray_384(native.umbraGateInitialStates);
-			return data;
-		}
-
-		void write_com_world(ComWorld& native, const asset_data::world::com_world& data, [[maybe_unused]] const asset_resolver& resolve, [[maybe_unused]] plain::context& memory)
-		{
-			native.name = plain::write_string(memory, data.name);
-			native.isInUse = data.is_in_use;
-			native.useForwardPlus = data.use_forward_plus;
-			native.bakeQuality = data.bake_quality;
-			native.proxyLODQuality = data.proxy_lod_quality;
-			std::ranges::copy(data.tr_vis_radii, native.trVisRadii);
-			native.trVisFacingDistAdd = data.tr_vis_facing_dist_add;
-			native.primaryLights = plain::write_array<ComPrimaryLight>(data.primary_lights, memory, [&](auto& out, const auto& in) { write_com_primary_light(out, in, resolve, memory); });
-			native.scriptablePrimaryLightCount = data.scriptable_primary_light_count;
-			native.firstScriptablePrimaryLight = data.first_scriptable_primary_light;
-			native.transientTable = plain::write_array<std::uint16_t>(data.transient_table, memory, [&](auto& out, const auto& in) { out = in; });
-			write_com_change_list_info(native.changeListInfo, data.change_list_info, resolve, memory);
-			native.umbraGateNames = plain::write_array<const char*>(data.umbra_gate_names, memory, [&](auto& out, const auto& in) { out = plain::write_string(memory, in); });
-			write_bitarray_384(native.umbraGateInitialStates, data.umbra_gate_initial_states, resolve, memory);
-			native.primaryLightCount = plain::count_of<std::uint32_t>(data.primary_lights);
-			native.transientTableSize = plain::count_of<std::uint32_t>(data.transient_table);
-			native.numUmbraGates = plain::count_of<std::uint32_t>(data.umbra_gate_names);
-		}
-
-		std::size_t size_com_world([[maybe_unused]] const asset_data::world::com_world& data)
-		{
-			std::size_t size = 0;
-			size += plain::string_size(data.name);
-			if (data.primary_lights)
-			{
-				size += plain::sized(std::max<std::size_t>(data.primary_lights->size(), 1) * sizeof(ComPrimaryLight));
-				for (const auto& item : *data.primary_lights)
-				{
-					size += size_com_primary_light(item);
-				}
-			}
-			if (data.transient_table)
-			{
-				size += plain::sized(std::max<std::size_t>(data.transient_table->size(), 1) * sizeof(std::uint16_t));
-			}
-			size += size_com_change_list_info(data.change_list_info);
-			if (data.umbra_gate_names)
-			{
-				size += plain::sized(std::max<std::size_t>(data.umbra_gate_names->size(), 1) * sizeof(const char*));
-				for (const auto& item : *data.umbra_gate_names)
-				{
-					size += plain::string_size(item);
-				}
-			}
-			size += size_bitarray_384(data.umbra_gate_initial_states);
-			return size;
-		}
-
-		asset_data::world::glass_piece read_glass_piece(const G_GlassPiece& native)
-		{
-			asset_data::world::glass_piece data;
-			data.damage_taken = native.damageTaken;
-			data.collapse_time = native.collapseTime;
-			data.last_state_change_time = native.lastStateChangeTime;
-			data.impact_dir = native.impactDir;
-			data.impact_pos = std::to_array(native.impactPos);
-			return data;
-		}
-
-		void write_glass_piece(G_GlassPiece& native, const asset_data::world::glass_piece& data, [[maybe_unused]] const asset_resolver& resolve, [[maybe_unused]] plain::context& memory)
-		{
-			native.damageTaken = data.damage_taken;
-			native.collapseTime = data.collapse_time;
-			native.lastStateChangeTime = data.last_state_change_time;
-			native.impactDir = data.impact_dir;
-			std::ranges::copy(data.impact_pos, native.impactPos);
-		}
-
-		std::size_t size_glass_piece([[maybe_unused]] const asset_data::world::glass_piece& data)
-		{
-			std::size_t size = 0;
-			return size;
-		}
-
-		asset_data::world::glass_name read_glass_name(const G_GlassName& native)
-		{
-			asset_data::world::glass_name data;
-			data.name_str = plain::read_string(native.nameStr);
-			data.name = plain::read_script_string(native.name);
-			data.piece_indices = plain::read_array(native.pieceIndices, native.pieceCount, "G_GlassName.pieceIndices", [&](const auto& item) { return item; });
-			return data;
-		}
-
-		void write_glass_name(G_GlassName& native, const asset_data::world::glass_name& data, [[maybe_unused]] const asset_resolver& resolve, [[maybe_unused]] plain::context& memory)
-		{
-			native.nameStr = plain::write_string(memory, data.name_str);
-			native.name = static_cast<scr_string_t>(plain::write_script_string(data.name));
-			native.pieceIndices = plain::write_array<std::uint16_t>(data.piece_indices, memory, [&](auto& out, const auto& in) { out = in; });
-			native.pieceCount = plain::count_of<std::uint16_t>(data.piece_indices);
-		}
-
-		std::size_t size_glass_name([[maybe_unused]] const asset_data::world::glass_name& data)
-		{
-			std::size_t size = 0;
-			size += plain::string_size(data.name_str);
-			if (data.piece_indices)
-			{
-				size += plain::sized(std::max<std::size_t>(data.piece_indices->size(), 1) * sizeof(std::uint16_t));
-			}
-			return size;
-		}
-
 		asset_data::world::spatial_partition_tree read_spatial_partition_tree(const SpatialPartition_Tree& native)
 		{
+			plain::trace("read_spatial_partition_tree");
 			asset_data::world::spatial_partition_tree data;
 			data.tree = plain::read_array(native.tree, native.treeSize, "SpatialPartition_Tree.tree", [&](const auto& item) { return item; });
 			data.always_list = plain::read_array(native.alwaysList, native.alwaysListLength, "SpatialPartition_Tree.alwaysList", [&](const auto& item) { return item; });
@@ -281,6 +377,7 @@ namespace zonetool::iw8::neutral
 
 		asset_data::world::glass_data read_glass_data(const G_GlassData& native)
 		{
+			plain::trace("read_glass_data");
 			asset_data::world::glass_data data;
 			data.glass_pieces = plain::read_array(native.glassPieces, native.pieceCount, "G_GlassData.glassPieces", [&](const auto& item) { return read_glass_piece(item); });
 			data.damage_to_weaken = native.damageToWeaken;
@@ -330,6 +427,7 @@ namespace zonetool::iw8::neutral
 
 		asset_data::world::glass_world read_glass_world(const GlassWorld& native)
 		{
+			plain::trace("read_glass_world");
 			asset_data::world::glass_world data;
 			data.name = plain::read_string(native.name);
 			data.g_glass_data = plain::read_single(native.g_glassData, [&](const auto& item) { return read_glass_data(item); });
@@ -354,164 +452,65 @@ namespace zonetool::iw8::neutral
 			return size;
 		}
 
-		asset_data::world::flagged_edge_metadata read_flagged_edge_metadata(const FlaggedEdgeMetadata& native)
+		asset_data::world::glass_piece read_glass_piece(const G_GlassPiece& native)
 		{
-			asset_data::world::flagged_edge_metadata data;
-			data.packed_adjacent_normal = native.packedAdjacentNormal;
-			data.packed_open_angle = native.packedOpenAngle;
-			data.flags = std::to_array(native.flags);
+			plain::trace("read_glass_piece");
+			asset_data::world::glass_piece data;
+			data.damage_taken = native.damageTaken;
+			data.collapse_time = native.collapseTime;
+			data.last_state_change_time = native.lastStateChangeTime;
+			data.impact_dir = native.impactDir;
+			data.impact_pos = std::to_array(native.impactPos);
 			return data;
 		}
 
-		void write_flagged_edge_metadata(FlaggedEdgeMetadata& native, const asset_data::world::flagged_edge_metadata& data, [[maybe_unused]] const asset_resolver& resolve, [[maybe_unused]] plain::context& memory)
+		void write_glass_piece(G_GlassPiece& native, const asset_data::world::glass_piece& data, [[maybe_unused]] const asset_resolver& resolve, [[maybe_unused]] plain::context& memory)
 		{
-			native.packedAdjacentNormal = data.packed_adjacent_normal;
-			native.packedOpenAngle = data.packed_open_angle;
-			std::ranges::copy(data.flags, native.flags);
+			native.damageTaken = data.damage_taken;
+			native.collapseTime = data.collapse_time;
+			native.lastStateChangeTime = data.last_state_change_time;
+			native.impactDir = data.impact_dir;
+			std::ranges::copy(data.impact_pos, native.impactPos);
 		}
 
-		std::size_t size_flagged_edge_metadata([[maybe_unused]] const asset_data::world::flagged_edge_metadata& data)
+		std::size_t size_glass_piece([[maybe_unused]] const asset_data::world::glass_piece& data)
 		{
 			std::size_t size = 0;
 			return size;
 		}
 
-		asset_data::world::pmr_octree_node read_pmr_octree_node(const PMROctreeNode& native)
+		asset_data::world::glass_name read_glass_name(const G_GlassName& native)
 		{
-			asset_data::world::pmr_octree_node data;
-			data.uniform_grid_index = std::to_array(native.uniformGridIndex);
-			data.depth = native.depth;
-			data.flags = plain::flag_names(asset_data::world::pmr_octree_flags_names, static_cast<std::uint64_t>(native.flags), "PMROctreeNode.flags");
-			data.parent_node_index_or_q_edge_table_index = plain::read_scalars<std::uint32_t, 1>(&native.___u3)[0];
-			data.child_node_set_index_or_q_edge_table_count = plain::read_scalars<std::uint32_t, 1>(&native.___u4)[0];
+			plain::trace("read_glass_name");
+			asset_data::world::glass_name data;
+			data.name_str = plain::read_string(native.nameStr);
+			data.name = plain::read_script_string(native.name);
+			data.piece_indices = plain::read_array(native.pieceIndices, native.pieceCount, "G_GlassName.pieceIndices", [&](const auto& item) { return item; });
 			return data;
 		}
 
-		void write_pmr_octree_node(PMROctreeNode& native, const asset_data::world::pmr_octree_node& data, [[maybe_unused]] const asset_resolver& resolve, [[maybe_unused]] plain::context& memory)
+		void write_glass_name(G_GlassName& native, const asset_data::world::glass_name& data, [[maybe_unused]] const asset_resolver& resolve, [[maybe_unused]] plain::context& memory)
 		{
-			std::ranges::copy(data.uniform_grid_index, native.uniformGridIndex);
-			native.depth = data.depth;
-			native.flags = static_cast<PMROctreeFlags>(plain::flag_value(asset_data::world::pmr_octree_flags_names, data.flags, "PMROctreeNode.flags"));
-			plain::write_scalars(&native.___u3, std::array<std::uint32_t, 1>{data.parent_node_index_or_q_edge_table_index});
-			plain::write_scalars(&native.___u4, std::array<std::uint32_t, 1>{data.child_node_set_index_or_q_edge_table_count});
+			native.nameStr = plain::write_string(memory, data.name_str);
+			native.name = static_cast<scr_string_t>(plain::write_script_string(data.name));
+			native.pieceIndices = plain::write_array<std::uint16_t>(data.piece_indices, memory, [&](auto& out, const auto& in) { out = in; });
+			native.pieceCount = plain::count_of<std::uint16_t>(data.piece_indices);
 		}
 
-		std::size_t size_pmr_octree_node([[maybe_unused]] const asset_data::world::pmr_octree_node& data)
+		std::size_t size_glass_name([[maybe_unused]] const asset_data::world::glass_name& data)
 		{
 			std::size_t size = 0;
-			return size;
-		}
-
-		asset_data::world::pmr_octree_metadata read_pmr_octree_metadata(const PMROctreeMetadata& native)
-		{
-			asset_data::world::pmr_octree_metadata data;
-			data.node_half_width = [&] { std::array<std::array<float, 4>, 16> out; for (std::size_t i = 0; i < out.size(); ++i) { out[i] = plain::read_scalars<float, 4>(&native.nodeHalfWidth[i]); } return out; }();
-			data.min_extent = plain::read_scalars<float, 4>(&native.minExtent);
-			data.root_node = read_pmr_octree_node(native.rootNode);
-			data.node_set_count = native.nodeSetCount;
-			data.node_bounding_radius_sq = std::to_array(native.nodeBoundingRadiusSq);
-			data.edge_bucket = plain::enum_name(asset_data::world::edge_query_bucket_t_names, static_cast<std::int64_t>(native.edgeBucket), "PMROctreeMetadata.edgeBucket");
-			data.flags = std::to_array(native.flags);
-			plain::require_zero(native.pad, "PMROctreeMetadata.pad");
-			return data;
-		}
-
-		void write_pmr_octree_metadata(PMROctreeMetadata& native, const asset_data::world::pmr_octree_metadata& data, [[maybe_unused]] const asset_resolver& resolve, [[maybe_unused]] plain::context& memory)
-		{
-			for (std::size_t i = 0; i < data.node_half_width.size(); ++i)
+			size += plain::string_size(data.name_str);
+			if (data.piece_indices)
 			{
-				plain::write_scalars(&native.nodeHalfWidth[i], data.node_half_width[i]);
+				size += plain::sized(std::max<std::size_t>(data.piece_indices->size(), 1) * sizeof(std::uint16_t));
 			}
-			plain::write_scalars(&native.minExtent, data.min_extent);
-			write_pmr_octree_node(native.rootNode, data.root_node, resolve, memory);
-			native.nodeSetCount = data.node_set_count;
-			std::ranges::copy(data.node_bounding_radius_sq, native.nodeBoundingRadiusSq);
-			native.edgeBucket = static_cast<edgeQueryBucket_t>(plain::enum_value(asset_data::world::edge_query_bucket_t_names, data.edge_bucket, "PMROctreeMetadata.edgeBucket"));
-			std::ranges::copy(data.flags, native.flags);
-		}
-
-		std::size_t size_pmr_octree_metadata([[maybe_unused]] const asset_data::world::pmr_octree_metadata& data)
-		{
-			std::size_t size = 0;
-			size += size_pmr_octree_node(data.root_node);
-			return size;
-		}
-
-		asset_data::world::pmr_octree_node_set read_pmr_octree_node_set(const PMROctreeNodeSet& native)
-		{
-			asset_data::world::pmr_octree_node_set data;
-			data.node = [&] { std::array<asset_data::world::pmr_octree_node, 8> out; for (std::size_t i = 0; i < out.size(); ++i) { out[i] = read_pmr_octree_node(native.node[i]); } return out; }();
-			return data;
-		}
-
-		void write_pmr_octree_node_set(PMROctreeNodeSet& native, const asset_data::world::pmr_octree_node_set& data, [[maybe_unused]] const asset_resolver& resolve, [[maybe_unused]] plain::context& memory)
-		{
-			for (std::size_t i = 0; i < data.node.size(); ++i)
-			{
-				write_pmr_octree_node(native.node[i], data.node[i], resolve, memory);
-			}
-		}
-
-		std::size_t size_pmr_octree_node_set([[maybe_unused]] const asset_data::world::pmr_octree_node_set& data)
-		{
-			std::size_t size = 0;
-			for (const auto& item : data.node)
-			{
-				size += size_pmr_octree_node(item);
-			}
-			return size;
-		}
-
-		asset_data::world::edge_adjacency_metadata read_edge_adjacency_metadata(const EdgeAdjacencyMetadata& native)
-		{
-			asset_data::world::edge_adjacency_metadata data;
-			data.start_index = native.startIndex;
-			data.mount_count = native.mountCount;
-			data.interaction_count = native.interactionCount;
-			return data;
-		}
-
-		void write_edge_adjacency_metadata(EdgeAdjacencyMetadata& native, const asset_data::world::edge_adjacency_metadata& data, [[maybe_unused]] const asset_resolver& resolve, [[maybe_unused]] plain::context& memory)
-		{
-			native.startIndex = data.start_index;
-			native.mountCount = data.mount_count;
-			native.interactionCount = data.interaction_count;
-		}
-
-		std::size_t size_edge_adjacency_metadata([[maybe_unused]] const asset_data::world::edge_adjacency_metadata& data)
-		{
-			std::size_t size = 0;
-			return size;
-		}
-
-		asset_data::world::edge_adjacency read_edge_adjacency(const EdgeAdjacency& native)
-		{
-			asset_data::world::edge_adjacency data;
-			data.start = native.start;
-			data.end = native.end;
-			data.adj_edge = native.adjEdge;
-			data.adj_start = native.adjStart;
-			data.adj_end = native.adjEnd;
-			return data;
-		}
-
-		void write_edge_adjacency(EdgeAdjacency& native, const asset_data::world::edge_adjacency& data, [[maybe_unused]] const asset_resolver& resolve, [[maybe_unused]] plain::context& memory)
-		{
-			native.start = data.start;
-			native.end = data.end;
-			native.adjEdge = data.adj_edge;
-			native.adjStart = data.adj_start;
-			native.adjEnd = data.adj_end;
-		}
-
-		std::size_t size_edge_adjacency([[maybe_unused]] const asset_data::world::edge_adjacency& data)
-		{
-			std::size_t size = 0;
 			return size;
 		}
 
 		asset_data::world::map_edge_list read_map_edge_list(const MapEdgeList& native)
 		{
+			plain::trace("read_map_edge_list");
 			asset_data::world::map_edge_list data;
 			data.name = plain::read_string(native.name);
 			data.mins = plain::read_scalars<float, 3>(&native.mins);
@@ -613,348 +612,171 @@ namespace zonetool::iw8::neutral
 			return size;
 		}
 
-		asset_data::world::nav_resource_s read_nav_resource_s(const nav_resource_s& native)
+		asset_data::world::flagged_edge_metadata read_flagged_edge_metadata(const FlaggedEdgeMetadata& native)
 		{
-			asset_data::world::nav_resource_s data;
-			data.target_name = plain::read_script_string(native.targetName);
-			data.model_idx = native.modelIdx;
-			data.target_ent_num = native.targetEntNum;
-			plain::require_zero(native.pSpace, "nav_resource_s.pSpace");
-			data.local_offset_pos = plain::read_scalars<float, 3>(&native.localOffsetPos);
-			data.local_offset_rot = plain::read_scalars<float, 4>(&native.localOffsetRot);
-			data.offset_layer = native.offsetLayer;
-			plain::require_zero(native.pPrev, "nav_resource_s.pPrev");
-			plain::require_zero(native.pNext, "nav_resource_s.pNext");
-			data.build_error = native.buildError;
-			data.layer_flags = native.layerFlags;
-			data.b_dockable = native.bDockable;
-			data.b_is_volume = native.bIsVolume;
-			data.p_graph_buffer = plain::read_array(native.pGraphBuffer, native.graphSize, "nav_resource_s.pGraphBuffer", [&](const auto& item) { return item; });
-			data.p_working_graph = plain::read_array(native.pWorkingGraph, (static_cast<std::uint8_t>(native.bDockable) == 0 ? 0 : native.graphSize), "nav_resource_s.pWorkingGraph", [&](const auto& item) { return item; });
+			plain::trace("read_flagged_edge_metadata");
+			asset_data::world::flagged_edge_metadata data;
+			data.packed_adjacent_normal = native.packedAdjacentNormal;
+			data.packed_open_angle = native.packedOpenAngle;
+			data.flags = std::to_array(native.flags);
 			return data;
 		}
 
-		void write_nav_resource_s(nav_resource_s& native, const asset_data::world::nav_resource_s& data, [[maybe_unused]] const asset_resolver& resolve, [[maybe_unused]] plain::context& memory)
+		void write_flagged_edge_metadata(FlaggedEdgeMetadata& native, const asset_data::world::flagged_edge_metadata& data, [[maybe_unused]] const asset_resolver& resolve, [[maybe_unused]] plain::context& memory)
 		{
-			native.targetName = static_cast<scr_string_t>(plain::write_script_string(data.target_name));
-			native.modelIdx = data.model_idx;
-			native.targetEntNum = data.target_ent_num;
-			plain::write_scalars(&native.localOffsetPos, data.local_offset_pos);
-			plain::write_scalars(&native.localOffsetRot, data.local_offset_rot);
-			native.offsetLayer = data.offset_layer;
-			native.buildError = data.build_error;
-			native.layerFlags = data.layer_flags;
-			native.bDockable = data.b_dockable;
-			native.bIsVolume = data.b_is_volume;
-			native.pGraphBuffer = plain::write_array<std::uint8_t>(data.p_graph_buffer, memory, [&](auto& out, const auto& in) { out = in; });
-			native.pWorkingGraph = plain::write_array<std::uint8_t>(data.p_working_graph, memory, [&](auto& out, const auto& in) { out = in; });
-			native.graphSize = plain::count_of<std::int32_t>(data.p_graph_buffer);
+			native.packedAdjacentNormal = data.packed_adjacent_normal;
+			native.packedOpenAngle = data.packed_open_angle;
+			std::ranges::copy(data.flags, native.flags);
 		}
 
-		std::size_t size_nav_resource_s([[maybe_unused]] const asset_data::world::nav_resource_s& data)
-		{
-			std::size_t size = 0;
-			if (data.p_graph_buffer)
-			{
-				size += plain::sized(std::max<std::size_t>(data.p_graph_buffer->size(), 1) * sizeof(std::uint8_t));
-			}
-			if (data.p_working_graph)
-			{
-				size += plain::sized(std::max<std::size_t>(data.p_working_graph->size(), 1) * sizeof(std::uint8_t));
-			}
-			return size;
-		}
-
-		asset_data::world::nav_boundary_plane_s read_nav_boundary_plane_s(const nav_boundary_plane_s& native)
-		{
-			asset_data::world::nav_boundary_plane_s data;
-			data.m_normal = plain::read_scalars<float, 3>(&native.m_Normal);
-			data.m_dist_from_center = native.m_DistFromCenter;
-			return data;
-		}
-
-		void write_nav_boundary_plane_s(nav_boundary_plane_s& native, const asset_data::world::nav_boundary_plane_s& data, [[maybe_unused]] const asset_resolver& resolve, [[maybe_unused]] plain::context& memory)
-		{
-			plain::write_scalars(&native.m_Normal, data.m_normal);
-			native.m_DistFromCenter = data.m_dist_from_center;
-		}
-
-		std::size_t size_nav_boundary_plane_s([[maybe_unused]] const asset_data::world::nav_boundary_plane_s& data)
+		std::size_t size_flagged_edge_metadata([[maybe_unused]] const asset_data::world::flagged_edge_metadata& data)
 		{
 			std::size_t size = 0;
 			return size;
 		}
 
-		asset_data::world::nav_obstacle_hull_s read_nav_obstacle_hull_s(const nav_obstacle_hull_s& native)
+		asset_data::world::pmr_octree_node read_pmr_octree_node(const PMROctreeNode& native)
 		{
-			asset_data::world::nav_obstacle_hull_s data;
-			data.m_boundaries = plain::read_array(native.m_Boundaries, native.m_NumBoundaries, "nav_obstacle_hull_s.m_Boundaries", [&](const auto& item) { return read_nav_boundary_plane_s(item); });
-			data.m_bounds_x = native.m_BoundsX;
-			data.m_bounds_y = native.m_BoundsY;
-			data.m_bounds_z = native.m_BoundsZ;
-			data.m_offset = plain::read_scalars<float, 3>(&native.m_Offset);
-			data.m_b_use_bounds = native.m_bUseBounds;
+			plain::trace("read_pmr_octree_node");
+			asset_data::world::pmr_octree_node data;
+			data.uniform_grid_index = std::to_array(native.uniformGridIndex);
+			data.depth = native.depth;
+			data.flags = plain::flag_names(asset_data::world::pmr_octree_flags_names, static_cast<std::uint64_t>(native.flags), "PMROctreeNode.flags");
+			data.parent_node_index_or_q_edge_table_index = plain::read_scalars<std::uint32_t, 1>(&native.___u3)[0];
+			data.child_node_set_index_or_q_edge_table_count = plain::read_scalars<std::uint32_t, 1>(&native.___u4)[0];
 			return data;
 		}
 
-		void write_nav_obstacle_hull_s(nav_obstacle_hull_s& native, const asset_data::world::nav_obstacle_hull_s& data, [[maybe_unused]] const asset_resolver& resolve, [[maybe_unused]] plain::context& memory)
+		void write_pmr_octree_node(PMROctreeNode& native, const asset_data::world::pmr_octree_node& data, [[maybe_unused]] const asset_resolver& resolve, [[maybe_unused]] plain::context& memory)
 		{
-			native.m_Boundaries = plain::write_array<nav_boundary_plane_s>(data.m_boundaries, memory, [&](auto& out, const auto& in) { write_nav_boundary_plane_s(out, in, resolve, memory); });
-			native.m_BoundsX = data.m_bounds_x;
-			native.m_BoundsY = data.m_bounds_y;
-			native.m_BoundsZ = data.m_bounds_z;
-			plain::write_scalars(&native.m_Offset, data.m_offset);
-			native.m_bUseBounds = data.m_b_use_bounds;
-			native.m_NumBoundaries = plain::count_of<std::int32_t>(data.m_boundaries);
+			std::ranges::copy(data.uniform_grid_index, native.uniformGridIndex);
+			native.depth = data.depth;
+			native.flags = static_cast<PMROctreeFlags>(plain::flag_value(asset_data::world::pmr_octree_flags_names, data.flags, "PMROctreeNode.flags"));
+			plain::write_scalars(&native.___u3, std::array<std::uint32_t, 1>{data.parent_node_index_or_q_edge_table_index});
+			plain::write_scalars(&native.___u4, std::array<std::uint32_t, 1>{data.child_node_set_index_or_q_edge_table_count});
 		}
 
-		std::size_t size_nav_obstacle_hull_s([[maybe_unused]] const asset_data::world::nav_obstacle_hull_s& data)
+		std::size_t size_pmr_octree_node([[maybe_unused]] const asset_data::world::pmr_octree_node& data)
 		{
 			std::size_t size = 0;
-			if (data.m_boundaries)
-			{
-				size += plain::sized(std::max<std::size_t>(data.m_boundaries->size(), 1) * sizeof(nav_boundary_plane_s));
-				for (const auto& item : *data.m_boundaries)
-				{
-					size += size_nav_boundary_plane_s(item);
-				}
-			}
 			return size;
 		}
 
-		asset_data::world::nav_obstacle_bounds_s read_nav_obstacle_bounds_s(const nav_obstacle_bounds_s& native)
+		asset_data::world::pmr_octree_metadata read_pmr_octree_metadata(const PMROctreeMetadata& native)
 		{
-			asset_data::world::nav_obstacle_bounds_s data;
-			data.m_hulls = plain::read_array(native.m_Hulls, native.m_NumHulls, "nav_obstacle_bounds_s.m_Hulls", [&](const auto& item) { return read_nav_obstacle_hull_s(item); });
+			plain::trace("read_pmr_octree_metadata");
+			asset_data::world::pmr_octree_metadata data;
+			data.node_half_width = [&] { std::array<std::array<float, 4>, 16> out; for (std::size_t i = 0; i < out.size(); ++i) { out[i] = plain::read_scalars<float, 4>(&native.nodeHalfWidth[i]); } return out; }();
+			data.min_extent = plain::read_scalars<float, 4>(&native.minExtent);
+			data.root_node = read_pmr_octree_node(native.rootNode);
+			data.node_set_count = native.nodeSetCount;
+			data.node_bounding_radius_sq = std::to_array(native.nodeBoundingRadiusSq);
+			data.edge_bucket = plain::enum_name(asset_data::world::edge_query_bucket_t_names, static_cast<std::int64_t>(native.edgeBucket), "PMROctreeMetadata.edgeBucket");
+			data.flags = std::to_array(native.flags);
+			plain::require_zero(native.pad, "PMROctreeMetadata.pad");
 			return data;
 		}
 
-		void write_nav_obstacle_bounds_s(nav_obstacle_bounds_s& native, const asset_data::world::nav_obstacle_bounds_s& data, [[maybe_unused]] const asset_resolver& resolve, [[maybe_unused]] plain::context& memory)
+		void write_pmr_octree_metadata(PMROctreeMetadata& native, const asset_data::world::pmr_octree_metadata& data, [[maybe_unused]] const asset_resolver& resolve, [[maybe_unused]] plain::context& memory)
 		{
-			native.m_Hulls = plain::write_array<nav_obstacle_hull_s>(data.m_hulls, memory, [&](auto& out, const auto& in) { write_nav_obstacle_hull_s(out, in, resolve, memory); });
-			native.m_NumHulls = plain::count_of<std::int32_t>(data.m_hulls);
+			for (std::size_t i = 0; i < data.node_half_width.size(); ++i)
+			{
+				plain::write_scalars(&native.nodeHalfWidth[i], data.node_half_width[i]);
+			}
+			plain::write_scalars(&native.minExtent, data.min_extent);
+			write_pmr_octree_node(native.rootNode, data.root_node, resolve, memory);
+			native.nodeSetCount = data.node_set_count;
+			std::ranges::copy(data.node_bounding_radius_sq, native.nodeBoundingRadiusSq);
+			native.edgeBucket = static_cast<edgeQueryBucket_t>(plain::enum_value(asset_data::world::edge_query_bucket_t_names, data.edge_bucket, "PMROctreeMetadata.edgeBucket"));
+			std::ranges::copy(data.flags, native.flags);
 		}
 
-		std::size_t size_nav_obstacle_bounds_s([[maybe_unused]] const asset_data::world::nav_obstacle_bounds_s& data)
+		std::size_t size_pmr_octree_metadata([[maybe_unused]] const asset_data::world::pmr_octree_metadata& data)
 		{
 			std::size_t size = 0;
-			if (data.m_hulls)
+			size += size_pmr_octree_node(data.root_node);
+			return size;
+		}
+
+		asset_data::world::pmr_octree_node_set read_pmr_octree_node_set(const PMROctreeNodeSet& native)
+		{
+			plain::trace("read_pmr_octree_node_set");
+			asset_data::world::pmr_octree_node_set data;
+			data.node = [&] { std::array<asset_data::world::pmr_octree_node, 8> out; for (std::size_t i = 0; i < out.size(); ++i) { out[i] = read_pmr_octree_node(native.node[i]); } return out; }();
+			return data;
+		}
+
+		void write_pmr_octree_node_set(PMROctreeNodeSet& native, const asset_data::world::pmr_octree_node_set& data, [[maybe_unused]] const asset_resolver& resolve, [[maybe_unused]] plain::context& memory)
+		{
+			for (std::size_t i = 0; i < data.node.size(); ++i)
 			{
-				size += plain::sized(std::max<std::size_t>(data.m_hulls->size(), 1) * sizeof(nav_obstacle_hull_s));
-				for (const auto& item : *data.m_hulls)
-				{
-					size += size_nav_obstacle_hull_s(item);
-				}
+				write_pmr_octree_node(native.node[i], data.node[i], resolve, memory);
+			}
+		}
+
+		std::size_t size_pmr_octree_node_set([[maybe_unused]] const asset_data::world::pmr_octree_node_set& data)
+		{
+			std::size_t size = 0;
+			for (const auto& item : data.node)
+			{
+				size += size_pmr_octree_node(item);
 			}
 			return size;
 		}
 
-		asset_data::world::nav_glass_bounds_s read_nav_glass_bounds_s(const nav_glass_bounds_s& native)
+		asset_data::world::edge_adjacency_metadata read_edge_adjacency_metadata(const EdgeAdjacencyMetadata& native)
 		{
-			asset_data::world::nav_glass_bounds_s data;
-			data.m_boundaries = plain::read_array(native.m_Boundaries, native.m_NumBoundaries, "nav_glass_bounds_s.m_Boundaries", [&](const auto& item) { return read_nav_boundary_plane_s(item); });
-			data.m_pos = plain::read_scalars<float, 3>(&native.m_Pos);
-			data.m_glass_piece_index = native.m_GlassPieceIndex;
+			plain::trace("read_edge_adjacency_metadata");
+			asset_data::world::edge_adjacency_metadata data;
+			data.start_index = native.startIndex;
+			data.mount_count = native.mountCount;
+			data.interaction_count = native.interactionCount;
 			return data;
 		}
 
-		void write_nav_glass_bounds_s(nav_glass_bounds_s& native, const asset_data::world::nav_glass_bounds_s& data, [[maybe_unused]] const asset_resolver& resolve, [[maybe_unused]] plain::context& memory)
+		void write_edge_adjacency_metadata(EdgeAdjacencyMetadata& native, const asset_data::world::edge_adjacency_metadata& data, [[maybe_unused]] const asset_resolver& resolve, [[maybe_unused]] plain::context& memory)
 		{
-			native.m_Boundaries = plain::write_array<nav_boundary_plane_s>(data.m_boundaries, memory, [&](auto& out, const auto& in) { write_nav_boundary_plane_s(out, in, resolve, memory); });
-			plain::write_scalars(&native.m_Pos, data.m_pos);
-			native.m_GlassPieceIndex = data.m_glass_piece_index;
-			native.m_NumBoundaries = plain::count_of<std::int32_t>(data.m_boundaries);
+			native.startIndex = data.start_index;
+			native.mountCount = data.mount_count;
+			native.interactionCount = data.interaction_count;
 		}
 
-		std::size_t size_nav_glass_bounds_s([[maybe_unused]] const asset_data::world::nav_glass_bounds_s& data)
-		{
-			std::size_t size = 0;
-			if (data.m_boundaries)
-			{
-				size += plain::sized(std::max<std::size_t>(data.m_boundaries->size(), 1) * sizeof(nav_boundary_plane_s));
-				for (const auto& item : *data.m_boundaries)
-				{
-					size += size_nav_boundary_plane_s(item);
-				}
-			}
-			return size;
-		}
-
-		asset_data::world::nav_modifier_s read_nav_modifier_s(const nav_modifier_s& native)
-		{
-			asset_data::world::nav_modifier_s data;
-			data.m_boundaries = plain::read_array(native.m_Boundaries, native.m_NumBoundaries, "nav_modifier_s.m_Boundaries", [&](const auto& item) { return read_nav_boundary_plane_s(item); });
-			data.m_pos = plain::read_scalars<float, 3>(&native.m_Pos);
-			data.m_target_name = plain::read_script_string(native.m_TargetName);
-			data.m_target = plain::read_script_string(native.m_Target);
-			data.m_script_noteworthy = plain::read_script_string(native.m_ScriptNoteworthy);
-			data.m_script_link_name = plain::read_script_string(native.m_ScriptLinkName);
-			data.m_user_flags = native.m_UserFlags;
-			data.m_layer_flags = native.m_LayerFlags;
-			data.m_weight = native.m_Weight;
-			data.m_b_active_on_load = native.m_bActiveOnLoad;
-			return data;
-		}
-
-		void write_nav_modifier_s(nav_modifier_s& native, const asset_data::world::nav_modifier_s& data, [[maybe_unused]] const asset_resolver& resolve, [[maybe_unused]] plain::context& memory)
-		{
-			native.m_Boundaries = plain::write_array<nav_boundary_plane_s>(data.m_boundaries, memory, [&](auto& out, const auto& in) { write_nav_boundary_plane_s(out, in, resolve, memory); });
-			plain::write_scalars(&native.m_Pos, data.m_pos);
-			native.m_TargetName = static_cast<scr_string_t>(plain::write_script_string(data.m_target_name));
-			native.m_Target = static_cast<scr_string_t>(plain::write_script_string(data.m_target));
-			native.m_ScriptNoteworthy = static_cast<scr_string_t>(plain::write_script_string(data.m_script_noteworthy));
-			native.m_ScriptLinkName = static_cast<scr_string_t>(plain::write_script_string(data.m_script_link_name));
-			native.m_UserFlags = data.m_user_flags;
-			native.m_LayerFlags = data.m_layer_flags;
-			native.m_Weight = data.m_weight;
-			native.m_bActiveOnLoad = data.m_b_active_on_load;
-			native.m_NumBoundaries = plain::count_of<std::int32_t>(data.m_boundaries);
-		}
-
-		std::size_t size_nav_modifier_s([[maybe_unused]] const asset_data::world::nav_modifier_s& data)
-		{
-			std::size_t size = 0;
-			if (data.m_boundaries)
-			{
-				size += plain::sized(std::max<std::size_t>(data.m_boundaries->size(), 1) * sizeof(nav_boundary_plane_s));
-				for (const auto& item : *data.m_boundaries)
-				{
-					size += size_nav_boundary_plane_s(item);
-				}
-			}
-			return size;
-		}
-
-		asset_data::world::nav_link_point_s read_nav_link_point_s(const nav_link_point_s& native)
-		{
-			asset_data::world::nav_link_point_s data;
-			data.m_pt1 = plain::read_scalars<float, 3>(&native.m_Pt1);
-			data.m_pt2 = plain::read_scalars<float, 3>(&native.m_Pt2);
-			return data;
-		}
-
-		void write_nav_link_point_s(nav_link_point_s& native, const asset_data::world::nav_link_point_s& data, [[maybe_unused]] const asset_resolver& resolve, [[maybe_unused]] plain::context& memory)
-		{
-			plain::write_scalars(&native.m_Pt1, data.m_pt1);
-			plain::write_scalars(&native.m_Pt2, data.m_pt2);
-		}
-
-		std::size_t size_nav_link_point_s([[maybe_unused]] const asset_data::world::nav_link_point_s& data)
+		std::size_t size_edge_adjacency_metadata([[maybe_unused]] const asset_data::world::edge_adjacency_metadata& data)
 		{
 			std::size_t size = 0;
 			return size;
 		}
 
-		asset_data::world::nav_link_creation_data_s read_nav_link_creation_data_s(const nav_link_creation_data_s& native)
+		asset_data::world::edge_adjacency read_edge_adjacency(const EdgeAdjacency& native)
 		{
-			asset_data::world::nav_link_creation_data_s data;
-			data.m_start = read_nav_link_point_s(native.m_Start);
-			data.m_end = read_nav_link_point_s(native.m_End);
-			data.m_animscript = plain::read_script_string(native.m_Animscript);
-			data.m_target = plain::read_script_string(native.m_Target);
-			data.m_parent = plain::read_script_string(native.m_Parent);
-			data.m_usage_flags = native.m_UsageFlags;
-			data.m_penalty_mult = native.m_PenaltyMult;
-			data.m_b_bidirectional = native.m_bBidirectional;
+			plain::trace("read_edge_adjacency");
+			asset_data::world::edge_adjacency data;
+			data.start = native.start;
+			data.end = native.end;
+			data.adj_edge = native.adjEdge;
+			data.adj_start = native.adjStart;
+			data.adj_end = native.adjEnd;
 			return data;
 		}
 
-		void write_nav_link_creation_data_s(nav_link_creation_data_s& native, const asset_data::world::nav_link_creation_data_s& data, [[maybe_unused]] const asset_resolver& resolve, [[maybe_unused]] plain::context& memory)
+		void write_edge_adjacency(EdgeAdjacency& native, const asset_data::world::edge_adjacency& data, [[maybe_unused]] const asset_resolver& resolve, [[maybe_unused]] plain::context& memory)
 		{
-			write_nav_link_point_s(native.m_Start, data.m_start, resolve, memory);
-			write_nav_link_point_s(native.m_End, data.m_end, resolve, memory);
-			native.m_Animscript = static_cast<scr_string_t>(plain::write_script_string(data.m_animscript));
-			native.m_Target = static_cast<scr_string_t>(plain::write_script_string(data.m_target));
-			native.m_Parent = static_cast<scr_string_t>(plain::write_script_string(data.m_parent));
-			native.m_UsageFlags = data.m_usage_flags;
-			native.m_PenaltyMult = data.m_penalty_mult;
-			native.m_bBidirectional = data.m_b_bidirectional;
+			native.start = data.start;
+			native.end = data.end;
+			native.adjEdge = data.adj_edge;
+			native.adjStart = data.adj_start;
+			native.adjEnd = data.adj_end;
 		}
 
-		std::size_t size_nav_link_creation_data_s([[maybe_unused]] const asset_data::world::nav_link_creation_data_s& data)
+		std::size_t size_edge_adjacency([[maybe_unused]] const asset_data::world::edge_adjacency& data)
 		{
 			std::size_t size = 0;
-			size += size_nav_link_point_s(data.m_start);
-			size += size_nav_link_point_s(data.m_end);
-			return size;
-		}
-
-		asset_data::world::nav_raw_volume_s read_nav_raw_volume_s(const nav_raw_volume_s& native)
-		{
-			asset_data::world::nav_raw_volume_s data;
-			data.m_mid_point = plain::read_scalars<float, 3>(&native.m_MidPoint);
-			data.m_half_size = plain::read_scalars<float, 3>(&native.m_HalfSize);
-			data.m_min_voxel_size = native.m_MinVoxelSize;
-			data.m_clearance_xy = native.m_ClearanceXY;
-			data.m_clearance_z = native.m_ClearanceZ;
-			return data;
-		}
-
-		void write_nav_raw_volume_s(nav_raw_volume_s& native, const asset_data::world::nav_raw_volume_s& data, [[maybe_unused]] const asset_resolver& resolve, [[maybe_unused]] plain::context& memory)
-		{
-			plain::write_scalars(&native.m_MidPoint, data.m_mid_point);
-			plain::write_scalars(&native.m_HalfSize, data.m_half_size);
-			native.m_MinVoxelSize = data.m_min_voxel_size;
-			native.m_ClearanceXY = data.m_clearance_xy;
-			native.m_ClearanceZ = data.m_clearance_z;
-		}
-
-		std::size_t size_nav_raw_volume_s([[maybe_unused]] const asset_data::world::nav_raw_volume_s& data)
-		{
-			std::size_t size = 0;
-			return size;
-		}
-
-		asset_data::world::nav_raw_custom_volume_tri_s read_nav_raw_custom_volume_tri_s(const nav_raw_custom_volume_tri_s& native)
-		{
-			asset_data::world::nav_raw_custom_volume_tri_s data;
-			data.m_verts = [&] { std::array<std::array<float, 3>, 3> out; for (std::size_t i = 0; i < out.size(); ++i) { out[i] = plain::read_scalars<float, 3>(&native.m_Verts[i]); } return out; }();
-			return data;
-		}
-
-		void write_nav_raw_custom_volume_tri_s(nav_raw_custom_volume_tri_s& native, const asset_data::world::nav_raw_custom_volume_tri_s& data, [[maybe_unused]] const asset_resolver& resolve, [[maybe_unused]] plain::context& memory)
-		{
-			for (std::size_t i = 0; i < data.m_verts.size(); ++i)
-			{
-				plain::write_scalars(&native.m_Verts[i], data.m_verts[i]);
-			}
-		}
-
-		std::size_t size_nav_raw_custom_volume_tri_s([[maybe_unused]] const asset_data::world::nav_raw_custom_volume_tri_s& data)
-		{
-			std::size_t size = 0;
-			return size;
-		}
-
-		asset_data::world::nav_raw_custom_volume_s read_nav_raw_custom_volume_s(const nav_raw_custom_volume_s& native)
-		{
-			asset_data::world::nav_raw_custom_volume_s data;
-			data.m_tris = plain::read_array(native.m_Tris, native.m_NumTris, "nav_raw_custom_volume_s.m_Tris", [&](const auto& item) { return read_nav_raw_custom_volume_tri_s(item); });
-			return data;
-		}
-
-		void write_nav_raw_custom_volume_s(nav_raw_custom_volume_s& native, const asset_data::world::nav_raw_custom_volume_s& data, [[maybe_unused]] const asset_resolver& resolve, [[maybe_unused]] plain::context& memory)
-		{
-			native.m_Tris = plain::write_array<nav_raw_custom_volume_tri_s>(data.m_tris, memory, [&](auto& out, const auto& in) { write_nav_raw_custom_volume_tri_s(out, in, resolve, memory); });
-			native.m_NumTris = plain::count_of<std::int32_t>(data.m_tris);
-		}
-
-		std::size_t size_nav_raw_custom_volume_s([[maybe_unused]] const asset_data::world::nav_raw_custom_volume_s& data)
-		{
-			std::size_t size = 0;
-			if (data.m_tris)
-			{
-				size += plain::sized(std::max<std::size_t>(data.m_tris->size(), 1) * sizeof(nav_raw_custom_volume_tri_s));
-				for (const auto& item : *data.m_tris)
-				{
-					size += size_nav_raw_custom_volume_tri_s(item);
-				}
-			}
 			return size;
 		}
 
 		asset_data::world::nav_misc_s read_nav_misc_s(const nav_misc_s& native)
 		{
+			plain::trace("read_nav_misc_s");
 			asset_data::world::nav_misc_s data;
 			data.m_static_bounds_half_size = plain::read_scalars<float, 3>(&native.m_StaticBoundsHalfSize);
 			data.m_static_bounds_mid_point = plain::read_scalars<float, 3>(&native.m_StaticBoundsMidPoint);
@@ -975,6 +797,7 @@ namespace zonetool::iw8::neutral
 
 		asset_data::world::nav_mesh read_nav_mesh(const NavMeshData& native)
 		{
+			plain::trace("read_nav_mesh");
 			asset_data::world::nav_mesh data;
 			data.name = plain::read_string(native.name);
 			data.version = native.version;
@@ -1083,255 +906,352 @@ namespace zonetool::iw8::neutral
 			return size;
 		}
 
-		asset_data::world::static_model_collision_instance read_static_model_collision_instance(const StaticModelCollisionInstance& native)
+		asset_data::world::nav_resource_s read_nav_resource_s(const nav_resource_s& native)
 		{
-			asset_data::world::static_model_collision_instance data;
-			data.origin = plain::read_scalars<float, 3>(&native.origin);
-			data.angles = plain::read_scalars<float, 3>(&native.angles);
-			data.scale = native.scale;
+			plain::trace("read_nav_resource_s");
+			asset_data::world::nav_resource_s data;
+			data.target_name = plain::read_script_string(native.targetName);
+			data.model_idx = native.modelIdx;
+			data.target_ent_num = native.targetEntNum;
+			plain::require_zero(native.pSpace, "nav_resource_s.pSpace");
+			data.local_offset_pos = plain::read_scalars<float, 3>(&native.localOffsetPos);
+			data.local_offset_rot = plain::read_scalars<float, 4>(&native.localOffsetRot);
+			data.offset_layer = native.offsetLayer;
+			plain::require_zero(native.pPrev, "nav_resource_s.pPrev");
+			plain::require_zero(native.pNext, "nav_resource_s.pNext");
+			data.build_error = native.buildError;
+			data.layer_flags = native.layerFlags;
+			data.b_dockable = native.bDockable;
+			data.b_is_volume = native.bIsVolume;
+			data.p_graph_buffer = plain::read_array(native.pGraphBuffer, native.graphSize, "nav_resource_s.pGraphBuffer", [&](const auto& item) { return item; });
+			data.p_working_graph = plain::read_array(native.pWorkingGraph, (static_cast<std::uint8_t>(native.bDockable) == 0 ? 0 : native.graphSize), "nav_resource_s.pWorkingGraph", [&](const auto& item) { return item; });
 			return data;
 		}
 
-		void write_static_model_collision_instance(StaticModelCollisionInstance& native, const asset_data::world::static_model_collision_instance& data, [[maybe_unused]] const asset_resolver& resolve, [[maybe_unused]] plain::context& memory)
+		void write_nav_resource_s(nav_resource_s& native, const asset_data::world::nav_resource_s& data, [[maybe_unused]] const asset_resolver& resolve, [[maybe_unused]] plain::context& memory)
 		{
-			plain::write_scalars(&native.origin, data.origin);
-			plain::write_scalars(&native.angles, data.angles);
-			native.scale = data.scale;
+			native.targetName = static_cast<scr_string_t>(plain::write_script_string(data.target_name));
+			native.modelIdx = data.model_idx;
+			native.targetEntNum = data.target_ent_num;
+			plain::write_scalars(&native.localOffsetPos, data.local_offset_pos);
+			plain::write_scalars(&native.localOffsetRot, data.local_offset_rot);
+			native.offsetLayer = data.offset_layer;
+			native.buildError = data.build_error;
+			native.layerFlags = data.layer_flags;
+			native.bDockable = data.b_dockable;
+			native.bIsVolume = data.b_is_volume;
+			native.pGraphBuffer = plain::write_array<std::uint8_t>(data.p_graph_buffer, memory, [&](auto& out, const auto& in) { out = in; });
+			native.pWorkingGraph = plain::write_array<std::uint8_t>(data.p_working_graph, memory, [&](auto& out, const auto& in) { out = in; });
+			native.graphSize = plain::count_of<std::int32_t>(data.p_graph_buffer);
 		}
 
-		std::size_t size_static_model_collision_instance([[maybe_unused]] const asset_data::world::static_model_collision_instance& data)
+		std::size_t size_nav_resource_s([[maybe_unused]] const asset_data::world::nav_resource_s& data)
 		{
 			std::size_t size = 0;
+			if (data.p_graph_buffer)
+			{
+				size += plain::sized(std::max<std::size_t>(data.p_graph_buffer->size(), 1) * sizeof(std::uint8_t));
+			}
+			if (data.p_working_graph)
+			{
+				size += plain::sized(std::max<std::size_t>(data.p_working_graph->size(), 1) * sizeof(std::uint8_t));
+			}
 			return size;
 		}
 
-		asset_data::world::static_model_collision_model read_static_model_collision_model(const StaticModelCollisionModel& native)
+		asset_data::world::nav_obstacle_bounds_s read_nav_obstacle_bounds_s(const nav_obstacle_bounds_s& native)
 		{
-			asset_data::world::static_model_collision_model data;
-			data.name = plain::read_script_string(native.name);
-			data.physics_asset = plain::read_asset(ASSET_TYPE_PHYSICSASSET, native.physicsAsset);
-			data.detail_collision = plain::read_asset(ASSET_TYPE_XMODEL_DETAIL_COLLISION, native.detailCollision);
-			data.instances = plain::read_array(native.instances, native.numInstances, "StaticModelCollisionModel.instances", [&](const auto& item) { return read_static_model_collision_instance(item); });
+			plain::trace("read_nav_obstacle_bounds_s");
+			asset_data::world::nav_obstacle_bounds_s data;
+			data.m_hulls = plain::read_array(native.m_Hulls, native.m_NumHulls, "nav_obstacle_bounds_s.m_Hulls", [&](const auto& item) { return read_nav_obstacle_hull_s(item); });
 			return data;
 		}
 
-		void write_static_model_collision_model(StaticModelCollisionModel& native, const asset_data::world::static_model_collision_model& data, [[maybe_unused]] const asset_resolver& resolve, [[maybe_unused]] plain::context& memory)
+		void write_nav_obstacle_bounds_s(nav_obstacle_bounds_s& native, const asset_data::world::nav_obstacle_bounds_s& data, [[maybe_unused]] const asset_resolver& resolve, [[maybe_unused]] plain::context& memory)
 		{
-			native.name = static_cast<scr_string_t>(plain::write_script_string(data.name));
-			native.physicsAsset = plain::resolve_asset<PhysicsAsset>(resolve, ASSET_TYPE_PHYSICSASSET, data.physics_asset);
-			native.detailCollision = plain::resolve_asset<XModelDetailCollision>(resolve, ASSET_TYPE_XMODEL_DETAIL_COLLISION, data.detail_collision);
-			native.instances = plain::write_array<StaticModelCollisionInstance>(data.instances, memory, [&](auto& out, const auto& in) { write_static_model_collision_instance(out, in, resolve, memory); });
-			native.numInstances = plain::count_of<std::uint32_t>(data.instances);
+			native.m_Hulls = plain::write_array<nav_obstacle_hull_s>(data.m_hulls, memory, [&](auto& out, const auto& in) { write_nav_obstacle_hull_s(out, in, resolve, memory); });
+			native.m_NumHulls = plain::count_of<std::int32_t>(data.m_hulls);
 		}
 
-		std::size_t size_static_model_collision_model([[maybe_unused]] const asset_data::world::static_model_collision_model& data)
+		std::size_t size_nav_obstacle_bounds_s([[maybe_unused]] const asset_data::world::nav_obstacle_bounds_s& data)
 		{
 			std::size_t size = 0;
-			if (data.instances)
+			if (data.m_hulls)
 			{
-				size += plain::sized(std::max<std::size_t>(data.instances->size(), 1) * sizeof(StaticModelCollisionInstance));
-				for (const auto& item : *data.instances)
+				size += plain::sized(std::max<std::size_t>(data.m_hulls->size(), 1) * sizeof(nav_obstacle_hull_s));
+				for (const auto& item : *data.m_hulls)
 				{
-					size += size_static_model_collision_instance(item);
+					size += size_nav_obstacle_hull_s(item);
 				}
 			}
 			return size;
 		}
 
-		asset_data::world::static_model_collision_model_list read_static_model_collision_model_list(const StaticModelCollisionModelList& native)
+		asset_data::world::nav_obstacle_hull_s read_nav_obstacle_hull_s(const nav_obstacle_hull_s& native)
 		{
-			asset_data::world::static_model_collision_model_list data;
-			data.models = plain::read_array(native.models, native.numModels, "StaticModelCollisionModelList.models", [&](const auto& item) { return read_static_model_collision_model(item); });
-			data.structure_memory_cost = native.structureMemoryCost;
+			plain::trace("read_nav_obstacle_hull_s");
+			asset_data::world::nav_obstacle_hull_s data;
+			data.m_boundaries = plain::read_array(native.m_Boundaries, native.m_NumBoundaries, "nav_obstacle_hull_s.m_Boundaries", [&](const auto& item) { return read_nav_boundary_plane_s(item); });
+			data.m_bounds_x = native.m_BoundsX;
+			data.m_bounds_y = native.m_BoundsY;
+			data.m_bounds_z = native.m_BoundsZ;
+			data.m_offset = plain::read_scalars<float, 3>(&native.m_Offset);
+			data.m_b_use_bounds = native.m_bUseBounds;
 			return data;
 		}
 
-		void write_static_model_collision_model_list(StaticModelCollisionModelList& native, const asset_data::world::static_model_collision_model_list& data, [[maybe_unused]] const asset_resolver& resolve, [[maybe_unused]] plain::context& memory)
+		void write_nav_obstacle_hull_s(nav_obstacle_hull_s& native, const asset_data::world::nav_obstacle_hull_s& data, [[maybe_unused]] const asset_resolver& resolve, [[maybe_unused]] plain::context& memory)
 		{
-			native.models = plain::write_array<StaticModelCollisionModel>(data.models, memory, [&](auto& out, const auto& in) { write_static_model_collision_model(out, in, resolve, memory); });
-			native.structureMemoryCost = data.structure_memory_cost;
-			native.numModels = plain::count_of<std::uint32_t>(data.models);
+			native.m_Boundaries = plain::write_array<nav_boundary_plane_s>(data.m_boundaries, memory, [&](auto& out, const auto& in) { write_nav_boundary_plane_s(out, in, resolve, memory); });
+			native.m_BoundsX = data.m_bounds_x;
+			native.m_BoundsY = data.m_bounds_y;
+			native.m_BoundsZ = data.m_bounds_z;
+			plain::write_scalars(&native.m_Offset, data.m_offset);
+			native.m_bUseBounds = data.m_b_use_bounds;
+			native.m_NumBoundaries = plain::count_of<std::int32_t>(data.m_boundaries);
 		}
 
-		std::size_t size_static_model_collision_model_list([[maybe_unused]] const asset_data::world::static_model_collision_model_list& data)
+		std::size_t size_nav_obstacle_hull_s([[maybe_unused]] const asset_data::world::nav_obstacle_hull_s& data)
 		{
 			std::size_t size = 0;
-			if (data.models)
+			if (data.m_boundaries)
 			{
-				size += plain::sized(std::max<std::size_t>(data.models->size(), 1) * sizeof(StaticModelCollisionModel));
-				for (const auto& item : *data.models)
+				size += plain::sized(std::max<std::size_t>(data.m_boundaries->size(), 1) * sizeof(nav_boundary_plane_s));
+				for (const auto& item : *data.m_boundaries)
 				{
-					size += size_static_model_collision_model(item);
+					size += size_nav_boundary_plane_s(item);
 				}
 			}
 			return size;
 		}
 
-		asset_data::world::stage read_stage(const Stage& native)
+		asset_data::world::nav_boundary_plane_s read_nav_boundary_plane_s(const nav_boundary_plane_s& native)
 		{
-			asset_data::world::stage data;
-			data.name = plain::read_string(native.name);
-			data.origin = plain::read_scalars<float, 3>(&native.origin);
-			data.trigger_index = native.triggerIndex;
-			data.sun_primary_light_index = native.sunPrimaryLightIndex;
-			data.entity_uid = native.entityUID;
-			data.sky_rotation_angles = plain::read_scalars<float, 3>(&native.skyRotationAngles);
+			plain::trace("read_nav_boundary_plane_s");
+			asset_data::world::nav_boundary_plane_s data;
+			data.m_normal = plain::read_scalars<float, 3>(&native.m_Normal);
+			data.m_dist_from_center = native.m_DistFromCenter;
 			return data;
 		}
 
-		void write_stage(Stage& native, const asset_data::world::stage& data, [[maybe_unused]] const asset_resolver& resolve, [[maybe_unused]] plain::context& memory)
+		void write_nav_boundary_plane_s(nav_boundary_plane_s& native, const asset_data::world::nav_boundary_plane_s& data, [[maybe_unused]] const asset_resolver& resolve, [[maybe_unused]] plain::context& memory)
 		{
-			native.name = plain::write_string(memory, data.name);
-			plain::write_scalars(&native.origin, data.origin);
-			native.triggerIndex = data.trigger_index;
-			native.sunPrimaryLightIndex = data.sun_primary_light_index;
-			native.entityUID = data.entity_uid;
-			plain::write_scalars(&native.skyRotationAngles, data.sky_rotation_angles);
+			plain::write_scalars(&native.m_Normal, data.m_normal);
+			native.m_DistFromCenter = data.m_dist_from_center;
 		}
 
-		std::size_t size_stage([[maybe_unused]] const asset_data::world::stage& data)
-		{
-			std::size_t size = 0;
-			size += plain::string_size(data.name);
-			return size;
-		}
-
-		asset_data::world::trigger_model read_trigger_model(const TriggerModel& native)
-		{
-			asset_data::world::trigger_model data;
-			data.contents = native.contents;
-			data.hull_count = native.hullCount;
-			data.first_hull = native.firstHull;
-			data.winding_count = native.windingCount;
-			data.first_winding = native.firstWinding;
-			data.flags = native.flags;
-			data.physics_asset = plain::read_asset(ASSET_TYPE_PHYSICSASSET, native.physicsAsset);
-			data.physics_shape_override_idx = native.physicsShapeOverrideIdx;
-			return data;
-		}
-
-		void write_trigger_model(TriggerModel& native, const asset_data::world::trigger_model& data, [[maybe_unused]] const asset_resolver& resolve, [[maybe_unused]] plain::context& memory)
-		{
-			native.contents = data.contents;
-			native.hullCount = data.hull_count;
-			native.firstHull = data.first_hull;
-			native.windingCount = data.winding_count;
-			native.firstWinding = data.first_winding;
-			native.flags = data.flags;
-			native.physicsAsset = plain::resolve_asset<PhysicsAsset>(resolve, ASSET_TYPE_PHYSICSASSET, data.physics_asset);
-			native.physicsShapeOverrideIdx = data.physics_shape_override_idx;
-		}
-
-		std::size_t size_trigger_model([[maybe_unused]] const asset_data::world::trigger_model& data)
+		std::size_t size_nav_boundary_plane_s([[maybe_unused]] const asset_data::world::nav_boundary_plane_s& data)
 		{
 			std::size_t size = 0;
 			return size;
 		}
 
-		asset_data::world::bounds read_bounds(const Bounds& native)
+		asset_data::world::nav_glass_bounds_s read_nav_glass_bounds_s(const nav_glass_bounds_s& native)
 		{
-			asset_data::world::bounds data;
-			data.mid_point = plain::read_scalars<float, 3>(&native.midPoint);
-			data.half_size = plain::read_scalars<float, 3>(&native.halfSize);
+			plain::trace("read_nav_glass_bounds_s");
+			asset_data::world::nav_glass_bounds_s data;
+			data.m_boundaries = plain::read_array(native.m_Boundaries, native.m_NumBoundaries, "nav_glass_bounds_s.m_Boundaries", [&](const auto& item) { return read_nav_boundary_plane_s(item); });
+			data.m_pos = plain::read_scalars<float, 3>(&native.m_Pos);
+			data.m_glass_piece_index = native.m_GlassPieceIndex;
 			return data;
 		}
 
-		void write_bounds(Bounds& native, const asset_data::world::bounds& data, [[maybe_unused]] const asset_resolver& resolve, [[maybe_unused]] plain::context& memory)
+		void write_nav_glass_bounds_s(nav_glass_bounds_s& native, const asset_data::world::nav_glass_bounds_s& data, [[maybe_unused]] const asset_resolver& resolve, [[maybe_unused]] plain::context& memory)
 		{
-			plain::write_scalars(&native.midPoint, data.mid_point);
-			plain::write_scalars(&native.halfSize, data.half_size);
+			native.m_Boundaries = plain::write_array<nav_boundary_plane_s>(data.m_boundaries, memory, [&](auto& out, const auto& in) { write_nav_boundary_plane_s(out, in, resolve, memory); });
+			plain::write_scalars(&native.m_Pos, data.m_pos);
+			native.m_GlassPieceIndex = data.m_glass_piece_index;
+			native.m_NumBoundaries = plain::count_of<std::int32_t>(data.m_boundaries);
 		}
 
-		std::size_t size_bounds([[maybe_unused]] const asset_data::world::bounds& data)
+		std::size_t size_nav_glass_bounds_s([[maybe_unused]] const asset_data::world::nav_glass_bounds_s& data)
+		{
+			std::size_t size = 0;
+			if (data.m_boundaries)
+			{
+				size += plain::sized(std::max<std::size_t>(data.m_boundaries->size(), 1) * sizeof(nav_boundary_plane_s));
+				for (const auto& item : *data.m_boundaries)
+				{
+					size += size_nav_boundary_plane_s(item);
+				}
+			}
+			return size;
+		}
+
+		asset_data::world::nav_modifier_s read_nav_modifier_s(const nav_modifier_s& native)
+		{
+			plain::trace("read_nav_modifier_s");
+			asset_data::world::nav_modifier_s data;
+			data.m_boundaries = plain::read_array(native.m_Boundaries, native.m_NumBoundaries, "nav_modifier_s.m_Boundaries", [&](const auto& item) { return read_nav_boundary_plane_s(item); });
+			data.m_pos = plain::read_scalars<float, 3>(&native.m_Pos);
+			data.m_target_name = plain::read_script_string(native.m_TargetName);
+			data.m_target = plain::read_script_string(native.m_Target);
+			data.m_script_noteworthy = plain::read_script_string(native.m_ScriptNoteworthy);
+			data.m_script_link_name = plain::read_script_string(native.m_ScriptLinkName);
+			data.m_user_flags = native.m_UserFlags;
+			data.m_layer_flags = native.m_LayerFlags;
+			data.m_weight = native.m_Weight;
+			data.m_b_active_on_load = native.m_bActiveOnLoad;
+			return data;
+		}
+
+		void write_nav_modifier_s(nav_modifier_s& native, const asset_data::world::nav_modifier_s& data, [[maybe_unused]] const asset_resolver& resolve, [[maybe_unused]] plain::context& memory)
+		{
+			native.m_Boundaries = plain::write_array<nav_boundary_plane_s>(data.m_boundaries, memory, [&](auto& out, const auto& in) { write_nav_boundary_plane_s(out, in, resolve, memory); });
+			plain::write_scalars(&native.m_Pos, data.m_pos);
+			native.m_TargetName = static_cast<scr_string_t>(plain::write_script_string(data.m_target_name));
+			native.m_Target = static_cast<scr_string_t>(plain::write_script_string(data.m_target));
+			native.m_ScriptNoteworthy = static_cast<scr_string_t>(plain::write_script_string(data.m_script_noteworthy));
+			native.m_ScriptLinkName = static_cast<scr_string_t>(plain::write_script_string(data.m_script_link_name));
+			native.m_UserFlags = data.m_user_flags;
+			native.m_LayerFlags = data.m_layer_flags;
+			native.m_Weight = data.m_weight;
+			native.m_bActiveOnLoad = data.m_b_active_on_load;
+			native.m_NumBoundaries = plain::count_of<std::int32_t>(data.m_boundaries);
+		}
+
+		std::size_t size_nav_modifier_s([[maybe_unused]] const asset_data::world::nav_modifier_s& data)
+		{
+			std::size_t size = 0;
+			if (data.m_boundaries)
+			{
+				size += plain::sized(std::max<std::size_t>(data.m_boundaries->size(), 1) * sizeof(nav_boundary_plane_s));
+				for (const auto& item : *data.m_boundaries)
+				{
+					size += size_nav_boundary_plane_s(item);
+				}
+			}
+			return size;
+		}
+
+		asset_data::world::nav_link_point_s read_nav_link_point_s(const nav_link_point_s& native)
+		{
+			plain::trace("read_nav_link_point_s");
+			asset_data::world::nav_link_point_s data;
+			data.m_pt1 = plain::read_scalars<float, 3>(&native.m_Pt1);
+			data.m_pt2 = plain::read_scalars<float, 3>(&native.m_Pt2);
+			return data;
+		}
+
+		void write_nav_link_point_s(nav_link_point_s& native, const asset_data::world::nav_link_point_s& data, [[maybe_unused]] const asset_resolver& resolve, [[maybe_unused]] plain::context& memory)
+		{
+			plain::write_scalars(&native.m_Pt1, data.m_pt1);
+			plain::write_scalars(&native.m_Pt2, data.m_pt2);
+		}
+
+		std::size_t size_nav_link_point_s([[maybe_unused]] const asset_data::world::nav_link_point_s& data)
 		{
 			std::size_t size = 0;
 			return size;
 		}
 
-		asset_data::world::trigger_hull read_trigger_hull(const TriggerHull& native)
+		asset_data::world::nav_link_creation_data_s read_nav_link_creation_data_s(const nav_link_creation_data_s& native)
 		{
-			asset_data::world::trigger_hull data;
-			data.bounds = read_bounds(native.bounds);
-			data.contents = native.contents;
-			data.slab_count = native.slabCount;
-			data.first_slab = native.firstSlab;
+			plain::trace("read_nav_link_creation_data_s");
+			asset_data::world::nav_link_creation_data_s data;
+			data.m_start = read_nav_link_point_s(native.m_Start);
+			data.m_end = read_nav_link_point_s(native.m_End);
+			data.m_animscript = plain::read_script_string(native.m_Animscript);
+			data.m_target = plain::read_script_string(native.m_Target);
+			data.m_parent = plain::read_script_string(native.m_Parent);
+			data.m_usage_flags = native.m_UsageFlags;
+			data.m_penalty_mult = native.m_PenaltyMult;
+			data.m_b_bidirectional = native.m_bBidirectional;
 			return data;
 		}
 
-		void write_trigger_hull(TriggerHull& native, const asset_data::world::trigger_hull& data, [[maybe_unused]] const asset_resolver& resolve, [[maybe_unused]] plain::context& memory)
+		void write_nav_link_creation_data_s(nav_link_creation_data_s& native, const asset_data::world::nav_link_creation_data_s& data, [[maybe_unused]] const asset_resolver& resolve, [[maybe_unused]] plain::context& memory)
 		{
-			write_bounds(native.bounds, data.bounds, resolve, memory);
-			native.contents = data.contents;
-			native.slabCount = data.slab_count;
-			native.firstSlab = data.first_slab;
+			write_nav_link_point_s(native.m_Start, data.m_start, resolve, memory);
+			write_nav_link_point_s(native.m_End, data.m_end, resolve, memory);
+			native.m_Animscript = static_cast<scr_string_t>(plain::write_script_string(data.m_animscript));
+			native.m_Target = static_cast<scr_string_t>(plain::write_script_string(data.m_target));
+			native.m_Parent = static_cast<scr_string_t>(plain::write_script_string(data.m_parent));
+			native.m_UsageFlags = data.m_usage_flags;
+			native.m_PenaltyMult = data.m_penalty_mult;
+			native.m_bBidirectional = data.m_b_bidirectional;
 		}
 
-		std::size_t size_trigger_hull([[maybe_unused]] const asset_data::world::trigger_hull& data)
+		std::size_t size_nav_link_creation_data_s([[maybe_unused]] const asset_data::world::nav_link_creation_data_s& data)
 		{
 			std::size_t size = 0;
-			size += size_bounds(data.bounds);
+			size += size_nav_link_point_s(data.m_start);
+			size += size_nav_link_point_s(data.m_end);
 			return size;
 		}
 
-		asset_data::world::trigger_slab read_trigger_slab(const TriggerSlab& native)
+		asset_data::world::nav_raw_volume_s read_nav_raw_volume_s(const nav_raw_volume_s& native)
 		{
-			asset_data::world::trigger_slab data;
-			data.dir = plain::read_scalars<float, 3>(&native.dir);
-			data.mid_point = native.midPoint;
-			data.half_size = native.halfSize;
+			plain::trace("read_nav_raw_volume_s");
+			asset_data::world::nav_raw_volume_s data;
+			data.m_mid_point = plain::read_scalars<float, 3>(&native.m_MidPoint);
+			data.m_half_size = plain::read_scalars<float, 3>(&native.m_HalfSize);
+			data.m_min_voxel_size = native.m_MinVoxelSize;
+			data.m_clearance_xy = native.m_ClearanceXY;
+			data.m_clearance_z = native.m_ClearanceZ;
 			return data;
 		}
 
-		void write_trigger_slab(TriggerSlab& native, const asset_data::world::trigger_slab& data, [[maybe_unused]] const asset_resolver& resolve, [[maybe_unused]] plain::context& memory)
+		void write_nav_raw_volume_s(nav_raw_volume_s& native, const asset_data::world::nav_raw_volume_s& data, [[maybe_unused]] const asset_resolver& resolve, [[maybe_unused]] plain::context& memory)
 		{
-			plain::write_scalars(&native.dir, data.dir);
-			native.midPoint = data.mid_point;
-			native.halfSize = data.half_size;
+			plain::write_scalars(&native.m_MidPoint, data.m_mid_point);
+			plain::write_scalars(&native.m_HalfSize, data.m_half_size);
+			native.m_MinVoxelSize = data.m_min_voxel_size;
+			native.m_ClearanceXY = data.m_clearance_xy;
+			native.m_ClearanceZ = data.m_clearance_z;
 		}
 
-		std::size_t size_trigger_slab([[maybe_unused]] const asset_data::world::trigger_slab& data)
-		{
-			std::size_t size = 0;
-			return size;
-		}
-
-		asset_data::world::trigger_winding read_trigger_winding(const TriggerWinding& native)
-		{
-			asset_data::world::trigger_winding data;
-			data.dir = plain::read_scalars<float, 3>(&native.dir);
-			data.point_count = native.pointCount;
-			data.first_point = native.firstPoint;
-			data.flags = native.flags;
-			return data;
-		}
-
-		void write_trigger_winding(TriggerWinding& native, const asset_data::world::trigger_winding& data, [[maybe_unused]] const asset_resolver& resolve, [[maybe_unused]] plain::context& memory)
-		{
-			plain::write_scalars(&native.dir, data.dir);
-			native.pointCount = data.point_count;
-			native.firstPoint = data.first_point;
-			native.flags = data.flags;
-		}
-
-		std::size_t size_trigger_winding([[maybe_unused]] const asset_data::world::trigger_winding& data)
+		std::size_t size_nav_raw_volume_s([[maybe_unused]] const asset_data::world::nav_raw_volume_s& data)
 		{
 			std::size_t size = 0;
 			return size;
 		}
 
-		asset_data::world::trigger_winding_point read_trigger_winding_point(const TriggerWindingPoint& native)
+		asset_data::world::nav_raw_custom_volume_s read_nav_raw_custom_volume_s(const nav_raw_custom_volume_s& native)
 		{
-			asset_data::world::trigger_winding_point data;
-			data.loc = plain::read_scalars<float, 3>(&native.loc);
+			plain::trace("read_nav_raw_custom_volume_s");
+			asset_data::world::nav_raw_custom_volume_s data;
+			data.m_tris = plain::read_array(native.m_Tris, native.m_NumTris, "nav_raw_custom_volume_s.m_Tris", [&](const auto& item) { return read_nav_raw_custom_volume_tri_s(item); });
 			return data;
 		}
 
-		void write_trigger_winding_point(TriggerWindingPoint& native, const asset_data::world::trigger_winding_point& data, [[maybe_unused]] const asset_resolver& resolve, [[maybe_unused]] plain::context& memory)
+		void write_nav_raw_custom_volume_s(nav_raw_custom_volume_s& native, const asset_data::world::nav_raw_custom_volume_s& data, [[maybe_unused]] const asset_resolver& resolve, [[maybe_unused]] plain::context& memory)
 		{
-			plain::write_scalars(&native.loc, data.loc);
+			native.m_Tris = plain::write_array<nav_raw_custom_volume_tri_s>(data.m_tris, memory, [&](auto& out, const auto& in) { write_nav_raw_custom_volume_tri_s(out, in, resolve, memory); });
+			native.m_NumTris = plain::count_of<std::int32_t>(data.m_tris);
 		}
 
-		std::size_t size_trigger_winding_point([[maybe_unused]] const asset_data::world::trigger_winding_point& data)
+		std::size_t size_nav_raw_custom_volume_s([[maybe_unused]] const asset_data::world::nav_raw_custom_volume_s& data)
+		{
+			std::size_t size = 0;
+			if (data.m_tris)
+			{
+				size += plain::sized(std::max<std::size_t>(data.m_tris->size(), 1) * sizeof(nav_raw_custom_volume_tri_s));
+				for (const auto& item : *data.m_tris)
+				{
+					size += size_nav_raw_custom_volume_tri_s(item);
+				}
+			}
+			return size;
+		}
+
+		asset_data::world::nav_raw_custom_volume_tri_s read_nav_raw_custom_volume_tri_s(const nav_raw_custom_volume_tri_s& native)
+		{
+			plain::trace("read_nav_raw_custom_volume_tri_s");
+			asset_data::world::nav_raw_custom_volume_tri_s data;
+			data.m_verts = [&] { std::array<std::array<float, 3>, 3> out; for (std::size_t i = 0; i < out.size(); ++i) { out[i] = plain::read_scalars<float, 3>(&native.m_Verts[i]); } return out; }();
+			return data;
+		}
+
+		void write_nav_raw_custom_volume_tri_s(nav_raw_custom_volume_tri_s& native, const asset_data::world::nav_raw_custom_volume_tri_s& data, [[maybe_unused]] const asset_resolver& resolve, [[maybe_unused]] plain::context& memory)
+		{
+			for (std::size_t i = 0; i < data.m_verts.size(); ++i)
+			{
+				plain::write_scalars(&native.m_Verts[i], data.m_verts[i]);
+			}
+		}
+
+		std::size_t size_nav_raw_custom_volume_tri_s([[maybe_unused]] const asset_data::world::nav_raw_custom_volume_tri_s& data)
 		{
 			std::size_t size = 0;
 			return size;
@@ -1339,6 +1259,7 @@ namespace zonetool::iw8::neutral
 
 		asset_data::world::map_triggers read_map_triggers(const MapTriggers& native)
 		{
+			plain::trace("read_map_triggers");
 			asset_data::world::map_triggers data;
 			data.count = native.count;
 			data.models = plain::read_array(native.models, native.count, "MapTriggers.models", [&](const auto& item) { return read_trigger_model(item); });
@@ -1411,6 +1332,7 @@ namespace zonetool::iw8::neutral
 
 		asset_data::world::physics_capacities read_physics_capacities(const PhysicsCapacities& native)
 		{
+			plain::trace("read_physics_capacities");
 			asset_data::world::physics_capacities data;
 			data.max_num_rigid_bodies_server = native.maxNumRigidBodiesServer;
 			data.max_num_detail_rigid_bodies_server = native.maxNumDetailRigidBodiesServer;
@@ -1441,32 +1363,9 @@ namespace zonetool::iw8::neutral
 			return size;
 		}
 
-		asset_data::world::collision_heatmap_entry read_collision_heatmap_entry(const CollisionHeatmapEntry& native)
-		{
-			asset_data::world::collision_heatmap_entry data;
-			data.vertex_count = native.vertexCount;
-			data.vertex_density = native.vertexDensity;
-			data.min_extent = plain::read_scalars<float, 3>(&native.minExtent);
-			data.max_extent = plain::read_scalars<float, 3>(&native.maxExtent);
-			return data;
-		}
-
-		void write_collision_heatmap_entry(CollisionHeatmapEntry& native, const asset_data::world::collision_heatmap_entry& data, [[maybe_unused]] const asset_resolver& resolve, [[maybe_unused]] plain::context& memory)
-		{
-			native.vertexCount = data.vertex_count;
-			native.vertexDensity = data.vertex_density;
-			plain::write_scalars(&native.minExtent, data.min_extent);
-			plain::write_scalars(&native.maxExtent, data.max_extent);
-		}
-
-		std::size_t size_collision_heatmap_entry([[maybe_unused]] const asset_data::world::collision_heatmap_entry& data)
-		{
-			std::size_t size = 0;
-			return size;
-		}
-
 		asset_data::world::top_down_map_data_header read_top_down_map_data_header(const TopDownMapDataHeader& native)
 		{
+			plain::trace("read_top_down_map_data_header");
 			asset_data::world::top_down_map_data_header data;
 			data.version = native.version;
 			data.samples_per_axis = native.samplesPerAxis;
@@ -1491,6 +1390,7 @@ namespace zonetool::iw8::neutral
 
 		asset_data::world::top_down_map_data_content read_top_down_map_data_content(const TopDownMapDataContent& native)
 		{
+			plain::trace("read_top_down_map_data_content");
 			asset_data::world::top_down_map_data_content data;
 			data.nav_mesh_visible = std::to_array(native.navMeshVisible);
 			return data;
@@ -1509,6 +1409,7 @@ namespace zonetool::iw8::neutral
 
 		asset_data::world::top_down_map_data read_top_down_map_data(const TopDownMapData& native)
 		{
+			plain::trace("read_top_down_map_data");
 			asset_data::world::top_down_map_data data;
 			data.header = read_top_down_map_data_header(native.header);
 			data.content = read_top_down_map_data_content(native.content);
@@ -1531,6 +1432,7 @@ namespace zonetool::iw8::neutral
 
 		asset_data::world::clip_map read_clip_map(const clipMap_t& native)
 		{
+			plain::trace("read_clip_map");
 			asset_data::world::clip_map data;
 			data.name = plain::read_string(native.name);
 			data.is_in_use = native.isInUse;
@@ -1618,8 +1520,298 @@ namespace zonetool::iw8::neutral
 			return size;
 		}
 
+		asset_data::world::static_model_collision_model_list read_static_model_collision_model_list(const StaticModelCollisionModelList& native)
+		{
+			plain::trace("read_static_model_collision_model_list");
+			asset_data::world::static_model_collision_model_list data;
+			data.models = plain::read_array(native.models, native.numModels, "StaticModelCollisionModelList.models", [&](const auto& item) { return read_static_model_collision_model(item); });
+			data.structure_memory_cost = native.structureMemoryCost;
+			return data;
+		}
+
+		void write_static_model_collision_model_list(StaticModelCollisionModelList& native, const asset_data::world::static_model_collision_model_list& data, [[maybe_unused]] const asset_resolver& resolve, [[maybe_unused]] plain::context& memory)
+		{
+			native.models = plain::write_array<StaticModelCollisionModel>(data.models, memory, [&](auto& out, const auto& in) { write_static_model_collision_model(out, in, resolve, memory); });
+			native.structureMemoryCost = data.structure_memory_cost;
+			native.numModels = plain::count_of<std::uint32_t>(data.models);
+		}
+
+		std::size_t size_static_model_collision_model_list([[maybe_unused]] const asset_data::world::static_model_collision_model_list& data)
+		{
+			std::size_t size = 0;
+			if (data.models)
+			{
+				size += plain::sized(std::max<std::size_t>(data.models->size(), 1) * sizeof(StaticModelCollisionModel));
+				for (const auto& item : *data.models)
+				{
+					size += size_static_model_collision_model(item);
+				}
+			}
+			return size;
+		}
+
+		asset_data::world::static_model_collision_model read_static_model_collision_model(const StaticModelCollisionModel& native)
+		{
+			plain::trace("read_static_model_collision_model");
+			asset_data::world::static_model_collision_model data;
+			data.name = plain::read_script_string(native.name);
+			data.physics_asset = plain::read_asset(ASSET_TYPE_PHYSICSASSET, native.physicsAsset);
+			data.detail_collision = plain::read_asset(ASSET_TYPE_XMODEL_DETAIL_COLLISION, native.detailCollision);
+			data.instances = plain::read_array(native.instances, native.numInstances, "StaticModelCollisionModel.instances", [&](const auto& item) { return read_static_model_collision_instance(item); });
+			return data;
+		}
+
+		void write_static_model_collision_model(StaticModelCollisionModel& native, const asset_data::world::static_model_collision_model& data, [[maybe_unused]] const asset_resolver& resolve, [[maybe_unused]] plain::context& memory)
+		{
+			native.name = static_cast<scr_string_t>(plain::write_script_string(data.name));
+			native.physicsAsset = plain::resolve_asset<PhysicsAsset>(resolve, ASSET_TYPE_PHYSICSASSET, data.physics_asset);
+			native.detailCollision = plain::resolve_asset<XModelDetailCollision>(resolve, ASSET_TYPE_XMODEL_DETAIL_COLLISION, data.detail_collision);
+			native.instances = plain::write_array<StaticModelCollisionInstance>(data.instances, memory, [&](auto& out, const auto& in) { write_static_model_collision_instance(out, in, resolve, memory); });
+			native.numInstances = plain::count_of<std::uint32_t>(data.instances);
+		}
+
+		std::size_t size_static_model_collision_model([[maybe_unused]] const asset_data::world::static_model_collision_model& data)
+		{
+			std::size_t size = 0;
+			if (data.instances)
+			{
+				size += plain::sized(std::max<std::size_t>(data.instances->size(), 1) * sizeof(StaticModelCollisionInstance));
+				for (const auto& item : *data.instances)
+				{
+					size += size_static_model_collision_instance(item);
+				}
+			}
+			return size;
+		}
+
+		asset_data::world::static_model_collision_instance read_static_model_collision_instance(const StaticModelCollisionInstance& native)
+		{
+			plain::trace("read_static_model_collision_instance");
+			asset_data::world::static_model_collision_instance data;
+			data.origin = plain::read_scalars<float, 3>(&native.origin);
+			data.angles = plain::read_scalars<float, 3>(&native.angles);
+			data.scale = native.scale;
+			return data;
+		}
+
+		void write_static_model_collision_instance(StaticModelCollisionInstance& native, const asset_data::world::static_model_collision_instance& data, [[maybe_unused]] const asset_resolver& resolve, [[maybe_unused]] plain::context& memory)
+		{
+			plain::write_scalars(&native.origin, data.origin);
+			plain::write_scalars(&native.angles, data.angles);
+			native.scale = data.scale;
+		}
+
+		std::size_t size_static_model_collision_instance([[maybe_unused]] const asset_data::world::static_model_collision_instance& data)
+		{
+			std::size_t size = 0;
+			return size;
+		}
+
+		asset_data::world::stage read_stage(const Stage& native)
+		{
+			plain::trace("read_stage");
+			asset_data::world::stage data;
+			data.name = plain::read_string(native.name);
+			data.origin = plain::read_scalars<float, 3>(&native.origin);
+			data.trigger_index = native.triggerIndex;
+			data.sun_primary_light_index = native.sunPrimaryLightIndex;
+			data.entity_uid = native.entityUID;
+			data.sky_rotation_angles = plain::read_scalars<float, 3>(&native.skyRotationAngles);
+			return data;
+		}
+
+		void write_stage(Stage& native, const asset_data::world::stage& data, [[maybe_unused]] const asset_resolver& resolve, [[maybe_unused]] plain::context& memory)
+		{
+			native.name = plain::write_string(memory, data.name);
+			plain::write_scalars(&native.origin, data.origin);
+			native.triggerIndex = data.trigger_index;
+			native.sunPrimaryLightIndex = data.sun_primary_light_index;
+			native.entityUID = data.entity_uid;
+			plain::write_scalars(&native.skyRotationAngles, data.sky_rotation_angles);
+		}
+
+		std::size_t size_stage([[maybe_unused]] const asset_data::world::stage& data)
+		{
+			std::size_t size = 0;
+			size += plain::string_size(data.name);
+			return size;
+		}
+
+		asset_data::world::trigger_model read_trigger_model(const TriggerModel& native)
+		{
+			plain::trace("read_trigger_model");
+			asset_data::world::trigger_model data;
+			data.contents = native.contents;
+			data.hull_count = native.hullCount;
+			data.first_hull = native.firstHull;
+			data.winding_count = native.windingCount;
+			data.first_winding = native.firstWinding;
+			data.flags = native.flags;
+			data.physics_asset = plain::read_asset(ASSET_TYPE_PHYSICSASSET, native.physicsAsset);
+			data.physics_shape_override_idx = native.physicsShapeOverrideIdx;
+			return data;
+		}
+
+		void write_trigger_model(TriggerModel& native, const asset_data::world::trigger_model& data, [[maybe_unused]] const asset_resolver& resolve, [[maybe_unused]] plain::context& memory)
+		{
+			native.contents = data.contents;
+			native.hullCount = data.hull_count;
+			native.firstHull = data.first_hull;
+			native.windingCount = data.winding_count;
+			native.firstWinding = data.first_winding;
+			native.flags = data.flags;
+			native.physicsAsset = plain::resolve_asset<PhysicsAsset>(resolve, ASSET_TYPE_PHYSICSASSET, data.physics_asset);
+			native.physicsShapeOverrideIdx = data.physics_shape_override_idx;
+		}
+
+		std::size_t size_trigger_model([[maybe_unused]] const asset_data::world::trigger_model& data)
+		{
+			std::size_t size = 0;
+			return size;
+		}
+
+		asset_data::world::bounds read_bounds(const Bounds& native)
+		{
+			plain::trace("read_bounds");
+			asset_data::world::bounds data;
+			data.mid_point = plain::read_scalars<float, 3>(&native.midPoint);
+			data.half_size = plain::read_scalars<float, 3>(&native.halfSize);
+			return data;
+		}
+
+		void write_bounds(Bounds& native, const asset_data::world::bounds& data, [[maybe_unused]] const asset_resolver& resolve, [[maybe_unused]] plain::context& memory)
+		{
+			plain::write_scalars(&native.midPoint, data.mid_point);
+			plain::write_scalars(&native.halfSize, data.half_size);
+		}
+
+		std::size_t size_bounds([[maybe_unused]] const asset_data::world::bounds& data)
+		{
+			std::size_t size = 0;
+			return size;
+		}
+
+		asset_data::world::trigger_hull read_trigger_hull(const TriggerHull& native)
+		{
+			plain::trace("read_trigger_hull");
+			asset_data::world::trigger_hull data;
+			data.bounds = read_bounds(native.bounds);
+			data.contents = native.contents;
+			data.slab_count = native.slabCount;
+			data.first_slab = native.firstSlab;
+			return data;
+		}
+
+		void write_trigger_hull(TriggerHull& native, const asset_data::world::trigger_hull& data, [[maybe_unused]] const asset_resolver& resolve, [[maybe_unused]] plain::context& memory)
+		{
+			write_bounds(native.bounds, data.bounds, resolve, memory);
+			native.contents = data.contents;
+			native.slabCount = data.slab_count;
+			native.firstSlab = data.first_slab;
+		}
+
+		std::size_t size_trigger_hull([[maybe_unused]] const asset_data::world::trigger_hull& data)
+		{
+			std::size_t size = 0;
+			size += size_bounds(data.bounds);
+			return size;
+		}
+
+		asset_data::world::trigger_slab read_trigger_slab(const TriggerSlab& native)
+		{
+			plain::trace("read_trigger_slab");
+			asset_data::world::trigger_slab data;
+			data.dir = plain::read_scalars<float, 3>(&native.dir);
+			data.mid_point = native.midPoint;
+			data.half_size = native.halfSize;
+			return data;
+		}
+
+		void write_trigger_slab(TriggerSlab& native, const asset_data::world::trigger_slab& data, [[maybe_unused]] const asset_resolver& resolve, [[maybe_unused]] plain::context& memory)
+		{
+			plain::write_scalars(&native.dir, data.dir);
+			native.midPoint = data.mid_point;
+			native.halfSize = data.half_size;
+		}
+
+		std::size_t size_trigger_slab([[maybe_unused]] const asset_data::world::trigger_slab& data)
+		{
+			std::size_t size = 0;
+			return size;
+		}
+
+		asset_data::world::trigger_winding read_trigger_winding(const TriggerWinding& native)
+		{
+			plain::trace("read_trigger_winding");
+			asset_data::world::trigger_winding data;
+			data.dir = plain::read_scalars<float, 3>(&native.dir);
+			data.point_count = native.pointCount;
+			data.first_point = native.firstPoint;
+			data.flags = native.flags;
+			return data;
+		}
+
+		void write_trigger_winding(TriggerWinding& native, const asset_data::world::trigger_winding& data, [[maybe_unused]] const asset_resolver& resolve, [[maybe_unused]] plain::context& memory)
+		{
+			plain::write_scalars(&native.dir, data.dir);
+			native.pointCount = data.point_count;
+			native.firstPoint = data.first_point;
+			native.flags = data.flags;
+		}
+
+		std::size_t size_trigger_winding([[maybe_unused]] const asset_data::world::trigger_winding& data)
+		{
+			std::size_t size = 0;
+			return size;
+		}
+
+		asset_data::world::trigger_winding_point read_trigger_winding_point(const TriggerWindingPoint& native)
+		{
+			plain::trace("read_trigger_winding_point");
+			asset_data::world::trigger_winding_point data;
+			data.loc = plain::read_scalars<float, 3>(&native.loc);
+			return data;
+		}
+
+		void write_trigger_winding_point(TriggerWindingPoint& native, const asset_data::world::trigger_winding_point& data, [[maybe_unused]] const asset_resolver& resolve, [[maybe_unused]] plain::context& memory)
+		{
+			plain::write_scalars(&native.loc, data.loc);
+		}
+
+		std::size_t size_trigger_winding_point([[maybe_unused]] const asset_data::world::trigger_winding_point& data)
+		{
+			std::size_t size = 0;
+			return size;
+		}
+
+		asset_data::world::collision_heatmap_entry read_collision_heatmap_entry(const CollisionHeatmapEntry& native)
+		{
+			plain::trace("read_collision_heatmap_entry");
+			asset_data::world::collision_heatmap_entry data;
+			data.vertex_count = native.vertexCount;
+			data.vertex_density = native.vertexDensity;
+			data.min_extent = plain::read_scalars<float, 3>(&native.minExtent);
+			data.max_extent = plain::read_scalars<float, 3>(&native.maxExtent);
+			return data;
+		}
+
+		void write_collision_heatmap_entry(CollisionHeatmapEntry& native, const asset_data::world::collision_heatmap_entry& data, [[maybe_unused]] const asset_resolver& resolve, [[maybe_unused]] plain::context& memory)
+		{
+			native.vertexCount = data.vertex_count;
+			native.vertexDensity = data.vertex_density;
+			plain::write_scalars(&native.minExtent, data.min_extent);
+			plain::write_scalars(&native.maxExtent, data.max_extent);
+		}
+
+		std::size_t size_collision_heatmap_entry([[maybe_unused]] const asset_data::world::collision_heatmap_entry& data)
+		{
+			std::size_t size = 0;
+			return size;
+		}
+
 		asset_data::world::gfx_fog_spline_data read_gfx_fog_spline_data(const GfxFogSplineData& native)
 		{
+			plain::trace("read_gfx_fog_spline_data");
 			asset_data::world::gfx_fog_spline_data data;
 			data.fog_start_dist = native.fogStartDist;
 			data.fog_half_plane_distance = native.fogHalfPlaneDistance;
@@ -1642,6 +1834,7 @@ namespace zonetool::iw8::neutral
 
 		asset_data::world::fog_spline read_fog_spline(const GfxFogSpline& native)
 		{
+			plain::trace("read_fog_spline");
 			asset_data::world::fog_spline data;
 			data.name = plain::read_string(native.name);
 			data.image = plain::read_asset(ASSET_TYPE_IMAGE, native.image);

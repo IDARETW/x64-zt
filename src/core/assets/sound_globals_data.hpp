@@ -45,6 +45,48 @@ inline constexpr std::array<std::pair<std::int64_t, std::string_view>, 3> sound_
 	{2, "none"},
 }};
 
+struct sound_globals;
+struct sound_volume_modifier;
+struct sound_entity_channel;
+struct sound_context;
+struct sound_context_value;
+struct sound_master;
+struct sound_master_eq_param_bank;
+struct sound_master_eq_param;
+struct sound_dynamics_params;
+struct sound_peak_limiter_params;
+struct sound_whizby;
+struct sound_perk;
+
+inline void validate(const sound_globals& data);
+inline void validate(const sound_volume_modifier& data);
+inline void validate(const sound_entity_channel& data);
+inline void validate(const sound_context& data);
+inline void validate(const sound_context_value& data);
+inline void validate(const sound_master& data);
+inline void validate(const sound_master_eq_param_bank& data);
+inline void validate(const sound_master_eq_param& data);
+inline void validate(const sound_dynamics_params& data);
+inline void validate(const sound_peak_limiter_params& data);
+inline void validate(const sound_whizby& data);
+inline void validate(const sound_perk& data);
+
+struct sound_globals
+{
+	std::optional<std::string> name{};
+	float global_volume_modifier{};
+	float bink_volume_modifier{};
+	std::optional<std::vector<sound_volume_modifier>> volmodinfo{};
+	std::optional<std::vector<sound_entity_channel>> entity_channel_info{};
+	std::optional<std::vector<sound_context>> contexts{};
+	std::optional<std::vector<sound_context_value>> context_values{};
+	std::optional<std::vector<sound_master>> masters{};
+	std::optional<std::vector<sound_whizby>> whizbys{};
+	std::optional<std::vector<sound_perk>> perkinfo{};
+
+	bool operator==(const sound_globals&) const = default;
+};
+
 struct sound_volume_modifier
 {
 	std::string name{};
@@ -211,21 +253,107 @@ struct sound_perk
 	bool operator==(const sound_perk&) const = default;
 };
 
-struct sound_globals
+inline void validate(const sound_globals& data)
 {
-	std::optional<std::string> name{};
-	float global_volume_modifier{};
-	float bink_volume_modifier{};
-	std::optional<std::vector<sound_volume_modifier>> volmodinfo{};
-	std::optional<std::vector<sound_entity_channel>> entity_channel_info{};
-	std::optional<std::vector<sound_context>> contexts{};
-	std::optional<std::vector<sound_context_value>> context_values{};
-	std::optional<std::vector<sound_master>> masters{};
-	std::optional<std::vector<sound_whizby>> whizbys{};
-	std::optional<std::vector<sound_perk>> perkinfo{};
+	if (!data.name)
+	{
+		throw std::runtime_error("sound_globals has no name");
+	}
 
-	bool operator==(const sound_globals&) const = default;
-};
+	detail::name(*data.name, "sound_globals");
+
+	if (data.volmodinfo)
+	{
+		for (const auto& item : *data.volmodinfo)
+		{
+			validate(item);
+		}
+	}
+
+	if (data.entity_channel_info)
+	{
+		for (const auto& item : *data.entity_channel_info)
+		{
+			validate(item);
+		}
+	}
+
+	if (data.contexts)
+	{
+		for (const auto& item : *data.contexts)
+		{
+			validate(item);
+		}
+	}
+
+	if (data.context_values)
+	{
+		for (const auto& item : *data.context_values)
+		{
+			validate(item);
+		}
+	}
+
+	if (data.masters)
+	{
+		for (const auto& item : *data.masters)
+		{
+			validate(item);
+		}
+	}
+
+	if (data.whizbys)
+	{
+		for (const auto& item : *data.whizbys)
+		{
+			validate(item);
+		}
+	}
+
+	if (data.perkinfo)
+	{
+		for (const auto& item : *data.perkinfo)
+		{
+			validate(item);
+		}
+	}
+
+	if ((data.volmodinfo && data.volmodinfo->size() > 0xFFFFFFFFull))
+	{
+		throw std::runtime_error("sound_globals has arrays that its count does not fit");
+	}
+
+	if ((data.entity_channel_info && data.entity_channel_info->size() > 0xFFFFFFFFull))
+	{
+		throw std::runtime_error("sound_globals has arrays that its count does not fit");
+	}
+
+	if ((data.contexts && data.contexts->size() > 0xFFFFFFFFull))
+	{
+		throw std::runtime_error("sound_globals has arrays that its count does not fit");
+	}
+
+	if ((data.context_values && data.context_values->size() > 0xFFFFFFFFull))
+	{
+		throw std::runtime_error("sound_globals has arrays that its count does not fit");
+	}
+
+	if ((data.masters && data.masters->size() > 0xFFFFFFFFull))
+	{
+		throw std::runtime_error("sound_globals has arrays that its count does not fit");
+	}
+
+	if ((data.whizbys && data.whizbys->size() > 0xFFFFFFFFull))
+	{
+		throw std::runtime_error("sound_globals has arrays that its count does not fit");
+	}
+
+	if ((data.perkinfo && data.perkinfo->size() > 0xFFFFFFFFull))
+	{
+		throw std::runtime_error("sound_globals has arrays that its count does not fit");
+	}
+
+}
 
 inline void validate(const sound_volume_modifier& data)
 {
@@ -355,108 +483,6 @@ inline void validate(const sound_perk& data)
 	if (data.name.size() >= 64)
 	{
 		throw std::runtime_error("sound_perk.name does not fit its 64 character buffer");
-	}
-
-}
-
-inline void validate(const sound_globals& data)
-{
-	if (!data.name)
-	{
-		throw std::runtime_error("sound_globals has no name");
-	}
-
-	detail::name(*data.name, "sound_globals");
-
-	if (data.volmodinfo)
-	{
-		for (const auto& item : *data.volmodinfo)
-		{
-			validate(item);
-		}
-	}
-
-	if (data.entity_channel_info)
-	{
-		for (const auto& item : *data.entity_channel_info)
-		{
-			validate(item);
-		}
-	}
-
-	if (data.contexts)
-	{
-		for (const auto& item : *data.contexts)
-		{
-			validate(item);
-		}
-	}
-
-	if (data.context_values)
-	{
-		for (const auto& item : *data.context_values)
-		{
-			validate(item);
-		}
-	}
-
-	if (data.masters)
-	{
-		for (const auto& item : *data.masters)
-		{
-			validate(item);
-		}
-	}
-
-	if (data.whizbys)
-	{
-		for (const auto& item : *data.whizbys)
-		{
-			validate(item);
-		}
-	}
-
-	if (data.perkinfo)
-	{
-		for (const auto& item : *data.perkinfo)
-		{
-			validate(item);
-		}
-	}
-
-	if ((data.volmodinfo && data.volmodinfo->size() > 0xFFFFFFFFull))
-	{
-		throw std::runtime_error("sound_globals has arrays that its count does not fit");
-	}
-
-	if ((data.entity_channel_info && data.entity_channel_info->size() > 0xFFFFFFFFull))
-	{
-		throw std::runtime_error("sound_globals has arrays that its count does not fit");
-	}
-
-	if ((data.contexts && data.contexts->size() > 0xFFFFFFFFull))
-	{
-		throw std::runtime_error("sound_globals has arrays that its count does not fit");
-	}
-
-	if ((data.context_values && data.context_values->size() > 0xFFFFFFFFull))
-	{
-		throw std::runtime_error("sound_globals has arrays that its count does not fit");
-	}
-
-	if ((data.masters && data.masters->size() > 0xFFFFFFFFull))
-	{
-		throw std::runtime_error("sound_globals has arrays that its count does not fit");
-	}
-
-	if ((data.whizbys && data.whizbys->size() > 0xFFFFFFFFull))
-	{
-		throw std::runtime_error("sound_globals has arrays that its count does not fit");
-	}
-
-	if ((data.perkinfo && data.perkinfo->size() > 0xFFFFFFFFull))
-	{
-		throw std::runtime_error("sound_globals has arrays that its count does not fit");
 	}
 
 }

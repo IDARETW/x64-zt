@@ -19,6 +19,20 @@ namespace zonetool::asset_data
 {
 namespace effects
 {
+struct particle_sim_animation;
+struct fx_particle_sim_animation_header;
+struct fx_particle_sim_animation_particle_data;
+struct fx_particle_sim_animation_particle_data_orientation3_d;
+struct fx_particle_sim_animation_particle_data_index;
+struct fx_particle_sim_animation_frame;
+
+inline void validate(const particle_sim_animation& data);
+inline void validate(const fx_particle_sim_animation_header& data);
+inline void validate(const fx_particle_sim_animation_particle_data& data);
+inline void validate(const fx_particle_sim_animation_particle_data_orientation3_d& data);
+inline void validate(const fx_particle_sim_animation_particle_data_index& data);
+inline void validate(const fx_particle_sim_animation_frame& data);
+
 struct fx_particle_sim_animation_header
 {
 	float playback_rate{};
@@ -41,6 +55,20 @@ struct fx_particle_sim_animation_header
 	bool has_index{};
 
 	bool operator==(const fx_particle_sim_animation_header&) const = default;
+};
+
+struct particle_sim_animation
+{
+	std::optional<std::string> name{};
+	std::optional<std::string> material{};
+	fx_particle_sim_animation_header header{};
+	std::optional<std::vector<fx_particle_sim_animation_particle_data>> particle_data{};
+	std::optional<std::vector<fx_particle_sim_animation_particle_data_orientation3_d>> particle_data_orientation3_d{};
+	std::optional<std::vector<fx_particle_sim_animation_particle_data_index>> particle_data_index{};
+	std::optional<std::vector<fx_particle_sim_animation_frame>> frames{};
+	std::optional<std::vector<std::array<float, 4>>> color_table{};
+
+	bool operator==(const particle_sim_animation&) const = default;
 };
 
 struct fx_particle_sim_animation_particle_data
@@ -91,41 +119,7 @@ struct fx_particle_sim_animation_frame
 	bool operator==(const fx_particle_sim_animation_frame&) const = default;
 };
 
-struct particle_sim_animation
-{
-	std::optional<std::string> name{};
-	std::optional<std::string> material{};
-	fx_particle_sim_animation_header header{};
-	std::optional<std::vector<fx_particle_sim_animation_particle_data>> particle_data{};
-	std::optional<std::vector<fx_particle_sim_animation_particle_data_orientation3_d>> particle_data_orientation3_d{};
-	std::optional<std::vector<fx_particle_sim_animation_particle_data_index>> particle_data_index{};
-	std::optional<std::vector<fx_particle_sim_animation_frame>> frames{};
-	std::optional<std::vector<std::array<float, 4>>> color_table{};
-
-	bool operator==(const particle_sim_animation&) const = default;
-};
-
 inline void validate(const fx_particle_sim_animation_header& data)
-{
-	(void) data;
-}
-
-inline void validate(const fx_particle_sim_animation_particle_data& data)
-{
-	(void) data;
-}
-
-inline void validate(const fx_particle_sim_animation_particle_data_orientation3_d& data)
-{
-	(void) data;
-}
-
-inline void validate(const fx_particle_sim_animation_particle_data_index& data)
-{
-	(void) data;
-}
-
-inline void validate(const fx_particle_sim_animation_frame& data)
 {
 	(void) data;
 }
@@ -198,6 +192,26 @@ inline void validate(const particle_sim_animation& data)
 		throw std::runtime_error("particle_sim_animation.color_table has a length that its count does not give");
 	}
 
+}
+
+inline void validate(const fx_particle_sim_animation_particle_data& data)
+{
+	(void) data;
+}
+
+inline void validate(const fx_particle_sim_animation_particle_data_orientation3_d& data)
+{
+	(void) data;
+}
+
+inline void validate(const fx_particle_sim_animation_particle_data_index& data)
+{
+	(void) data;
+}
+
+inline void validate(const fx_particle_sim_animation_frame& data)
+{
+	(void) data;
 }
 
 } // namespace effects

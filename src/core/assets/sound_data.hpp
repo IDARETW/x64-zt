@@ -41,6 +41,147 @@ inline constexpr std::array<std::pair<std::int64_t, std::string_view>, 2> weapon
 	{1, "interior"},
 }};
 
+struct sound_bank_resident;
+struct sound_bank;
+struct sound_alias_list;
+struct sound_alias;
+struct sound_index_entry;
+struct sound_send_effect_params;
+struct sound_table;
+struct adsr_setting;
+struct ambient_def;
+struct ambient_event;
+struct ambient_element;
+struct filter_def;
+struct mix_def;
+struct adsr_zone_entry;
+struct occlude_def;
+struct reverb_def;
+struct timescale_entry;
+struct zone_def;
+struct full_occlusion_def;
+struct player_breath_state_def;
+struct sound_duck;
+struct sound_music_set;
+struct sound_music_state;
+struct sound_music_asset;
+struct weapon_reflection_def;
+struct doppler_preset;
+struct occlusion_shape;
+struct focus_cone;
+struct sound_curve;
+struct speaker_map;
+struct sound_futz;
+struct sound_bank_stream_info;
+struct sound_bank_transient;
+
+inline void validate(const sound_bank_resident& data);
+inline void validate(const sound_bank& data);
+inline void validate(const sound_alias_list& data);
+inline void validate(const sound_alias& data);
+inline void validate(const sound_index_entry& data);
+inline void validate(const sound_send_effect_params& data);
+inline void validate(const sound_table& data);
+inline void validate(const adsr_setting& data);
+inline void validate(const ambient_def& data);
+inline void validate(const ambient_event& data);
+inline void validate(const ambient_element& data);
+inline void validate(const filter_def& data);
+inline void validate(const mix_def& data);
+inline void validate(const adsr_zone_entry& data);
+inline void validate(const occlude_def& data);
+inline void validate(const reverb_def& data);
+inline void validate(const timescale_entry& data);
+inline void validate(const zone_def& data);
+inline void validate(const full_occlusion_def& data);
+inline void validate(const player_breath_state_def& data);
+inline void validate(const sound_duck& data);
+inline void validate(const sound_music_set& data);
+inline void validate(const sound_music_state& data);
+inline void validate(const sound_music_asset& data);
+inline void validate(const weapon_reflection_def& data);
+inline void validate(const doppler_preset& data);
+inline void validate(const occlusion_shape& data);
+inline void validate(const focus_cone& data);
+inline void validate(const sound_curve& data);
+inline void validate(const speaker_map& data);
+inline void validate(const sound_futz& data);
+inline void validate(const sound_bank_stream_info& data);
+inline void validate(const sound_bank_transient& data);
+
+struct sound_table
+{
+	std::uint32_t id{};
+	std::optional<std::vector<adsr_setting>> adsr_settings{};
+	std::optional<std::vector<ambient_def>> ambient_defs{};
+	std::optional<std::vector<ambient_event>> ambient_events{};
+	std::optional<std::vector<ambient_element>> ambient_elements{};
+	std::optional<std::vector<filter_def>> filters{};
+	std::optional<std::vector<mix_def>> mixes{};
+	std::optional<std::vector<adsr_zone_entry>> npc_adsr_zones{};
+	std::optional<std::vector<occlude_def>> occlusion_filters{};
+	std::optional<std::vector<adsr_zone_entry>> player_adsr_zones{};
+	std::optional<std::vector<reverb_def>> reverbs{};
+	std::optional<std::vector<timescale_entry>> time_scale_settings{};
+	std::optional<std::vector<zone_def>> zones{};
+	std::optional<std::vector<full_occlusion_def>> full_occlusion_defs{};
+	std::optional<std::vector<player_breath_state_def>> player_breath_state_defs{};
+
+	bool operator==(const sound_table&) const = default;
+};
+
+struct sound_bank_stream_info
+{
+	std::optional<std::string> loaded_stream_key{};
+	bool always_loaded{};
+
+	bool operator==(const sound_bank_stream_info&) const = default;
+};
+
+struct sound_bank
+{
+	std::optional<std::string> name{};
+	std::optional<std::string> zone{};
+	std::optional<std::string> game_language{};
+	std::optional<std::string> sound_language{};
+	std::optional<std::vector<sound_alias_list>> alias{};
+	std::optional<std::vector<sound_index_entry>> alias_index{};
+	std::optional<std::vector<sound_send_effect_params>> send_effects{};
+	sound_table tables{};
+	std::optional<std::vector<sound_duck>> ducks{};
+	std::optional<std::vector<sound_music_set>> music_sets{};
+	std::optional<std::vector<weapon_reflection_def>> weapon_reflections{};
+	std::optional<std::vector<doppler_preset>> doppler_presets{};
+	std::optional<std::vector<occlusion_shape>> occlusion_shapes{};
+	std::optional<std::vector<focus_cone>> focus_cones{};
+	std::optional<std::vector<sound_curve>> volume_falloff_curves{};
+	std::optional<std::vector<sound_curve>> lpf_curves{};
+	std::optional<std::vector<sound_curve>> hpf_curves{};
+	std::optional<std::vector<sound_curve>> reverb_curves{};
+	std::optional<std::vector<speaker_map>> speaker_maps{};
+	std::optional<std::vector<sound_futz>> futzs{};
+	sound_bank_stream_info stream_info{};
+
+	bool operator==(const sound_bank&) const = default;
+};
+
+struct sound_bank_resident
+{
+	sound_bank bank{};
+
+	bool operator==(const sound_bank_resident&) const = default;
+};
+
+struct sound_alias_list
+{
+	std::optional<std::string> alias_name{};
+	std::uint32_t id{};
+	std::optional<std::vector<sound_alias>> head{};
+	std::int32_t sequence{};
+
+	bool operator==(const sound_alias_list&) const = default;
+};
+
 struct sound_alias
 {
 	std::optional<std::string> alias_name{};
@@ -98,16 +239,6 @@ struct sound_alias
 	std::int16_t max_duration_dsec{};
 
 	bool operator==(const sound_alias&) const = default;
-};
-
-struct sound_alias_list
-{
-	std::optional<std::string> alias_name{};
-	std::uint32_t id{};
-	std::optional<std::vector<sound_alias>> head{};
-	std::int32_t sequence{};
-
-	bool operator==(const sound_alias_list&) const = default;
 };
 
 struct sound_index_entry
@@ -356,27 +487,6 @@ struct player_breath_state_def
 	bool operator==(const player_breath_state_def&) const = default;
 };
 
-struct sound_table
-{
-	std::uint32_t id{};
-	std::optional<std::vector<adsr_setting>> adsr_settings{};
-	std::optional<std::vector<ambient_def>> ambient_defs{};
-	std::optional<std::vector<ambient_event>> ambient_events{};
-	std::optional<std::vector<ambient_element>> ambient_elements{};
-	std::optional<std::vector<filter_def>> filters{};
-	std::optional<std::vector<mix_def>> mixes{};
-	std::optional<std::vector<adsr_zone_entry>> npc_adsr_zones{};
-	std::optional<std::vector<occlude_def>> occlusion_filters{};
-	std::optional<std::vector<adsr_zone_entry>> player_adsr_zones{};
-	std::optional<std::vector<reverb_def>> reverbs{};
-	std::optional<std::vector<timescale_entry>> time_scale_settings{};
-	std::optional<std::vector<zone_def>> zones{};
-	std::optional<std::vector<full_occlusion_def>> full_occlusion_defs{};
-	std::optional<std::vector<player_breath_state_def>> player_breath_state_defs{};
-
-	bool operator==(const sound_table&) const = default;
-};
-
 struct sound_duck
 {
 	std::string name{};
@@ -403,6 +513,15 @@ struct sound_duck
 	std::uint32_t duck_alias{};
 
 	bool operator==(const sound_duck&) const = default;
+};
+
+struct sound_music_set
+{
+	std::string name{};
+	std::uint32_t id{};
+	std::optional<std::vector<sound_music_state>> states{};
+
+	bool operator==(const sound_music_set&) const = default;
 };
 
 struct sound_music_asset
@@ -447,15 +566,6 @@ struct sound_music_state
 	bool wall_clock_sync{};
 
 	bool operator==(const sound_music_state&) const = default;
-};
-
-struct sound_music_set
-{
-	std::string name{};
-	std::uint32_t id{};
-	std::optional<std::vector<sound_music_state>> states{};
-
-	bool operator==(const sound_music_set&) const = default;
 };
 
 struct weapon_reflection_def
@@ -587,177 +697,12 @@ struct sound_futz
 	bool operator==(const sound_futz&) const = default;
 };
 
-struct sound_bank_stream_info
-{
-	std::optional<std::string> loaded_stream_key{};
-	bool always_loaded{};
-
-	bool operator==(const sound_bank_stream_info&) const = default;
-};
-
-struct sound_bank
-{
-	std::optional<std::string> name{};
-	std::optional<std::string> zone{};
-	std::optional<std::string> game_language{};
-	std::optional<std::string> sound_language{};
-	std::optional<std::vector<sound_alias_list>> alias{};
-	std::optional<std::vector<sound_index_entry>> alias_index{};
-	std::optional<std::vector<sound_send_effect_params>> send_effects{};
-	sound_table tables{};
-	std::optional<std::vector<sound_duck>> ducks{};
-	std::optional<std::vector<sound_music_set>> music_sets{};
-	std::optional<std::vector<weapon_reflection_def>> weapon_reflections{};
-	std::optional<std::vector<doppler_preset>> doppler_presets{};
-	std::optional<std::vector<occlusion_shape>> occlusion_shapes{};
-	std::optional<std::vector<focus_cone>> focus_cones{};
-	std::optional<std::vector<sound_curve>> volume_falloff_curves{};
-	std::optional<std::vector<sound_curve>> lpf_curves{};
-	std::optional<std::vector<sound_curve>> hpf_curves{};
-	std::optional<std::vector<sound_curve>> reverb_curves{};
-	std::optional<std::vector<speaker_map>> speaker_maps{};
-	std::optional<std::vector<sound_futz>> futzs{};
-	sound_bank_stream_info stream_info{};
-
-	bool operator==(const sound_bank&) const = default;
-};
-
-struct sound_bank_resident
-{
-	sound_bank bank{};
-
-	bool operator==(const sound_bank_resident&) const = default;
-};
-
 struct sound_bank_transient
 {
 	sound_bank bank{};
 
 	bool operator==(const sound_bank_transient&) const = default;
 };
-
-inline void validate(const sound_alias& data)
-{
-	(void) data;
-}
-
-inline void validate(const sound_alias_list& data)
-{
-	if (data.head)
-	{
-		for (const auto& item : *data.head)
-		{
-			validate(item);
-		}
-	}
-
-	if ((data.head && data.head->size() > 0x7FFFFFFFull))
-	{
-		throw std::runtime_error("sound_alias_list has arrays that its count does not fit");
-	}
-
-}
-
-inline void validate(const sound_index_entry& data)
-{
-	(void) data;
-}
-
-inline void validate(const sound_send_effect_params& data)
-{
-	if (data.name.size() >= 64)
-	{
-		throw std::runtime_error("sound_send_effect_params.name does not fit its 64 character buffer");
-	}
-
-}
-
-inline void validate(const adsr_setting& data)
-{
-	if (std::ranges::none_of(adsr_curve_names, [&](const auto& entry) { return entry.second == data.attack_curve; }))
-	{
-		throw std::runtime_error("adsr_setting.attack_curve names no value");
-	}
-
-	if (std::ranges::none_of(adsr_curve_names, [&](const auto& entry) { return entry.second == data.decay_curve; }))
-	{
-		throw std::runtime_error("adsr_setting.decay_curve names no value");
-	}
-
-	if (std::ranges::none_of(adsr_curve_names, [&](const auto& entry) { return entry.second == data.release_curve; }))
-	{
-		throw std::runtime_error("adsr_setting.release_curve names no value");
-	}
-
-}
-
-inline void validate(const ambient_def& data)
-{
-	(void) data;
-}
-
-inline void validate(const ambient_event& data)
-{
-	(void) data;
-}
-
-inline void validate(const ambient_element& data)
-{
-	(void) data;
-}
-
-inline void validate(const filter_def& data)
-{
-	if (std::ranges::none_of(sound_eqtype_names, [&](const auto& entry) { return entry.second == data.type; }))
-	{
-		throw std::runtime_error("filter_def.type names no value");
-	}
-
-}
-
-inline void validate(const mix_def& data)
-{
-	(void) data;
-}
-
-inline void validate(const adsr_zone_entry& data)
-{
-	(void) data;
-}
-
-inline void validate(const occlude_def& data)
-{
-	(void) data;
-}
-
-inline void validate(const reverb_def& data)
-{
-	if (data.room_type.size() >= 64)
-	{
-		throw std::runtime_error("reverb_def.room_type does not fit its 64 character buffer");
-	}
-
-}
-
-inline void validate(const timescale_entry& data)
-{
-	(void) data;
-}
-
-inline void validate(const zone_def& data)
-{
-	(void) data;
-}
-
-inline void validate(const full_occlusion_def& data)
-{
-	(void) data;
-}
-
-inline void validate(const player_breath_state_def& data)
-{
-	(void) data;
-}
 
 inline void validate(const sound_table& data)
 {
@@ -941,135 +886,6 @@ inline void validate(const sound_table& data)
 	if ((data.player_breath_state_defs && data.player_breath_state_defs->size() > 0xFFFFFFFFull))
 	{
 		throw std::runtime_error("sound_table has arrays that its count does not fit");
-	}
-
-}
-
-inline void validate(const sound_duck& data)
-{
-	if (data.name.size() >= 64)
-	{
-		throw std::runtime_error("sound_duck.name does not fit its 64 character buffer");
-	}
-
-}
-
-inline void validate(const sound_music_asset& data)
-{
-	if (data.alias.size() >= 64)
-	{
-		throw std::runtime_error("sound_music_asset.alias does not fit its 64 character buffer");
-	}
-
-}
-
-inline void validate(const sound_music_state& data)
-{
-	if (data.name.size() >= 64)
-	{
-		throw std::runtime_error("sound_music_state.name does not fit its 64 character buffer");
-	}
-
-	validate(data.intro);
-
-	validate(data.exit);
-
-	if (data.loops)
-	{
-		for (const auto& item : *data.loops)
-		{
-			validate(item);
-		}
-	}
-
-	if ((data.loops && data.loops->size() > 0xFFFFFFFFull))
-	{
-		throw std::runtime_error("sound_music_state has arrays that its count does not fit");
-	}
-
-}
-
-inline void validate(const sound_music_set& data)
-{
-	if (data.name.size() >= 64)
-	{
-		throw std::runtime_error("sound_music_set.name does not fit its 64 character buffer");
-	}
-
-	if (data.states)
-	{
-		for (const auto& item : *data.states)
-		{
-			validate(item);
-		}
-	}
-
-	if ((data.states && data.states->size() > 0xFFFFFFFFull))
-	{
-		throw std::runtime_error("sound_music_set has arrays that its count does not fit");
-	}
-
-}
-
-inline void validate(const weapon_reflection_def& data)
-{
-	if (std::ranges::none_of(weapon_reflection_room_type_names, [&](const auto& entry) { return entry.second == data.zone_type; }))
-	{
-		throw std::runtime_error("weapon_reflection_def.zone_type names no value");
-	}
-
-}
-
-inline void validate(const doppler_preset& data)
-{
-	if (data.name.size() >= 64)
-	{
-		throw std::runtime_error("doppler_preset.name does not fit its 64 character buffer");
-	}
-
-}
-
-inline void validate(const occlusion_shape& data)
-{
-	if (data.name.size() >= 64)
-	{
-		throw std::runtime_error("occlusion_shape.name does not fit its 64 character buffer");
-	}
-
-}
-
-inline void validate(const focus_cone& data)
-{
-	if (data.name.size() >= 64)
-	{
-		throw std::runtime_error("focus_cone.name does not fit its 64 character buffer");
-	}
-
-}
-
-inline void validate(const sound_curve& data)
-{
-	if (data.name.size() >= 64)
-	{
-		throw std::runtime_error("sound_curve.name does not fit its 64 character buffer");
-	}
-
-}
-
-inline void validate(const speaker_map& data)
-{
-	if (data.name.size() >= 64)
-	{
-		throw std::runtime_error("speaker_map.name does not fit its 64 character buffer");
-	}
-
-}
-
-inline void validate(const sound_futz& data)
-{
-	if (data.name.size() >= 64)
-	{
-		throw std::runtime_error("sound_futz.name does not fit its 64 character buffer");
 	}
 
 }
@@ -1287,6 +1103,258 @@ inline void validate(const sound_bank_resident& data)
 	detail::name(*data.bank.name, "sound_bank_resident");
 
 	validate(data.bank);
+
+}
+
+inline void validate(const sound_alias_list& data)
+{
+	if (data.head)
+	{
+		for (const auto& item : *data.head)
+		{
+			validate(item);
+		}
+	}
+
+	if ((data.head && data.head->size() > 0x7FFFFFFFull))
+	{
+		throw std::runtime_error("sound_alias_list has arrays that its count does not fit");
+	}
+
+}
+
+inline void validate(const sound_alias& data)
+{
+	(void) data;
+}
+
+inline void validate(const sound_index_entry& data)
+{
+	(void) data;
+}
+
+inline void validate(const sound_send_effect_params& data)
+{
+	if (data.name.size() >= 64)
+	{
+		throw std::runtime_error("sound_send_effect_params.name does not fit its 64 character buffer");
+	}
+
+}
+
+inline void validate(const adsr_setting& data)
+{
+	if (std::ranges::none_of(adsr_curve_names, [&](const auto& entry) { return entry.second == data.attack_curve; }))
+	{
+		throw std::runtime_error("adsr_setting.attack_curve names no value");
+	}
+
+	if (std::ranges::none_of(adsr_curve_names, [&](const auto& entry) { return entry.second == data.decay_curve; }))
+	{
+		throw std::runtime_error("adsr_setting.decay_curve names no value");
+	}
+
+	if (std::ranges::none_of(adsr_curve_names, [&](const auto& entry) { return entry.second == data.release_curve; }))
+	{
+		throw std::runtime_error("adsr_setting.release_curve names no value");
+	}
+
+}
+
+inline void validate(const ambient_def& data)
+{
+	(void) data;
+}
+
+inline void validate(const ambient_event& data)
+{
+	(void) data;
+}
+
+inline void validate(const ambient_element& data)
+{
+	(void) data;
+}
+
+inline void validate(const filter_def& data)
+{
+	if (std::ranges::none_of(sound_eqtype_names, [&](const auto& entry) { return entry.second == data.type; }))
+	{
+		throw std::runtime_error("filter_def.type names no value");
+	}
+
+}
+
+inline void validate(const mix_def& data)
+{
+	(void) data;
+}
+
+inline void validate(const adsr_zone_entry& data)
+{
+	(void) data;
+}
+
+inline void validate(const occlude_def& data)
+{
+	(void) data;
+}
+
+inline void validate(const reverb_def& data)
+{
+	if (data.room_type.size() >= 64)
+	{
+		throw std::runtime_error("reverb_def.room_type does not fit its 64 character buffer");
+	}
+
+}
+
+inline void validate(const timescale_entry& data)
+{
+	(void) data;
+}
+
+inline void validate(const zone_def& data)
+{
+	(void) data;
+}
+
+inline void validate(const full_occlusion_def& data)
+{
+	(void) data;
+}
+
+inline void validate(const player_breath_state_def& data)
+{
+	(void) data;
+}
+
+inline void validate(const sound_duck& data)
+{
+	if (data.name.size() >= 64)
+	{
+		throw std::runtime_error("sound_duck.name does not fit its 64 character buffer");
+	}
+
+}
+
+inline void validate(const sound_music_set& data)
+{
+	if (data.name.size() >= 64)
+	{
+		throw std::runtime_error("sound_music_set.name does not fit its 64 character buffer");
+	}
+
+	if (data.states)
+	{
+		for (const auto& item : *data.states)
+		{
+			validate(item);
+		}
+	}
+
+	if ((data.states && data.states->size() > 0xFFFFFFFFull))
+	{
+		throw std::runtime_error("sound_music_set has arrays that its count does not fit");
+	}
+
+}
+
+inline void validate(const sound_music_asset& data)
+{
+	if (data.alias.size() >= 64)
+	{
+		throw std::runtime_error("sound_music_asset.alias does not fit its 64 character buffer");
+	}
+
+}
+
+inline void validate(const sound_music_state& data)
+{
+	if (data.name.size() >= 64)
+	{
+		throw std::runtime_error("sound_music_state.name does not fit its 64 character buffer");
+	}
+
+	validate(data.intro);
+
+	validate(data.exit);
+
+	if (data.loops)
+	{
+		for (const auto& item : *data.loops)
+		{
+			validate(item);
+		}
+	}
+
+	if ((data.loops && data.loops->size() > 0xFFFFFFFFull))
+	{
+		throw std::runtime_error("sound_music_state has arrays that its count does not fit");
+	}
+
+}
+
+inline void validate(const weapon_reflection_def& data)
+{
+	if (std::ranges::none_of(weapon_reflection_room_type_names, [&](const auto& entry) { return entry.second == data.zone_type; }))
+	{
+		throw std::runtime_error("weapon_reflection_def.zone_type names no value");
+	}
+
+}
+
+inline void validate(const doppler_preset& data)
+{
+	if (data.name.size() >= 64)
+	{
+		throw std::runtime_error("doppler_preset.name does not fit its 64 character buffer");
+	}
+
+}
+
+inline void validate(const occlusion_shape& data)
+{
+	if (data.name.size() >= 64)
+	{
+		throw std::runtime_error("occlusion_shape.name does not fit its 64 character buffer");
+	}
+
+}
+
+inline void validate(const focus_cone& data)
+{
+	if (data.name.size() >= 64)
+	{
+		throw std::runtime_error("focus_cone.name does not fit its 64 character buffer");
+	}
+
+}
+
+inline void validate(const sound_curve& data)
+{
+	if (data.name.size() >= 64)
+	{
+		throw std::runtime_error("sound_curve.name does not fit its 64 character buffer");
+	}
+
+}
+
+inline void validate(const speaker_map& data)
+{
+	if (data.name.size() >= 64)
+	{
+		throw std::runtime_error("speaker_map.name does not fit its 64 character buffer");
+	}
+
+}
+
+inline void validate(const sound_futz& data)
+{
+	if (data.name.size() >= 64)
+	{
+		throw std::runtime_error("sound_futz.name does not fit its 64 character buffer");
+	}
 
 }
 
