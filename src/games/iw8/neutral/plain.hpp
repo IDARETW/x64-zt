@@ -4,6 +4,7 @@
 #include "../iw8.hpp"
 #include "../zone/loader.hpp"
 
+#include <zone/script_strings.hpp>
 #include <zone/zone_memory.hpp>
 
 #include <algorithm>
@@ -47,7 +48,7 @@ namespace zonetool::iw8::neutral::plain
 			return this->memory_.manual_allocate<T>(size, count);
 		}
 
-		const char* text(const std::string& value)
+		char* text(const std::string& value)
 		{
 			auto& pooled = this->strings_[value];
 			if (!pooled)
@@ -62,7 +63,7 @@ namespace zonetool::iw8::neutral::plain
 
 	private:
 		zone_memory& memory_;
-		std::map<std::string, const char*> strings_;
+		std::map<std::string, char*> strings_;
 	};
 
 	inline void fail(const std::string& what, const char* problem)
@@ -108,9 +109,22 @@ namespace zonetool::iw8::neutral::plain
 		return text ? std::optional<std::string>(text) : std::nullopt;
 	}
 
-	inline const char* write_string(context& memory, const std::optional<std::string>& text)
+	inline char* write_string(context& memory, const std::optional<std::string>& text)
 	{
 		return text ? memory.text(*text) : nullptr;
+	}
+
+	// A script string is a number that names a string of the game's table: the neutral data holds the text, and
+	// the number is made again when the asset is written.
+	inline std::optional<std::string> read_script_string(const scr_string_t id)
+	{
+		const auto* text = SL_ConvertToString(id);
+		return text ? std::optional<std::string>(text) : std::nullopt;
+	}
+
+	inline std::uint32_t write_script_string(const std::optional<std::string>& text)
+	{
+		return text ? static_cast<std::uint32_t>(SL_GetString(text->data())) : 0;
 	}
 
 	inline std::size_t string_size(const std::optional<std::string>& text)
@@ -146,6 +160,21 @@ namespace zonetool::iw8::neutral::plain
 
 		fail(what, "has an enum name that is not known");
 		return 0;
+	}
+
+	// The floats of a vector type (a union or a register type): copied as they are, so that a NaN keeps its bits.
+	template <std::size_t Count>
+	std::array<float, Count> read_floats(const void* vector)
+	{
+		std::array<float, Count> out;
+		std::memcpy(out.data(), vector, sizeof(out));
+		return out;
+	}
+
+	template <std::size_t Count>
+	void write_floats(void* vector, const std::array<float, Count>& values)
+	{
+		std::memcpy(vector, values.data(), sizeof(values));
 	}
 
 	// A pointer member that no stream rule describes holds nothing in a zone; a value would be lost.
@@ -202,6 +231,18 @@ namespace zonetool::iw8::neutral::plain
 		return out;
 	}
 
+	// A pointer to one object.
+	template <typename Element, typename Read>
+	auto read_single(const Element* element, Read&& read) -> std::optional<decltype(read(*element))>
+	{
+		if (!element)
+		{
+			return std::nullopt;
+		}
+
+		return read(*element);
+	}
+
 	template <typename Element, std::size_t Count>
 	std::optional<std::array<Element, Count>> read_fixed(const Element* elements)
 	{
@@ -230,6 +271,19 @@ namespace zonetool::iw8::neutral::plain
 		}
 
 		return elements;
+	}
+
+	template <typename Element, typename Item, typename Write>
+	Element* write_single(const std::optional<Item>& item, context& memory, Write&& write)
+	{
+		if (!item)
+		{
+			return nullptr;
+		}
+
+		auto* element = memory.manual_allocate<Element>(rounded(sizeof(Element)));
+		write(*element, *item);
+		return element;
 	}
 
 	template <typename Count, typename Items>

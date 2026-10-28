@@ -1,0 +1,24 @@
+{
+ "family": "world",
+ "assets": [
+  {
+   "type": "ASSET_TYPE_COM_MAP",
+   "struct": "ComWorld",
+   "neutral": "com_world",
+   "name": "name"
+  },
+  {
+   "type": "ASSET_TYPE_GLASS_MAP",
+   "struct": "GlassWorld",
+   "neutral": "glass_world",
+   "name": "name"
+  }
+ ],
+ "tokens": {},
+ "structs": {
+  "G_GlassData": "glass_data",
+  "G_GlassPiece": "glass_piece",
+  "G_GlassName": "glass_name"
+ },
+ "fields": {}
+}

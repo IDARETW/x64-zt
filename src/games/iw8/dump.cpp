@@ -17,9 +17,11 @@
 #include "neutral/rumble.hpp"
 #include "neutral/shader.hpp"
 #include "neutral/sound.hpp"
+#include "neutral/sound_globals.hpp"
 #include "neutral/techset.hpp"
 #include "neutral/stream.hpp"
 #include "neutral/text.hpp"
+#include "neutral/world.hpp"
 #include "neutral/xanim.hpp"
 #include "neutral/xmodel.hpp"
 #include <core/assets/neutral_files.hpp>
@@ -268,7 +270,7 @@ namespace zonetool::iw8
 			neutral::xmodel_surfs_source, neutral::decal_volume_material_source, neutral::stream_key_source,
 			neutral::material_source, neutral::shader_source, asset_data::technique_set, asset_data::physics_fx_shape,
 			asset_data::detail_collision, asset_data::physics_asset, asset_data::sound_bank_resident, asset_data::sound_bank_transient,
-			asset_data::impact_table, asset_data::surface_effect_table,
+			asset_data::sound_globals, asset_data::com_world, asset_data::glass_world, asset_data::impact_table, asset_data::surface_effect_table,
 			asset_data::physics_fx_pipeline, neutral::vector_field_source>;
 
 		template <typename T>
@@ -367,6 +369,12 @@ namespace zonetool::iw8
 				return accepted(neutral::to_neutral(*static_cast<const FxImpactTable*>(header)), "impact effect table", kept);
 			case ASSET_TYPE_SURFACE_FX:
 				return accepted(neutral::to_neutral(*static_cast<const SurfaceFxTable*>(header)), "surface effect table", kept);
+			case ASSET_TYPE_SOUND_GLOBALS:
+				return accepted(neutral::to_neutral(*static_cast<const SndGlobals*>(header)), "sound globals", kept);
+			case ASSET_TYPE_COMWORLD:
+				return accepted(neutral::to_neutral(*static_cast<const ComWorld*>(header)), "com world", kept);
+			case ASSET_TYPE_GLASSWORLD:
+				return accepted(neutral::to_neutral(*static_cast<const GlassWorld*>(header)), "glass world", kept);
 			case ASSET_TYPE_SOUND_BANK:
 				return accepted(neutral::to_neutral(*static_cast<const SndBankResident*>(header)), "sound bank", kept);
 			case ASSET_TYPE_SOUND_BANK_TRANSIENT:

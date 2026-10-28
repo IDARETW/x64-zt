@@ -27,7 +27,7 @@ SCALARS = {'std::uint8_t', 'std::uint16_t', 'std::uint32_t', 'std::uint64_t', 's
            'std::int64_t', 'float', 'bool', 'char'}
 ALIASES = {'int': 'std::int32_t', 'unsigned int': 'std::uint32_t', 'std::size_t': 'std::uint64_t'}
 # Unions of a float vector and its named parts are plain vectors of floats.
-VECTORS = {'vec2_t': 2, 'vec3_t': 3}
+VECTORS = {'vec2_t': 2, 'vec3_t': 3, 'vec4_t': 4, 'float4': 4}
 PADDING = re.compile(r'^(m_)?pad(ding)?(_?\d+)?$|^unused\w*$|^reserved\d*$')
 
 
@@ -130,6 +130,16 @@ class Family:
         name, type_name = m['name'], m['type']
         if PADDING.match(name):
             return {'kind': 'padding'}
+        if type_name == 'scr_string_t' and not m['pointer']:
+            if m['dims']:
+                self.problems.append('%s.%s: an inline array of script strings' % (owner, name))
+                return {'kind': 'unknown'}
+            return {'kind': 'script_string'}
+        if m['pointer'] == 2 and type_name == 'char':
+            count = self.rules.array_count(name, members)
+            if count:
+                return {'kind': 'array', 'element': 'char*', 'native_element': 'const char*', 'count': count}
+            return {'kind': 'padding'}
         if m['pointer'] == 1 and type_name == 'char':
             return {'kind': 'string'} if name in self.rules.strings else {'kind': 'padding'}
         if m['pointer']:
@@ -137,7 +147,7 @@ class Family:
             if name in self.rules.assets:
                 return {'kind': 'asset', 'asset': self.rules.assets[name], 'target': type_name}
             if count and m['pointer'] == 1:
-                return {'kind': 'array', 'element': type_name, 'count': count}
+                return {'kind': 'array', 'element': type_name, 'native_element': type_name, 'count': count}
             return {'kind': 'padding'}
         if type_name == 'char' and len(m['dims']) == 1:
             return {'kind': 'text', 'size': m['dims'][0]}
@@ -199,6 +209,8 @@ class Family:
 
     def element_type(self, type_name):
         """The neutral type of an array element or an inline value of a type."""
+        if type_name in ('scr_string_t', 'char*'):
+            return 'std::optional<std::string>'
         if type_name in VECTORS:
             return 'std::array<float, %d>' % VECTORS[type_name]
         if type_name in self.source.structs:
@@ -217,7 +229,7 @@ class Family:
             return self.nest(self.scalar_type(m['type']), m['dims'])
         if kind == 'text':
             return 'std::string'
-        if kind in ('string', 'asset'):
+        if kind in ('string', 'asset', 'script_string'):
             return 'std::optional<std::string>'
         if kind == 'enum':
             return 'std::string'
@@ -226,7 +238,9 @@ class Family:
         if kind == 'struct':
             return self.nest(self.qual + self.struct_name(m['type']), m['dims'])
         if kind == 'array':
-            element = self.element_type(m['type'])
+            element = self.element_type(c['element'])
+            if c['count'] == ('literal', 1):
+                return 'std::optional<%s>' % element
             if c['count'][0] == 'literal':
                 return 'std::optional<std::array<%s, %d>>' % (element, c['count'][1])
             return 'std::optional<std::vector<%s>>' % element
@@ -315,10 +329,10 @@ class Family:
                         body.append('\tfor (const auto& item : %s)\n\t{\n\t\tvalidate(item);\n\t}\n' % field)
                     else:
                         body.append('\tvalidate(%s);\n' % field)
+                elif c['kind'] == 'array' and m['type'] in self.structs and c['count'] == ('literal', 1):
+                    body.append('\tif (%s)\n\t{\n\t\tvalidate(*%s);\n\t}\n' % (field, field))
                 elif c['kind'] == 'array' and m['type'] in self.structs:
                     body.append('\tif (%s)\n\t{\n\t\tfor (const auto& item : *%s)\n\t\t{\n\t\t\tvalidate(item);\n\t\t}\n\t}\n' % (field, field))
-                elif c['kind'] == 'array' and c['count'][0] == 'member':
-                    pass
             for count, arrays in self.count_groups(name).items():
                 limit = self.count_limit(name, count)
                 names = ['data.' + self.member_name(name, a) for a in arrays]
@@ -374,12 +388,14 @@ class Family:
             return 'plain::read_text(%s, %s)' % (field, what)
         if kind == 'string':
             return 'plain::read_string(%s)' % field
+        if kind == 'script_string':
+            return 'plain::read_script_string(%s)' % field
         if kind == 'enum':
             return 'plain::enum_name(asset_data::%s, static_cast<std::int64_t>(%s), %s)' % (self.enum_table(m['type'])[0], field, what)
         if kind == 'vector':
             if m['dims']:
-                return self.loop_read(m, 'std::to_array(%s[i].v)' % field, self.neutral_type(m, c))
-            return 'std::to_array(%s.v)' % field
+                return self.loop_read(m, 'plain::read_floats<%d>(&%s[i])' % (c['size'], field), self.neutral_type(m, c))
+            return 'plain::read_floats<%d>(&%s)' % (c['size'], field)
         if kind == 'struct':
             reader = 'read_%s' % self.struct_name(m['type'])
             if m['dims']:
@@ -389,15 +405,21 @@ class Family:
             return 'plain::read_asset(%s, %s)' % (c['asset'], field)
         if kind == 'array':
             count = c['count']
+            if count == ('literal', 1):
+                return 'plain::read_single(%s, [&](const auto& item) { return %s; })' % (field, self.element_read(c['element'], 'item'))
             if count[0] == 'literal':
-                return 'plain::read_fixed<%s, %d>(%s)' % (self.element_type(m['type']), count[1], field)
-            return 'plain::read_array(%s, native.%s, %s, [&](const %s& item) { return %s; })' % (
-                field, count[1], what, m['type'], self.element_read(m['type'], 'item'))
+                return 'plain::read_fixed<%s, %d>(%s)' % (self.element_type(c['element']), count[1], field)
+            return 'plain::read_array(%s, native.%s, %s, [&](const auto& item) { return %s; })' % (
+                field, count[1], what, self.element_read(c['element'], 'item'))
         raise SystemExit('no read for %s' % kind)
 
     def element_read(self, type_name, item):
+        if type_name == 'scr_string_t':
+            return 'plain::read_script_string(%s)' % item
+        if type_name == 'char*':
+            return 'plain::read_string(%s)' % item
         if type_name in VECTORS:
-            return 'std::to_array(%s.v)' % item
+            return 'plain::read_floats<%d>(&%s)' % (VECTORS[type_name], item)
         if type_name in self.source.structs:
             return 'read_%s(%s)' % (self.struct_name(type_name), item)
         return item if type_name in SCALARS else 'static_cast<%s>(%s)' % (self.scalar_type(type_name), item)
@@ -418,6 +440,8 @@ class Family:
             return ['plain::write_text(%s, %s, %s);' % (field, data, what)]
         if kind == 'string':
             return ['%s = plain::write_string(memory, %s);' % (field, data)]
+        if kind == 'script_string':
+            return ['%s = static_cast<scr_string_t>(plain::write_script_string(%s));' % (field, data)]
         if kind == 'enum':
             return ['%s = static_cast<%s>(plain::enum_value(asset_data::%s, %s, %s));' % (
                 field, m['type'], self.enum_table(m['type'])[0], data, what)]
@@ -436,18 +460,26 @@ class Family:
             return ['%s = plain::resolve_asset<%s>(resolve, %s, %s);' % (field, c['target'], c['asset'], data)]
         if kind == 'array':
             count = c['count']
+            native_element = c['native_element']
+            if count == ('literal', 1):
+                return ['%s = plain::write_single<%s>(%s, memory, [&](auto& out, const auto& in) { %s });' % (
+                    field, native_element, data, self.element_write('out', 'in', c['element']))]
             if count[0] == 'literal':
                 return ['if (%s)' % data, '{',
-                        '\t%s = memory.manual_allocate<%s>(plain::rounded(%d * sizeof(%s)));' % (field, m['type'], count[1], m['type']),
+                        '\t%s = memory.manual_allocate<%s>(plain::rounded(%d * sizeof(%s)));' % (field, native_element, count[1], native_element),
                         '\tfor (std::size_t i = 0; i < %d; ++i)' % count[1], '\t{',
-                        '\t\t%s' % self.element_write('%s[i]' % field, '(*%s)[i]' % data, m['type']), '\t}', '}']
-            return ['%s = plain::write_array<%s>(%s, memory, [&](%s& out, const %s& in) { %s });' % (
-                field, m['type'], data, m['type'], self.element_type(m['type']), self.element_write('out', 'in', m['type']))]
+                        '\t\t%s' % self.element_write('%s[i]' % field, '(*%s)[i]' % data, c['element']), '\t}', '}']
+            return ['%s = plain::write_array<%s>(%s, memory, [&](auto& out, const auto& in) { %s });' % (
+                field, native_element, data, self.element_write('out', 'in', c['element']))]
         raise SystemExit('no write for %s' % kind)
 
     def element_write(self, out, source, type_name):
+        if type_name == 'scr_string_t':
+            return '%s = static_cast<scr_string_t>(plain::write_script_string(%s));' % (out, source)
+        if type_name == 'char*':
+            return '%s = plain::write_string(memory, %s);' % (out, source)
         if type_name in VECTORS:
-            return 'std::ranges::copy(%s, %s.v);' % (source, out)
+            return 'plain::write_floats(&%s, %s);' % (out, source)
         if type_name in self.source.structs:
             return 'write_%s(%s, %s, resolve, memory);' % (self.struct_name(type_name), out, source)
         return '%s = %s;' % (out, source if type_name in SCALARS else 'static_cast<%s>(%s)' % (type_name, source))
@@ -463,11 +495,19 @@ class Family:
             return ['size += size_%s(%s);' % (self.struct_name(m['type']), data)]
         if kind == 'array':
             count = c['count']
+            native_element = c['native_element']
+            if count == ('literal', 1):
+                lines = ['if (%s)' % data, '{', '\tsize += plain::rounded(sizeof(%s));' % native_element]
+                if c['element'] in self.structs:
+                    lines.append('\tsize += size_%s(*%s);' % (self.struct_name(c['element']), data))
+                return lines + ['}']
             if count[0] == 'literal':
-                return ['size += %s ? plain::rounded(%d * sizeof(%s)) : 0;' % (data, count[1], m['type'])]
-            lines = ['if (%s)' % data, '{', '\tsize += plain::rounded(std::max<std::size_t>(%s->size(), 1) * sizeof(%s));' % (data, m['type'])]
-            if m['type'] in self.structs:
-                lines += ['\tfor (const auto& item : *%s)' % data, '\t{', '\t\tsize += size_%s(item);' % self.struct_name(m['type']), '\t}']
+                return ['size += %s ? plain::rounded(%d * sizeof(%s)) : 0;' % (data, count[1], native_element)]
+            lines = ['if (%s)' % data, '{', '\tsize += plain::rounded(std::max<std::size_t>(%s->size(), 1) * sizeof(%s));' % (data, native_element)]
+            if c['element'] in self.structs:
+                lines += ['\tfor (const auto& item : *%s)' % data, '\t{', '\t\tsize += size_%s(item);' % self.struct_name(c['element']), '\t}']
+            if c['element'] == 'char*':
+                lines += ['\tfor (const auto& item : *%s)' % data, '\t{', '\t\tsize += plain::string_size(item);', '\t}']
             return lines + ['}']
         return []
 
