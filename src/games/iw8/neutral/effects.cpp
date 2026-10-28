@@ -7,9 +7,9 @@ namespace zonetool::iw8::neutral
 {
 	namespace
 	{
-		asset_data::fx_particle_sim_animation_header read_fx_particle_sim_animation_header(const FxParticleSimAnimationHeader& native)
+		asset_data::effects::fx_particle_sim_animation_header read_fx_particle_sim_animation_header(const FxParticleSimAnimationHeader& native)
 		{
-			asset_data::fx_particle_sim_animation_header data;
+			asset_data::effects::fx_particle_sim_animation_header data;
 			data.playback_rate = native.playbackRate;
 			data.duration = native.duration;
 			data.frame_count = native.frameCount;
@@ -31,7 +31,7 @@ namespace zonetool::iw8::neutral
 			return data;
 		}
 
-		void write_fx_particle_sim_animation_header(FxParticleSimAnimationHeader& native, const asset_data::fx_particle_sim_animation_header& data, [[maybe_unused]] const asset_resolver& resolve, [[maybe_unused]] plain::context& memory)
+		void write_fx_particle_sim_animation_header(FxParticleSimAnimationHeader& native, const asset_data::effects::fx_particle_sim_animation_header& data, [[maybe_unused]] const asset_resolver& resolve, [[maybe_unused]] plain::context& memory)
 		{
 			native.playbackRate = data.playback_rate;
 			native.duration = data.duration;
@@ -53,15 +53,15 @@ namespace zonetool::iw8::neutral
 			native.hasIndex = data.has_index;
 		}
 
-		std::size_t size_fx_particle_sim_animation_header([[maybe_unused]] const asset_data::fx_particle_sim_animation_header& data)
+		std::size_t size_fx_particle_sim_animation_header([[maybe_unused]] const asset_data::effects::fx_particle_sim_animation_header& data)
 		{
 			std::size_t size = 0;
 			return size;
 		}
 
-		asset_data::fx_particle_sim_animation_particle_data read_fx_particle_sim_animation_particle_data(const FxParticleSimAnimationParticleData& native)
+		asset_data::effects::fx_particle_sim_animation_particle_data read_fx_particle_sim_animation_particle_data(const FxParticleSimAnimationParticleData& native)
 		{
-			asset_data::fx_particle_sim_animation_particle_data data;
+			asset_data::effects::fx_particle_sim_animation_particle_data data;
 			data.x_normalized_pos = native.xNormalizedPos;
 			data.y_normalized_pos = native.yNormalizedPos;
 			data.z_normalized_pos = native.zNormalizedPos;
@@ -81,7 +81,7 @@ namespace zonetool::iw8::neutral
 			return data;
 		}
 
-		void write_fx_particle_sim_animation_particle_data(FxParticleSimAnimationParticleData& native, const asset_data::fx_particle_sim_animation_particle_data& data, [[maybe_unused]] const asset_resolver& resolve, [[maybe_unused]] plain::context& memory)
+		void write_fx_particle_sim_animation_particle_data(FxParticleSimAnimationParticleData& native, const asset_data::effects::fx_particle_sim_animation_particle_data& data, [[maybe_unused]] const asset_resolver& resolve, [[maybe_unused]] plain::context& memory)
 		{
 			native.xNormalizedPos = data.x_normalized_pos;
 			native.yNormalizedPos = data.y_normalized_pos;
@@ -101,15 +101,15 @@ namespace zonetool::iw8::neutral
 			native.nextColorTableIndex = data.next_color_table_index;
 		}
 
-		std::size_t size_fx_particle_sim_animation_particle_data([[maybe_unused]] const asset_data::fx_particle_sim_animation_particle_data& data)
+		std::size_t size_fx_particle_sim_animation_particle_data([[maybe_unused]] const asset_data::effects::fx_particle_sim_animation_particle_data& data)
 		{
 			std::size_t size = 0;
 			return size;
 		}
 
-		asset_data::fx_particle_sim_animation_particle_data_orientation3_d read_fx_particle_sim_animation_particle_data_orientation3_d(const FxParticleSimAnimationParticleDataOrientation3D& native)
+		asset_data::effects::fx_particle_sim_animation_particle_data_orientation3_d read_fx_particle_sim_animation_particle_data_orientation3_d(const FxParticleSimAnimationParticleDataOrientation3D& native)
 		{
-			asset_data::fx_particle_sim_animation_particle_data_orientation3_d data;
+			asset_data::effects::fx_particle_sim_animation_particle_data_orientation3_d data;
 			data.y_orientation = native.yOrientation;
 			data.z_orientation = native.zOrientation;
 			data.y_orientation_delta = native.yOrientationDelta;
@@ -117,7 +117,7 @@ namespace zonetool::iw8::neutral
 			return data;
 		}
 
-		void write_fx_particle_sim_animation_particle_data_orientation3_d(FxParticleSimAnimationParticleDataOrientation3D& native, const asset_data::fx_particle_sim_animation_particle_data_orientation3_d& data, [[maybe_unused]] const asset_resolver& resolve, [[maybe_unused]] plain::context& memory)
+		void write_fx_particle_sim_animation_particle_data_orientation3_d(FxParticleSimAnimationParticleDataOrientation3D& native, const asset_data::effects::fx_particle_sim_animation_particle_data_orientation3_d& data, [[maybe_unused]] const asset_resolver& resolve, [[maybe_unused]] plain::context& memory)
 		{
 			native.yOrientation = data.y_orientation;
 			native.zOrientation = data.z_orientation;
@@ -125,55 +125,55 @@ namespace zonetool::iw8::neutral
 			native.zOrientationDelta = data.z_orientation_delta;
 		}
 
-		std::size_t size_fx_particle_sim_animation_particle_data_orientation3_d([[maybe_unused]] const asset_data::fx_particle_sim_animation_particle_data_orientation3_d& data)
+		std::size_t size_fx_particle_sim_animation_particle_data_orientation3_d([[maybe_unused]] const asset_data::effects::fx_particle_sim_animation_particle_data_orientation3_d& data)
 		{
 			std::size_t size = 0;
 			return size;
 		}
 
-		asset_data::fx_particle_sim_animation_particle_data_index read_fx_particle_sim_animation_particle_data_index(const FxParticleSimAnimationParticleDataIndex& native)
+		asset_data::effects::fx_particle_sim_animation_particle_data_index read_fx_particle_sim_animation_particle_data_index(const FxParticleSimAnimationParticleDataIndex& native)
 		{
-			asset_data::fx_particle_sim_animation_particle_data_index data;
+			asset_data::effects::fx_particle_sim_animation_particle_data_index data;
 			data.index = native.index;
 			data.next_index = native.nextIndex;
 			return data;
 		}
 
-		void write_fx_particle_sim_animation_particle_data_index(FxParticleSimAnimationParticleDataIndex& native, const asset_data::fx_particle_sim_animation_particle_data_index& data, [[maybe_unused]] const asset_resolver& resolve, [[maybe_unused]] plain::context& memory)
+		void write_fx_particle_sim_animation_particle_data_index(FxParticleSimAnimationParticleDataIndex& native, const asset_data::effects::fx_particle_sim_animation_particle_data_index& data, [[maybe_unused]] const asset_resolver& resolve, [[maybe_unused]] plain::context& memory)
 		{
 			native.index = data.index;
 			native.nextIndex = data.next_index;
 		}
 
-		std::size_t size_fx_particle_sim_animation_particle_data_index([[maybe_unused]] const asset_data::fx_particle_sim_animation_particle_data_index& data)
+		std::size_t size_fx_particle_sim_animation_particle_data_index([[maybe_unused]] const asset_data::effects::fx_particle_sim_animation_particle_data_index& data)
 		{
 			std::size_t size = 0;
 			return size;
 		}
 
-		asset_data::fx_particle_sim_animation_frame read_fx_particle_sim_animation_frame(const FxParticleSimAnimationFrame& native)
+		asset_data::effects::fx_particle_sim_animation_frame read_fx_particle_sim_animation_frame(const FxParticleSimAnimationFrame& native)
 		{
-			asset_data::fx_particle_sim_animation_frame data;
+			asset_data::effects::fx_particle_sim_animation_frame data;
 			data.particle_data_offset = native.particleDataOffset;
 			data.num_active_particles = native.numActiveParticles;
 			return data;
 		}
 
-		void write_fx_particle_sim_animation_frame(FxParticleSimAnimationFrame& native, const asset_data::fx_particle_sim_animation_frame& data, [[maybe_unused]] const asset_resolver& resolve, [[maybe_unused]] plain::context& memory)
+		void write_fx_particle_sim_animation_frame(FxParticleSimAnimationFrame& native, const asset_data::effects::fx_particle_sim_animation_frame& data, [[maybe_unused]] const asset_resolver& resolve, [[maybe_unused]] plain::context& memory)
 		{
 			native.particleDataOffset = data.particle_data_offset;
 			native.numActiveParticles = data.num_active_particles;
 		}
 
-		std::size_t size_fx_particle_sim_animation_frame([[maybe_unused]] const asset_data::fx_particle_sim_animation_frame& data)
+		std::size_t size_fx_particle_sim_animation_frame([[maybe_unused]] const asset_data::effects::fx_particle_sim_animation_frame& data)
 		{
 			std::size_t size = 0;
 			return size;
 		}
 
-		asset_data::particle_sim_animation read_particle_sim_animation(const FxParticleSimAnimation& native)
+		asset_data::effects::particle_sim_animation read_particle_sim_animation(const FxParticleSimAnimation& native)
 		{
-			asset_data::particle_sim_animation data;
+			asset_data::effects::particle_sim_animation data;
 			data.name = plain::read_string(native.name);
 			data.material = plain::read_asset(ASSET_TYPE_MATERIAL, native.material);
 			data.header = read_fx_particle_sim_animation_header(native.header);
@@ -185,7 +185,7 @@ namespace zonetool::iw8::neutral
 			return data;
 		}
 
-		void write_particle_sim_animation(FxParticleSimAnimation& native, const asset_data::particle_sim_animation& data, [[maybe_unused]] const asset_resolver& resolve, [[maybe_unused]] plain::context& memory)
+		void write_particle_sim_animation(FxParticleSimAnimation& native, const asset_data::effects::particle_sim_animation& data, [[maybe_unused]] const asset_resolver& resolve, [[maybe_unused]] plain::context& memory)
 		{
 			native.name = plain::write_string(memory, data.name);
 			native.material = plain::resolve_asset<Material>(resolve, ASSET_TYPE_MATERIAL, data.material);
@@ -197,14 +197,14 @@ namespace zonetool::iw8::neutral
 			native.colorTable = plain::write_array<vec4_t>(data.color_table, memory, [&](auto& out, const auto& in) { plain::write_scalars(&out, in); });
 		}
 
-		std::size_t size_particle_sim_animation([[maybe_unused]] const asset_data::particle_sim_animation& data)
+		std::size_t size_particle_sim_animation([[maybe_unused]] const asset_data::effects::particle_sim_animation& data)
 		{
 			std::size_t size = 0;
 			size += plain::string_size(data.name);
 			size += size_fx_particle_sim_animation_header(data.header);
 			if (data.particle_data)
 			{
-				size += plain::rounded(std::max<std::size_t>(data.particle_data->size(), 1) * sizeof(FxParticleSimAnimationParticleData));
+				size += plain::sized(std::max<std::size_t>(data.particle_data->size(), 1) * sizeof(FxParticleSimAnimationParticleData));
 				for (const auto& item : *data.particle_data)
 				{
 					size += size_fx_particle_sim_animation_particle_data(item);
@@ -212,7 +212,7 @@ namespace zonetool::iw8::neutral
 			}
 			if (data.particle_data_orientation3_d)
 			{
-				size += plain::rounded(std::max<std::size_t>(data.particle_data_orientation3_d->size(), 1) * sizeof(FxParticleSimAnimationParticleDataOrientation3D));
+				size += plain::sized(std::max<std::size_t>(data.particle_data_orientation3_d->size(), 1) * sizeof(FxParticleSimAnimationParticleDataOrientation3D));
 				for (const auto& item : *data.particle_data_orientation3_d)
 				{
 					size += size_fx_particle_sim_animation_particle_data_orientation3_d(item);
@@ -220,7 +220,7 @@ namespace zonetool::iw8::neutral
 			}
 			if (data.particle_data_index)
 			{
-				size += plain::rounded(std::max<std::size_t>(data.particle_data_index->size(), 1) * sizeof(FxParticleSimAnimationParticleDataIndex));
+				size += plain::sized(std::max<std::size_t>(data.particle_data_index->size(), 1) * sizeof(FxParticleSimAnimationParticleDataIndex));
 				for (const auto& item : *data.particle_data_index)
 				{
 					size += size_fx_particle_sim_animation_particle_data_index(item);
@@ -228,7 +228,7 @@ namespace zonetool::iw8::neutral
 			}
 			if (data.frames)
 			{
-				size += plain::rounded(std::max<std::size_t>(data.frames->size(), 1) * sizeof(FxParticleSimAnimationFrame));
+				size += plain::sized(std::max<std::size_t>(data.frames->size(), 1) * sizeof(FxParticleSimAnimationFrame));
 				for (const auto& item : *data.frames)
 				{
 					size += size_fx_particle_sim_animation_frame(item);
@@ -236,19 +236,19 @@ namespace zonetool::iw8::neutral
 			}
 			if (data.color_table)
 			{
-				size += plain::rounded(std::max<std::size_t>(data.color_table->size(), 1) * sizeof(vec4_t));
+				size += plain::sized(std::max<std::size_t>(data.color_table->size(), 1) * sizeof(vec4_t));
 			}
 			return size;
 		}
 
 	}
 
-	std::expected<asset_data::particle_sim_animation, std::string> to_neutral(const FxParticleSimAnimation& native)
+	std::expected<asset_data::effects::particle_sim_animation, std::string> to_neutral(const FxParticleSimAnimation& native)
 	{
 		try
 		{
 			auto data = read_particle_sim_animation(native);
-			asset_data::validate(data);
+			validate(data);
 			return data;
 		}
 		catch (const std::exception& error)
@@ -257,16 +257,16 @@ namespace zonetool::iw8::neutral
 		}
 	}
 
-	FxParticleSimAnimation* from_neutral(const asset_data::particle_sim_animation& data, const asset_resolver& resolve, zone_memory& memory)
+	FxParticleSimAnimation* from_neutral(const asset_data::effects::particle_sim_animation& data, const asset_resolver& resolve, zone_memory& memory)
 	{
-		asset_data::validate(data);
+		validate(data);
 		plain::context context(memory);
 		auto* native = context.allocate<FxParticleSimAnimation>();
 		write_particle_sim_animation(*native, data, resolve, context);
 		return native;
 	}
 
-	std::size_t native_size(const asset_data::particle_sim_animation& data)
+	std::size_t native_size(const asset_data::effects::particle_sim_animation& data)
 	{
 		return plain::rounded(sizeof(FxParticleSimAnimation)) + size_particle_sim_animation(data) + 64;
 	}

@@ -16,6 +16,8 @@
 #include <stdexcept>
 #include <string>
 #include <string_view>
+#include <type_traits>
+#include <variant>
 #include <vector>
 
 // The reads and writes that the generated adapters (tools/gen_iw8_neutral.py) share: strings, character buffers, enum
@@ -25,6 +27,12 @@ namespace zonetool::iw8::neutral::plain
 	constexpr std::size_t rounded(const std::size_t size)
 	{
 		return (size + 7) & ~std::size_t(7);
+	}
+
+	// An upper bound for one allocation of this many bytes: the memory of a rebuild is sized in advance from these.
+	constexpr std::size_t sized(const std::size_t size)
+	{
+		return rounded(size) + 32;
 	}
 
 	// The memory one asset is rebuilt in. Equal strings of an asset are one string, as in the zones the game ships.
@@ -66,7 +74,36 @@ namespace zonetool::iw8::neutral::plain
 		std::map<std::string, char*> strings_;
 	};
 
-	inline void fail(const std::string& what, const char* problem)
+	// The type of the module that an event list or a module member is read or written in, for the structs whose meaning
+	// depends on it (the generated tagged unions set it).
+	class module_scope
+	{
+	public:
+		explicit module_scope(const std::uint32_t type)
+			: previous_(current_)
+		{
+			current_ = type;
+		}
+
+		~module_scope()
+		{
+			current_ = previous_;
+		}
+
+		module_scope(const module_scope&) = delete;
+		module_scope& operator=(const module_scope&) = delete;
+
+		static std::uint32_t current()
+		{
+			return current_;
+		}
+
+	private:
+		inline static thread_local std::uint32_t current_ = 0xFFFFFFFFu;
+		std::uint32_t previous_;
+	};
+
+	[[noreturn]] inline void fail(const std::string& what, const char* problem)
 	{
 		throw std::runtime_error(what + " " + problem);
 	}
@@ -170,7 +207,8 @@ namespace zonetool::iw8::neutral::plain
 		for (const auto& [number, name] : table)
 		{
 			const auto bits = static_cast<std::uint64_t>(number);
-			if (bits && (value & bits) == bits)
+			// Only a single bit names a flag: a name for several bits is a shorthand for them.
+			if (bits && (bits & (bits - 1)) == 0 && (value & bits) == bits)
 			{
 				names.emplace_back(name);
 				value &= ~bits;
@@ -305,6 +343,24 @@ namespace zonetool::iw8::neutral::plain
 		auto* pointee = memory.manual_allocate<Pointee>(rounded(sizeof(Pointee)));
 		write(*pointee, *item);
 		return pointee;
+	}
+
+	// A fixed number of elements behind a pointer, each read by the caller.
+	template <std::size_t Count, typename Element, typename Read>
+	auto read_fixed_with(const Element* elements, Read&& read) -> std::optional<std::array<decltype(read(*elements)), Count>>
+	{
+		if (!elements)
+		{
+			return std::nullopt;
+		}
+
+		std::array<decltype(read(*elements)), Count> out;
+		for (std::size_t index = 0; index < Count; ++index)
+		{
+			out[index] = read(elements[index]);
+		}
+
+		return out;
 	}
 
 	// A pointer to one object.

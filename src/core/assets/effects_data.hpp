@@ -8,12 +8,16 @@
 #include <stdexcept>
 #include <string>
 #include <string_view>
+#include <type_traits>
 #include <utility>
+#include <variant>
 #include <vector>
 
 // Neutral effects assets (docs/NEUTRAL_ASSETS.md), emitted by tools/gen_iw8_neutral.py from the IW8 structs and stream
 // traversals: do not edit; change the spec (tools/neutral_families/effects.json) or the generator.
 namespace zonetool::asset_data
+{
+namespace effects
 {
 struct fx_particle_sim_animation_header
 {
@@ -196,4 +200,5 @@ inline void validate(const particle_sim_animation& data)
 
 }
 
+} // namespace effects
 } // namespace zonetool::asset_data

@@ -8,12 +8,16 @@
 #include <stdexcept>
 #include <string>
 #include <string_view>
+#include <type_traits>
 #include <utility>
+#include <variant>
 #include <vector>
 
 // Neutral sound_globals assets (docs/NEUTRAL_ASSETS.md), emitted by tools/gen_iw8_neutral.py from the IW8 structs and stream
 // traversals: do not edit; change the spec (tools/neutral_families/sound_globals.json) or the generator.
 namespace zonetool::asset_data
+{
+namespace sound_globals
 {
 inline constexpr std::array<std::pair<std::int64_t, std::string_view>, 3> sound_entity_channel_spaital_type_names{{
 	{0, "2_d"},
@@ -457,4 +461,5 @@ inline void validate(const sound_globals& data)
 
 }
 
+} // namespace sound_globals
 } // namespace zonetool::asset_data

@@ -7,81 +7,81 @@ namespace zonetool::iw8::neutral
 {
 	namespace
 	{
-		asset_data::sound_volume_modifier read_sound_volume_modifier(const snd_volmod_info_t& native)
+		asset_data::sound_globals::sound_volume_modifier read_sound_volume_modifier(const snd_volmod_info_t& native)
 		{
-			asset_data::sound_volume_modifier data;
+			asset_data::sound_globals::sound_volume_modifier data;
 			data.name = plain::read_text(native.name, "snd_volmod_info_t.name");
 			data.id = native.id;
 			data.value = native.value;
 			return data;
 		}
 
-		void write_sound_volume_modifier(snd_volmod_info_t& native, const asset_data::sound_volume_modifier& data, [[maybe_unused]] const asset_resolver& resolve, [[maybe_unused]] plain::context& memory)
+		void write_sound_volume_modifier(snd_volmod_info_t& native, const asset_data::sound_globals::sound_volume_modifier& data, [[maybe_unused]] const asset_resolver& resolve, [[maybe_unused]] plain::context& memory)
 		{
 			plain::write_text(native.name, data.name, "snd_volmod_info_t.name");
 			native.id = data.id;
 			native.value = data.value;
 		}
 
-		std::size_t size_sound_volume_modifier([[maybe_unused]] const asset_data::sound_volume_modifier& data)
+		std::size_t size_sound_volume_modifier([[maybe_unused]] const asset_data::sound_globals::sound_volume_modifier& data)
 		{
 			std::size_t size = 0;
 			return size;
 		}
 
-		asset_data::sound_entity_channel read_sound_entity_channel(const snd_entchannel_info_t& native)
+		asset_data::sound_globals::sound_entity_channel read_sound_entity_channel(const snd_entchannel_info_t& native)
 		{
-			asset_data::sound_entity_channel data;
+			asset_data::sound_globals::sound_entity_channel data;
 			data.name = plain::read_text(native.name, "snd_entchannel_info_t.name");
 			data.id = native.id;
 			data.priority = native.priority;
-			data.spatial_type = plain::enum_name(asset_data::sound_entity_channel_spaital_type_names, static_cast<std::int64_t>(native.spatialType), "snd_entchannel_info_t.spatialType");
+			data.spatial_type = plain::enum_name(asset_data::sound_globals::sound_entity_channel_spaital_type_names, static_cast<std::int64_t>(native.spatialType), "snd_entchannel_info_t.spatialType");
 			data.is_restricted = native.isRestricted;
 			data.is_pausable = native.isPausable;
 			data.max_voices = native.maxVoices;
-			data.limit_behavior = plain::enum_name(asset_data::sound_limit_behavior_names, static_cast<std::int64_t>(native.limitBehavior), "snd_entchannel_info_t.limitBehavior");
+			data.limit_behavior = plain::enum_name(asset_data::sound_globals::sound_limit_behavior_names, static_cast<std::int64_t>(native.limitBehavior), "snd_entchannel_info_t.limitBehavior");
 			data.center_speaker_pan = native.centerSpeakerPan;
-			data.mp_far_reverb_behavior = plain::enum_name(asset_data::sound_far_reverb_behavior_names, static_cast<std::int64_t>(native.mpFarReverbBehavior), "snd_entchannel_info_t.mpFarReverbBehavior");
-			data.sp_far_reverb_behavior = plain::enum_name(asset_data::sound_far_reverb_behavior_names, static_cast<std::int64_t>(native.spFarReverbBehavior), "snd_entchannel_info_t.spFarReverbBehavior");
-			data.cp_far_reverb_behavior = plain::enum_name(asset_data::sound_far_reverb_behavior_names, static_cast<std::int64_t>(native.cpFarReverbBehavior), "snd_entchannel_info_t.cpFarReverbBehavior");
+			data.mp_far_reverb_behavior = plain::enum_name(asset_data::sound_globals::sound_far_reverb_behavior_names, static_cast<std::int64_t>(native.mpFarReverbBehavior), "snd_entchannel_info_t.mpFarReverbBehavior");
+			data.sp_far_reverb_behavior = plain::enum_name(asset_data::sound_globals::sound_far_reverb_behavior_names, static_cast<std::int64_t>(native.spFarReverbBehavior), "snd_entchannel_info_t.spFarReverbBehavior");
+			data.cp_far_reverb_behavior = plain::enum_name(asset_data::sound_globals::sound_far_reverb_behavior_names, static_cast<std::int64_t>(native.cpFarReverbBehavior), "snd_entchannel_info_t.cpFarReverbBehavior");
 			data.has71_pan = native.has71Pan;
 			data.bus_id = native.busId;
 			data.is_player_dialogue = native.isPlayerDialogue;
-			data.send_type = plain::enum_name(asset_data::sound_send_type_names, static_cast<std::int64_t>(native.sendType), "snd_entchannel_info_t.sendType");
+			data.send_type = plain::enum_name(asset_data::sound_globals::sound_send_type_names, static_cast<std::int64_t>(native.sendType), "snd_entchannel_info_t.sendType");
 			data.speed_of_sound_mult = native.speedOfSoundMult;
 			return data;
 		}
 
-		void write_sound_entity_channel(snd_entchannel_info_t& native, const asset_data::sound_entity_channel& data, [[maybe_unused]] const asset_resolver& resolve, [[maybe_unused]] plain::context& memory)
+		void write_sound_entity_channel(snd_entchannel_info_t& native, const asset_data::sound_globals::sound_entity_channel& data, [[maybe_unused]] const asset_resolver& resolve, [[maybe_unused]] plain::context& memory)
 		{
 			plain::write_text(native.name, data.name, "snd_entchannel_info_t.name");
 			native.id = data.id;
 			native.priority = data.priority;
-			native.spatialType = static_cast<SndEntchannelSpaitalType>(plain::enum_value(asset_data::sound_entity_channel_spaital_type_names, data.spatial_type, "snd_entchannel_info_t.spatialType"));
+			native.spatialType = static_cast<SndEntchannelSpaitalType>(plain::enum_value(asset_data::sound_globals::sound_entity_channel_spaital_type_names, data.spatial_type, "snd_entchannel_info_t.spatialType"));
 			native.isRestricted = data.is_restricted;
 			native.isPausable = data.is_pausable;
 			native.maxVoices = data.max_voices;
-			native.limitBehavior = static_cast<SndLimitBehavior>(plain::enum_value(asset_data::sound_limit_behavior_names, data.limit_behavior, "snd_entchannel_info_t.limitBehavior"));
+			native.limitBehavior = static_cast<SndLimitBehavior>(plain::enum_value(asset_data::sound_globals::sound_limit_behavior_names, data.limit_behavior, "snd_entchannel_info_t.limitBehavior"));
 			native.centerSpeakerPan = data.center_speaker_pan;
-			native.mpFarReverbBehavior = static_cast<SndFarReverbBehavior>(plain::enum_value(asset_data::sound_far_reverb_behavior_names, data.mp_far_reverb_behavior, "snd_entchannel_info_t.mpFarReverbBehavior"));
-			native.spFarReverbBehavior = static_cast<SndFarReverbBehavior>(plain::enum_value(asset_data::sound_far_reverb_behavior_names, data.sp_far_reverb_behavior, "snd_entchannel_info_t.spFarReverbBehavior"));
-			native.cpFarReverbBehavior = static_cast<SndFarReverbBehavior>(plain::enum_value(asset_data::sound_far_reverb_behavior_names, data.cp_far_reverb_behavior, "snd_entchannel_info_t.cpFarReverbBehavior"));
+			native.mpFarReverbBehavior = static_cast<SndFarReverbBehavior>(plain::enum_value(asset_data::sound_globals::sound_far_reverb_behavior_names, data.mp_far_reverb_behavior, "snd_entchannel_info_t.mpFarReverbBehavior"));
+			native.spFarReverbBehavior = static_cast<SndFarReverbBehavior>(plain::enum_value(asset_data::sound_globals::sound_far_reverb_behavior_names, data.sp_far_reverb_behavior, "snd_entchannel_info_t.spFarReverbBehavior"));
+			native.cpFarReverbBehavior = static_cast<SndFarReverbBehavior>(plain::enum_value(asset_data::sound_globals::sound_far_reverb_behavior_names, data.cp_far_reverb_behavior, "snd_entchannel_info_t.cpFarReverbBehavior"));
 			native.has71Pan = data.has71_pan;
 			native.busId = data.bus_id;
 			native.isPlayerDialogue = data.is_player_dialogue;
-			native.sendType = static_cast<SndSendType>(plain::enum_value(asset_data::sound_send_type_names, data.send_type, "snd_entchannel_info_t.sendType"));
+			native.sendType = static_cast<SndSendType>(plain::enum_value(asset_data::sound_globals::sound_send_type_names, data.send_type, "snd_entchannel_info_t.sendType"));
 			native.speedOfSoundMult = data.speed_of_sound_mult;
 		}
 
-		std::size_t size_sound_entity_channel([[maybe_unused]] const asset_data::sound_entity_channel& data)
+		std::size_t size_sound_entity_channel([[maybe_unused]] const asset_data::sound_globals::sound_entity_channel& data)
 		{
 			std::size_t size = 0;
 			return size;
 		}
 
-		asset_data::sound_context read_sound_context(const SndContext& native)
+		asset_data::sound_globals::sound_context read_sound_context(const SndContext& native)
 		{
-			asset_data::sound_context data;
+			asset_data::sound_globals::sound_context data;
 			data.type = plain::read_string(native.type);
 			data.type_id = native.typeId;
 			data.num_values = native.numValues;
@@ -92,7 +92,7 @@ namespace zonetool::iw8::neutral
 			return data;
 		}
 
-		void write_sound_context(SndContext& native, const asset_data::sound_context& data, [[maybe_unused]] const asset_resolver& resolve, [[maybe_unused]] plain::context& memory)
+		void write_sound_context(SndContext& native, const asset_data::sound_globals::sound_context& data, [[maybe_unused]] const asset_resolver& resolve, [[maybe_unused]] plain::context& memory)
 		{
 			native.type = plain::write_string(memory, data.type);
 			native.typeId = data.type_id;
@@ -103,37 +103,37 @@ namespace zonetool::iw8::neutral
 			native.canBlend = data.can_blend;
 		}
 
-		std::size_t size_sound_context([[maybe_unused]] const asset_data::sound_context& data)
+		std::size_t size_sound_context([[maybe_unused]] const asset_data::sound_globals::sound_context& data)
 		{
 			std::size_t size = 0;
 			size += plain::string_size(data.type);
 			return size;
 		}
 
-		asset_data::sound_context_value read_sound_context_value(const SndContextValue& native)
+		asset_data::sound_globals::sound_context_value read_sound_context_value(const SndContextValue& native)
 		{
-			asset_data::sound_context_value data;
+			asset_data::sound_globals::sound_context_value data;
 			data.value = plain::read_string(native.value);
 			data.value_id = native.valueId;
 			return data;
 		}
 
-		void write_sound_context_value(SndContextValue& native, const asset_data::sound_context_value& data, [[maybe_unused]] const asset_resolver& resolve, [[maybe_unused]] plain::context& memory)
+		void write_sound_context_value(SndContextValue& native, const asset_data::sound_globals::sound_context_value& data, [[maybe_unused]] const asset_resolver& resolve, [[maybe_unused]] plain::context& memory)
 		{
 			native.value = plain::write_string(memory, data.value);
 			native.valueId = data.value_id;
 		}
 
-		std::size_t size_sound_context_value([[maybe_unused]] const asset_data::sound_context_value& data)
+		std::size_t size_sound_context_value([[maybe_unused]] const asset_data::sound_globals::sound_context_value& data)
 		{
 			std::size_t size = 0;
 			size += plain::string_size(data.value);
 			return size;
 		}
 
-		asset_data::sound_master_eq_param read_sound_master_eq_param(const SndMasterEqParam& native)
+		asset_data::sound_globals::sound_master_eq_param read_sound_master_eq_param(const SndMasterEqParam& native)
 		{
-			asset_data::sound_master_eq_param data;
+			asset_data::sound_globals::sound_master_eq_param data;
 			data.enabled = native.enabled;
 			data.gain = native.gain;
 			data.frequency = native.frequency;
@@ -141,7 +141,7 @@ namespace zonetool::iw8::neutral
 			return data;
 		}
 
-		void write_sound_master_eq_param(SndMasterEqParam& native, const asset_data::sound_master_eq_param& data, [[maybe_unused]] const asset_resolver& resolve, [[maybe_unused]] plain::context& memory)
+		void write_sound_master_eq_param(SndMasterEqParam& native, const asset_data::sound_globals::sound_master_eq_param& data, [[maybe_unused]] const asset_resolver& resolve, [[maybe_unused]] plain::context& memory)
 		{
 			native.enabled = data.enabled;
 			native.gain = data.gain;
@@ -149,15 +149,15 @@ namespace zonetool::iw8::neutral
 			native.q = data.q;
 		}
 
-		std::size_t size_sound_master_eq_param([[maybe_unused]] const asset_data::sound_master_eq_param& data)
+		std::size_t size_sound_master_eq_param([[maybe_unused]] const asset_data::sound_globals::sound_master_eq_param& data)
 		{
 			std::size_t size = 0;
 			return size;
 		}
 
-		asset_data::sound_master_eq_param_bank read_sound_master_eq_param_bank(const SndMasterEqParamBank& native)
+		asset_data::sound_globals::sound_master_eq_param_bank read_sound_master_eq_param_bank(const SndMasterEqParamBank& native)
 		{
-			asset_data::sound_master_eq_param_bank data;
+			asset_data::sound_globals::sound_master_eq_param_bank data;
 			data.low = read_sound_master_eq_param(native.low);
 			data.peak1 = read_sound_master_eq_param(native.peak1);
 			data.peak2 = read_sound_master_eq_param(native.peak2);
@@ -165,7 +165,7 @@ namespace zonetool::iw8::neutral
 			return data;
 		}
 
-		void write_sound_master_eq_param_bank(SndMasterEqParamBank& native, const asset_data::sound_master_eq_param_bank& data, [[maybe_unused]] const asset_resolver& resolve, [[maybe_unused]] plain::context& memory)
+		void write_sound_master_eq_param_bank(SndMasterEqParamBank& native, const asset_data::sound_globals::sound_master_eq_param_bank& data, [[maybe_unused]] const asset_resolver& resolve, [[maybe_unused]] plain::context& memory)
 		{
 			write_sound_master_eq_param(native.low, data.low, resolve, memory);
 			write_sound_master_eq_param(native.peak1, data.peak1, resolve, memory);
@@ -173,7 +173,7 @@ namespace zonetool::iw8::neutral
 			write_sound_master_eq_param(native.high, data.high, resolve, memory);
 		}
 
-		std::size_t size_sound_master_eq_param_bank([[maybe_unused]] const asset_data::sound_master_eq_param_bank& data)
+		std::size_t size_sound_master_eq_param_bank([[maybe_unused]] const asset_data::sound_globals::sound_master_eq_param_bank& data)
 		{
 			std::size_t size = 0;
 			size += size_sound_master_eq_param(data.low);
@@ -183,9 +183,9 @@ namespace zonetool::iw8::neutral
 			return size;
 		}
 
-		asset_data::sound_dynamics_params read_sound_dynamics_params(const SndDynamicsParams& native)
+		asset_data::sound_globals::sound_dynamics_params read_sound_dynamics_params(const SndDynamicsParams& native)
 		{
-			asset_data::sound_dynamics_params data;
+			asset_data::sound_globals::sound_dynamics_params data;
 			data.enable = native.enable;
 			data.pre_gain = native.preGain;
 			data.post_gain = native.postGain;
@@ -199,7 +199,7 @@ namespace zonetool::iw8::neutral
 			return data;
 		}
 
-		void write_sound_dynamics_params(SndDynamicsParams& native, const asset_data::sound_dynamics_params& data, [[maybe_unused]] const asset_resolver& resolve, [[maybe_unused]] plain::context& memory)
+		void write_sound_dynamics_params(SndDynamicsParams& native, const asset_data::sound_globals::sound_dynamics_params& data, [[maybe_unused]] const asset_resolver& resolve, [[maybe_unused]] plain::context& memory)
 		{
 			native.enable = data.enable;
 			native.preGain = data.pre_gain;
@@ -213,15 +213,15 @@ namespace zonetool::iw8::neutral
 			native.ITU1770 = data.itu1770;
 		}
 
-		std::size_t size_sound_dynamics_params([[maybe_unused]] const asset_data::sound_dynamics_params& data)
+		std::size_t size_sound_dynamics_params([[maybe_unused]] const asset_data::sound_globals::sound_dynamics_params& data)
 		{
 			std::size_t size = 0;
 			return size;
 		}
 
-		asset_data::sound_peak_limiter_params read_sound_peak_limiter_params(const SndPeakLimiterParams& native)
+		asset_data::sound_globals::sound_peak_limiter_params read_sound_peak_limiter_params(const SndPeakLimiterParams& native)
 		{
-			asset_data::sound_peak_limiter_params data;
+			asset_data::sound_globals::sound_peak_limiter_params data;
 			data.enable = native.enable;
 			data.input_gain = native.inputGain;
 			data.output_gain = native.outputGain;
@@ -231,7 +231,7 @@ namespace zonetool::iw8::neutral
 			return data;
 		}
 
-		void write_sound_peak_limiter_params(SndPeakLimiterParams& native, const asset_data::sound_peak_limiter_params& data, [[maybe_unused]] const asset_resolver& resolve, [[maybe_unused]] plain::context& memory)
+		void write_sound_peak_limiter_params(SndPeakLimiterParams& native, const asset_data::sound_globals::sound_peak_limiter_params& data, [[maybe_unused]] const asset_resolver& resolve, [[maybe_unused]] plain::context& memory)
 		{
 			native.enable = data.enable;
 			native.inputGain = data.input_gain;
@@ -241,15 +241,15 @@ namespace zonetool::iw8::neutral
 			native.releaseMax = data.release_max;
 		}
 
-		std::size_t size_sound_peak_limiter_params([[maybe_unused]] const asset_data::sound_peak_limiter_params& data)
+		std::size_t size_sound_peak_limiter_params([[maybe_unused]] const asset_data::sound_globals::sound_peak_limiter_params& data)
 		{
 			std::size_t size = 0;
 			return size;
 		}
 
-		asset_data::sound_master read_sound_master(const SndMaster& native)
+		asset_data::sound_globals::sound_master read_sound_master(const SndMaster& native)
 		{
-			asset_data::sound_master data;
+			asset_data::sound_globals::sound_master data;
 			data.name = plain::read_text(native.name, "SndMaster.name");
 			data.id = native.id;
 			data.dialog_eq = read_sound_master_eq_param_bank(native.dialogEq);
@@ -279,7 +279,7 @@ namespace zonetool::iw8::neutral
 			return data;
 		}
 
-		void write_sound_master(SndMaster& native, const asset_data::sound_master& data, [[maybe_unused]] const asset_resolver& resolve, [[maybe_unused]] plain::context& memory)
+		void write_sound_master(SndMaster& native, const asset_data::sound_globals::sound_master& data, [[maybe_unused]] const asset_resolver& resolve, [[maybe_unused]] plain::context& memory)
 		{
 			plain::write_text(native.name, data.name, "SndMaster.name");
 			native.id = data.id;
@@ -309,7 +309,7 @@ namespace zonetool::iw8::neutral
 			native.busReferenceEnable = data.bus_reference_enable;
 		}
 
-		std::size_t size_sound_master([[maybe_unused]] const asset_data::sound_master& data)
+		std::size_t size_sound_master([[maybe_unused]] const asset_data::sound_globals::sound_master& data)
 		{
 			std::size_t size = 0;
 			size += size_sound_master_eq_param_bank(data.dialog_eq);
@@ -325,9 +325,9 @@ namespace zonetool::iw8::neutral
 			return size;
 		}
 
-		asset_data::sound_whizby read_sound_whizby(const SndWhizby& native)
+		asset_data::sound_globals::sound_whizby read_sound_whizby(const SndWhizby& native)
 		{
-			asset_data::sound_whizby data;
+			asset_data::sound_globals::sound_whizby data;
 			data.name = plain::read_text(native.name, "SndWhizby.name");
 			data.id = native.id;
 			data.radius_near = native.radiusNear;
@@ -349,7 +349,7 @@ namespace zonetool::iw8::neutral
 			return data;
 		}
 
-		void write_sound_whizby(SndWhizby& native, const asset_data::sound_whizby& data, [[maybe_unused]] const asset_resolver& resolve, [[maybe_unused]] plain::context& memory)
+		void write_sound_whizby(SndWhizby& native, const asset_data::sound_globals::sound_whizby& data, [[maybe_unused]] const asset_resolver& resolve, [[maybe_unused]] plain::context& memory)
 		{
 			plain::write_text(native.name, data.name, "SndWhizby.name");
 			native.id = data.id;
@@ -371,37 +371,37 @@ namespace zonetool::iw8::neutral
 			native.speedOfSound = data.speed_of_sound;
 		}
 
-		std::size_t size_sound_whizby([[maybe_unused]] const asset_data::sound_whizby& data)
+		std::size_t size_sound_whizby([[maybe_unused]] const asset_data::sound_globals::sound_whizby& data)
 		{
 			std::size_t size = 0;
 			return size;
 		}
 
-		asset_data::sound_perk read_sound_perk(const snd_perk_info_t& native)
+		asset_data::sound_globals::sound_perk read_sound_perk(const snd_perk_info_t& native)
 		{
-			asset_data::sound_perk data;
+			asset_data::sound_globals::sound_perk data;
 			data.name = plain::read_text(native.name, "snd_perk_info_t.name");
 			data.id = native.id;
 			data.volume = native.volume;
 			return data;
 		}
 
-		void write_sound_perk(snd_perk_info_t& native, const asset_data::sound_perk& data, [[maybe_unused]] const asset_resolver& resolve, [[maybe_unused]] plain::context& memory)
+		void write_sound_perk(snd_perk_info_t& native, const asset_data::sound_globals::sound_perk& data, [[maybe_unused]] const asset_resolver& resolve, [[maybe_unused]] plain::context& memory)
 		{
 			plain::write_text(native.name, data.name, "snd_perk_info_t.name");
 			native.id = data.id;
 			native.volume = data.volume;
 		}
 
-		std::size_t size_sound_perk([[maybe_unused]] const asset_data::sound_perk& data)
+		std::size_t size_sound_perk([[maybe_unused]] const asset_data::sound_globals::sound_perk& data)
 		{
 			std::size_t size = 0;
 			return size;
 		}
 
-		asset_data::sound_globals read_sound_globals(const SndGlobals& native)
+		asset_data::sound_globals::sound_globals read_sound_globals(const SndGlobals& native)
 		{
-			asset_data::sound_globals data;
+			asset_data::sound_globals::sound_globals data;
 			data.name = plain::read_string(native.name);
 			data.global_volume_modifier = native.globalVolumeModifier;
 			data.bink_volume_modifier = native.binkVolumeModifier;
@@ -415,7 +415,7 @@ namespace zonetool::iw8::neutral
 			return data;
 		}
 
-		void write_sound_globals(SndGlobals& native, const asset_data::sound_globals& data, [[maybe_unused]] const asset_resolver& resolve, [[maybe_unused]] plain::context& memory)
+		void write_sound_globals(SndGlobals& native, const asset_data::sound_globals::sound_globals& data, [[maybe_unused]] const asset_resolver& resolve, [[maybe_unused]] plain::context& memory)
 		{
 			native.name = plain::write_string(memory, data.name);
 			native.globalVolumeModifier = data.global_volume_modifier;
@@ -436,13 +436,13 @@ namespace zonetool::iw8::neutral
 			native.perkinfoCount = plain::count_of<std::uint32_t>(data.perkinfo);
 		}
 
-		std::size_t size_sound_globals([[maybe_unused]] const asset_data::sound_globals& data)
+		std::size_t size_sound_globals([[maybe_unused]] const asset_data::sound_globals::sound_globals& data)
 		{
 			std::size_t size = 0;
 			size += plain::string_size(data.name);
 			if (data.volmodinfo)
 			{
-				size += plain::rounded(std::max<std::size_t>(data.volmodinfo->size(), 1) * sizeof(snd_volmod_info_t));
+				size += plain::sized(std::max<std::size_t>(data.volmodinfo->size(), 1) * sizeof(snd_volmod_info_t));
 				for (const auto& item : *data.volmodinfo)
 				{
 					size += size_sound_volume_modifier(item);
@@ -450,7 +450,7 @@ namespace zonetool::iw8::neutral
 			}
 			if (data.entity_channel_info)
 			{
-				size += plain::rounded(std::max<std::size_t>(data.entity_channel_info->size(), 1) * sizeof(snd_entchannel_info_t));
+				size += plain::sized(std::max<std::size_t>(data.entity_channel_info->size(), 1) * sizeof(snd_entchannel_info_t));
 				for (const auto& item : *data.entity_channel_info)
 				{
 					size += size_sound_entity_channel(item);
@@ -458,7 +458,7 @@ namespace zonetool::iw8::neutral
 			}
 			if (data.contexts)
 			{
-				size += plain::rounded(std::max<std::size_t>(data.contexts->size(), 1) * sizeof(SndContext));
+				size += plain::sized(std::max<std::size_t>(data.contexts->size(), 1) * sizeof(SndContext));
 				for (const auto& item : *data.contexts)
 				{
 					size += size_sound_context(item);
@@ -466,7 +466,7 @@ namespace zonetool::iw8::neutral
 			}
 			if (data.context_values)
 			{
-				size += plain::rounded(std::max<std::size_t>(data.context_values->size(), 1) * sizeof(SndContextValue));
+				size += plain::sized(std::max<std::size_t>(data.context_values->size(), 1) * sizeof(SndContextValue));
 				for (const auto& item : *data.context_values)
 				{
 					size += size_sound_context_value(item);
@@ -474,7 +474,7 @@ namespace zonetool::iw8::neutral
 			}
 			if (data.masters)
 			{
-				size += plain::rounded(std::max<std::size_t>(data.masters->size(), 1) * sizeof(SndMaster));
+				size += plain::sized(std::max<std::size_t>(data.masters->size(), 1) * sizeof(SndMaster));
 				for (const auto& item : *data.masters)
 				{
 					size += size_sound_master(item);
@@ -482,7 +482,7 @@ namespace zonetool::iw8::neutral
 			}
 			if (data.whizbys)
 			{
-				size += plain::rounded(std::max<std::size_t>(data.whizbys->size(), 1) * sizeof(SndWhizby));
+				size += plain::sized(std::max<std::size_t>(data.whizbys->size(), 1) * sizeof(SndWhizby));
 				for (const auto& item : *data.whizbys)
 				{
 					size += size_sound_whizby(item);
@@ -490,7 +490,7 @@ namespace zonetool::iw8::neutral
 			}
 			if (data.perkinfo)
 			{
-				size += plain::rounded(std::max<std::size_t>(data.perkinfo->size(), 1) * sizeof(snd_perk_info_t));
+				size += plain::sized(std::max<std::size_t>(data.perkinfo->size(), 1) * sizeof(snd_perk_info_t));
 				for (const auto& item : *data.perkinfo)
 				{
 					size += size_sound_perk(item);
@@ -501,12 +501,12 @@ namespace zonetool::iw8::neutral
 
 	}
 
-	std::expected<asset_data::sound_globals, std::string> to_neutral(const SndGlobals& native)
+	std::expected<asset_data::sound_globals::sound_globals, std::string> to_neutral(const SndGlobals& native)
 	{
 		try
 		{
 			auto data = read_sound_globals(native);
-			asset_data::validate(data);
+			validate(data);
 			return data;
 		}
 		catch (const std::exception& error)
@@ -515,16 +515,16 @@ namespace zonetool::iw8::neutral
 		}
 	}
 
-	SndGlobals* from_neutral(const asset_data::sound_globals& data, const asset_resolver& resolve, zone_memory& memory)
+	SndGlobals* from_neutral(const asset_data::sound_globals::sound_globals& data, const asset_resolver& resolve, zone_memory& memory)
 	{
-		asset_data::validate(data);
+		validate(data);
 		plain::context context(memory);
 		auto* native = context.allocate<SndGlobals>();
 		write_sound_globals(*native, data, resolve, context);
 		return native;
 	}
 
-	std::size_t native_size(const asset_data::sound_globals& data)
+	std::size_t native_size(const asset_data::sound_globals::sound_globals& data)
 	{
 		return plain::rounded(sizeof(SndGlobals)) + size_sound_globals(data) + 64;
 	}

@@ -47,11 +47,13 @@ class Source:
         for kind, name, body in re.findall(r'\n\t(struct|union) (\w+)\n\t\{\n((?:\t\t[^\n]*\n)*)\t\};', text):
             self.structs[name] = (kind, body)
         self.enums = {}
+        self.enum_names = {}
         for name, base, body in re.findall(r'\n\tenum (\w+) : ([\w:]+)\n\t\{\n((?:\t\t[^\n]*\n)*)\t\};', text):
             values = collections.OrderedDict()
             for member, value in re.findall(r'^\t\t(\w+) = (-?\d+),?$', body, re.M):
                 values.setdefault(int(value), member)
             self.enums[name] = (base, values)
+            self.enum_names[name] = {member: int(value) for member, value in re.findall(r'^		(\w+) = (-?\d+),?$', body, re.M)}
 
     @staticmethod
     def members(body):
@@ -219,8 +221,12 @@ class Family:
         self.path = []
         self.runtime = set(spec.get('runtime', []))
         self.spec_flag_enums = set(spec.get('flag_enums', []))
-        self.groups = spec.get('groups', {})
         self.problems = []
+        self.tagged = {}
+        for entry in spec.get('tagged', []):
+            self.tagged[(entry['owner'], entry['member'])] = dict(entry, cases=self.dispatch_cases(entry))
+        self.groups = spec.get('groups', {})
+        self.external = spec.get('external', {})
         for asset in spec['assets']:
             self.visit(asset['struct'])
 
@@ -237,10 +243,58 @@ class Family:
     def field_name(self, owner, name):
         return self.field_names.get(owner + '.' + name) or self.words(name)
 
+    def dispatch_cases(self, entry):
+        """The (tag value, union member, member type) of a tagged union.
+
+        Each member is matched to the value of the tag enum whose name is the member's name in upper snake case under the
+        spec's prefix (initSpawnShapeBox is PARTICLE_MODULE_INIT_SPAWN_SHAPE_BOX). The dispatch of the stream traversal, which
+        only mentions the members that have something to stream, has to agree where it names a member."""
+        union_type = next(m['type'] for m in Source.members(self.source.structs[entry['owner']][1]) if m['name'] == entry['member'])
+        union_members = {m['name']: m['type'] for m in Source.members(self.source.structs[union_type][1])}
+        tag_type = next(m['type'] for m in Source.members(self.source.structs[entry['owner']][1]) if m['name'] == entry['tag'])
+        values = self.source.enum_names[tag_type]
+        skip = set(entry.get('skip', []))
+        cases = {}
+        for member, member_type in union_members.items():
+            if member in skip:
+                continue
+            wanted = member.lower()
+            found = next((number for name, number in values.items()
+                          if name.startswith(entry['prefix']) and name[len(entry['prefix']):].replace('_', '').lower() == wanted), None)
+            if found is None:
+                self.problems.append('%s.%s: the tag enum %s has no name that reads as %s' % (entry['owner'], entry['member'], tag_type, member))
+                continue
+            cases[found] = member
+        # the dispatch, where it names a member
+        text = open(STREAMS, encoding='utf-8').read()
+        first = text.index('void %s(Stream& stream' % entry['dispatch'])
+        start = text.index('void %s(Stream& stream' % entry['dispatch'], first + 10)
+        lines = text[start:text.index('\n\t\t}\n', start)].split('\n')
+        for number, line in enumerate(lines):
+            call = re.search(r'\.%s\.(\w+), ' % re.escape(entry['member']), line)
+            if not call or call.group(1) not in union_members or call.group(1) in skip:
+                continue
+            indent = len(line) - len(line.lstrip('\t'))
+            for back in range(number - 1, -1, -1):
+                test = re.search(r'!= (\d+)\)$', lines[back])
+                if test and len(lines[back]) - len(lines[back].lstrip('\t')) == indent - 1:
+                    if cases.get(int(test.group(1))) != call.group(1):
+                        self.problems.append('%s.%s: the dispatch puts %s at %s and the enum names do not' % (
+                            entry['owner'], entry['member'], call.group(1), test.group(1)))
+                    break
+        return [(value, member, union_members[member]) for value, member in sorted(cases.items())]
+
     # ---- classification --------------------------------------------------------------------------
     def classify(self, owner, m, members):
         """The kind of a member: how to_neutral reads it and from_neutral writes it."""
         name, type_name = m['name'], m['type']
+        if type_name in self.external and not m['pointer']:
+            return {'kind': 'external', 'ext': self.external[type_name]}
+        tagged = self.tagged.get((owner, name))
+        if tagged:
+            return {'kind': 'tagged', 'tag': tagged['tag'], 'cases': tagged['cases']}
+        if any(owner == o and name == t['tag'] for (o, _), t in self.tagged.items()):
+            return {'kind': 'tag'}
         if PADDING.match(name):
             return {'kind': 'padding'}
         if '%s.%s' % (owner, name) in self.runtime:
@@ -328,7 +382,7 @@ class Family:
 
     def mappable(self, type_name):
         """True when an array element of this type has a neutral form."""
-        return (type_name in SCALARS or type_name in self.source.enums or type_name == 'scr_string_t' or type_name in VECTORS or
+        return type_name in self.external or (type_name in SCALARS or type_name in self.source.enums or type_name == 'scr_string_t' or type_name in VECTORS or
                 (type_name in self.source.structs and self.source.structs[type_name][0] == 'struct') or bool(self.vector_of(type_name)))
 
     def vector_of(self, type_name):
@@ -390,9 +444,12 @@ class Family:
                 self.problems.append('%s.%s: its count %s is not in the struct' % (name, m['name'], c['count'][1]))
             if c['kind'] in ('struct',):
                 self.visit(m['type'])
+            if c['kind'] == 'tagged':
+                for _, _, case_type in c['cases']:
+                    self.visit(case_type)
             if c['kind'] == 'array' and c['element'].startswith('ptr|') and m['type'] in self.path:
                 self.problems.append('%s.%s: pointers to %s make the struct contain itself' % (name, m['name'], m['type']))
-            if c['kind'] == 'array' and m['type'] in self.source.structs and not c['element'].startswith('asset|'):
+            if c['kind'] == 'array' and m['type'] in self.source.structs and m['type'] not in self.external and not c['element'].startswith('asset|'):
                 self.visit(m['type'])
             if c['kind'] in ('enum', 'flags'):
                 self.enums[m['type']] = self.source.enums[m['type']]
@@ -414,7 +471,13 @@ class Family:
             return ALIASES.get(self.source.enums[type_name][0], self.source.enums[type_name][0])
         return type_name
 
-    # The namespace prefix of neutral types: empty in the data header, asset_data:: in the adapter.
+    def external_ns(self):
+        return 'asset_data::' if self.qual else ''
+
+    def family_ns(self):
+        return 'asset_data::%s::' % self.spec['family']
+
+    # The namespace prefix of neutral types: empty in the data header, the family namespace in the adapter.
     qual = ''
 
     def element_type(self, type_name):
@@ -423,6 +486,8 @@ class Family:
             return 'std::optional<std::string>'
         if type_name.startswith('ptr|'):
             return 'std::optional<%s>' % (self.qual + self.struct_name(type_name.split('|')[1]))
+        if type_name in self.external:
+            return self.external_ns() + self.external[type_name]['neutral']
         vector = self.vector_of(type_name)
         if vector:
             return 'std::array<%s, %d>' % vector
@@ -448,6 +513,10 @@ class Family:
             return 'std::string'
         if kind == 'flags':
             return 'std::vector<std::string>'
+        if kind == 'external':
+            return self.nest(self.external_ns() + c['ext']['neutral'], m['dims'])
+        if kind == 'tagged':
+            return 'std::variant<std::monostate, %s>' % ', '.join(self.qual + self.struct_name(t) for _, _, t in c['cases'])
         if kind == 'vector':
             return self.nest('std::array<%s, %d>' % (c['scalar'], c['size']), m['dims'])
         if kind == 'overlay':
@@ -467,7 +536,7 @@ class Family:
 
     def emitted(self, members):
         """The members that become neutral fields: not padding and not a count that an array derives."""
-        return [(m, c) for m, c in members if c['kind'] not in ('padding', 'unknown', 'runtime') and 'counts' not in c]
+        return [(m, c) for m, c in members if c['kind'] not in ('padding', 'unknown', 'runtime', 'tag') and 'counts' not in c]
 
     def enum_table(self, type_name):
         base, values = self.source.enums[type_name]
@@ -488,6 +557,9 @@ class Family:
             for m, c in self.structs[name]:
                 if c['kind'] in ('struct', 'array') and m['type'] in self.structs and not c.get('element', '').startswith('asset|'):
                     visit(m['type'])
+                if c['kind'] == 'tagged':
+                    for _, _, case_type in c['cases']:
+                        visit(case_type)
             out.append(name)
         for name in self.structs:
             visit(name)
@@ -496,11 +568,11 @@ class Family:
     # ---- the data header -------------------------------------------------------------------------
     def header(self):
         family = self.spec['family']
-        out = ['#pragma once', '', '#include "asset_data.hpp"', '#include <algorithm>', '#include <array>', '#include <cstdint>', '#include <optional>',
-               '#include <stdexcept>', '#include <string>', '#include <string_view>', '#include <utility>', '#include <vector>', '',
+        out = ['#pragma once', '', '#include "asset_data.hpp"'] + ['#include "%s"' % h for h in self.spec.get('data_includes', [])] + ['#include <algorithm>', '#include <array>', '#include <cstdint>', '#include <optional>',
+               '#include <stdexcept>', '#include <string>', '#include <string_view>', '#include <type_traits>', '#include <utility>', '#include <variant>', '#include <vector>', '',
                '// Neutral %s assets (docs/NEUTRAL_ASSETS.md), emitted by tools/gen_iw8_neutral.py from the IW8 structs and stream' % family,
                '// traversals: do not edit; change the spec (tools/neutral_families/%s.json) or the generator.' % family,
-               'namespace zonetool::asset_data', '{']
+               'namespace zonetool::asset_data', '{', 'namespace %s' % family, '{']
         for type_name in self.enums:
             table, names = self.enum_table(type_name)
             out.append('inline constexpr std::array<std::pair<std::int64_t, std::string_view>, %d> %s{{' % (len(names), table))
@@ -510,6 +582,7 @@ class Family:
         for name in self.order():
             out.extend(self.struct_decl(name))
         out.extend(self.validators())
+        out.append('} // namespace %s' % family)
         out.append('} // namespace zonetool::asset_data')
         return '\n'.join(out) + '\n'
 
@@ -542,6 +615,17 @@ class Family:
                 if c['kind'] == 'text':
                     body.append('\tif (%s.size() >= %d)\n\t{\n\t\tthrow std::runtime_error("%s does not fit its %d character buffer");\n\t}\n'
                                 % (field, c['size'], what, c['size']))
+                elif c['kind'] == 'external':
+                    if m['dims']:
+                        body.append('\tfor (const auto& item : %s)\n\t{\n\t\tvalidate(item);\n\t}\n' % field)
+                    else:
+                        body.append('\tvalidate(%s);\n' % field)
+                elif c['kind'] == 'array' and c['element'] in self.external:
+                    body.append('\tif (%s)\n\t{\n\t\tfor (const auto& item : *%s)\n\t\t{\n\t\t\tvalidate(item);\n\t\t}\n\t}\n' % (field, field))
+                elif c['kind'] == 'tagged':
+                    body.append('\tstd::visit([](const auto& value)\n\t{\n\t\tif constexpr (std::is_same_v<std::decay_t<decltype(value)>, std::monostate>)\n'
+                                '\t\t{\n\t\t\tthrow std::runtime_error("%s.%s holds no module");\n\t\t}\n\t\telse\n\t\t{\n\t\t\tvalidate(value);\n\t\t}\n\t}, %s);\n'
+                                % (neutral, self.member_name(name, m), field))
                 elif c['kind'] == 'flags':
                     table = self.enum_table(m['type'])[0]
                     body.append('\tfor (const auto& name : %s)\n\t{\n\t\tif (std::ranges::none_of(%s, [&](const auto& entry) { return entry.second == name; }))\n'
@@ -617,7 +701,7 @@ class Family:
         kind = c['kind']
         if kind == 'scalar':
             if m['dims']:
-                if len(m['dims']) > 1:
+                if len(m['dims']) > 1 or m['type'] not in SCALARS:
                     return 'plain::read_block<%s>(&%s)' % (self.neutral_type(m, c), field)
                 return 'std::to_array(%s)' % field
             return field if m['type'] in SCALARS else 'static_cast<%s>(%s)' % (self.scalar_type(m['type']), field)
@@ -627,10 +711,23 @@ class Family:
             return 'plain::read_string(%s)' % field
         if kind == 'script_string':
             return 'plain::read_script_string(%s)' % field
+        if kind == 'external':
+            if m['dims']:
+                return self.loop_read(m, '%s(%s[i])' % (c['ext']['read'], field), self.neutral_type(m, c))
+            return '%s(%s)' % (c['ext']['read'], field)
+        if kind == 'tagged':
+            variant = self.neutral_type(m, c)
+            lines = ['[&]() -> %s {' % variant,
+                     'switch (static_cast<std::uint32_t>(native.%s)) {' % c['tag']]
+            for value, member, case_type in c['cases']:
+                lines.append('case %d: { plain::module_scope scope(%d); return %s(read_%s(native.%s.%s)); }' % (
+                    value, value, variant, self.struct_name(case_type), m['name'], member))
+            lines.append('default: plain::fail("%s.%s", "has a tag value without a case"); } }()' % (owner, m['name']))
+            return ' '.join(lines)
         if kind == 'flags':
-            return 'plain::flag_names(asset_data::%s, static_cast<std::uint64_t>(%s), %s)' % (self.enum_table(m['type'])[0], field, what)
+            return 'plain::flag_names(%s%s, static_cast<std::uint64_t>(%s), %s)' % (self.family_ns(), self.enum_table(m['type'])[0], field, what)
         if kind == 'enum':
-            return 'plain::enum_name(asset_data::%s, static_cast<std::int64_t>(%s), %s)' % (self.enum_table(m['type'])[0], field, what)
+            return 'plain::enum_name(%s%s, static_cast<std::int64_t>(%s), %s)' % (self.family_ns(), self.enum_table(m['type'])[0], field, what)
         if kind == 'vector':
             if m['dims']:
                 return self.loop_read(m, 'plain::read_scalars<%s, %d>(&%s[i])' % (c['scalar'], c['size'], field), self.neutral_type(m, c))
@@ -649,7 +746,8 @@ class Family:
             if count == ('literal', 1):
                 return 'plain::read_single(%s, [&](const auto& item) { return %s; })' % (field, self.element_read(c['element'], 'item'))
             if count[0] == 'literal':
-                return 'plain::read_fixed<%s, %d>(%s)' % (self.element_type(c['element']), count[1], field)
+                return 'plain::read_fixed_with<%d>(%s, [&](const auto& item) { return %s; })' % (
+                    count[1], field, self.element_read(c['element'], 'item'))
             native_count = 'native.' + count[1] if count[0] == 'member' else self.expression(owner, count[1], 'native')
             if c.get('group'):
                 return ('plain::read_array(reinterpret_cast<const std::array<%s, %d>*>(%s), %s, %s, '
@@ -685,6 +783,8 @@ class Family:
         return out
 
     def element_read(self, type_name, item):
+        if type_name in self.external:
+            return '%s(%s)' % (self.external[type_name]['read'], item)
         if type_name.startswith('ptr|'):
             return 'plain::read_pointee(%s, [&](const auto& pointee) { return read_%s(pointee); })' % (
                 item, self.struct_name(type_name.split('|')[1]))
@@ -710,7 +810,7 @@ class Family:
         what = '"%s.%s"' % (owner, m['name'])
         kind = c['kind']
         if kind == 'scalar':
-            if len(m['dims']) > 1:
+            if len(m['dims']) > 1 or (m['dims'] and m['type'] not in SCALARS):
                 return ['plain::write_block(&%s, %s);' % (field, data)]
             if m['dims']:
                 return ['std::ranges::copy(%s, %s);' % (data, field)]
@@ -721,12 +821,31 @@ class Family:
             return ['%s = plain::write_string(memory, %s);' % (field, data)]
         if kind == 'script_string':
             return ['%s = static_cast<scr_string_t>(plain::write_script_string(%s));' % (field, data)]
+        if kind == 'external':
+            writer = c['ext']['write']
+            if m['dims']:
+                return ['for (std::size_t i = 0; i < %s.size(); ++i)' % data, '{',
+                        '\t%s(%s[i], %s[i], resolve, memory);' % (writer, field, data), '}']
+            return ['%s(%s, %s, resolve, memory);' % (writer, field, data)]
+        if kind == 'tagged':
+            tag_member = next(t for t, _ in self.structs[owner] if t['name'] == c['tag'])
+            lines = ['std::visit([&](const auto& value)', '{', '\tusing value_type = std::decay_t<decltype(value)>;',
+                     '\tif constexpr (std::is_same_v<value_type, std::monostate>)', '\t{',
+                     '\t\tplain::fail("%s.%s", "holds no module");' % (owner, m['name']), '\t}']
+            for value, member, case_type in c['cases']:
+                neutral = self.qual + self.struct_name(case_type)
+                lines += ['\telse if constexpr (std::is_same_v<value_type, %s>)' % neutral, '\t{',
+                          '\t\tnative.%s = static_cast<%s>(%d);' % (c['tag'], tag_member['type'], value),
+                          '\t\tplain::module_scope scope(%d);' % value,
+                          '\t\twrite_%s(native.%s.%s, value, resolve, memory);' % (self.struct_name(case_type), m['name'], member), '\t}']
+            lines.append('}, %s);' % data)
+            return lines
         if kind == 'flags':
-            return ['%s = static_cast<%s>(plain::flag_value(asset_data::%s, %s, %s));' % (
-                field, m['type'], self.enum_table(m['type'])[0], data, what)]
+            return ['%s = static_cast<%s>(plain::flag_value(%s%s, %s, %s));' % (
+                field, m['type'], self.family_ns(), self.enum_table(m['type'])[0], data, what)]
         if kind == 'enum':
-            return ['%s = static_cast<%s>(plain::enum_value(asset_data::%s, %s, %s));' % (
-                field, m['type'], self.enum_table(m['type'])[0], data, what)]
+            return ['%s = static_cast<%s>(plain::enum_value(%s%s, %s, %s));' % (
+                field, m['type'], self.family_ns(), self.enum_table(m['type'])[0], data, what)]
         if kind == 'vector':
             if m['dims']:
                 return ['for (std::size_t i = 0; i < %s.size(); ++i)' % data, '{',
@@ -762,6 +881,8 @@ class Family:
         raise SystemExit('no write for %s' % kind)
 
     def element_write(self, out, source, type_name):
+        if type_name in self.external:
+            return '%s(%s, %s, resolve, memory);' % (self.external[type_name]['write'], out, source)
         if type_name.startswith('ptr|'):
             target = type_name.split('|')[1]
             return '%s = plain::write_pointee<%s>(%s, memory, [&](auto& pointee, const auto& value) { write_%s(pointee, value, resolve, memory); });' % (
@@ -782,6 +903,18 @@ class Family:
     def size_stmts(self, owner, m, c):
         data = 'data.' + self.member_name(owner, m)
         kind = c['kind']
+        if kind == 'external':
+            if m['dims']:
+                return ['for (const auto& item : %s)' % data, '{', '\tsize += %s(item);' % c['ext']['size'], '}']
+            return ['size += %s(%s);' % (c['ext']['size'], data)]
+        if kind == 'tagged':
+            lines = ['std::visit([&](const auto& value)', '{', '\tusing value_type = std::decay_t<decltype(value)>;',
+                     '\tif constexpr (std::is_same_v<value_type, std::monostate>)', '\t{', '\t}']
+            for value, member, case_type in c['cases']:
+                lines += ['\telse if constexpr (std::is_same_v<value_type, %s>)' % (self.qual + self.struct_name(case_type)), '\t{',
+                          '\t\tsize += size_%s(value);' % self.struct_name(case_type), '\t}']
+            lines.append('}, %s);' % data)
+            return lines
         if kind == 'string':
             return ['size += plain::string_size(%s);' % data]
         if kind == 'struct' and m['type'] in self.structs:
@@ -792,32 +925,40 @@ class Family:
             count = c['count']
             native_element = c['native_element']
             if c.get('group'):
-                return ['if (%s)' % data, '{', '\tsize += plain::rounded(std::max<std::size_t>(%s->size(), 1) * %d * sizeof(%s));' % (
+                return ['if (%s)' % data, '{', '\tsize += plain::sized(std::max<std::size_t>(%s->size(), 1) * %d * sizeof(%s));' % (
                     data, c['group'], native_element), '}']
             if count == ('literal', 1):
-                lines = ['if (%s)' % data, '{', '\tsize += plain::rounded(sizeof(%s));' % native_element]
+                lines = ['if (%s)' % data, '{', '\tsize += plain::sized(sizeof(%s));' % native_element]
                 if c['element'] in self.structs:
                     lines.append('\tsize += size_%s(*%s);' % (self.struct_name(c['element']), data))
                 return lines + ['}']
             if count[0] == 'literal':
-                return ['size += %s ? plain::rounded(%d * sizeof(%s)) : 0;' % (data, count[1], native_element)]
-            lines = ['if (%s)' % data, '{', '\tsize += plain::rounded(std::max<std::size_t>(%s->size(), 1) * sizeof(%s));' % (data, native_element)]
+                lines = ['if (%s)' % data, '{', '	size += plain::sized(%d * sizeof(%s));' % (count[1], native_element)]
+                if c['element'] in self.structs:
+                    lines += ['	for (const auto& item : *%s)' % data, '	{', '		size += size_%s(item);' % self.struct_name(c['element']), '	}']
+                if c['element'] in self.external:
+                    lines += ['	for (const auto& item : *%s)' % data, '	{', '		size += %s(item);' % self.external[c['element']]['size'], '	}']
+                return lines + ['}']
+            lines = ['if (%s)' % data, '{', '\tsize += plain::sized(std::max<std::size_t>(%s->size(), 1) * sizeof(%s));' % (data, native_element)]
             if c['element'] in self.structs:
                 lines += ['\tfor (const auto& item : *%s)' % data, '\t{', '\t\tsize += size_%s(item);' % self.struct_name(c['element']), '\t}']
+            if c['element'] in self.external:
+                lines += ['\tfor (const auto& item : *%s)' % data, '\t{', '\t\tsize += %s(item);' % self.external[c['element']]['size'], '\t}']
             if c['element'].startswith('ptr|'):
                 target = c['element'].split('|')[1]
                 lines += ['\tfor (const auto& item : *%s)' % data, '\t{', '\t\tif (item)', '\t\t{',
-                          '\t\t\tsize += plain::rounded(sizeof(%s)) + size_%s(*item);' % (target, self.struct_name(target)), '\t\t}', '\t}']
+                          '\t\t\tsize += plain::sized(sizeof(%s)) + size_%s(*item);' % (target, self.struct_name(target)), '\t\t}', '\t}']
             if c['element'] == 'char*':
                 lines += ['\tfor (const auto& item : *%s)' % data, '\t{', '\t\tsize += plain::string_size(item);', '\t}']
             return lines + ['}']
         return []
 
     def adapter(self):
-        self.qual = 'asset_data::'
+        self.qual = self.family_ns()
         family = self.spec['family']
         out = ['// Emitted by tools/gen_iw8_neutral.py from tools/neutral_families/%s.json: do not edit.' % family,
-               '#include <std_include.hpp>', '#include "%s.hpp"' % family, '#include "plain.hpp"', '',
+               '#include <std_include.hpp>', '#include "%s.hpp"' % family, '#include "plain.hpp"'] + \
+              ['#include "%s"' % h for h in self.spec.get('adapter_includes', [])] + ['',
                'namespace zonetool::iw8::neutral', '{', '\tnamespace', '\t{']
         for name in self.order():
             out.extend(self.adapter_functions(name))
@@ -832,7 +973,7 @@ class Family:
         return [('\t' * tabs + line) if line else line for line in lines]
 
     def adapter_functions(self, name):
-        neutral = 'asset_data::' + self.struct_name(name)
+        neutral = self.qual + self.struct_name(name)
         short = self.struct_name(name)
         members = self.structs[name]
         read = ['%s read_%s(const %s& native)' % (neutral, short, name), '{', '\t%s data;' % neutral]
@@ -840,7 +981,7 @@ class Family:
                  '[[maybe_unused]] plain::context& memory)' % (short, name, neutral), '{']
         size = ['std::size_t size_%s([[maybe_unused]] const %s& data)' % (short, neutral), '{', '\tstd::size_t size = 0;']
         for m, c in members:
-            if c['kind'] == 'runtime':
+            if c['kind'] in ('runtime', 'tag'):
                 continue
             if c['kind'] == 'padding':
                 read.append('\tplain::require_zero(native.%s, "%s.%s");' % (m['name'], name, m['name']))
@@ -866,13 +1007,13 @@ class Family:
         return self.indented(read + write + size, 2)
 
     def root_functions(self, asset):
-        native, neutral = asset['struct'], 'asset_data::' + asset['neutral']
+        native, neutral = asset['struct'], self.family_ns() + asset['neutral']
         return [
             '\tstd::expected<%s, std::string> to_neutral(const %s& native)' % (neutral, native), '\t{', '\t\ttry', '\t\t{',
-            '\t\t\tauto data = read_%s(native);' % asset['neutral'], '\t\t\tasset_data::validate(data);', '\t\t\treturn data;', '\t\t}',
+            '\t\t\tauto data = read_%s(native);' % asset['neutral'], '\t\t\tvalidate(data);', '\t\t\treturn data;', '\t\t}',
             '\t\tcatch (const std::exception& error)', '\t\t{', '\t\t\treturn std::unexpected(error.what());', '\t\t}', '\t}', '',
             '\t%s* from_neutral(const %s& data, const asset_resolver& resolve, zone_memory& memory)' % (native, neutral), '\t{',
-            '\t\tasset_data::validate(data);', '\t\tplain::context context(memory);',
+            '\t\tvalidate(data);', '\t\tplain::context context(memory);',
             '\t\tauto* native = context.allocate<%s>();' % native,
             '\t\twrite_%s(*native, data, resolve, context);' % asset['neutral'], '\t\treturn native;', '\t}', '',
             '\tstd::size_t native_size(const %s& data)' % neutral, '\t{',
@@ -886,7 +1027,7 @@ class Family:
                '// Replay 1.20 %s assets to and from neutral data (docs/NEUTRAL_ASSETS.md).' % family,
                'namespace zonetool::iw8::neutral', '{']
         for asset in self.spec['assets']:
-            native, neutral = asset['struct'], 'asset_data::' + asset['neutral']
+            native, neutral = asset['struct'], self.family_ns() + asset['neutral']
             out += ['\tstd::expected<%s, std::string> to_neutral(const %s& native);' % (neutral, native),
                     '\t%s* from_neutral(const %s& data, const asset_resolver& resolve, zone_memory& memory);' % (native, neutral),
                     '\tstd::size_t native_size(const %s& data);' % neutral, '']

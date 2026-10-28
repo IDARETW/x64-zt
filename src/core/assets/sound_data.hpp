@@ -8,12 +8,16 @@
 #include <stdexcept>
 #include <string>
 #include <string_view>
+#include <type_traits>
 #include <utility>
+#include <variant>
 #include <vector>
 
 // Neutral sound assets (docs/NEUTRAL_ASSETS.md), emitted by tools/gen_iw8_neutral.py from the IW8 structs and stream
 // traversals: do not edit; change the spec (tools/neutral_families/sound.json) or the generator.
 namespace zonetool::asset_data
+{
+namespace sound
 {
 inline constexpr std::array<std::pair<std::int64_t, std::string_view>, 5> adsr_curve_names{{
 	{0, "linear"},
@@ -1299,4 +1303,5 @@ inline void validate(const sound_bank_transient& data)
 
 }
 
+} // namespace sound
 } // namespace zonetool::asset_data
