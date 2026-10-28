@@ -353,6 +353,12 @@ inline constexpr std::array<std::pair<std::int64_t, std::string_view>, 4> vehicl
 	{3, "fire_type_count"},
 }};
 
+inline constexpr std::array<std::pair<std::int64_t, std::string_view>, 3> x_cam_aperture_type_names{{
+	{0, "xcam_fov_aperture"},
+	{1, "xcam_focal_length_aperture"},
+	{2, "count_xcam_aperture"},
+}};
+
 struct attachment;
 struct att_ammo_general;
 struct att_ammo_type;
@@ -463,6 +469,14 @@ struct vehicle_physics_sound_group;
 struct vehicle_physics_vfx_group;
 struct spaceship_anim_parts;
 struct vehicle_physics_rev_modifier;
+struct xcam;
+struct x_cam_target_model;
+struct x_cam_target_model_frame;
+struct x_cam_camera;
+struct x_cam_frame;
+struct x_cam_camera_switch_params;
+struct x_cam_frame_name;
+struct x_anim_notify_info;
 
 inline void validate(const attachment& data);
 inline void validate(const att_ammo_general& data);
@@ -574,6 +588,14 @@ inline void validate(const vehicle_physics_sound_group& data);
 inline void validate(const vehicle_physics_vfx_group& data);
 inline void validate(const spaceship_anim_parts& data);
 inline void validate(const vehicle_physics_rev_modifier& data);
+inline void validate(const xcam& data);
+inline void validate(const x_cam_target_model& data);
+inline void validate(const x_cam_target_model_frame& data);
+inline void validate(const x_cam_camera& data);
+inline void validate(const x_cam_frame& data);
+inline void validate(const x_cam_camera_switch_params& data);
+inline void validate(const x_cam_frame_name& data);
+inline void validate(const x_anim_notify_info& data);
 
 struct att_ammo_general
 {
@@ -2778,6 +2800,108 @@ struct vehicle
 	bool operator==(const vehicle&) const = default;
 };
 
+struct x_cam_target_model
+{
+	std::optional<std::string> name{};
+	std::optional<std::vector<x_cam_target_model_frame>> animation_frames{};
+
+	bool operator==(const x_cam_target_model&) const = default;
+};
+
+struct xcam
+{
+	std::optional<std::string> name{};
+	std::optional<std::string> parent_scene{};
+	bool hide_hud{};
+	bool looping{};
+	bool hide_local_player_model{};
+	bool use_first_person_player_model{};
+	bool disable_near_dof{};
+	bool auto_motion_blur{};
+	bool ease_animations_out{};
+	bool show_non_animated_players{};
+	std::int32_t camera_count{};
+	std::int32_t frames{};
+	std::int32_t frame_rate{};
+	std::int32_t frame_name_count{};
+	std::array<float, 4> rotation_offset_inv{};
+	std::array<float, 3> offset{};
+	std::optional<x_cam_target_model> target_model_bone_roots{};
+	std::optional<std::vector<x_cam_camera>> cameras{};
+	std::optional<std::vector<x_cam_camera_switch_params>> camera_switch_params{};
+	std::optional<std::vector<x_cam_frame_name>> frame_names{};
+	std::optional<std::vector<x_anim_notify_info>> notify{};
+	std::uint8_t notify_count{};
+	std::optional<std::vector<x_anim_notify_info>> startup_notify{};
+	std::uint8_t startup_notify_count{};
+	std::optional<std::vector<x_anim_notify_info>> shutdown_notify{};
+	std::uint8_t shutdown_notify_count{};
+	std::array<float, 3> right_stick_rotate_offset{};
+	std::array<float, 2> right_stick_rotate_max_degrees{};
+	float free_cursor_parallax{};
+
+	bool operator==(const xcam&) const = default;
+};
+
+struct x_cam_target_model_frame
+{
+	std::array<float, 3> offset{};
+	std::array<float, 4> axis_quat{};
+
+	bool operator==(const x_cam_target_model_frame&) const = default;
+};
+
+struct x_cam_camera
+{
+	std::optional<std::string> name{};
+	std::int32_t index{};
+	std::string aperture_type{};
+	std::optional<std::vector<x_cam_frame>> animation_frames{};
+	float far_z{};
+	float focus_shift_multiplier{};
+
+	bool operator==(const x_cam_camera&) const = default;
+};
+
+struct x_cam_frame
+{
+	std::int32_t frame_num{};
+	std::array<float, 3> origin{};
+	std::array<float, 4> angle_quat{};
+	float fov{};
+	float focal_length{};
+	float focal_distance{};
+	float f_stop{};
+
+	bool operator==(const x_cam_frame&) const = default;
+};
+
+struct x_cam_camera_switch_params
+{
+	std::int32_t frame_num{};
+	std::int32_t camera1_index{};
+	std::int32_t camera2_index{};
+	float dissolve{};
+
+	bool operator==(const x_cam_camera_switch_params&) const = default;
+};
+
+struct x_cam_frame_name
+{
+	std::optional<std::string> frame_name{};
+	std::int32_t frame_num{};
+
+	bool operator==(const x_cam_frame_name&) const = default;
+};
+
+struct x_anim_notify_info
+{
+	std::optional<std::string> name{};
+	float time{};
+
+	bool operator==(const x_anim_notify_info&) const = default;
+};
+
 inline void validate(const att_ammo_general& data)
 {
 	if (std::ranges::none_of(weap_fire_type_t_names, [&](const auto& entry) { return entry.second == data.fire_type; }))
@@ -4475,6 +4599,164 @@ inline void validate(const vehicle& data)
 
 	validate(data.speed_snd);
 
+}
+
+inline void validate(const x_cam_target_model& data)
+{
+	if (data.animation_frames)
+	{
+		for (const auto& item : *data.animation_frames)
+		{
+			validate(item);
+		}
+	}
+
+	if ((data.animation_frames && data.animation_frames->size() > 0x7FFFFFFFull))
+	{
+		throw std::runtime_error("x_cam_target_model has arrays that its count does not fit");
+	}
+
+}
+
+inline void validate(const xcam& data)
+{
+	if (!data.name)
+	{
+		throw std::runtime_error("xcam has no name");
+	}
+
+	detail::name(*data.name, "xcam");
+
+	if (data.target_model_bone_roots)
+	{
+		validate(*data.target_model_bone_roots);
+	}
+
+	if (data.cameras)
+	{
+		for (const auto& item : *data.cameras)
+		{
+			validate(item);
+		}
+	}
+
+	if (data.camera_switch_params)
+	{
+		for (const auto& item : *data.camera_switch_params)
+		{
+			validate(item);
+		}
+	}
+
+	if (data.frame_names)
+	{
+		for (const auto& item : *data.frame_names)
+		{
+			validate(item);
+		}
+	}
+
+	if (data.notify)
+	{
+		for (const auto& item : *data.notify)
+		{
+			validate(item);
+		}
+	}
+
+	if (data.startup_notify)
+	{
+		for (const auto& item : *data.startup_notify)
+		{
+			validate(item);
+		}
+	}
+
+	if (data.shutdown_notify)
+	{
+		for (const auto& item : *data.shutdown_notify)
+		{
+			validate(item);
+		}
+	}
+
+	if (data.cameras && data.cameras->size() != data.camera_count)
+	{
+		throw std::runtime_error("xcam.cameras has a length that its count does not give");
+	}
+
+	if (data.camera_switch_params && data.camera_switch_params->size() != data.frames)
+	{
+		throw std::runtime_error("xcam.camera_switch_params has a length that its count does not give");
+	}
+
+	if (data.frame_names && data.frame_names->size() != data.frame_name_count)
+	{
+		throw std::runtime_error("xcam.frame_names has a length that its count does not give");
+	}
+
+	if (data.notify && data.notify->size() != data.notify_count)
+	{
+		throw std::runtime_error("xcam.notify has a length that its count does not give");
+	}
+
+	if (data.startup_notify && data.startup_notify->size() != data.startup_notify_count)
+	{
+		throw std::runtime_error("xcam.startup_notify has a length that its count does not give");
+	}
+
+	if (data.shutdown_notify && data.shutdown_notify->size() != data.shutdown_notify_count)
+	{
+		throw std::runtime_error("xcam.shutdown_notify has a length that its count does not give");
+	}
+
+}
+
+inline void validate(const x_cam_target_model_frame& data)
+{
+	(void) data;
+}
+
+inline void validate(const x_cam_camera& data)
+{
+	if (std::ranges::none_of(x_cam_aperture_type_names, [&](const auto& entry) { return entry.second == data.aperture_type; }))
+	{
+		throw std::runtime_error("x_cam_camera.aperture_type names no value");
+	}
+
+	if (data.animation_frames)
+	{
+		for (const auto& item : *data.animation_frames)
+		{
+			validate(item);
+		}
+	}
+
+	if ((data.animation_frames && data.animation_frames->size() > 0x7FFFFFFFull))
+	{
+		throw std::runtime_error("x_cam_camera has arrays that its count does not fit");
+	}
+
+}
+
+inline void validate(const x_cam_frame& data)
+{
+	(void) data;
+}
+
+inline void validate(const x_cam_camera_switch_params& data)
+{
+	(void) data;
+}
+
+inline void validate(const x_cam_frame_name& data)
+{
+	(void) data;
+}
+
+inline void validate(const x_anim_notify_info& data)
+{
+	(void) data;
 }
 
 } // namespace content

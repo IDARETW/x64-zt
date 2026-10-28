@@ -54,6 +54,15 @@
    "struct": "VehicleDef",
    "neutral": "vehicle",
    "name": "name"
+  },
+  {
+   "type": "ASSET_TYPE_XCAM",
+   "struct": "XCam",
+   "neutral": "xcam",
+   "name": "name"
   }
+ ],
+ "kept_counts": [
+  "XCam.*"
  ]
 }

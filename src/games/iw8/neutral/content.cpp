@@ -337,6 +337,30 @@ namespace zonetool::iw8::neutral
 		asset_data::content::vehicle_physics_rev_modifier read_vehicle_physics_rev_modifier(const VehiclePhysicsRevModifier& native);
 		void write_vehicle_physics_rev_modifier(VehiclePhysicsRevModifier& native, const asset_data::content::vehicle_physics_rev_modifier& data, const asset_resolver& resolve, plain::context& memory);
 		std::size_t size_vehicle_physics_rev_modifier(const asset_data::content::vehicle_physics_rev_modifier& data);
+		asset_data::content::xcam read_xcam(const XCam& native);
+		void write_xcam(XCam& native, const asset_data::content::xcam& data, const asset_resolver& resolve, plain::context& memory);
+		std::size_t size_xcam(const asset_data::content::xcam& data);
+		asset_data::content::x_cam_target_model read_x_cam_target_model(const XCamTargetModel& native);
+		void write_x_cam_target_model(XCamTargetModel& native, const asset_data::content::x_cam_target_model& data, const asset_resolver& resolve, plain::context& memory);
+		std::size_t size_x_cam_target_model(const asset_data::content::x_cam_target_model& data);
+		asset_data::content::x_cam_target_model_frame read_x_cam_target_model_frame(const XCamTargetModelFrame& native);
+		void write_x_cam_target_model_frame(XCamTargetModelFrame& native, const asset_data::content::x_cam_target_model_frame& data, const asset_resolver& resolve, plain::context& memory);
+		std::size_t size_x_cam_target_model_frame(const asset_data::content::x_cam_target_model_frame& data);
+		asset_data::content::x_cam_camera read_x_cam_camera(const XCamCamera& native);
+		void write_x_cam_camera(XCamCamera& native, const asset_data::content::x_cam_camera& data, const asset_resolver& resolve, plain::context& memory);
+		std::size_t size_x_cam_camera(const asset_data::content::x_cam_camera& data);
+		asset_data::content::x_cam_frame read_x_cam_frame(const XCamFrame& native);
+		void write_x_cam_frame(XCamFrame& native, const asset_data::content::x_cam_frame& data, const asset_resolver& resolve, plain::context& memory);
+		std::size_t size_x_cam_frame(const asset_data::content::x_cam_frame& data);
+		asset_data::content::x_cam_camera_switch_params read_x_cam_camera_switch_params(const XCamCameraSwitchParams& native);
+		void write_x_cam_camera_switch_params(XCamCameraSwitchParams& native, const asset_data::content::x_cam_camera_switch_params& data, const asset_resolver& resolve, plain::context& memory);
+		std::size_t size_x_cam_camera_switch_params(const asset_data::content::x_cam_camera_switch_params& data);
+		asset_data::content::x_cam_frame_name read_x_cam_frame_name(const XCamFrameName& native);
+		void write_x_cam_frame_name(XCamFrameName& native, const asset_data::content::x_cam_frame_name& data, const asset_resolver& resolve, plain::context& memory);
+		std::size_t size_x_cam_frame_name(const asset_data::content::x_cam_frame_name& data);
+		asset_data::content::x_anim_notify_info read_x_anim_notify_info(const XAnimNotifyInfo& native);
+		void write_x_anim_notify_info(XAnimNotifyInfo& native, const asset_data::content::x_anim_notify_info& data, const asset_resolver& resolve, plain::context& memory);
+		std::size_t size_x_anim_notify_info(const asset_data::content::x_anim_notify_info& data);
 
 		asset_data::content::att_ammo_general read_att_ammo_general(const AttAmmoGeneral& native)
 		{
@@ -6139,6 +6163,326 @@ namespace zonetool::iw8::neutral
 			return size;
 		}
 
+		asset_data::content::x_cam_target_model read_x_cam_target_model(const XCamTargetModel& native)
+		{
+			plain::trace("read_x_cam_target_model");
+			asset_data::content::x_cam_target_model data;
+			data.name = plain::read_string(native.name);
+			data.animation_frames = plain::read_array(native.animationFrames, native.frames, "XCamTargetModel.animationFrames", [&](const auto& item) { return read_x_cam_target_model_frame(item); });
+			return data;
+		}
+
+		void write_x_cam_target_model(XCamTargetModel& native, const asset_data::content::x_cam_target_model& data, [[maybe_unused]] const asset_resolver& resolve, [[maybe_unused]] plain::context& memory)
+		{
+			native.name = plain::write_string(memory, data.name);
+			native.animationFrames = plain::write_array<XCamTargetModelFrame>(data.animation_frames, memory, [&](auto& out, const auto& in) { write_x_cam_target_model_frame(out, in, resolve, memory); });
+			native.frames = plain::count_of<std::int32_t>(data.animation_frames);
+		}
+
+		std::size_t size_x_cam_target_model([[maybe_unused]] const asset_data::content::x_cam_target_model& data)
+		{
+			std::size_t size = 0;
+			size += plain::string_size(data.name);
+			if (data.animation_frames)
+			{
+				size += plain::sized(std::max<std::size_t>(data.animation_frames->size(), 1) * sizeof(XCamTargetModelFrame));
+				for (const auto& item : *data.animation_frames)
+				{
+					size += size_x_cam_target_model_frame(item);
+				}
+			}
+			return size;
+		}
+
+		asset_data::content::xcam read_xcam(const XCam& native)
+		{
+			plain::trace("read_xcam");
+			asset_data::content::xcam data;
+			data.name = plain::read_string(native.name);
+			data.parent_scene = plain::read_string(native.parent_scene);
+			data.hide_hud = native.hideHud;
+			data.looping = native.looping;
+			data.hide_local_player_model = native.hideLocalPlayerModel;
+			data.use_first_person_player_model = native.useFirstPersonPlayerModel;
+			data.disable_near_dof = native.disableNearDof;
+			data.auto_motion_blur = native.autoMotionBlur;
+			data.ease_animations_out = native.easeAnimationsOut;
+			data.show_non_animated_players = native.showNonAnimatedPlayers;
+			data.camera_count = native.cameraCount;
+			data.frames = native.frames;
+			data.frame_rate = native.frameRate;
+			data.frame_name_count = native.frameNameCount;
+			data.rotation_offset_inv = plain::read_scalars<float, 4>(&native.rotationOffsetInv);
+			data.offset = plain::read_scalars<float, 3>(&native.offset);
+			data.target_model_bone_roots = plain::read_single(native.targetModelBoneRoots, [&](const auto& item) { return read_x_cam_target_model(item); });
+			data.cameras = plain::read_array_if_present(native.cameras, native.cameraCount, "XCam.cameras", [&](const auto& item) { return read_x_cam_camera(item); });
+			data.camera_switch_params = plain::read_array_if_present(native.cameraSwitchParams, native.frames, "XCam.cameraSwitchParams", [&](const auto& item) { return read_x_cam_camera_switch_params(item); });
+			data.frame_names = plain::read_array_if_present(native.frameNames, native.frameNameCount, "XCam.frameNames", [&](const auto& item) { return read_x_cam_frame_name(item); });
+			data.notify = plain::read_array_if_present(native.notify, native.notifyCount, "XCam.notify", [&](const auto& item) { return read_x_anim_notify_info(item); });
+			data.notify_count = native.notifyCount;
+			data.startup_notify = plain::read_array_if_present(native.startupNotify, native.startupNotifyCount, "XCam.startupNotify", [&](const auto& item) { return read_x_anim_notify_info(item); });
+			data.startup_notify_count = native.startupNotifyCount;
+			data.shutdown_notify = plain::read_array_if_present(native.shutdownNotify, native.shutdownNotifyCount, "XCam.shutdownNotify", [&](const auto& item) { return read_x_anim_notify_info(item); });
+			data.shutdown_notify_count = native.shutdownNotifyCount;
+			data.right_stick_rotate_offset = plain::read_scalars<float, 3>(&native.rightStickRotateOffset);
+			data.right_stick_rotate_max_degrees = plain::read_scalars<float, 2>(&native.rightStickRotateMaxDegrees);
+			data.free_cursor_parallax = native.freeCursorParallax;
+			return data;
+		}
+
+		void write_xcam(XCam& native, const asset_data::content::xcam& data, [[maybe_unused]] const asset_resolver& resolve, [[maybe_unused]] plain::context& memory)
+		{
+			native.name = plain::write_string(memory, data.name);
+			native.parent_scene = plain::write_string(memory, data.parent_scene);
+			native.hideHud = data.hide_hud;
+			native.looping = data.looping;
+			native.hideLocalPlayerModel = data.hide_local_player_model;
+			native.useFirstPersonPlayerModel = data.use_first_person_player_model;
+			native.disableNearDof = data.disable_near_dof;
+			native.autoMotionBlur = data.auto_motion_blur;
+			native.easeAnimationsOut = data.ease_animations_out;
+			native.showNonAnimatedPlayers = data.show_non_animated_players;
+			native.cameraCount = data.camera_count;
+			native.frames = data.frames;
+			native.frameRate = data.frame_rate;
+			native.frameNameCount = data.frame_name_count;
+			plain::write_scalars(&native.rotationOffsetInv, data.rotation_offset_inv);
+			plain::write_scalars(&native.offset, data.offset);
+			native.targetModelBoneRoots = plain::write_single<XCamTargetModel>(data.target_model_bone_roots, memory, [&](auto& out, const auto& in) { write_x_cam_target_model(out, in, resolve, memory); });
+			native.cameras = plain::write_array<XCamCamera>(data.cameras, memory, [&](auto& out, const auto& in) { write_x_cam_camera(out, in, resolve, memory); });
+			native.cameraSwitchParams = plain::write_array<XCamCameraSwitchParams>(data.camera_switch_params, memory, [&](auto& out, const auto& in) { write_x_cam_camera_switch_params(out, in, resolve, memory); });
+			native.frameNames = plain::write_array<XCamFrameName>(data.frame_names, memory, [&](auto& out, const auto& in) { write_x_cam_frame_name(out, in, resolve, memory); });
+			native.notify = plain::write_array<XAnimNotifyInfo>(data.notify, memory, [&](auto& out, const auto& in) { write_x_anim_notify_info(out, in, resolve, memory); });
+			native.notifyCount = data.notify_count;
+			native.startupNotify = plain::write_array<XAnimNotifyInfo>(data.startup_notify, memory, [&](auto& out, const auto& in) { write_x_anim_notify_info(out, in, resolve, memory); });
+			native.startupNotifyCount = data.startup_notify_count;
+			native.shutdownNotify = plain::write_array<XAnimNotifyInfo>(data.shutdown_notify, memory, [&](auto& out, const auto& in) { write_x_anim_notify_info(out, in, resolve, memory); });
+			native.shutdownNotifyCount = data.shutdown_notify_count;
+			plain::write_scalars(&native.rightStickRotateOffset, data.right_stick_rotate_offset);
+			plain::write_scalars(&native.rightStickRotateMaxDegrees, data.right_stick_rotate_max_degrees);
+			native.freeCursorParallax = data.free_cursor_parallax;
+		}
+
+		std::size_t size_xcam([[maybe_unused]] const asset_data::content::xcam& data)
+		{
+			std::size_t size = 0;
+			size += plain::string_size(data.name);
+			size += plain::string_size(data.parent_scene);
+			if (data.target_model_bone_roots)
+			{
+				size += plain::sized(sizeof(XCamTargetModel));
+				size += size_x_cam_target_model(*data.target_model_bone_roots);
+			}
+			if (data.cameras)
+			{
+				size += plain::sized(std::max<std::size_t>(data.cameras->size(), 1) * sizeof(XCamCamera));
+				for (const auto& item : *data.cameras)
+				{
+					size += size_x_cam_camera(item);
+				}
+			}
+			if (data.camera_switch_params)
+			{
+				size += plain::sized(std::max<std::size_t>(data.camera_switch_params->size(), 1) * sizeof(XCamCameraSwitchParams));
+				for (const auto& item : *data.camera_switch_params)
+				{
+					size += size_x_cam_camera_switch_params(item);
+				}
+			}
+			if (data.frame_names)
+			{
+				size += plain::sized(std::max<std::size_t>(data.frame_names->size(), 1) * sizeof(XCamFrameName));
+				for (const auto& item : *data.frame_names)
+				{
+					size += size_x_cam_frame_name(item);
+				}
+			}
+			if (data.notify)
+			{
+				size += plain::sized(std::max<std::size_t>(data.notify->size(), 1) * sizeof(XAnimNotifyInfo));
+				for (const auto& item : *data.notify)
+				{
+					size += size_x_anim_notify_info(item);
+				}
+			}
+			if (data.startup_notify)
+			{
+				size += plain::sized(std::max<std::size_t>(data.startup_notify->size(), 1) * sizeof(XAnimNotifyInfo));
+				for (const auto& item : *data.startup_notify)
+				{
+					size += size_x_anim_notify_info(item);
+				}
+			}
+			if (data.shutdown_notify)
+			{
+				size += plain::sized(std::max<std::size_t>(data.shutdown_notify->size(), 1) * sizeof(XAnimNotifyInfo));
+				for (const auto& item : *data.shutdown_notify)
+				{
+					size += size_x_anim_notify_info(item);
+				}
+			}
+			return size;
+		}
+
+		asset_data::content::x_cam_target_model_frame read_x_cam_target_model_frame(const XCamTargetModelFrame& native)
+		{
+			plain::trace("read_x_cam_target_model_frame");
+			asset_data::content::x_cam_target_model_frame data;
+			data.offset = plain::read_scalars<float, 3>(&native.offset);
+			data.axis_quat = plain::read_scalars<float, 4>(&native.axisQuat);
+			return data;
+		}
+
+		void write_x_cam_target_model_frame(XCamTargetModelFrame& native, const asset_data::content::x_cam_target_model_frame& data, [[maybe_unused]] const asset_resolver& resolve, [[maybe_unused]] plain::context& memory)
+		{
+			plain::write_scalars(&native.offset, data.offset);
+			plain::write_scalars(&native.axisQuat, data.axis_quat);
+		}
+
+		std::size_t size_x_cam_target_model_frame([[maybe_unused]] const asset_data::content::x_cam_target_model_frame& data)
+		{
+			std::size_t size = 0;
+			return size;
+		}
+
+		asset_data::content::x_cam_camera read_x_cam_camera(const XCamCamera& native)
+		{
+			plain::trace("read_x_cam_camera");
+			asset_data::content::x_cam_camera data;
+			data.name = plain::read_string(native.name);
+			data.index = native.index;
+			data.aperture_type = plain::enum_name(asset_data::content::x_cam_aperture_type_names, static_cast<std::int64_t>(native.apertureType), "XCamCamera.apertureType");
+			data.animation_frames = plain::read_array(native.animationFrames, native.frames, "XCamCamera.animationFrames", [&](const auto& item) { return read_x_cam_frame(item); });
+			data.far_z = native.farZ;
+			data.focus_shift_multiplier = native.focusShiftMultiplier;
+			return data;
+		}
+
+		void write_x_cam_camera(XCamCamera& native, const asset_data::content::x_cam_camera& data, [[maybe_unused]] const asset_resolver& resolve, [[maybe_unused]] plain::context& memory)
+		{
+			native.name = plain::write_string(memory, data.name);
+			native.index = data.index;
+			native.apertureType = static_cast<XCamApertureType>(plain::enum_value(asset_data::content::x_cam_aperture_type_names, data.aperture_type, "XCamCamera.apertureType"));
+			native.animationFrames = plain::write_array<XCamFrame>(data.animation_frames, memory, [&](auto& out, const auto& in) { write_x_cam_frame(out, in, resolve, memory); });
+			native.farZ = data.far_z;
+			native.focusShiftMultiplier = data.focus_shift_multiplier;
+			native.frames = plain::count_of<std::int32_t>(data.animation_frames);
+		}
+
+		std::size_t size_x_cam_camera([[maybe_unused]] const asset_data::content::x_cam_camera& data)
+		{
+			std::size_t size = 0;
+			size += plain::string_size(data.name);
+			if (data.animation_frames)
+			{
+				size += plain::sized(std::max<std::size_t>(data.animation_frames->size(), 1) * sizeof(XCamFrame));
+				for (const auto& item : *data.animation_frames)
+				{
+					size += size_x_cam_frame(item);
+				}
+			}
+			return size;
+		}
+
+		asset_data::content::x_cam_frame read_x_cam_frame(const XCamFrame& native)
+		{
+			plain::trace("read_x_cam_frame");
+			asset_data::content::x_cam_frame data;
+			data.frame_num = native.frameNum;
+			data.origin = plain::read_scalars<float, 3>(&native.origin);
+			data.angle_quat = plain::read_scalars<float, 4>(&native.angleQuat);
+			data.fov = native.fov;
+			data.focal_length = native.focalLength;
+			data.focal_distance = native.focalDistance;
+			data.f_stop = native.fStop;
+			return data;
+		}
+
+		void write_x_cam_frame(XCamFrame& native, const asset_data::content::x_cam_frame& data, [[maybe_unused]] const asset_resolver& resolve, [[maybe_unused]] plain::context& memory)
+		{
+			native.frameNum = data.frame_num;
+			plain::write_scalars(&native.origin, data.origin);
+			plain::write_scalars(&native.angleQuat, data.angle_quat);
+			native.fov = data.fov;
+			native.focalLength = data.focal_length;
+			native.focalDistance = data.focal_distance;
+			native.fStop = data.f_stop;
+		}
+
+		std::size_t size_x_cam_frame([[maybe_unused]] const asset_data::content::x_cam_frame& data)
+		{
+			std::size_t size = 0;
+			return size;
+		}
+
+		asset_data::content::x_cam_camera_switch_params read_x_cam_camera_switch_params(const XCamCameraSwitchParams& native)
+		{
+			plain::trace("read_x_cam_camera_switch_params");
+			asset_data::content::x_cam_camera_switch_params data;
+			data.frame_num = native.frameNum;
+			data.camera1_index = native.camera1Index;
+			data.camera2_index = native.camera2Index;
+			data.dissolve = native.dissolve;
+			return data;
+		}
+
+		void write_x_cam_camera_switch_params(XCamCameraSwitchParams& native, const asset_data::content::x_cam_camera_switch_params& data, [[maybe_unused]] const asset_resolver& resolve, [[maybe_unused]] plain::context& memory)
+		{
+			native.frameNum = data.frame_num;
+			native.camera1Index = data.camera1_index;
+			native.camera2Index = data.camera2_index;
+			native.dissolve = data.dissolve;
+		}
+
+		std::size_t size_x_cam_camera_switch_params([[maybe_unused]] const asset_data::content::x_cam_camera_switch_params& data)
+		{
+			std::size_t size = 0;
+			return size;
+		}
+
+		asset_data::content::x_cam_frame_name read_x_cam_frame_name(const XCamFrameName& native)
+		{
+			plain::trace("read_x_cam_frame_name");
+			asset_data::content::x_cam_frame_name data;
+			data.frame_name = plain::read_string(native.frameName);
+			data.frame_num = native.frameNum;
+			return data;
+		}
+
+		void write_x_cam_frame_name(XCamFrameName& native, const asset_data::content::x_cam_frame_name& data, [[maybe_unused]] const asset_resolver& resolve, [[maybe_unused]] plain::context& memory)
+		{
+			native.frameName = plain::write_string(memory, data.frame_name);
+			native.frameNum = data.frame_num;
+		}
+
+		std::size_t size_x_cam_frame_name([[maybe_unused]] const asset_data::content::x_cam_frame_name& data)
+		{
+			std::size_t size = 0;
+			size += plain::string_size(data.frame_name);
+			return size;
+		}
+
+		asset_data::content::x_anim_notify_info read_x_anim_notify_info(const XAnimNotifyInfo& native)
+		{
+			plain::trace("read_x_anim_notify_info");
+			asset_data::content::x_anim_notify_info data;
+			data.name = plain::read_script_string(native.name);
+			data.time = native.time;
+			return data;
+		}
+
+		void write_x_anim_notify_info(XAnimNotifyInfo& native, const asset_data::content::x_anim_notify_info& data, [[maybe_unused]] const asset_resolver& resolve, [[maybe_unused]] plain::context& memory)
+		{
+			native.name = static_cast<scr_string_t>(plain::write_script_string(data.name));
+			native.time = data.time;
+		}
+
+		std::size_t size_x_anim_notify_info([[maybe_unused]] const asset_data::content::x_anim_notify_info& data)
+		{
+			std::size_t size = 0;
+			return size;
+		}
+
 	}
 
 	std::expected<asset_data::content::attachment, std::string> to_neutral(const WeaponAttachment& native)
@@ -6391,6 +6735,34 @@ namespace zonetool::iw8::neutral
 	std::size_t native_size(const asset_data::content::vehicle& data)
 	{
 		return plain::rounded(sizeof(VehicleDef)) + size_vehicle(data) + 64;
+	}
+
+	std::expected<asset_data::content::xcam, std::string> to_neutral(const XCam& native)
+	{
+		try
+		{
+			auto data = read_xcam(native);
+			validate(data);
+			return data;
+		}
+		catch (const std::exception& error)
+		{
+			return std::unexpected(error.what());
+		}
+	}
+
+	XCam* from_neutral(const asset_data::content::xcam& data, const asset_resolver& resolve, zone_memory& memory)
+	{
+		validate(data);
+		plain::context context(memory);
+		auto* native = context.allocate<XCam>();
+		write_xcam(*native, data, resolve, context);
+		return native;
+	}
+
+	std::size_t native_size(const asset_data::content::xcam& data)
+	{
+		return plain::rounded(sizeof(XCam)) + size_xcam(data) + 64;
 	}
 
 }
