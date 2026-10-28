@@ -21,12 +21,14 @@
 #include "neutral/lighting.hpp"
 #include "neutral/mapents.hpp"
 #include "neutral/material.hpp"
+#include "neutral/path_data.hpp"
 #include "neutral/physics.hpp"
 #include "neutral/physics_events.hpp"
 #include "neutral/plain.hpp"
 #include "neutral/rumble.hpp"
 #include "neutral/scriptable.hpp"
 #include "neutral/shader.hpp"
+#include "neutral/tacgraph.hpp"
 #include "neutral/sound.hpp"
 #include "neutral/sound_globals.hpp"
 #include "neutral/techset.hpp"
@@ -288,6 +290,8 @@ namespace zonetool::iw8
 			asset_data::fxworld::fx_world,
 			asset_data::fxworld::fx_world_transient_zone,
 			asset_data::behavior::behaviortree,
+			asset_data::path_data::path_data,
+			asset_data::tacgraph::tac_graph,
 			asset_data::bones::dynamicbones,
 			asset_data::bones::proceduralbones,
 			asset_data::mapents::map_ents,
@@ -548,6 +552,10 @@ namespace zonetool::iw8
 				return accepted(neutral::to_neutral(*static_cast<const FxWorld*>(header)), "effects world", kept);
 			case ASSET_TYPE_FXWORLD_TRANSIENT_ZONE:
 				return accepted(neutral::to_neutral(*static_cast<const FxWorldTransientZone*>(header)), "effects transient zone", kept);
+			case ASSET_TYPE_PATHDATA:
+				return accepted(neutral::to_neutral(*static_cast<const PathData*>(header)), "path data", kept);
+			case ASSET_TYPE_TACGRAPH:
+				return accepted(neutral::to_neutral(*static_cast<const TacticalGraphData*>(header)), "tactical graph", kept);
 			case ASSET_TYPE_BEHAVIOR_TREE:
 				return accepted(neutral::to_neutral(*static_cast<const BehaviorTree*>(header)), "behavior tree", kept);
 			case ASSET_TYPE_XANIM_PROCEDURALBONES:

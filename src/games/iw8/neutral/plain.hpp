@@ -342,6 +342,38 @@ namespace zonetool::iw8::neutral::plain
 		std::memcpy(block, &values, sizeof(values));
 	}
 
+	// While it lives, the bytes of the array whose elements are being read: a reader of an element that follows pointers to other
+	// elements asks whether a pointer is inside.
+	class element_range
+	{
+	public:
+		element_range(const void* first, const std::size_t bytes)
+			: previous_(current_), first_(static_cast<const std::uint8_t*>(first)), bytes_(bytes)
+		{
+			current_ = this;
+		}
+
+		~element_range()
+		{
+			current_ = previous_;
+		}
+
+		element_range(const element_range&) = delete;
+		element_range& operator=(const element_range&) = delete;
+
+		static bool contains(const void* pointer)
+		{
+			const auto* byte = static_cast<const std::uint8_t*>(pointer);
+			return current_ && byte >= current_->first_ && byte < current_->first_ + current_->bytes_;
+		}
+
+	private:
+		element_range* previous_;
+		const std::uint8_t* first_;
+		std::size_t bytes_;
+		static inline element_range* current_ = nullptr;
+	};
+
 	// A pointer member that no stream rule describes holds nothing in a zone; a value would be lost.
 	template <typename T>
 	void require_zero(const T& value, const char* what)
@@ -421,7 +453,26 @@ namespace zonetool::iw8::neutral::plain
 		return pointee;
 	}
 
-	// A fixed number of elements behind a pointer, each read by the caller.
+	// A fixed number of elements behind a pointer, each read by the caller; a vector when the element is the type that holds them
+	// (the children of a tree node).
+	template <std::size_t Count, bool Vector, typename Element, typename Read>
+	auto read_fixed_with(const Element* elements, Read&& read) -> std::optional<std::vector<decltype(read(*elements))>>
+	{
+		if (!elements)
+		{
+			return std::nullopt;
+		}
+
+		std::vector<decltype(read(*elements))> out;
+		out.reserve(Count);
+		for (std::size_t index = 0; index < Count; ++index)
+		{
+			out.push_back(read(elements[index]));
+		}
+
+		return out;
+	}
+
 	template <std::size_t Count, typename Element, typename Read>
 	auto read_fixed_with(const Element* elements, Read&& read) -> std::optional<std::array<decltype(read(*elements)), Count>>
 	{

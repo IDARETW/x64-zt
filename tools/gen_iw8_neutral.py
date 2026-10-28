@@ -148,6 +148,9 @@ class Rules:
                 rule = ('expr', count)
             elif 'outer_' in count:
                 rule = ('outer', count)
+            elif re.search(r'\bitems_\d+\[i\d+\]', count):
+                # A count over the members of the element being streamed (`items_1[i1].m_End`).
+                rule = ('element', count)
             else:
                 continue
             if rule not in self.arrays.setdefault(field, []):
@@ -297,6 +300,20 @@ class Rules:
         text = re.sub(r'\bdata\.', 'native.', text)
         return None if 'reinterpret_cast<const' in text and '&' in text else ('native', text, outer)
 
+    def element_count(self, text, members):
+        """A count over the members of the struct being read, as native C++ over `native`; None when a first-scalar path fails."""
+        def first(found):
+            path = self.first_scalar_path(members, found.group(2))
+            if not path:
+                raise ValueError
+            return 'native.' + '.'.join(p['name'] for p in path)
+        try:
+            text = re.sub(CAST, first, text)
+        except ValueError:
+            return None
+        text = re.sub(r'\bitems_\d+\[i\d+\]\.', 'native.', text)
+        return None if 'items_' in text or 'reinterpret_cast<const' in text else ('native', text, None)
+
     def array_count(self, field, members, owner=None, index=None, outer_ok=False, index2=None):
         """The count rule of an array member: the first candidate that the owner can satisfy."""
         names = {m['name'] for m in members}
@@ -322,6 +339,10 @@ class Rules:
                     return ('expr', text if rule[0] == 'first' else rule[2].replace('@', '(%s)' % text))
             if rule[0] == 'expr' and self.expression_applies(rule[1], members):
                 return rule
+            if rule[0] == 'element':
+                resolved = self.element_count(rule[1], members)
+                if resolved:
+                    return resolved
             if rule[0] == 'outer' and outer_ok:
                 resolved = self.outer_count(rule[1], members)
                 if resolved:
@@ -564,7 +585,7 @@ class Family:
             count = ('native', override['native'], override['outer'])
         else:
             count = self.rules.array_count(name, members, owner, element, self.outer_counts, element2)
-        if count and count[0] == 'native':
+        if count and count[0] == 'native' and count[2]:
             self.outer_needed[owner] = count[2]
         return count
 
@@ -707,7 +728,11 @@ class Family:
                 for _, _, case_type in c['cases']:
                     self.visit(case_type)
             if c['kind'] == 'array' and c['element'].startswith('ptr|') and m['type'] in self.path:
-                self.problems.append('%s.%s: pointers to %s make the struct contain itself' % (name, m['name'], m['type']))
+                if c['count'][0] != 'literal':
+                    self.problems.append('%s.%s: pointers to %s make the struct contain itself' % (name, m['name'], m['type']))
+                else:
+                    # A tree: the children are a vector, which may hold the type that is being declared.
+                    c['recursive'] = True
             if c['kind'] == 'array' and m['type'] in self.source.structs and m['type'] not in self.external and m['type'] not in self.blocks and not c['element'].startswith('asset|'):
                 self.visit(m['type'])
             if c['kind'] in ('enum', 'flags'):
@@ -805,6 +830,8 @@ class Family:
             if c['count'] == ('literal', 1):
                 return 'std::optional<%s>' % element
             if c['count'][0] == 'literal':
+                if c.get('recursive'):
+                    return 'std::optional<std::vector<%s>>' % element
                 return 'std::optional<std::array<%s, %d>>' % (element, c['count'][1])
             return self.nest('std::optional<std::vector<%s>>' % element, [] if c.get('prefix') else m['dims'])
         raise SystemExit('no neutral type for %s' % kind)
@@ -1099,8 +1126,8 @@ class Family:
             if count == ('literal', 1):
                 return 'plain::read_single(%s, [&](const auto& item) { return %s; })' % (field, self.element_read(c['element'], 'item'))
             if count[0] == 'literal':
-                return 'plain::read_fixed_with<%d>(%s, [&](const auto& item) { return %s; })' % (
-                    count[1], field, self.element_read(c['element'], 'item'))
+                return 'plain::read_fixed_with<%d%s>(%s, [&](const auto& item) { return %s; })' % (
+                    count[1], ', true' if c.get('recursive') else '', field, self.element_read(c['element'], 'item'))
             native_count = count[1] if count[0] == 'native' else (
                 'native.' + count[1] if count[0] == 'member' else self.expression(owner, count[1], 'native'))
             if c.get('group'):
@@ -1110,8 +1137,12 @@ class Family:
             if c.get('borrowed'):
                 return 'plain::read_borrowed(%s, %s, %s, [&](const auto& item) { return %s; })' % (
                     field, native_count, what, self.element_read(c['element'], 'item'))
-            return 'plain::read_array%s(%s, %s, %s, [&](const auto& item) { return %s; })' % (
+            read = 'plain::read_array%s(%s, %s, %s, [&](const auto& item) { return %s; })' % (
                 '_if_present' if c.get('kept_count') or c.get('kept_expr') else '', field, native_count, what, self.element_read(c['element'], 'item'))
+            if self.external.get(c['element'], {}).get('range'):
+                # The elements point at each other: they may only point inside this array.
+                return '[&] { plain::element_range range(%s, %s * sizeof(%s)); return %s; }()' % (field, native_count, c['native_element'], read)
+            return read
         raise SystemExit('no read for %s' % kind)
 
     def count_text(self, owner, rule, side):
