@@ -29,14 +29,38 @@ namespace zonetool::iw8::neutral
 		bool operator==(const xmodel_source&) const = default;
 	};
 
+	struct xmodel_surfs_source
+	{
+		asset_data::xmodel_surfs surfs;
+		asset_data::provenance provenance;
+
+		bool operator==(const xmodel_surfs_source&) const = default;
+	};
+
 	std::expected<xmodel_source, std::string> to_neutral(const XModel& native);
 	XModel* from_neutral(const asset_data::xmodel& data, const asset_data::provenance* source, const asset_resolver& resolve,
 		zone_memory& memory);
 	std::size_t native_size(const asset_data::xmodel& data);
 
+	// Resident geometry only: streamed geometry, subdivision, blend shapes and tension streams give their reason.
+	// Surface flags, UGB ids and hashes go to the provenance.
+	std::expected<xmodel_surfs_source, std::string> to_neutral(const XModelSurfs& native);
+	XModelSurfs* from_neutral(const asset_data::xmodel_surfs& data, const asset_data::provenance* source, zone_memory& memory);
+	std::size_t native_size(const asset_data::xmodel_surfs& data);
+
 	inline XModel* from_neutral(const xmodel_source& source, const asset_resolver& resolve, zone_memory& memory)
 	{
 		return from_neutral(source.model, &source.provenance, resolve, memory);
+	}
+
+	inline XModelSurfs* from_neutral(const xmodel_surfs_source& source, zone_memory& memory)
+	{
+		return from_neutral(source.surfs, &source.provenance, memory);
+	}
+
+	inline std::size_t native_size(const xmodel_surfs_source& source)
+	{
+		return native_size(source.surfs);
 	}
 
 	inline std::size_t native_size(const xmodel_source& source)

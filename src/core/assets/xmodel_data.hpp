@@ -198,6 +198,70 @@ struct xmodel
 	bool operator==(const xmodel&) const = default;
 };
 
+// A vertex of a model surface, as authored: its position is three 21-bit codes over the surface bounds (midpoint +
+// (2 * code / 2097151 - 1) * the largest half size), its tangent frame a packed quaternion (10, 10 and 9 bits, the
+// handedness and the index of the largest component).
+struct mesh_vertex
+{
+	std::array<std::uint32_t, 3> position{};
+	std::uint32_t self_visibility{};
+	std::array<float, 2> uv{};
+	std::uint32_t tangent_frame{};
+
+	bool operator==(const mesh_vertex&) const = default;
+};
+
+struct rigid_vertex_list
+{
+	std::uint32_t bone{};
+	std::uint32_t vertex_count{};
+	std::uint32_t first_triangle{};
+	std::uint32_t triangle_count{};
+
+	bool operator==(const rigid_vertex_list&) const = default;
+};
+
+// The bounds of up to 64 triangles (midpoint and half size as half floats) and their visibility cone, as authored.
+struct triangle_cluster
+{
+	std::array<std::uint16_t, 6> bounds{};
+	std::array<std::uint32_t, 3> cone{};
+
+	bool operator==(const triangle_cluster&) const = default;
+};
+
+struct mesh_surface
+{
+	bounds_box bounds;
+	std::vector<std::array<std::uint16_t, 3>> triangles;
+	std::vector<mesh_vertex> vertices;
+	std::optional<std::vector<std::uint32_t>> colors;
+	std::vector<triangle_cluster> clusters;
+	std::vector<rigid_vertex_list> rigid_lists;
+	// One per rigid list.
+	std::optional<std::vector<bounds_box>> rigid_bounds;
+	// Vertices with 1 to 8 bone influences, and their bone and weight words.
+	std::array<std::uint16_t, 8> blend_vertex_counts{};
+	std::vector<std::uint16_t> blend_words;
+	std::optional<std::vector<std::uint32_t>> lightmap_coords;
+	// A 32-bit code a vertex each, as authored; their encodings are not mapped.
+	std::optional<std::vector<std::uint32_t>> second_uv;
+	std::optional<std::vector<std::uint32_t>> normal_transforms;
+	std::array<std::uint32_t, 8> part_bits{};
+
+	bool operator==(const mesh_surface&) const = default;
+};
+
+// The surfaces of one level of detail of a model.
+struct xmodel_surfs
+{
+	std::string name;
+	std::array<std::uint32_t, 8> part_bits{};
+	std::vector<mesh_surface> surfaces;
+
+	bool operator==(const xmodel_surfs&) const = default;
+};
+
 inline constexpr const char* xmodel_physics_uses[] = {"no_physics", "standard", "no_collision_lod", "collision_lod_only"};
 inline constexpr const char* xmodel_impact_types[] = {"normal", "alien", "small_robot", "large_robot", "zombie"};
 inline constexpr const char* xmodel_mdao_types[] = {"none", "hitbox_skeleton", "base_skeleton", "volume"};
@@ -304,6 +368,41 @@ inline void validate(const xmodel& data)
 	if (data.blend_shapes && std::ranges::any_of(data.blend_shapes->maps, [](const blend_shape_map& map) { return !std::isfinite(map.full_weight); }))
 	{
 		throw std::runtime_error("model " + name + " has a blend shape weight that is not finite");
+	}
+}
+inline void validate(const xmodel_surfs& data)
+{
+	detail::name(data.name, "xmodelsurfs");
+	for (const auto& surface : data.surfaces)
+	{
+		const auto vertices = surface.vertices.size();
+		detail::finite_values(surface.bounds.midpoint, data.name);
+		detail::finite_values(surface.bounds.half_size, data.name);
+		if (vertices > 0xFFFF || surface.triangles.size() > 0xFFFF || surface.clusters.size() != (surface.triangles.size() + 63) / 64 ||
+			(surface.colors && surface.colors->size() != vertices) || (surface.lightmap_coords && surface.lightmap_coords->size() != vertices) ||
+			(surface.second_uv && surface.second_uv->size() != vertices) ||
+			(surface.normal_transforms && surface.normal_transforms->size() != vertices) ||
+			(surface.rigid_bounds && surface.rigid_bounds->size() != surface.rigid_lists.size()) || surface.rigid_lists.size() > 0xFF)
+		{
+			throw std::runtime_error("model surfaces " + data.name + " have streams of the wrong count");
+		}
+
+		for (const auto& triangle : surface.triangles)
+		{
+			if (std::ranges::any_of(triangle, [vertices](const std::uint16_t index) { return index >= vertices; }))
+			{
+				throw std::runtime_error("model surfaces " + data.name + " have a triangle with a missing vertex");
+			}
+		}
+
+		for (const auto& vertex : surface.vertices)
+		{
+			detail::finite_values(vertex.uv, data.name);
+			if (std::ranges::any_of(vertex.position, [](const std::uint32_t code) { return code >> 21; }))
+			{
+				throw std::runtime_error("model surfaces " + data.name + " have a position code beyond 21 bits");
+			}
+		}
 	}
 }
 } // namespace zonetool::asset_data
