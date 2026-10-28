@@ -28,6 +28,31 @@ namespace zonetool::iw8::neutral
 		bool operator==(const decal_volume_material_source&) const = default;
 	};
 
+	struct material_source
+	{
+		asset_data::material material;
+		asset_data::provenance provenance;
+
+		bool operator==(const material_source&) const = default;
+	};
+
+	// The geometry type, camera region, flags and packed draw surface of a material are Replay's: they go to the
+	// provenance, which from_neutral restores for a source of the same profile and otherwise rejects.
+	std::expected<material_source, std::string> to_neutral(const Material& native);
+	Material* from_neutral(const asset_data::material& data, const asset_data::provenance* source, const asset_resolver& resolve,
+		zone_memory& memory);
+	std::size_t native_size(const asset_data::material& data);
+
+	inline Material* from_neutral(const material_source& source, const asset_resolver& resolve, zone_memory& memory)
+	{
+		return from_neutral(source.material, &source.provenance, resolve, memory);
+	}
+
+	inline std::size_t native_size(const material_source& source)
+	{
+		return native_size(source.material);
+	}
+
 	std::expected<decal_volume_material_source, std::string> to_neutral(const GfxDecalVolumeMaterial& native);
 	GfxDecalVolumeMaterial* from_neutral(const asset_data::decal_volume_material& data, const asset_data::provenance* source,
 		const asset_resolver& resolve, zone_memory& memory);
