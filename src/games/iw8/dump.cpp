@@ -14,6 +14,7 @@
 #include "neutral/material.hpp"
 #include "neutral/rumble.hpp"
 #include "neutral/shader.hpp"
+#include "neutral/techset.hpp"
 #include "neutral/stream.hpp"
 #include "neutral/text.hpp"
 #include "neutral/xanim.hpp"
@@ -261,7 +262,7 @@ namespace zonetool::iw8
 		using neutral_data = std::variant<asset_data::localize_entry, asset_data::net_const_strings, asset_data::raw_file,
 			asset_data::string_table, asset_data::rumble_graph, asset_data::rumble_info, neutral::image_source,
 			neutral::xanim_source, neutral::light_def_source, neutral::grading_clut_source, neutral::xmodel_source,
-			neutral::xmodel_surfs_source, neutral::decal_volume_material_source, neutral::stream_key_source, neutral::material_source, neutral::shader_source, asset_data::physics_fx_pipeline,
+			neutral::xmodel_surfs_source, neutral::decal_volume_material_source, neutral::stream_key_source, neutral::material_source, neutral::shader_source, asset_data::technique_set, asset_data::physics_fx_pipeline,
 			neutral::vector_field_source>;
 
 		template <typename T>
@@ -356,6 +357,8 @@ namespace zonetool::iw8
 			case ASSET_TYPE_COMPUTESHADER:
 			case ASSET_TYPE_LIBSHADER:
 				return accepted(neutral::to_neutral(*static_cast<const ComputeShader*>(header), type), "shader", kept);
+			case ASSET_TYPE_TECHNIQUE_SET:
+				return accepted(neutral::to_neutral(*static_cast<const MaterialTechniqueSet*>(header)), "technique set", kept);
 			case ASSET_TYPE_MATERIAL:
 				return accepted(neutral::to_neutral(*static_cast<const Material*>(header)), "material", kept);
 			case ASSET_TYPE_DECAL_VOLUME_MATERIAL:
@@ -422,6 +425,7 @@ namespace zonetool::iw8
 
 			// An asset that a rebuilt asset points to is rebuilt first when it has neutral data.
 			std::map<void*, void*> rebuilt;
+			neutral::technique_cache techniques;
 			std::function<void*(void*)> rebuild;
 			const neutral::asset_resolver resolve = [&](const std::int32_t type, const std::string& name) -> void*
 			{
@@ -453,6 +457,10 @@ namespace zonetool::iw8
 					if constexpr (std::is_same_v<type, asset_data::rumble_info>)
 					{
 						return neutral::from_neutral(item, memory, resolve_graph);
+					}
+					else if constexpr (std::is_same_v<type, asset_data::technique_set>)
+					{
+						return neutral::from_neutral(item, resolve, techniques, memory);
 					}
 					else if constexpr (requires { neutral::from_neutral(item, resolve, memory); })
 					{
