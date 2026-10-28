@@ -67,4 +67,6 @@ namespace zonetool::iw8
 	std::vector<std::int32_t> zone_list_types(const std::filesystem::path& path);
 	// The same from the zone file's data, already read.
 	std::vector<std::int32_t> zone_list_types(const std::filesystem::path& path, std::string data);
+	// The type and definition name of each entry of the asset list, from the zone file's data, already read.
+	std::vector<std::pair<std::int32_t, std::string>> zone_list_assets(const std::filesystem::path& path, std::string data);
 }

@@ -262,4 +262,18 @@ namespace zonetool::iw8
 	{
 		return list_types(*load_zone(path.stem().string(), xfile::read(path, std::move(data), definition().format)));
 	}
+
+	std::vector<std::pair<std::int32_t, std::string>> zone_list_assets(const std::filesystem::path& path, std::string data)
+	{
+		const auto zone = load_zone(path.stem().string(), xfile::read(path, std::move(data), definition().format));
+		std::vector<std::pair<std::int32_t, std::string>> assets;
+		assets.reserve(zone->list.size());
+		for (const auto& entry : zone->list)
+		{
+			const auto* name = get_asset_name(entry.type, entry.header);
+			assets.emplace_back(entry.type, name ? name : "");
+		}
+
+		return assets;
+	}
 }
