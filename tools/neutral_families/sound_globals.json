@@ -1,0 +1,9 @@
+{
+ "family": "sound_globals",
+ "assets": [
+  {"type": "ASSET_TYPE_SOUND_GLOBALS", "struct": "SndGlobals", "neutral": "sound_globals", "name": "name"}
+ ],
+ "tokens": {"snd": "sound", "entchannel": "entity_channel", "volmod": "volume_modifier", "info": "info", "perk": "perk"},
+ "structs": {"snd_volmod_info_t": "sound_volume_modifier", "snd_entchannel_info_t": "sound_entity_channel", "snd_perk_info_t": "sound_perk"},
+ "fields": {}
+}

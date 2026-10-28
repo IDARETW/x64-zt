@@ -138,7 +138,7 @@ namespace zonetool::iw8::neutral
 			asset_data::sound_alias_list data;
 			data.alias_name = plain::read_string(native.aliasName);
 			data.id = native.id;
-			data.head = plain::read_array(native.head, native.count, "SndAliasList.head", [&](const SndAlias& item) { return read_sound_alias(item); });
+			data.head = plain::read_array(native.head, native.count, "SndAliasList.head", [&](const auto& item) { return read_sound_alias(item); });
 			data.sequence = native.sequence;
 			return data;
 		}
@@ -147,7 +147,7 @@ namespace zonetool::iw8::neutral
 		{
 			native.aliasName = plain::write_string(memory, data.alias_name);
 			native.id = data.id;
-			native.head = plain::write_array<SndAlias>(data.head, memory, [&](SndAlias& out, const asset_data::sound_alias& in) { write_sound_alias(out, in, resolve, memory); });
+			native.head = plain::write_array<SndAlias>(data.head, memory, [&](auto& out, const auto& in) { write_sound_alias(out, in, resolve, memory); });
 			native.sequence = data.sequence;
 			native.count = plain::count_of<std::int32_t>(data.head);
 		}
@@ -744,40 +744,40 @@ namespace zonetool::iw8::neutral
 		{
 			asset_data::sound_table data;
 			data.id = native.id;
-			data.adsr_settings = plain::read_array(native.adsrSettings, native.adsrCount, "SoundTable.adsrSettings", [&](const ADSRSetting& item) { return read_adsr_setting(item); });
-			data.ambient_defs = plain::read_array(native.ambientDefs, native.ambientDefCount, "SoundTable.ambientDefs", [&](const AmbientDef& item) { return read_ambient_def(item); });
-			data.ambient_events = plain::read_array(native.ambientEvents, native.ambientEventCount, "SoundTable.ambientEvents", [&](const AmbientEvent& item) { return read_ambient_event(item); });
-			data.ambient_elements = plain::read_array(native.ambientElements, native.ambientElementsCount, "SoundTable.ambientElements", [&](const AmbientElement& item) { return read_ambient_element(item); });
-			data.filters = plain::read_array(native.filters, native.filterCount, "SoundTable.filters", [&](const FilterDef& item) { return read_filter_def(item); });
-			data.mixes = plain::read_array(native.mixes, native.mixCount, "SoundTable.mixes", [&](const MixDef& item) { return read_mix_def(item); });
-			data.npc_adsr_zones = plain::read_array(native.npcADSRZones, native.npcADSRZoneCount, "SoundTable.npcADSRZones", [&](const AdsrZoneEntry& item) { return read_adsr_zone_entry(item); });
-			data.occlusion_filters = plain::read_array(native.occlusionFilters, native.occlusionFilterCount, "SoundTable.occlusionFilters", [&](const OccludeDef& item) { return read_occlude_def(item); });
-			data.player_adsr_zones = plain::read_array(native.playerADSRZones, native.playerADSRZoneCount, "SoundTable.playerADSRZones", [&](const AdsrZoneEntry& item) { return read_adsr_zone_entry(item); });
-			data.reverbs = plain::read_array(native.reverbs, native.reverbCount, "SoundTable.reverbs", [&](const ReverbDef& item) { return read_reverb_def(item); });
-			data.time_scale_settings = plain::read_array(native.timeScaleSettings, native.timeScaleSettingCount, "SoundTable.timeScaleSettings", [&](const TimescaleEntry& item) { return read_timescale_entry(item); });
-			data.zones = plain::read_array(native.zones, native.zoneCount, "SoundTable.zones", [&](const ZoneDef& item) { return read_zone_def(item); });
-			data.full_occlusion_defs = plain::read_array(native.fullOcclusionDefs, native.fullOcclusionDefCount, "SoundTable.fullOcclusionDefs", [&](const FullOcclusionDef& item) { return read_full_occlusion_def(item); });
-			data.player_breath_state_defs = plain::read_array(native.plrBreathStateDefs, native.plrBreathStateDefCount, "SoundTable.plrBreathStateDefs", [&](const PlayerBreathStateDef& item) { return read_player_breath_state_def(item); });
+			data.adsr_settings = plain::read_array(native.adsrSettings, native.adsrCount, "SoundTable.adsrSettings", [&](const auto& item) { return read_adsr_setting(item); });
+			data.ambient_defs = plain::read_array(native.ambientDefs, native.ambientDefCount, "SoundTable.ambientDefs", [&](const auto& item) { return read_ambient_def(item); });
+			data.ambient_events = plain::read_array(native.ambientEvents, native.ambientEventCount, "SoundTable.ambientEvents", [&](const auto& item) { return read_ambient_event(item); });
+			data.ambient_elements = plain::read_array(native.ambientElements, native.ambientElementsCount, "SoundTable.ambientElements", [&](const auto& item) { return read_ambient_element(item); });
+			data.filters = plain::read_array(native.filters, native.filterCount, "SoundTable.filters", [&](const auto& item) { return read_filter_def(item); });
+			data.mixes = plain::read_array(native.mixes, native.mixCount, "SoundTable.mixes", [&](const auto& item) { return read_mix_def(item); });
+			data.npc_adsr_zones = plain::read_array(native.npcADSRZones, native.npcADSRZoneCount, "SoundTable.npcADSRZones", [&](const auto& item) { return read_adsr_zone_entry(item); });
+			data.occlusion_filters = plain::read_array(native.occlusionFilters, native.occlusionFilterCount, "SoundTable.occlusionFilters", [&](const auto& item) { return read_occlude_def(item); });
+			data.player_adsr_zones = plain::read_array(native.playerADSRZones, native.playerADSRZoneCount, "SoundTable.playerADSRZones", [&](const auto& item) { return read_adsr_zone_entry(item); });
+			data.reverbs = plain::read_array(native.reverbs, native.reverbCount, "SoundTable.reverbs", [&](const auto& item) { return read_reverb_def(item); });
+			data.time_scale_settings = plain::read_array(native.timeScaleSettings, native.timeScaleSettingCount, "SoundTable.timeScaleSettings", [&](const auto& item) { return read_timescale_entry(item); });
+			data.zones = plain::read_array(native.zones, native.zoneCount, "SoundTable.zones", [&](const auto& item) { return read_zone_def(item); });
+			data.full_occlusion_defs = plain::read_array(native.fullOcclusionDefs, native.fullOcclusionDefCount, "SoundTable.fullOcclusionDefs", [&](const auto& item) { return read_full_occlusion_def(item); });
+			data.player_breath_state_defs = plain::read_array(native.plrBreathStateDefs, native.plrBreathStateDefCount, "SoundTable.plrBreathStateDefs", [&](const auto& item) { return read_player_breath_state_def(item); });
 			return data;
 		}
 
 		void write_sound_table(SoundTable& native, const asset_data::sound_table& data, [[maybe_unused]] const asset_resolver& resolve, [[maybe_unused]] plain::context& memory)
 		{
 			native.id = data.id;
-			native.adsrSettings = plain::write_array<ADSRSetting>(data.adsr_settings, memory, [&](ADSRSetting& out, const asset_data::adsr_setting& in) { write_adsr_setting(out, in, resolve, memory); });
-			native.ambientDefs = plain::write_array<AmbientDef>(data.ambient_defs, memory, [&](AmbientDef& out, const asset_data::ambient_def& in) { write_ambient_def(out, in, resolve, memory); });
-			native.ambientEvents = plain::write_array<AmbientEvent>(data.ambient_events, memory, [&](AmbientEvent& out, const asset_data::ambient_event& in) { write_ambient_event(out, in, resolve, memory); });
-			native.ambientElements = plain::write_array<AmbientElement>(data.ambient_elements, memory, [&](AmbientElement& out, const asset_data::ambient_element& in) { write_ambient_element(out, in, resolve, memory); });
-			native.filters = plain::write_array<FilterDef>(data.filters, memory, [&](FilterDef& out, const asset_data::filter_def& in) { write_filter_def(out, in, resolve, memory); });
-			native.mixes = plain::write_array<MixDef>(data.mixes, memory, [&](MixDef& out, const asset_data::mix_def& in) { write_mix_def(out, in, resolve, memory); });
-			native.npcADSRZones = plain::write_array<AdsrZoneEntry>(data.npc_adsr_zones, memory, [&](AdsrZoneEntry& out, const asset_data::adsr_zone_entry& in) { write_adsr_zone_entry(out, in, resolve, memory); });
-			native.occlusionFilters = plain::write_array<OccludeDef>(data.occlusion_filters, memory, [&](OccludeDef& out, const asset_data::occlude_def& in) { write_occlude_def(out, in, resolve, memory); });
-			native.playerADSRZones = plain::write_array<AdsrZoneEntry>(data.player_adsr_zones, memory, [&](AdsrZoneEntry& out, const asset_data::adsr_zone_entry& in) { write_adsr_zone_entry(out, in, resolve, memory); });
-			native.reverbs = plain::write_array<ReverbDef>(data.reverbs, memory, [&](ReverbDef& out, const asset_data::reverb_def& in) { write_reverb_def(out, in, resolve, memory); });
-			native.timeScaleSettings = plain::write_array<TimescaleEntry>(data.time_scale_settings, memory, [&](TimescaleEntry& out, const asset_data::timescale_entry& in) { write_timescale_entry(out, in, resolve, memory); });
-			native.zones = plain::write_array<ZoneDef>(data.zones, memory, [&](ZoneDef& out, const asset_data::zone_def& in) { write_zone_def(out, in, resolve, memory); });
-			native.fullOcclusionDefs = plain::write_array<FullOcclusionDef>(data.full_occlusion_defs, memory, [&](FullOcclusionDef& out, const asset_data::full_occlusion_def& in) { write_full_occlusion_def(out, in, resolve, memory); });
-			native.plrBreathStateDefs = plain::write_array<PlayerBreathStateDef>(data.player_breath_state_defs, memory, [&](PlayerBreathStateDef& out, const asset_data::player_breath_state_def& in) { write_player_breath_state_def(out, in, resolve, memory); });
+			native.adsrSettings = plain::write_array<ADSRSetting>(data.adsr_settings, memory, [&](auto& out, const auto& in) { write_adsr_setting(out, in, resolve, memory); });
+			native.ambientDefs = plain::write_array<AmbientDef>(data.ambient_defs, memory, [&](auto& out, const auto& in) { write_ambient_def(out, in, resolve, memory); });
+			native.ambientEvents = plain::write_array<AmbientEvent>(data.ambient_events, memory, [&](auto& out, const auto& in) { write_ambient_event(out, in, resolve, memory); });
+			native.ambientElements = plain::write_array<AmbientElement>(data.ambient_elements, memory, [&](auto& out, const auto& in) { write_ambient_element(out, in, resolve, memory); });
+			native.filters = plain::write_array<FilterDef>(data.filters, memory, [&](auto& out, const auto& in) { write_filter_def(out, in, resolve, memory); });
+			native.mixes = plain::write_array<MixDef>(data.mixes, memory, [&](auto& out, const auto& in) { write_mix_def(out, in, resolve, memory); });
+			native.npcADSRZones = plain::write_array<AdsrZoneEntry>(data.npc_adsr_zones, memory, [&](auto& out, const auto& in) { write_adsr_zone_entry(out, in, resolve, memory); });
+			native.occlusionFilters = plain::write_array<OccludeDef>(data.occlusion_filters, memory, [&](auto& out, const auto& in) { write_occlude_def(out, in, resolve, memory); });
+			native.playerADSRZones = plain::write_array<AdsrZoneEntry>(data.player_adsr_zones, memory, [&](auto& out, const auto& in) { write_adsr_zone_entry(out, in, resolve, memory); });
+			native.reverbs = plain::write_array<ReverbDef>(data.reverbs, memory, [&](auto& out, const auto& in) { write_reverb_def(out, in, resolve, memory); });
+			native.timeScaleSettings = plain::write_array<TimescaleEntry>(data.time_scale_settings, memory, [&](auto& out, const auto& in) { write_timescale_entry(out, in, resolve, memory); });
+			native.zones = plain::write_array<ZoneDef>(data.zones, memory, [&](auto& out, const auto& in) { write_zone_def(out, in, resolve, memory); });
+			native.fullOcclusionDefs = plain::write_array<FullOcclusionDef>(data.full_occlusion_defs, memory, [&](auto& out, const auto& in) { write_full_occlusion_def(out, in, resolve, memory); });
+			native.plrBreathStateDefs = plain::write_array<PlayerBreathStateDef>(data.player_breath_state_defs, memory, [&](auto& out, const auto& in) { write_player_breath_state_def(out, in, resolve, memory); });
 			native.adsrCount = plain::count_of<std::uint32_t>(data.adsr_settings);
 			native.ambientDefCount = plain::count_of<std::uint32_t>(data.ambient_defs);
 			native.ambientEventCount = plain::count_of<std::uint32_t>(data.ambient_events);
@@ -1075,7 +1075,7 @@ namespace zonetool::iw8::neutral
 			data.id = native.id;
 			data.intro = read_sound_music_asset(native.intro);
 			data.exit = read_sound_music_asset(native.exit);
-			data.loops = plain::read_array(native.loops, native.loopCount, "SndMusicState.loops", [&](const SndMusicAsset& item) { return read_sound_music_asset(item); });
+			data.loops = plain::read_array(native.loops, native.loopCount, "SndMusicState.loops", [&](const auto& item) { return read_sound_music_asset(item); });
 			data.order = native.order;
 			data.interrupt_priority = native.interruptPriority;
 			data.persist_priority = native.persistPriority;
@@ -1092,7 +1092,7 @@ namespace zonetool::iw8::neutral
 			native.id = data.id;
 			write_sound_music_asset(native.intro, data.intro, resolve, memory);
 			write_sound_music_asset(native.exit, data.exit, resolve, memory);
-			native.loops = plain::write_array<SndMusicAsset>(data.loops, memory, [&](SndMusicAsset& out, const asset_data::sound_music_asset& in) { write_sound_music_asset(out, in, resolve, memory); });
+			native.loops = plain::write_array<SndMusicAsset>(data.loops, memory, [&](auto& out, const auto& in) { write_sound_music_asset(out, in, resolve, memory); });
 			native.order = data.order;
 			native.interruptPriority = data.interrupt_priority;
 			native.persistPriority = data.persist_priority;
@@ -1124,7 +1124,7 @@ namespace zonetool::iw8::neutral
 			asset_data::sound_music_set data;
 			data.name = plain::read_text(native.name, "SndMusicSet.name");
 			data.id = native.id;
-			data.states = plain::read_array(native.states, native.stateCount, "SndMusicSet.states", [&](const SndMusicState& item) { return read_sound_music_state(item); });
+			data.states = plain::read_array(native.states, native.stateCount, "SndMusicSet.states", [&](const auto& item) { return read_sound_music_state(item); });
 			return data;
 		}
 
@@ -1132,7 +1132,7 @@ namespace zonetool::iw8::neutral
 		{
 			plain::write_text(native.name, data.name, "SndMusicSet.name");
 			native.id = data.id;
-			native.states = plain::write_array<SndMusicState>(data.states, memory, [&](SndMusicState& out, const asset_data::sound_music_state& in) { write_sound_music_state(out, in, resolve, memory); });
+			native.states = plain::write_array<SndMusicState>(data.states, memory, [&](auto& out, const auto& in) { write_sound_music_state(out, in, resolve, memory); });
 			native.stateCount = plain::count_of<std::uint32_t>(data.states);
 		}
 
@@ -1331,7 +1331,7 @@ namespace zonetool::iw8::neutral
 			data.name = plain::read_text(native.name, "SndCurve.name");
 			data.id = native.id;
 			data.num_points = native.numPoints;
-			data.points = [&] { std::array<std::array<float, 2>, 16> out; for (std::size_t i = 0; i < out.size(); ++i) { out[i] = std::to_array(native.points[i].v); } return out; }();
+			data.points = [&] { std::array<std::array<float, 2>, 16> out; for (std::size_t i = 0; i < out.size(); ++i) { out[i] = plain::read_floats<2>(&native.points[i]); } return out; }();
 			return data;
 		}
 
@@ -1469,22 +1469,22 @@ namespace zonetool::iw8::neutral
 			data.zone = plain::read_string(native.zone);
 			data.game_language = plain::read_string(native.gameLanguage);
 			data.sound_language = plain::read_string(native.soundLanguage);
-			data.alias = plain::read_array(native.alias, native.aliasCount, "SndBank.alias", [&](const SndAliasList& item) { return read_sound_alias_list(item); });
-			data.alias_index = plain::read_array(native.aliasIndex, native.aliasCount, "SndBank.aliasIndex", [&](const SndIndexEntry& item) { return read_sound_index_entry(item); });
-			data.send_effects = plain::read_array(native.sendEffects, native.sendEffectCount, "SndBank.sendEffects", [&](const SndSendEffectParams& item) { return read_sound_send_effect_params(item); });
+			data.alias = plain::read_array(native.alias, native.aliasCount, "SndBank.alias", [&](const auto& item) { return read_sound_alias_list(item); });
+			data.alias_index = plain::read_array(native.aliasIndex, native.aliasCount, "SndBank.aliasIndex", [&](const auto& item) { return read_sound_index_entry(item); });
+			data.send_effects = plain::read_array(native.sendEffects, native.sendEffectCount, "SndBank.sendEffects", [&](const auto& item) { return read_sound_send_effect_params(item); });
 			data.tables = read_sound_table(native.soundTable);
-			data.ducks = plain::read_array(native.ducks, native.duckCount, "SndBank.ducks", [&](const SndDuck& item) { return read_sound_duck(item); });
-			data.music_sets = plain::read_array(native.musicSets, native.musicSetCount, "SndBank.musicSets", [&](const SndMusicSet& item) { return read_sound_music_set(item); });
-			data.weapon_reflections = plain::read_array(native.weapReflections, native.weapReflectionCount, "SndBank.weapReflections", [&](const WeaponReflectionDef& item) { return read_weapon_reflection_def(item); });
-			data.doppler_presets = plain::read_array(native.dopplerPresets, native.dopplerPresetCount, "SndBank.dopplerPresets", [&](const DopplerPreset& item) { return read_doppler_preset(item); });
-			data.occlusion_shapes = plain::read_array(native.occlusionShapes, native.occlusionShapeCount, "SndBank.occlusionShapes", [&](const OcclusionShape& item) { return read_occlusion_shape(item); });
-			data.focus_cones = plain::read_array(native.focusCones, native.focusConeCount, "SndBank.focusCones", [&](const FocusCone& item) { return read_focus_cone(item); });
-			data.volume_falloff_curves = plain::read_array(native.vfCurves, native.vfCurveCount, "SndBank.vfCurves", [&](const SndCurve& item) { return read_sound_curve(item); });
-			data.lpf_curves = plain::read_array(native.lpfCurves, native.lpfCurveCount, "SndBank.lpfCurves", [&](const SndCurve& item) { return read_sound_curve(item); });
-			data.hpf_curves = plain::read_array(native.hpfCurves, native.hpfCurveCount, "SndBank.hpfCurves", [&](const SndCurve& item) { return read_sound_curve(item); });
-			data.reverb_curves = plain::read_array(native.rvbCurves, native.rvbCurveCount, "SndBank.rvbCurves", [&](const SndCurve& item) { return read_sound_curve(item); });
-			data.speaker_maps = plain::read_array(native.speakerMaps, native.speakerMapCount, "SndBank.speakerMaps", [&](const SpeakerMap& item) { return read_speaker_map(item); });
-			data.futzs = plain::read_array(native.futzs, native.futzCount, "SndBank.futzs", [&](const SndFutz& item) { return read_sound_futz(item); });
+			data.ducks = plain::read_array(native.ducks, native.duckCount, "SndBank.ducks", [&](const auto& item) { return read_sound_duck(item); });
+			data.music_sets = plain::read_array(native.musicSets, native.musicSetCount, "SndBank.musicSets", [&](const auto& item) { return read_sound_music_set(item); });
+			data.weapon_reflections = plain::read_array(native.weapReflections, native.weapReflectionCount, "SndBank.weapReflections", [&](const auto& item) { return read_weapon_reflection_def(item); });
+			data.doppler_presets = plain::read_array(native.dopplerPresets, native.dopplerPresetCount, "SndBank.dopplerPresets", [&](const auto& item) { return read_doppler_preset(item); });
+			data.occlusion_shapes = plain::read_array(native.occlusionShapes, native.occlusionShapeCount, "SndBank.occlusionShapes", [&](const auto& item) { return read_occlusion_shape(item); });
+			data.focus_cones = plain::read_array(native.focusCones, native.focusConeCount, "SndBank.focusCones", [&](const auto& item) { return read_focus_cone(item); });
+			data.volume_falloff_curves = plain::read_array(native.vfCurves, native.vfCurveCount, "SndBank.vfCurves", [&](const auto& item) { return read_sound_curve(item); });
+			data.lpf_curves = plain::read_array(native.lpfCurves, native.lpfCurveCount, "SndBank.lpfCurves", [&](const auto& item) { return read_sound_curve(item); });
+			data.hpf_curves = plain::read_array(native.hpfCurves, native.hpfCurveCount, "SndBank.hpfCurves", [&](const auto& item) { return read_sound_curve(item); });
+			data.reverb_curves = plain::read_array(native.rvbCurves, native.rvbCurveCount, "SndBank.rvbCurves", [&](const auto& item) { return read_sound_curve(item); });
+			data.speaker_maps = plain::read_array(native.speakerMaps, native.speakerMapCount, "SndBank.speakerMaps", [&](const auto& item) { return read_speaker_map(item); });
+			data.futzs = plain::read_array(native.futzs, native.futzCount, "SndBank.futzs", [&](const auto& item) { return read_sound_futz(item); });
 			data.stream_info = read_sound_bank_stream_info(native.streamInfo);
 			return data;
 		}
@@ -1495,22 +1495,22 @@ namespace zonetool::iw8::neutral
 			native.zone = plain::write_string(memory, data.zone);
 			native.gameLanguage = plain::write_string(memory, data.game_language);
 			native.soundLanguage = plain::write_string(memory, data.sound_language);
-			native.alias = plain::write_array<SndAliasList>(data.alias, memory, [&](SndAliasList& out, const asset_data::sound_alias_list& in) { write_sound_alias_list(out, in, resolve, memory); });
-			native.aliasIndex = plain::write_array<SndIndexEntry>(data.alias_index, memory, [&](SndIndexEntry& out, const asset_data::sound_index_entry& in) { write_sound_index_entry(out, in, resolve, memory); });
-			native.sendEffects = plain::write_array<SndSendEffectParams>(data.send_effects, memory, [&](SndSendEffectParams& out, const asset_data::sound_send_effect_params& in) { write_sound_send_effect_params(out, in, resolve, memory); });
+			native.alias = plain::write_array<SndAliasList>(data.alias, memory, [&](auto& out, const auto& in) { write_sound_alias_list(out, in, resolve, memory); });
+			native.aliasIndex = plain::write_array<SndIndexEntry>(data.alias_index, memory, [&](auto& out, const auto& in) { write_sound_index_entry(out, in, resolve, memory); });
+			native.sendEffects = plain::write_array<SndSendEffectParams>(data.send_effects, memory, [&](auto& out, const auto& in) { write_sound_send_effect_params(out, in, resolve, memory); });
 			write_sound_table(native.soundTable, data.tables, resolve, memory);
-			native.ducks = plain::write_array<SndDuck>(data.ducks, memory, [&](SndDuck& out, const asset_data::sound_duck& in) { write_sound_duck(out, in, resolve, memory); });
-			native.musicSets = plain::write_array<SndMusicSet>(data.music_sets, memory, [&](SndMusicSet& out, const asset_data::sound_music_set& in) { write_sound_music_set(out, in, resolve, memory); });
-			native.weapReflections = plain::write_array<WeaponReflectionDef>(data.weapon_reflections, memory, [&](WeaponReflectionDef& out, const asset_data::weapon_reflection_def& in) { write_weapon_reflection_def(out, in, resolve, memory); });
-			native.dopplerPresets = plain::write_array<DopplerPreset>(data.doppler_presets, memory, [&](DopplerPreset& out, const asset_data::doppler_preset& in) { write_doppler_preset(out, in, resolve, memory); });
-			native.occlusionShapes = plain::write_array<OcclusionShape>(data.occlusion_shapes, memory, [&](OcclusionShape& out, const asset_data::occlusion_shape& in) { write_occlusion_shape(out, in, resolve, memory); });
-			native.focusCones = plain::write_array<FocusCone>(data.focus_cones, memory, [&](FocusCone& out, const asset_data::focus_cone& in) { write_focus_cone(out, in, resolve, memory); });
-			native.vfCurves = plain::write_array<SndCurve>(data.volume_falloff_curves, memory, [&](SndCurve& out, const asset_data::sound_curve& in) { write_sound_curve(out, in, resolve, memory); });
-			native.lpfCurves = plain::write_array<SndCurve>(data.lpf_curves, memory, [&](SndCurve& out, const asset_data::sound_curve& in) { write_sound_curve(out, in, resolve, memory); });
-			native.hpfCurves = plain::write_array<SndCurve>(data.hpf_curves, memory, [&](SndCurve& out, const asset_data::sound_curve& in) { write_sound_curve(out, in, resolve, memory); });
-			native.rvbCurves = plain::write_array<SndCurve>(data.reverb_curves, memory, [&](SndCurve& out, const asset_data::sound_curve& in) { write_sound_curve(out, in, resolve, memory); });
-			native.speakerMaps = plain::write_array<SpeakerMap>(data.speaker_maps, memory, [&](SpeakerMap& out, const asset_data::speaker_map& in) { write_speaker_map(out, in, resolve, memory); });
-			native.futzs = plain::write_array<SndFutz>(data.futzs, memory, [&](SndFutz& out, const asset_data::sound_futz& in) { write_sound_futz(out, in, resolve, memory); });
+			native.ducks = plain::write_array<SndDuck>(data.ducks, memory, [&](auto& out, const auto& in) { write_sound_duck(out, in, resolve, memory); });
+			native.musicSets = plain::write_array<SndMusicSet>(data.music_sets, memory, [&](auto& out, const auto& in) { write_sound_music_set(out, in, resolve, memory); });
+			native.weapReflections = plain::write_array<WeaponReflectionDef>(data.weapon_reflections, memory, [&](auto& out, const auto& in) { write_weapon_reflection_def(out, in, resolve, memory); });
+			native.dopplerPresets = plain::write_array<DopplerPreset>(data.doppler_presets, memory, [&](auto& out, const auto& in) { write_doppler_preset(out, in, resolve, memory); });
+			native.occlusionShapes = plain::write_array<OcclusionShape>(data.occlusion_shapes, memory, [&](auto& out, const auto& in) { write_occlusion_shape(out, in, resolve, memory); });
+			native.focusCones = plain::write_array<FocusCone>(data.focus_cones, memory, [&](auto& out, const auto& in) { write_focus_cone(out, in, resolve, memory); });
+			native.vfCurves = plain::write_array<SndCurve>(data.volume_falloff_curves, memory, [&](auto& out, const auto& in) { write_sound_curve(out, in, resolve, memory); });
+			native.lpfCurves = plain::write_array<SndCurve>(data.lpf_curves, memory, [&](auto& out, const auto& in) { write_sound_curve(out, in, resolve, memory); });
+			native.hpfCurves = plain::write_array<SndCurve>(data.hpf_curves, memory, [&](auto& out, const auto& in) { write_sound_curve(out, in, resolve, memory); });
+			native.rvbCurves = plain::write_array<SndCurve>(data.reverb_curves, memory, [&](auto& out, const auto& in) { write_sound_curve(out, in, resolve, memory); });
+			native.speakerMaps = plain::write_array<SpeakerMap>(data.speaker_maps, memory, [&](auto& out, const auto& in) { write_speaker_map(out, in, resolve, memory); });
+			native.futzs = plain::write_array<SndFutz>(data.futzs, memory, [&](auto& out, const auto& in) { write_sound_futz(out, in, resolve, memory); });
 			write_sound_bank_stream_info(native.streamInfo, data.stream_info, resolve, memory);
 			native.aliasCount = plain::count_of<std::uint32_t>(data.alias);
 			native.sendEffectCount = plain::count_of<std::uint32_t>(data.send_effects);
