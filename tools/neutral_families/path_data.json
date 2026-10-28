@@ -1,0 +1,30 @@
+{
+ "family": "path_data",
+ "assets": [
+  {
+   "type": "ASSET_TYPE_PATHDATA",
+   "struct": "PathData",
+   "neutral": "path_data",
+   "name": "name"
+  }
+ ],
+ "data_includes": [
+  "path_tree_data.hpp"
+ ],
+ "adapter_includes": [
+  "path_tree.hpp"
+ ],
+ "external": {
+  "pathnode_tree_t": {
+   "neutral": "path_tree",
+   "read": "read_path_tree",
+   "write": "write_path_tree",
+   "size": "size_path_tree",
+   "range": true
+  }
+ },
+ "blocks": {
+  "ED58D932A885E0EFAB60E0E6C9C0FB48": "std::array<std::uint8_t, 12>",
+  "t_54CB8A0F601B46D96D10F3E70FE3A2ED": "std::array<std::uint8_t, 16>"
+ }
+}

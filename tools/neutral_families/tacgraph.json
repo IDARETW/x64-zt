@@ -1,0 +1,6 @@
+{
+ "family": "tacgraph",
+ "assets": [
+  {"type": "ASSET_TYPE_TACGRAPH", "struct": "TacticalGraphData", "neutral": "tac_graph", "name": "m_Name"}
+ ]
+}
