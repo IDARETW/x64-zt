@@ -281,8 +281,33 @@ namespace zonetool::iw8
 
 		// An asset of an adapter-backed type that the adapter declines (an image whose texels the zone does not hold, an
 		// animation whose streams it does not decode) has no neutral data: `kept` receives the reason when it is given.
+		// IW8_NEUTRAL_SKIP=<type id>,... keeps the assets of those types native, to find the adapter that changes a zone.
+		bool neutral_skipped(const std::int32_t type)
+		{
+			char list[256]{};
+			if (!GetEnvironmentVariableA("IW8_NEUTRAL_SKIP", list, sizeof(list)))
+			{
+				return false;
+			}
+
+			for (const auto id : std::string_view(list) | std::views::split(','))
+			{
+				if (std::string_view(id) == std::to_string(type))
+				{
+					return true;
+				}
+			}
+
+			return false;
+		}
+
 		std::optional<neutral_data> neutral_of(const std::int32_t type, const void* header, std::string* kept = nullptr)
 		{
+			if (neutral_skipped(type))
+			{
+				return std::nullopt;
+			}
+
 			switch (type)
 			{
 			case ASSET_TYPE_LOCALIZE_ENTRY:
@@ -430,6 +455,8 @@ namespace zonetool::iw8
 				rebuild(header);
 			}
 
+			// A list entry that points at data of the zone by its packed offset (a converter's zone) describes the layout of
+			// that zone: the rebuilt zone has another, so the writer finds the place again. Special markers stay.
 			const auto replace = [&rebuilt](std::vector<zone_asset> assets)
 			{
 				for (auto& asset : assets)
@@ -437,6 +464,11 @@ namespace zonetool::iw8
 					if (const auto found = rebuilt.find(asset.header); found != rebuilt.end())
 					{
 						asset.header = found->second;
+					}
+
+					if (asset.marker && asset.marker < 0xFFFFFFFFFFFFFFF0ull)
+					{
+						asset.marker = 0;
 					}
 				}
 
@@ -468,6 +500,20 @@ namespace zonetool::iw8
 				}
 
 				throw std::runtime_error("the zone that the neutral data makes holds other assets:" + difference);
+			}
+
+			// The asset list entry by entry: a reference to an asset of the zone must stay the reference that it was.
+			for (std::size_t index = 0; index < std::min(zone.list.size(), reloaded->list.size()); ++index)
+			{
+				const auto& before = zone.list[index];
+				const auto& after = reloaded->list[index];
+				if (before.type != after.type || before.referenced != after.referenced ||
+					asset_name(before.type, before.header) != asset_name(after.type, after.header))
+				{
+					throw std::runtime_error(std::format("list entry {} reads back as {} \"{}\"{} instead of {} \"{}\"{}", index, after.type,
+						asset_name(after.type, after.header), after.referenced ? " (reference)" : "", before.type,
+						asset_name(before.type, before.header), before.referenced ? " (reference)" : ""));
+				}
 			}
 
 			std::set<asset_key> compared;
