@@ -1,6 +1,6 @@
 #pragma once
 
-#include <core/assets/asset_data.hpp>
+#include "asset_data.hpp"
 #include <algorithm>
 #include <array>
 #include <cmath>

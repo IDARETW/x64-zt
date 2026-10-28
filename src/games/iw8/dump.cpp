@@ -14,6 +14,7 @@
 #include "neutral/text.hpp"
 #include "neutral/xanim.hpp"
 #include "neutral/xmodel.hpp"
+#include <core/assets/neutral_files.hpp>
 
 #include <game.hpp>
 
@@ -540,6 +541,32 @@ namespace zonetool::iw8
 			ZONETOOL_INFO("%s: %zu assets rebuilt from neutral data (%zu kept native); the written zone (0x%zX of 0x%zX bytes) "
 				"loads with the same assets and gives the same neutral data for each", zone.name.data(), compared.size(), native,
 				written.data.size(), zone.file.payload.size());
+		}
+
+		// The neutral data of each owned animation of the zone, for a comparison with another profile's adapter.
+		void write_neutral_files(const loaded_zone& zone, const std::filesystem::path& folder)
+		{
+			std::size_t written{};
+			for (const auto& asset : zone.assets)
+			{
+				if (asset.referenced || asset.type != ASSET_TYPE_XANIMPARTS)
+				{
+					continue;
+				}
+
+				const auto source = neutral::to_neutral(*static_cast<const XAnimParts*>(asset.header));
+				if (!source)
+				{
+					ZONETOOL_INFO("%s: animation %s has no neutral data: %s", zone.name.data(), asset_name(asset.type, asset.header).data(),
+						source.error().data());
+					continue;
+				}
+
+				asset_data::write_neutral_file(folder, "xanim", source->xanim.name, asset_data::write_xanim(source->xanim));
+				++written;
+			}
+
+			ZONETOOL_INFO("%s: neutral data of %zu animations written to %s", zone.name.data(), written, folder.string().data());
 		}
 
 		using havok::replay_compendium;
@@ -3192,6 +3219,11 @@ namespace zonetool::iw8
 		for (const auto& [name, count] : counts)
 		{
 			ZONETOOL_INFO("  %s: %zu", name.data(), count);
+		}
+
+		if (const auto folder = asset_data::neutral_output_folder())
+		{
+			write_neutral_files(*zone, *folder);
 		}
 
 		if (check_rewrite)
