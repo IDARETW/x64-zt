@@ -2,9 +2,8 @@
 
 #include <core/assets/lighting_data.hpp>
 #include <core/assets/provenance.hpp>
+#include "resolver.hpp"
 #include "../structs.hpp"
-
-#include <functional>
 
 namespace zonetool
 {
@@ -18,9 +17,6 @@ namespace zonetool
 namespace zonetool::iw8::neutral
 {
 	inline constexpr auto lighting_profile = "iw8 replay 1.20";
-
-	// The header of the asset of a type and definition name that a rebuilt asset points to, or nullptr.
-	using asset_resolver = std::function<void*(std::int32_t type, const std::string& name)>;
 
 	struct light_def_source
 	{
