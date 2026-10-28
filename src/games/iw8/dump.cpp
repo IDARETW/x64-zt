@@ -289,6 +289,7 @@ namespace zonetool::iw8
 			asset_data::physics_events::physics_sfx_event,
 			asset_data::physics_events::physics_vfx_event,
 			asset_data::content::vehicle,
+			asset_data::content::xcam,
 			asset_data::content::attachment,
 			asset_data::content::animclass,
 			asset_data::content::luafile,
@@ -543,6 +544,8 @@ namespace zonetool::iw8
 				return accepted(neutral::to_neutral(*static_cast<const GfxWorld*>(header)), "graphics world", kept);
 			case ASSET_TYPE_GFXWORLD_TRANSIENT_ZONE:
 				return accepted(neutral::to_neutral(*static_cast<const GfxWorldTransientZone*>(header)), "graphics transient zone", kept);
+			case ASSET_TYPE_XCAM:
+				return accepted(neutral::to_neutral(*static_cast<const XCam*>(header)), "camera animation", kept);
 			case ASSET_TYPE_SCRIPTABLE:
 				return accepted(neutral::to_neutral(*static_cast<const ScriptableDef*>(header)), "scriptable", kept);
 			case ASSET_TYPE_COMWORLD:

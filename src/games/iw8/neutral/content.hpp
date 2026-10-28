@@ -52,4 +52,8 @@ namespace zonetool::iw8::neutral
 	VehicleDef* from_neutral(const asset_data::content::vehicle& data, const asset_resolver& resolve, zone_memory& memory);
 	std::size_t native_size(const asset_data::content::vehicle& data);
 
+	std::expected<asset_data::content::xcam, std::string> to_neutral(const XCam& native);
+	XCam* from_neutral(const asset_data::content::xcam& data, const asset_resolver& resolve, zone_memory& memory);
+	std::size_t native_size(const asset_data::content::xcam& data);
+
 }
