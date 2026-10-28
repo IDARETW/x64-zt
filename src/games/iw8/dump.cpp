@@ -12,6 +12,7 @@
 #include "neutral/lighting.hpp"
 #include "neutral/material.hpp"
 #include "neutral/rumble.hpp"
+#include "neutral/stream.hpp"
 #include "neutral/text.hpp"
 #include "neutral/xanim.hpp"
 #include "neutral/xmodel.hpp"
@@ -258,7 +259,7 @@ namespace zonetool::iw8
 		using neutral_data = std::variant<asset_data::localize_entry, asset_data::net_const_strings, asset_data::raw_file,
 			asset_data::string_table, asset_data::rumble_graph, asset_data::rumble_info, neutral::image_source,
 			neutral::xanim_source, neutral::light_def_source, neutral::grading_clut_source, neutral::xmodel_source,
-			neutral::xmodel_surfs_source, neutral::decal_volume_material_source>;
+			neutral::xmodel_surfs_source, neutral::decal_volume_material_source, neutral::stream_key_source>;
 
 		template <typename T>
 		std::optional<neutral_data> accepted(std::expected<T, std::string> value, const char* kind, std::string* kept)
@@ -314,6 +315,8 @@ namespace zonetool::iw8
 				return accepted(neutral::to_neutral(*static_cast<const XAnimParts*>(header)), "animation", kept);
 			case ASSET_TYPE_XMODEL:
 				return accepted(neutral::to_neutral(*static_cast<const XModel*>(header)), "model", kept);
+			case ASSET_TYPE_STREAM_KEY:
+				return accepted(neutral::to_neutral(*static_cast<const StreamKey*>(header)), "stream key", kept);
 			case ASSET_TYPE_DECAL_VOLUME_MATERIAL:
 				return accepted(neutral::to_neutral(*static_cast<const GfxDecalVolumeMaterial*>(header)), "decal volume material", kept);
 			case ASSET_TYPE_XMODEL_SURFS:
