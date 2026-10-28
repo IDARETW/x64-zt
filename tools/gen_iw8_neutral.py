@@ -88,6 +88,7 @@ class Rules:
         self.arrays = {}
         self.element_sizes = {}
         self.asset_arrays = {}
+        self.overlay_pointers = set()
         self.referenced = set()
         member = r'(?:\w+(?:\[\w+\])?\.)*?(\w+)'
         for m in re.finditer(r'stream\.string\(' + member + r'\);', text):
@@ -222,10 +223,17 @@ class Family:
         self.runtime = set(spec.get('runtime', []))
         self.spec_flag_enums = set(spec.get('flag_enums', []))
         self.problems = []
+        self.synthetic = {}
+        self.synthetic_member = {}
         self.tagged = {}
         for entry in spec.get('tagged', []):
             self.tagged[(entry['owner'], entry['member'])] = dict(entry, cases=self.dispatch_cases(entry))
         self.groups = spec.get('groups', {})
+        self.owner_pointers = spec.get('owner_pointers', [])
+        self.case_owner = {}
+        for key, entry in self.tagged.items():
+            for _, _, case_type in entry['cases']:
+                self.case_owner[case_type] = key[0]
         self.external = spec.get('external', {})
         for asset in spec['assets']:
             self.visit(asset['struct'])
@@ -255,6 +263,20 @@ class Family:
         values = self.source.enum_names[tag_type]
         skip = set(entry.get('skip', []))
         cases = {}
+        explicit = entry.get('cases')
+        if explicit:
+            union_all = {m['name']: m for m in Source.members(self.source.structs[union_type][1])}
+            result = []
+            for member, value in explicit.items():
+                info = union_all[member]
+                if info['pointer']:
+                    synthetic = '%s__%s' % (entry['owner'], member)
+                    self.synthetic[synthetic] = union_type
+                    self.synthetic_member[synthetic] = dict(info, name=member)
+                    result.append((int(value), member, synthetic))
+                else:
+                    result.append((int(value), member, info['type']))
+            return sorted(result)
         for member, member_type in union_members.items():
             if member in skip:
                 continue
@@ -292,6 +314,9 @@ class Family:
         name, type_name = m['name'], m['type']
         if type_name in self.external and not m['pointer']:
             return {'kind': 'external', 'ext': self.external[type_name]}
+        for alias in self.owner_pointers:
+            if m['pointer'] == 1 and name == alias['member'] and self.case_owner.get(owner) == alias['owner']:
+                return {'kind': 'alias', 'owner_member': alias['owner_member'], 'owner': alias['owner']}
         tagged = self.tagged.get((owner, name))
         if tagged:
             return {'kind': 'tagged', 'tag': tagged['tag'], 'cases': tagged['cases']}
@@ -409,23 +434,37 @@ class Family:
             type_name = a['type']
             if type_name in self.source.enums:
                 type_name = ALIASES.get(self.source.enums[type_name][0], self.source.enums[type_name][0])
+            if not a['pointer'] and not a['dims'] and type_name in self.source.structs and self.source.structs[type_name][0] == 'struct':
+                inner = Source.members(self.source.structs[type_name][1])
+                inner_sizes = [self.SIZES.get(ALIASES.get(i['type'], i['type'])) if not i['pointer'] and not i['dims'] and
+                               i['type'] not in self.source.enums else None for i in inner]
+                if inner and all(inner_sizes):
+                    sizes.add(sum(inner_sizes))
+                    continue
+            if a['pointer'] and not a['dims'] and a['name'] in self.rules.overlay_pointers:
+                sizes.add(8)
+                continue
             if a['pointer'] or a['dims'] or type_name not in self.SIZES:
                 self.problems.append('%s.%s: a union of %s is not mapped' % (owner, m['name'], m['type']))
                 return {'kind': 'unknown'}
             sizes.add(self.SIZES[type_name])
-        if len(sizes) != 1 or m['dims']:
-            self.problems.append('%s.%s: a union of %s mixes sizes or is an array' % (owner, m['name'], m['type']))
+        if not sizes or m['dims'] or max(sizes) not in (1, 2, 4, 8):
+            self.problems.append('%s.%s: a union of %s has no scalar size or is an array' % (owner, m['name'], m['type']))
             return {'kind': 'unknown'}
-        return {'kind': 'overlay', 'bits': sizes.pop() * 8, 'alternatives': [a['name'] for a in alternatives]}
+        # Alternatives shorter than the longest share its first bytes: the bits of the longest hold all of them.
+        return {'kind': 'overlay', 'bits': max(sizes) * 8, 'alternatives': [a['name'] for a in alternatives]}
 
     def visit(self, name):
-        if name in self.structs or self.vector_of(name) or name not in self.source.structs:
+        if name in self.structs or self.vector_of(name) or (name not in self.source.structs and name not in self.synthetic):
             return
-        kind, body = self.source.structs[name]
-        if kind == 'union':
-            self.problems.append('%s: a union is not mapped' % name)
-            return
-        members = Source.members(body)
+        if name in self.synthetic:
+            kind, members = 'struct', [self.synthetic_member[name]]
+        else:
+            kind, body = self.source.structs[name]
+            if kind == 'union':
+                self.problems.append('%s: a union is not mapped' % name)
+                return
+            members = Source.members(body)
         classes = [self.classify(name, m, members) for m in members]
         self.structs[name] = list(zip(members, classes))
         self.path.append(name)
@@ -472,6 +511,10 @@ class Family:
         if type_name in self.source.enums:
             return ALIASES.get(self.source.enums[type_name][0], self.source.enums[type_name][0])
         return type_name
+
+    def aliases_of(self, case_type):
+        """The members of a case struct that alias a member of the owner of the tagged union."""
+        return [(m, c) for m, c in self.structs.get(case_type, []) if c['kind'] == 'alias']
 
     def external_ns(self):
         return 'asset_data::' if self.qual else ''
@@ -538,7 +581,7 @@ class Family:
 
     def emitted(self, members):
         """The members that become neutral fields: not padding and not a count that an array derives."""
-        return [(m, c) for m, c in members if c['kind'] not in ('padding', 'unknown', 'runtime', 'tag') and 'counts' not in c]
+        return [(m, c) for m, c in members if c['kind'] not in ('padding', 'unknown', 'runtime', 'tag', 'alias') and 'counts' not in c]
 
     def enum_table(self, type_name):
         base, values = self.source.enums[type_name]
@@ -557,7 +600,8 @@ class Family:
                 return
             done.add(name)
             for m, c in self.structs[name]:
-                if c['kind'] in ('struct', 'array') and m['type'] in self.structs and not c.get('element', '').startswith('asset|'):
+                by_value = c['kind'] == 'struct' or (c['kind'] == 'array' and (c['count'][0] == 'literal'))
+                if by_value and m['type'] in self.structs and not c.get('element', '').startswith('asset|'):
                     visit(m['type'])
                 if c['kind'] == 'tagged':
                     for _, _, case_type in c['cases']:
@@ -581,6 +625,10 @@ class Family:
             out.extend('\t{%d, "%s"},' % (value, name) for value, name in names)
             out.append('}};')
             out.append('')
+        out.extend('struct %s;' % self.struct_name(name) for name in self.structs)
+        out.append('')
+        out.extend('inline void validate(const %s& data);' % self.struct_name(name) for name in self.structs)
+        out.append('')
         for name in self.order():
             out.extend(self.struct_decl(name))
         out.extend(self.validators())
@@ -722,8 +770,13 @@ class Family:
             lines = ['[&]() -> %s {' % variant,
                      'switch (static_cast<std::uint32_t>(native.%s)) {' % c['tag']]
             for value, member, case_type in c['cases']:
-                lines.append('case %d: { plain::module_scope scope(%d); return %s(read_%s(native.%s.%s)); }' % (
-                    value, value, variant, self.struct_name(case_type), m['name'], member))
+                access = 'native.%s' % m['name'] if case_type in self.synthetic else 'native.%s.%s' % (m['name'], member)
+                check = ''
+                for alias_member, alias in self.aliases_of(case_type):
+                    check += ' if (%s.%s != &native.%s) { plain::fail_alias("%s.%s", %s.%s, &native.%s); }' % (
+                        access, alias_member['name'], alias['owner_member'], owner, m['name'], access, alias_member['name'], alias['owner_member'])
+                lines.append('case %d: { plain::module_scope scope(%d);%s return %s(read_%s(%s)); }' % (
+                    value, value, check, variant, self.struct_name(case_type), access))
             lines.append('default: plain::fail("%s.%s", "has a tag value without a case"); } }()' % (owner, m['name']))
             return ' '.join(lines)
         if kind == 'flags':
@@ -839,7 +892,11 @@ class Family:
                 lines += ['\telse if constexpr (std::is_same_v<value_type, %s>)' % neutral, '\t{',
                           '\t\tnative.%s = static_cast<%s>(%d);' % (c['tag'], tag_member['type'], value),
                           '\t\tplain::module_scope scope(%d);' % value,
-                          '\t\twrite_%s(native.%s.%s, value, resolve, memory);' % (self.struct_name(case_type), m['name'], member), '\t}']
+                          '\t\twrite_%s(%s, value, resolve, memory);' % (self.struct_name(case_type),
+                              'native.%s' % m['name'] if case_type in self.synthetic else 'native.%s.%s' % (m['name'], member))]
+                for alias_member, alias in self.aliases_of(case_type):
+                    lines.append('\t\tnative.%s.%s.%s = &native.%s;' % (m['name'], member, alias_member['name'], alias['owner_member']))
+                lines.append('\t}')
             lines.append('}, %s);' % data)
             return lines
         if kind == 'flags':
@@ -962,6 +1019,13 @@ class Family:
                '#include <std_include.hpp>', '#include "%s.hpp"' % family, '#include "plain.hpp"'] + \
               ['#include "%s"' % h for h in self.spec.get('adapter_includes', [])] + ['',
                'namespace zonetool::iw8::neutral', '{', '\tnamespace', '\t{']
+        for name in self.structs:
+            short, native = self.struct_name(name), self.synthetic.get(name, name)
+            neutral = self.qual + short
+            out.append('\t\t%s read_%s(const %s& native);' % (neutral, short, native))
+            out.append('\t\tvoid write_%s(%s& native, const %s& data, const asset_resolver& resolve, plain::context& memory);' % (short, native, neutral))
+            out.append('\t\tstd::size_t size_%s(const %s& data);' % (short, neutral))
+        out.append('')
         for name in self.order():
             out.extend(self.adapter_functions(name))
         out.append('\t}')
@@ -978,12 +1042,14 @@ class Family:
         neutral = self.qual + self.struct_name(name)
         short = self.struct_name(name)
         members = self.structs[name]
-        read = ['%s read_%s(const %s& native)' % (neutral, short, name), '{', '\t%s data;' % neutral]
+        native_name = self.synthetic.get(name, name)
+        read = ['%s read_%s(const %s& native)' % (neutral, short, native_name), '{', '\tplain::trace("read_%s");' % short,
+                '\t%s data;' % neutral]
         write = ['void write_%s(%s& native, const %s& data, [[maybe_unused]] const asset_resolver& resolve, '
-                 '[[maybe_unused]] plain::context& memory)' % (short, name, neutral), '{']
+                 '[[maybe_unused]] plain::context& memory)' % (short, native_name, neutral), '{']
         size = ['std::size_t size_%s([[maybe_unused]] const %s& data)' % (short, neutral), '{', '\tstd::size_t size = 0;']
         for m, c in members:
-            if c['kind'] in ('runtime', 'tag'):
+            if c['kind'] in ('runtime', 'tag', 'alias'):
                 continue
             if c['kind'] == 'padding':
                 read.append('\tplain::require_zero(native.%s, "%s.%s");' % (m['name'], name, m['name']))

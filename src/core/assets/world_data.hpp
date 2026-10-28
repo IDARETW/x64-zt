@@ -33,41 +33,103 @@ inline constexpr std::array<std::pair<std::int64_t, std::string_view>, 5> edge_q
 	{4, "edge_query_bucket_count"},
 }};
 
-struct com_primary_light
-{
-	std::uint8_t spawn_flags{};
-	std::uint8_t type{};
-	std::uint8_t can_use_shadow_map{};
-	std::uint8_t needs_dynamic_shadows{};
-	std::uint8_t is_volumetric{};
-	std::uint32_t transient_zone_list{};
-	std::uint32_t entity_id{};
-	float intensity{};
-	float uv_intensity{};
-	float ir_intensity{};
-	float heat_intensity{};
-	std::array<float, 3> color_linear_srgb{};
-	std::array<float, 3> dir{};
-	std::array<float, 3> up{};
-	std::array<float, 3> origin{};
-	float radius{};
-	std::array<float, 2> fade_offset{};
-	float bulb_radius{};
-	std::array<float, 3> bulb_length{};
-	float cos_half_fov_outer{};
-	float cos_half_fov_inner{};
-	float shadow_near_plane_bias{};
-	float shadow_softness{};
-	float shadow_bias{};
-	float shadow_area{};
-	float distance_falloff{};
-	float cos_half_fov_collimation{};
-	float rotation_limit{};
-	float translation_limit{};
-	std::optional<std::string> def_name{};
+struct com_world;
+struct com_primary_light;
+struct com_change_list_info;
+struct bitarray_384;
+struct glass_world;
+struct glass_data;
+struct glass_piece;
+struct glass_name;
+struct spatial_partition_tree;
+struct map_edge_list;
+struct flagged_edge_metadata;
+struct pmr_octree_metadata;
+struct pmr_octree_node;
+struct pmr_octree_node_set;
+struct edge_adjacency_metadata;
+struct edge_adjacency;
+struct nav_mesh;
+struct nav_resource_s;
+struct nav_obstacle_bounds_s;
+struct nav_obstacle_hull_s;
+struct nav_boundary_plane_s;
+struct nav_glass_bounds_s;
+struct nav_modifier_s;
+struct nav_link_creation_data_s;
+struct nav_link_point_s;
+struct nav_raw_volume_s;
+struct nav_raw_custom_volume_s;
+struct nav_raw_custom_volume_tri_s;
+struct nav_misc_s;
+struct clip_map;
+struct static_model_collision_model_list;
+struct static_model_collision_model;
+struct static_model_collision_instance;
+struct stage;
+struct map_triggers;
+struct trigger_model;
+struct trigger_hull;
+struct bounds;
+struct trigger_slab;
+struct trigger_winding;
+struct trigger_winding_point;
+struct physics_capacities;
+struct collision_heatmap_entry;
+struct top_down_map_data;
+struct top_down_map_data_header;
+struct top_down_map_data_content;
+struct fog_spline;
+struct gfx_fog_spline_data;
 
-	bool operator==(const com_primary_light&) const = default;
-};
+inline void validate(const com_world& data);
+inline void validate(const com_primary_light& data);
+inline void validate(const com_change_list_info& data);
+inline void validate(const bitarray_384& data);
+inline void validate(const glass_world& data);
+inline void validate(const glass_data& data);
+inline void validate(const glass_piece& data);
+inline void validate(const glass_name& data);
+inline void validate(const spatial_partition_tree& data);
+inline void validate(const map_edge_list& data);
+inline void validate(const flagged_edge_metadata& data);
+inline void validate(const pmr_octree_metadata& data);
+inline void validate(const pmr_octree_node& data);
+inline void validate(const pmr_octree_node_set& data);
+inline void validate(const edge_adjacency_metadata& data);
+inline void validate(const edge_adjacency& data);
+inline void validate(const nav_mesh& data);
+inline void validate(const nav_resource_s& data);
+inline void validate(const nav_obstacle_bounds_s& data);
+inline void validate(const nav_obstacle_hull_s& data);
+inline void validate(const nav_boundary_plane_s& data);
+inline void validate(const nav_glass_bounds_s& data);
+inline void validate(const nav_modifier_s& data);
+inline void validate(const nav_link_creation_data_s& data);
+inline void validate(const nav_link_point_s& data);
+inline void validate(const nav_raw_volume_s& data);
+inline void validate(const nav_raw_custom_volume_s& data);
+inline void validate(const nav_raw_custom_volume_tri_s& data);
+inline void validate(const nav_misc_s& data);
+inline void validate(const clip_map& data);
+inline void validate(const static_model_collision_model_list& data);
+inline void validate(const static_model_collision_model& data);
+inline void validate(const static_model_collision_instance& data);
+inline void validate(const stage& data);
+inline void validate(const map_triggers& data);
+inline void validate(const trigger_model& data);
+inline void validate(const trigger_hull& data);
+inline void validate(const bounds& data);
+inline void validate(const trigger_slab& data);
+inline void validate(const trigger_winding& data);
+inline void validate(const trigger_winding_point& data);
+inline void validate(const physics_capacities& data);
+inline void validate(const collision_heatmap_entry& data);
+inline void validate(const top_down_map_data& data);
+inline void validate(const top_down_map_data_header& data);
+inline void validate(const top_down_map_data_content& data);
+inline void validate(const fog_spline& data);
+inline void validate(const gfx_fog_spline_data& data);
 
 struct com_change_list_info
 {
@@ -105,24 +167,40 @@ struct com_world
 	bool operator==(const com_world&) const = default;
 };
 
-struct glass_piece
+struct com_primary_light
 {
-	std::uint16_t damage_taken{};
-	std::uint16_t collapse_time{};
-	std::int32_t last_state_change_time{};
-	std::uint8_t impact_dir{};
-	std::array<std::uint8_t, 2> impact_pos{};
+	std::uint8_t spawn_flags{};
+	std::uint8_t type{};
+	std::uint8_t can_use_shadow_map{};
+	std::uint8_t needs_dynamic_shadows{};
+	std::uint8_t is_volumetric{};
+	std::uint32_t transient_zone_list{};
+	std::uint32_t entity_id{};
+	float intensity{};
+	float uv_intensity{};
+	float ir_intensity{};
+	float heat_intensity{};
+	std::array<float, 3> color_linear_srgb{};
+	std::array<float, 3> dir{};
+	std::array<float, 3> up{};
+	std::array<float, 3> origin{};
+	float radius{};
+	std::array<float, 2> fade_offset{};
+	float bulb_radius{};
+	std::array<float, 3> bulb_length{};
+	float cos_half_fov_outer{};
+	float cos_half_fov_inner{};
+	float shadow_near_plane_bias{};
+	float shadow_softness{};
+	float shadow_bias{};
+	float shadow_area{};
+	float distance_falloff{};
+	float cos_half_fov_collimation{};
+	float rotation_limit{};
+	float translation_limit{};
+	std::optional<std::string> def_name{};
 
-	bool operator==(const glass_piece&) const = default;
-};
-
-struct glass_name
-{
-	std::optional<std::string> name_str{};
-	std::optional<std::string> name{};
-	std::optional<std::vector<std::uint16_t>> piece_indices{};
-
-	bool operator==(const glass_name&) const = default;
+	bool operator==(const com_primary_light&) const = default;
 };
 
 struct spatial_partition_tree
@@ -150,6 +228,48 @@ struct glass_world
 	std::optional<glass_data> g_glass_data{};
 
 	bool operator==(const glass_world&) const = default;
+};
+
+struct glass_piece
+{
+	std::uint16_t damage_taken{};
+	std::uint16_t collapse_time{};
+	std::int32_t last_state_change_time{};
+	std::uint8_t impact_dir{};
+	std::array<std::uint8_t, 2> impact_pos{};
+
+	bool operator==(const glass_piece&) const = default;
+};
+
+struct glass_name
+{
+	std::optional<std::string> name_str{};
+	std::optional<std::string> name{};
+	std::optional<std::vector<std::uint16_t>> piece_indices{};
+
+	bool operator==(const glass_name&) const = default;
+};
+
+struct map_edge_list
+{
+	std::optional<std::string> name{};
+	std::array<float, 3> mins{};
+	std::array<float, 3> maxs{};
+	std::uint32_t transient_index{};
+	std::uint32_t dynamic_query_types{};
+	std::uint32_t static_query_types{};
+	std::uint32_t num_dynamic_edges{};
+	std::uint32_t num_static_edges{};
+	bool valid{};
+	std::optional<std::vector<std::array<std::array<float, 4>, 2>>> edges{};
+	std::optional<std::vector<flagged_edge_metadata>> edge_metadata{};
+	std::optional<std::vector<pmr_octree_metadata>> edge_octrees{};
+	std::optional<std::vector<pmr_octree_node_set>> edge_octree_node_sets{};
+	std::optional<std::vector<std::uint32_t>> edge_indices{};
+	std::optional<std::vector<edge_adjacency_metadata>> edge_adjacency_metadata{};
+	std::optional<std::vector<edge_adjacency>> edge_adjacency{};
+
+	bool operator==(const map_edge_list&) const = default;
 };
 
 struct flagged_edge_metadata
@@ -212,26 +332,30 @@ struct edge_adjacency
 	bool operator==(const edge_adjacency&) const = default;
 };
 
-struct map_edge_list
+struct nav_misc_s
+{
+	std::array<float, 3> m_static_bounds_half_size{};
+	std::array<float, 3> m_static_bounds_mid_point{};
+
+	bool operator==(const nav_misc_s&) const = default;
+};
+
+struct nav_mesh
 {
 	std::optional<std::string> name{};
-	std::array<float, 3> mins{};
-	std::array<float, 3> maxs{};
-	std::uint32_t transient_index{};
-	std::uint32_t dynamic_query_types{};
-	std::uint32_t static_query_types{};
-	std::uint32_t num_dynamic_edges{};
-	std::uint32_t num_static_edges{};
-	bool valid{};
-	std::optional<std::vector<std::array<std::array<float, 4>, 2>>> edges{};
-	std::optional<std::vector<flagged_edge_metadata>> edge_metadata{};
-	std::optional<std::vector<pmr_octree_metadata>> edge_octrees{};
-	std::optional<std::vector<pmr_octree_node_set>> edge_octree_node_sets{};
-	std::optional<std::vector<std::uint32_t>> edge_indices{};
-	std::optional<std::vector<edge_adjacency_metadata>> edge_adjacency_metadata{};
-	std::optional<std::vector<edge_adjacency>> edge_adjacency{};
+	std::int32_t version{};
+	std::int32_t has_exposure_data{};
+	std::optional<std::vector<nav_resource_s>> nav_resources{};
+	std::optional<std::vector<nav_obstacle_bounds_s>> obstacle_bounds{};
+	std::optional<std::vector<nav_glass_bounds_s>> glass_bounds{};
+	std::optional<std::vector<nav_modifier_s>> modifiers{};
+	std::optional<std::vector<nav_link_creation_data_s>> link_creation_data{};
+	std::optional<std::vector<std::array<float, 3>>> volume_seeds{};
+	std::optional<std::vector<nav_raw_volume_s>> raw_volumes{};
+	std::optional<std::vector<nav_raw_custom_volume_s>> raw_custom_volumes{};
+	nav_misc_s misc_data{};
 
-	bool operator==(const map_edge_list&) const = default;
+	bool operator==(const nav_mesh&) const = default;
 };
 
 struct nav_resource_s
@@ -252,12 +376,11 @@ struct nav_resource_s
 	bool operator==(const nav_resource_s&) const = default;
 };
 
-struct nav_boundary_plane_s
+struct nav_obstacle_bounds_s
 {
-	std::array<float, 3> m_normal{};
-	float m_dist_from_center{};
+	std::optional<std::vector<nav_obstacle_hull_s>> m_hulls{};
 
-	bool operator==(const nav_boundary_plane_s&) const = default;
+	bool operator==(const nav_obstacle_bounds_s&) const = default;
 };
 
 struct nav_obstacle_hull_s
@@ -272,11 +395,12 @@ struct nav_obstacle_hull_s
 	bool operator==(const nav_obstacle_hull_s&) const = default;
 };
 
-struct nav_obstacle_bounds_s
+struct nav_boundary_plane_s
 {
-	std::optional<std::vector<nav_obstacle_hull_s>> m_hulls{};
+	std::array<float, 3> m_normal{};
+	float m_dist_from_center{};
 
-	bool operator==(const nav_obstacle_bounds_s&) const = default;
+	bool operator==(const nav_boundary_plane_s&) const = default;
 };
 
 struct nav_glass_bounds_s
@@ -337,13 +461,6 @@ struct nav_raw_volume_s
 	bool operator==(const nav_raw_volume_s&) const = default;
 };
 
-struct nav_raw_custom_volume_tri_s
-{
-	std::array<std::array<float, 3>, 3> m_verts{};
-
-	bool operator==(const nav_raw_custom_volume_tri_s&) const = default;
-};
-
 struct nav_raw_custom_volume_s
 {
 	std::optional<std::vector<nav_raw_custom_volume_tri_s>> m_tris{};
@@ -351,39 +468,92 @@ struct nav_raw_custom_volume_s
 	bool operator==(const nav_raw_custom_volume_s&) const = default;
 };
 
-struct nav_misc_s
+struct nav_raw_custom_volume_tri_s
 {
-	std::array<float, 3> m_static_bounds_half_size{};
-	std::array<float, 3> m_static_bounds_mid_point{};
+	std::array<std::array<float, 3>, 3> m_verts{};
 
-	bool operator==(const nav_misc_s&) const = default;
+	bool operator==(const nav_raw_custom_volume_tri_s&) const = default;
 };
 
-struct nav_mesh
+struct map_triggers
+{
+	std::uint32_t count{};
+	std::optional<std::vector<trigger_model>> models{};
+	std::optional<std::vector<trigger_hull>> hulls{};
+	std::optional<std::vector<trigger_slab>> slabs{};
+	std::optional<std::vector<trigger_winding>> windings{};
+	std::optional<std::vector<trigger_winding_point>> winding_points{};
+
+	bool operator==(const map_triggers&) const = default;
+};
+
+struct physics_capacities
+{
+	std::int32_t max_num_rigid_bodies_server{};
+	std::int32_t max_num_detail_rigid_bodies_server{};
+	std::int32_t max_num_constraints_server{};
+	std::int32_t max_num_motions_server{};
+	std::int32_t max_num_rigid_bodies_client{};
+	std::int32_t max_num_detail_rigid_bodies_client{};
+	std::int32_t max_num_constraints_client{};
+	std::int32_t max_num_motions_client{};
+
+	bool operator==(const physics_capacities&) const = default;
+};
+
+struct top_down_map_data_header
+{
+	std::int32_t version{};
+	std::int32_t samples_per_axis{};
+	std::array<float, 2> bottom_left{};
+	std::array<float, 2> top_right{};
+
+	bool operator==(const top_down_map_data_header&) const = default;
+};
+
+struct top_down_map_data_content
+{
+	std::array<std::uint8_t, 8193> nav_mesh_visible{};
+
+	bool operator==(const top_down_map_data_content&) const = default;
+};
+
+struct top_down_map_data
+{
+	top_down_map_data_header header{};
+	top_down_map_data_content content{};
+
+	bool operator==(const top_down_map_data&) const = default;
+};
+
+struct clip_map
 {
 	std::optional<std::string> name{};
-	std::int32_t version{};
-	std::int32_t has_exposure_data{};
-	std::optional<std::vector<nav_resource_s>> nav_resources{};
-	std::optional<std::vector<nav_obstacle_bounds_s>> obstacle_bounds{};
-	std::optional<std::vector<nav_glass_bounds_s>> glass_bounds{};
-	std::optional<std::vector<nav_modifier_s>> modifiers{};
-	std::optional<std::vector<nav_link_creation_data_s>> link_creation_data{};
-	std::optional<std::vector<std::array<float, 3>>> volume_seeds{};
-	std::optional<std::vector<nav_raw_volume_s>> raw_volumes{};
-	std::optional<std::vector<nav_raw_custom_volume_s>> raw_custom_volumes{};
-	nav_misc_s misc_data{};
+	std::int32_t is_in_use{};
+	std::optional<std::vector<static_model_collision_model_list>> static_model_collision_model_lists{};
+	std::optional<std::string> map_ents{};
+	std::optional<std::vector<stage>> stages{};
+	map_triggers stage_trigger{};
+	std::array<float, 3> broadphase_min{};
+	std::array<float, 3> broadphase_max{};
+	physics_capacities physics_capacities{};
+	std::optional<std::vector<char>> havok_world_shape_data{};
+	std::optional<std::vector<collision_heatmap_entry>> collision_heatmap{};
+	std::uint32_t total_glass_init_piece_count{};
+	std::uint32_t total_glass_piece_limit{};
+	std::optional<top_down_map_data> top_down_map_data{};
+	std::optional<std::string> vision_set_name{};
+	std::uint32_t checksum{};
 
-	bool operator==(const nav_mesh&) const = default;
+	bool operator==(const clip_map&) const = default;
 };
 
-struct static_model_collision_instance
+struct static_model_collision_model_list
 {
-	std::array<float, 3> origin{};
-	std::array<float, 3> angles{};
-	float scale{};
+	std::optional<std::vector<static_model_collision_model>> models{};
+	std::uint32_t structure_memory_cost{};
 
-	bool operator==(const static_model_collision_instance&) const = default;
+	bool operator==(const static_model_collision_model_list&) const = default;
 };
 
 struct static_model_collision_model
@@ -396,12 +566,13 @@ struct static_model_collision_model
 	bool operator==(const static_model_collision_model&) const = default;
 };
 
-struct static_model_collision_model_list
+struct static_model_collision_instance
 {
-	std::optional<std::vector<static_model_collision_model>> models{};
-	std::uint32_t structure_memory_cost{};
+	std::array<float, 3> origin{};
+	std::array<float, 3> angles{};
+	float scale{};
 
-	bool operator==(const static_model_collision_model_list&) const = default;
+	bool operator==(const static_model_collision_instance&) const = default;
 };
 
 struct stage
@@ -474,32 +645,6 @@ struct trigger_winding_point
 	bool operator==(const trigger_winding_point&) const = default;
 };
 
-struct map_triggers
-{
-	std::uint32_t count{};
-	std::optional<std::vector<trigger_model>> models{};
-	std::optional<std::vector<trigger_hull>> hulls{};
-	std::optional<std::vector<trigger_slab>> slabs{};
-	std::optional<std::vector<trigger_winding>> windings{};
-	std::optional<std::vector<trigger_winding_point>> winding_points{};
-
-	bool operator==(const map_triggers&) const = default;
-};
-
-struct physics_capacities
-{
-	std::int32_t max_num_rigid_bodies_server{};
-	std::int32_t max_num_detail_rigid_bodies_server{};
-	std::int32_t max_num_constraints_server{};
-	std::int32_t max_num_motions_server{};
-	std::int32_t max_num_rigid_bodies_client{};
-	std::int32_t max_num_detail_rigid_bodies_client{};
-	std::int32_t max_num_constraints_client{};
-	std::int32_t max_num_motions_client{};
-
-	bool operator==(const physics_capacities&) const = default;
-};
-
 struct collision_heatmap_entry
 {
 	std::int32_t vertex_count{};
@@ -508,53 +653,6 @@ struct collision_heatmap_entry
 	std::array<float, 3> max_extent{};
 
 	bool operator==(const collision_heatmap_entry&) const = default;
-};
-
-struct top_down_map_data_header
-{
-	std::int32_t version{};
-	std::int32_t samples_per_axis{};
-	std::array<float, 2> bottom_left{};
-	std::array<float, 2> top_right{};
-
-	bool operator==(const top_down_map_data_header&) const = default;
-};
-
-struct top_down_map_data_content
-{
-	std::array<std::uint8_t, 8193> nav_mesh_visible{};
-
-	bool operator==(const top_down_map_data_content&) const = default;
-};
-
-struct top_down_map_data
-{
-	top_down_map_data_header header{};
-	top_down_map_data_content content{};
-
-	bool operator==(const top_down_map_data&) const = default;
-};
-
-struct clip_map
-{
-	std::optional<std::string> name{};
-	std::int32_t is_in_use{};
-	std::optional<std::vector<static_model_collision_model_list>> static_model_collision_model_lists{};
-	std::optional<std::string> map_ents{};
-	std::optional<std::vector<stage>> stages{};
-	map_triggers stage_trigger{};
-	std::array<float, 3> broadphase_min{};
-	std::array<float, 3> broadphase_max{};
-	physics_capacities physics_capacities{};
-	std::optional<std::vector<char>> havok_world_shape_data{};
-	std::optional<std::vector<collision_heatmap_entry>> collision_heatmap{};
-	std::uint32_t total_glass_init_piece_count{};
-	std::uint32_t total_glass_piece_limit{};
-	std::optional<top_down_map_data> top_down_map_data{};
-	std::optional<std::string> vision_set_name{};
-	std::uint32_t checksum{};
-
-	bool operator==(const clip_map&) const = default;
 };
 
 struct gfx_fog_spline_data
@@ -574,11 +672,6 @@ struct fog_spline
 
 	bool operator==(const fog_spline&) const = default;
 };
-
-inline void validate(const com_primary_light& data)
-{
-	(void) data;
-}
 
 inline void validate(const com_change_list_info& data)
 {
@@ -628,18 +721,9 @@ inline void validate(const com_world& data)
 
 }
 
-inline void validate(const glass_piece& data)
+inline void validate(const com_primary_light& data)
 {
 	(void) data;
-}
-
-inline void validate(const glass_name& data)
-{
-	if ((data.piece_indices && data.piece_indices->size() > 0xFFFFull))
-	{
-		throw std::runtime_error("glass_name has arrays that its count does not fit");
-	}
-
 }
 
 inline void validate(const spatial_partition_tree& data)
@@ -707,51 +791,18 @@ inline void validate(const glass_world& data)
 
 }
 
-inline void validate(const flagged_edge_metadata& data)
+inline void validate(const glass_piece& data)
 {
 	(void) data;
 }
 
-inline void validate(const pmr_octree_node& data)
+inline void validate(const glass_name& data)
 {
-	for (const auto& name : data.flags)
+	if ((data.piece_indices && data.piece_indices->size() > 0xFFFFull))
 	{
-		if (std::ranges::none_of(pmr_octree_flags_names, [&](const auto& entry) { return entry.second == name; }))
-		{
-			throw std::runtime_error("pmr_octree_node.flags names no flag");
-		}
+		throw std::runtime_error("glass_name has arrays that its count does not fit");
 	}
 
-}
-
-inline void validate(const pmr_octree_metadata& data)
-{
-	validate(data.root_node);
-
-	if (std::ranges::none_of(edge_query_bucket_t_names, [&](const auto& entry) { return entry.second == data.edge_bucket; }))
-	{
-		throw std::runtime_error("pmr_octree_metadata.edge_bucket names no value");
-	}
-
-}
-
-inline void validate(const pmr_octree_node_set& data)
-{
-	for (const auto& item : data.node)
-	{
-		validate(item);
-	}
-
-}
-
-inline void validate(const edge_adjacency_metadata& data)
-{
-	(void) data;
-}
-
-inline void validate(const edge_adjacency& data)
-{
-	(void) data;
 }
 
 inline void validate(const map_edge_list& data)
@@ -835,131 +886,51 @@ inline void validate(const map_edge_list& data)
 
 }
 
-inline void validate(const nav_resource_s& data)
-{
-	if (static_cast<std::int64_t>((static_cast<std::uint8_t>(data.b_dockable) == 0 ? 0 : (data.p_graph_buffer ? data.p_graph_buffer->size() : std::size_t{}))) != (data.p_working_graph ? static_cast<std::int64_t>(data.p_working_graph->size()) : 0))
-	{
-		throw std::runtime_error("nav_resource_s.p_working_graph has a length that its count does not give");
-	}
-
-	if ((data.p_graph_buffer && data.p_graph_buffer->size() > 0x7FFFFFFFull))
-	{
-		throw std::runtime_error("nav_resource_s has arrays that its count does not fit");
-	}
-
-}
-
-inline void validate(const nav_boundary_plane_s& data)
+inline void validate(const flagged_edge_metadata& data)
 {
 	(void) data;
 }
 
-inline void validate(const nav_obstacle_hull_s& data)
+inline void validate(const pmr_octree_node& data)
 {
-	if (data.m_boundaries)
+	for (const auto& name : data.flags)
 	{
-		for (const auto& item : *data.m_boundaries)
+		if (std::ranges::none_of(pmr_octree_flags_names, [&](const auto& entry) { return entry.second == name; }))
 		{
-			validate(item);
+			throw std::runtime_error("pmr_octree_node.flags names no flag");
 		}
-	}
-
-	if ((data.m_boundaries && data.m_boundaries->size() > 0x7FFFFFFFull))
-	{
-		throw std::runtime_error("nav_obstacle_hull_s has arrays that its count does not fit");
 	}
 
 }
 
-inline void validate(const nav_obstacle_bounds_s& data)
+inline void validate(const pmr_octree_metadata& data)
 {
-	if (data.m_hulls)
-	{
-		for (const auto& item : *data.m_hulls)
-		{
-			validate(item);
-		}
-	}
+	validate(data.root_node);
 
-	if ((data.m_hulls && data.m_hulls->size() > 0x7FFFFFFFull))
+	if (std::ranges::none_of(edge_query_bucket_t_names, [&](const auto& entry) { return entry.second == data.edge_bucket; }))
 	{
-		throw std::runtime_error("nav_obstacle_bounds_s has arrays that its count does not fit");
+		throw std::runtime_error("pmr_octree_metadata.edge_bucket names no value");
 	}
 
 }
 
-inline void validate(const nav_glass_bounds_s& data)
+inline void validate(const pmr_octree_node_set& data)
 {
-	if (data.m_boundaries)
+	for (const auto& item : data.node)
 	{
-		for (const auto& item : *data.m_boundaries)
-		{
-			validate(item);
-		}
-	}
-
-	if ((data.m_boundaries && data.m_boundaries->size() > 0x7FFFFFFFull))
-	{
-		throw std::runtime_error("nav_glass_bounds_s has arrays that its count does not fit");
+		validate(item);
 	}
 
 }
 
-inline void validate(const nav_modifier_s& data)
-{
-	if (data.m_boundaries)
-	{
-		for (const auto& item : *data.m_boundaries)
-		{
-			validate(item);
-		}
-	}
-
-	if ((data.m_boundaries && data.m_boundaries->size() > 0x7FFFFFFFull))
-	{
-		throw std::runtime_error("nav_modifier_s has arrays that its count does not fit");
-	}
-
-}
-
-inline void validate(const nav_link_point_s& data)
+inline void validate(const edge_adjacency_metadata& data)
 {
 	(void) data;
 }
 
-inline void validate(const nav_link_creation_data_s& data)
-{
-	validate(data.m_start);
-
-	validate(data.m_end);
-
-}
-
-inline void validate(const nav_raw_volume_s& data)
+inline void validate(const edge_adjacency& data)
 {
 	(void) data;
-}
-
-inline void validate(const nav_raw_custom_volume_tri_s& data)
-{
-	(void) data;
-}
-
-inline void validate(const nav_raw_custom_volume_s& data)
-{
-	if (data.m_tris)
-	{
-		for (const auto& item : *data.m_tris)
-		{
-			validate(item);
-		}
-	}
-
-	if ((data.m_tris && data.m_tris->size() > 0x7FFFFFFFull))
-	{
-		throw std::runtime_error("nav_raw_custom_volume_s has arrays that its count does not fit");
-	}
-
 }
 
 inline void validate(const nav_misc_s& data)
@@ -1076,77 +1047,129 @@ inline void validate(const nav_mesh& data)
 
 }
 
-inline void validate(const static_model_collision_instance& data)
+inline void validate(const nav_resource_s& data)
 {
-	(void) data;
+	if (static_cast<std::int64_t>((static_cast<std::uint8_t>(data.b_dockable) == 0 ? 0 : (data.p_graph_buffer ? data.p_graph_buffer->size() : std::size_t{}))) != (data.p_working_graph ? static_cast<std::int64_t>(data.p_working_graph->size()) : 0))
+	{
+		throw std::runtime_error("nav_resource_s.p_working_graph has a length that its count does not give");
+	}
+
+	if ((data.p_graph_buffer && data.p_graph_buffer->size() > 0x7FFFFFFFull))
+	{
+		throw std::runtime_error("nav_resource_s has arrays that its count does not fit");
+	}
+
 }
 
-inline void validate(const static_model_collision_model& data)
+inline void validate(const nav_obstacle_bounds_s& data)
 {
-	if (data.instances)
+	if (data.m_hulls)
 	{
-		for (const auto& item : *data.instances)
+		for (const auto& item : *data.m_hulls)
 		{
 			validate(item);
 		}
 	}
 
-	if ((data.instances && data.instances->size() > 0xFFFFFFFFull))
+	if ((data.m_hulls && data.m_hulls->size() > 0x7FFFFFFFull))
 	{
-		throw std::runtime_error("static_model_collision_model has arrays that its count does not fit");
+		throw std::runtime_error("nav_obstacle_bounds_s has arrays that its count does not fit");
 	}
 
 }
 
-inline void validate(const static_model_collision_model_list& data)
+inline void validate(const nav_obstacle_hull_s& data)
 {
-	if (data.models)
+	if (data.m_boundaries)
 	{
-		for (const auto& item : *data.models)
+		for (const auto& item : *data.m_boundaries)
 		{
 			validate(item);
 		}
 	}
 
-	if ((data.models && data.models->size() > 0xFFFFFFFFull))
+	if ((data.m_boundaries && data.m_boundaries->size() > 0x7FFFFFFFull))
 	{
-		throw std::runtime_error("static_model_collision_model_list has arrays that its count does not fit");
+		throw std::runtime_error("nav_obstacle_hull_s has arrays that its count does not fit");
 	}
 
 }
 
-inline void validate(const stage& data)
+inline void validate(const nav_boundary_plane_s& data)
 {
 	(void) data;
 }
 
-inline void validate(const trigger_model& data)
+inline void validate(const nav_glass_bounds_s& data)
+{
+	if (data.m_boundaries)
+	{
+		for (const auto& item : *data.m_boundaries)
+		{
+			validate(item);
+		}
+	}
+
+	if ((data.m_boundaries && data.m_boundaries->size() > 0x7FFFFFFFull))
+	{
+		throw std::runtime_error("nav_glass_bounds_s has arrays that its count does not fit");
+	}
+
+}
+
+inline void validate(const nav_modifier_s& data)
+{
+	if (data.m_boundaries)
+	{
+		for (const auto& item : *data.m_boundaries)
+		{
+			validate(item);
+		}
+	}
+
+	if ((data.m_boundaries && data.m_boundaries->size() > 0x7FFFFFFFull))
+	{
+		throw std::runtime_error("nav_modifier_s has arrays that its count does not fit");
+	}
+
+}
+
+inline void validate(const nav_link_point_s& data)
 {
 	(void) data;
 }
 
-inline void validate(const bounds& data)
+inline void validate(const nav_link_creation_data_s& data)
+{
+	validate(data.m_start);
+
+	validate(data.m_end);
+
+}
+
+inline void validate(const nav_raw_volume_s& data)
 {
 	(void) data;
 }
 
-inline void validate(const trigger_hull& data)
+inline void validate(const nav_raw_custom_volume_s& data)
 {
-	validate(data.bounds);
+	if (data.m_tris)
+	{
+		for (const auto& item : *data.m_tris)
+		{
+			validate(item);
+		}
+	}
+
+	if ((data.m_tris && data.m_tris->size() > 0x7FFFFFFFull))
+	{
+		throw std::runtime_error("nav_raw_custom_volume_s has arrays that its count does not fit");
+	}
 
 }
 
-inline void validate(const trigger_slab& data)
-{
-	(void) data;
-}
-
-inline void validate(const trigger_winding& data)
-{
-	(void) data;
-}
-
-inline void validate(const trigger_winding_point& data)
+inline void validate(const nav_raw_custom_volume_tri_s& data)
 {
 	(void) data;
 }
@@ -1221,11 +1244,6 @@ inline void validate(const map_triggers& data)
 }
 
 inline void validate(const physics_capacities& data)
-{
-	(void) data;
-}
-
-inline void validate(const collision_heatmap_entry& data)
 {
 	(void) data;
 }
@@ -1310,6 +1328,86 @@ inline void validate(const clip_map& data)
 		throw std::runtime_error("clip_map has arrays that its count does not fit");
 	}
 
+}
+
+inline void validate(const static_model_collision_model_list& data)
+{
+	if (data.models)
+	{
+		for (const auto& item : *data.models)
+		{
+			validate(item);
+		}
+	}
+
+	if ((data.models && data.models->size() > 0xFFFFFFFFull))
+	{
+		throw std::runtime_error("static_model_collision_model_list has arrays that its count does not fit");
+	}
+
+}
+
+inline void validate(const static_model_collision_model& data)
+{
+	if (data.instances)
+	{
+		for (const auto& item : *data.instances)
+		{
+			validate(item);
+		}
+	}
+
+	if ((data.instances && data.instances->size() > 0xFFFFFFFFull))
+	{
+		throw std::runtime_error("static_model_collision_model has arrays that its count does not fit");
+	}
+
+}
+
+inline void validate(const static_model_collision_instance& data)
+{
+	(void) data;
+}
+
+inline void validate(const stage& data)
+{
+	(void) data;
+}
+
+inline void validate(const trigger_model& data)
+{
+	(void) data;
+}
+
+inline void validate(const bounds& data)
+{
+	(void) data;
+}
+
+inline void validate(const trigger_hull& data)
+{
+	validate(data.bounds);
+
+}
+
+inline void validate(const trigger_slab& data)
+{
+	(void) data;
+}
+
+inline void validate(const trigger_winding& data)
+{
+	(void) data;
+}
+
+inline void validate(const trigger_winding_point& data)
+{
+	(void) data;
+}
+
+inline void validate(const collision_heatmap_entry& data)
+{
+	(void) data;
 }
 
 inline void validate(const gfx_fog_spline_data& data)

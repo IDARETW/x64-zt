@@ -264,21 +264,199 @@ inline constexpr std::array<std::pair<std::int64_t, std::string_view>, 4> partic
 	{3, "count"},
 }};
 
-struct particle_module
-{
-	std::string m_type{};
-	std::uint32_t m_flags{};
+struct particle_system;
+struct particle_emitter_def;
+struct particle_state_def;
+struct particle_module_group_def;
+struct particle_module_def;
+struct particle_module_init_atlas;
+struct particle_module;
+struct particle_curve_def;
+struct particle_curve_control_point_def;
+struct particle_module_init_attributes;
+struct particle_module_init_beam;
+struct particle_module_init_camera_offset;
+struct particle_module_init_cloud;
+struct particle_module_init_decal;
+struct particle_module_init_flare;
+struct particle_float_range;
+struct particle_module_init_geo_trail;
+struct particle_module_init_kill_wrap_box;
+struct particle_module_init_light_omni;
+struct particle_module_init_light_spot;
+struct particle_module_init_material;
+struct particle_material_data;
+struct particle_module_init_mirror_texture;
+struct particle_module_init_model;
+struct particle_module_init_occlusion_query;
+struct particle_module_init_oriented_sprite;
+struct particle_module_init_particle_sim;
+struct particle_module_init_player_facing;
+struct particle_module_init_relative_velocity;
+struct particle_module_init_rotation;
+struct particle_module_init_rotation3_d;
+struct particle_module_init_runner;
+struct particle_modifier;
+struct particle_module_init_sound;
+struct particle_module_init_spawn;
+struct particle_module_init_spawn_shape_box;
+struct particle_module_init_spawn_shape;
+struct particle_module_init_spawn_shape_cylinder;
+struct particle_module_init_spawn_shape_ellipsoid;
+struct particle_module_init_spawn_shape_mesh;
+struct particle_module_init_spawn_shape_sphere;
+struct particle_module_init_tail;
+struct particle_module_init_vector_field;
+struct particle_module_init_volumetric;
+struct particle_module_init_dismember;
+struct particle_module_attractor;
+struct particle_module_color_graph;
+struct particle_module_color_lerp;
+struct particle_module_emission_graph;
+struct particle_module_emissive_graph;
+struct particle_module_shader_graph;
+struct particle_module_force;
+struct particle_module_force_drag_graph;
+struct particle_module_gravity;
+struct particle_module_intensity_graph;
+struct particle_module_temperature_graph;
+struct particle_module_parent_velocity_graph;
+struct particle_module_physics_light;
+struct particle_module_physics_ray_cast;
+struct bounds;
+struct particle_module_position_graph;
+struct particle_module_rotation_graph;
+struct particle_module_rotation_graph3_d;
+struct particle_module_scale_by_distance;
+struct particle_module_size_graph;
+struct particle_module_size_lerp;
+struct particle_module_velocity_graph;
+struct particle_module_vector_field_graph;
+struct particle_module_test_age;
+struct particle_module_test;
+struct particle_module_test_event_handler_data;
+struct particle_module_test_birth;
+struct particle_module_test_death;
+struct particle_module_test_gravity;
+struct particle_module_test_impact;
+struct particle_module_test_pos;
+struct particle_module_test_time_in_state;
+struct particle_int_range;
 
-	bool operator==(const particle_module&) const = default;
+inline void validate(const particle_system& data);
+inline void validate(const particle_emitter_def& data);
+inline void validate(const particle_state_def& data);
+inline void validate(const particle_module_group_def& data);
+inline void validate(const particle_module_def& data);
+inline void validate(const particle_module_init_atlas& data);
+inline void validate(const particle_module& data);
+inline void validate(const particle_curve_def& data);
+inline void validate(const particle_curve_control_point_def& data);
+inline void validate(const particle_module_init_attributes& data);
+inline void validate(const particle_module_init_beam& data);
+inline void validate(const particle_module_init_camera_offset& data);
+inline void validate(const particle_module_init_cloud& data);
+inline void validate(const particle_module_init_decal& data);
+inline void validate(const particle_module_init_flare& data);
+inline void validate(const particle_float_range& data);
+inline void validate(const particle_module_init_geo_trail& data);
+inline void validate(const particle_module_init_kill_wrap_box& data);
+inline void validate(const particle_module_init_light_omni& data);
+inline void validate(const particle_module_init_light_spot& data);
+inline void validate(const particle_module_init_material& data);
+inline void validate(const particle_material_data& data);
+inline void validate(const particle_module_init_mirror_texture& data);
+inline void validate(const particle_module_init_model& data);
+inline void validate(const particle_module_init_occlusion_query& data);
+inline void validate(const particle_module_init_oriented_sprite& data);
+inline void validate(const particle_module_init_particle_sim& data);
+inline void validate(const particle_module_init_player_facing& data);
+inline void validate(const particle_module_init_relative_velocity& data);
+inline void validate(const particle_module_init_rotation& data);
+inline void validate(const particle_module_init_rotation3_d& data);
+inline void validate(const particle_module_init_runner& data);
+inline void validate(const particle_modifier& data);
+inline void validate(const particle_module_init_sound& data);
+inline void validate(const particle_module_init_spawn& data);
+inline void validate(const particle_module_init_spawn_shape_box& data);
+inline void validate(const particle_module_init_spawn_shape& data);
+inline void validate(const particle_module_init_spawn_shape_cylinder& data);
+inline void validate(const particle_module_init_spawn_shape_ellipsoid& data);
+inline void validate(const particle_module_init_spawn_shape_mesh& data);
+inline void validate(const particle_module_init_spawn_shape_sphere& data);
+inline void validate(const particle_module_init_tail& data);
+inline void validate(const particle_module_init_vector_field& data);
+inline void validate(const particle_module_init_volumetric& data);
+inline void validate(const particle_module_init_dismember& data);
+inline void validate(const particle_module_attractor& data);
+inline void validate(const particle_module_color_graph& data);
+inline void validate(const particle_module_color_lerp& data);
+inline void validate(const particle_module_emission_graph& data);
+inline void validate(const particle_module_emissive_graph& data);
+inline void validate(const particle_module_shader_graph& data);
+inline void validate(const particle_module_force& data);
+inline void validate(const particle_module_force_drag_graph& data);
+inline void validate(const particle_module_gravity& data);
+inline void validate(const particle_module_intensity_graph& data);
+inline void validate(const particle_module_temperature_graph& data);
+inline void validate(const particle_module_parent_velocity_graph& data);
+inline void validate(const particle_module_physics_light& data);
+inline void validate(const particle_module_physics_ray_cast& data);
+inline void validate(const bounds& data);
+inline void validate(const particle_module_position_graph& data);
+inline void validate(const particle_module_rotation_graph& data);
+inline void validate(const particle_module_rotation_graph3_d& data);
+inline void validate(const particle_module_scale_by_distance& data);
+inline void validate(const particle_module_size_graph& data);
+inline void validate(const particle_module_size_lerp& data);
+inline void validate(const particle_module_velocity_graph& data);
+inline void validate(const particle_module_vector_field_graph& data);
+inline void validate(const particle_module_test_age& data);
+inline void validate(const particle_module_test& data);
+inline void validate(const particle_module_test_event_handler_data& data);
+inline void validate(const particle_module_test_birth& data);
+inline void validate(const particle_module_test_death& data);
+inline void validate(const particle_module_test_gravity& data);
+inline void validate(const particle_module_test_impact& data);
+inline void validate(const particle_module_test_pos& data);
+inline void validate(const particle_module_test_time_in_state& data);
+inline void validate(const particle_int_range& data);
+
+struct particle_system
+{
+	std::optional<std::string> name{};
+	std::optional<std::vector<particle_emitter_def>> emitter_defs{};
+	std::optional<std::vector<particle_scripted_input_node>> scripted_input_node_defs{};
+	std::int32_t version{};
+	std::uint32_t flags{};
+	std::int32_t occlusion_override_emitter_index{};
+	std::string phase_options{};
+	float draw_frustum_cull_radius{};
+	float update_frustum_cull_radius{};
+	float sun_distance{};
+	std::int32_t pre_roll_m_sec{};
+	std::array<float, 4> editor_position{};
+	std::array<float, 4> editor_rotation{};
+	std::array<float, 4> game_tweak_position{};
+	std::array<float, 4> game_tweak_rotation{};
+
+	bool operator==(const particle_system&) const = default;
 };
 
-struct particle_curve_control_point_def
+struct particle_float_range
 {
-	float time{};
-	float value{};
-	float inv_time_delta{};
+	float min{};
+	float max{};
 
-	bool operator==(const particle_curve_control_point_def&) const = default;
+	bool operator==(const particle_float_range&) const = default;
+};
+
+struct particle_int_range
+{
+	std::int32_t min{};
+	std::int32_t max{};
+
+	bool operator==(const particle_int_range&) const = default;
 };
 
 struct particle_curve_def
@@ -287,6 +465,59 @@ struct particle_curve_def
 	float scale{};
 
 	bool operator==(const particle_curve_def&) const = default;
+};
+
+struct particle_emitter_def
+{
+	std::optional<std::vector<particle_state_def>> state_defs{};
+	particle_float_range particle_spawn_rate{};
+	particle_float_range particle_life{};
+	particle_float_range particle_delay{};
+	std::uint32_t particle_count_max{};
+	particle_int_range particle_burst_count{};
+	particle_float_range emitter_life{};
+	particle_float_range emitter_delay{};
+	std::int32_t random_seed{};
+	particle_float_range spawn_range_sq{};
+	float fade_out_max_distance{};
+	particle_curve_def fade_curve_def{};
+	float spawn_frustum_cull_radius{};
+	std::uint32_t flags{};
+	std::string gravity_options{};
+	std::array<std::uint32_t, 4> group_i_ds{};
+	particle_float_range emit_by_distance_density{};
+	std::uint32_t instance_pool{};
+	std::uint32_t solo_instance_max{};
+	std::string instance_action{};
+	std::vector<std::string> m_data_flags{};
+	particle_float_range particle_spawn_shape_range{};
+
+	bool operator==(const particle_emitter_def&) const = default;
+};
+
+struct particle_module_group_def
+{
+	std::optional<std::vector<particle_module_def>> module_defs{};
+	bool disabled{};
+
+	bool operator==(const particle_module_group_def&) const = default;
+};
+
+struct particle_state_def
+{
+	std::optional<std::array<particle_module_group_def, 3>> module_group_defs{};
+	std::uint32_t element_type{};
+	std::uint64_t flags{};
+
+	bool operator==(const particle_state_def&) const = default;
+};
+
+struct particle_module
+{
+	std::string m_type{};
+	std::uint32_t m_flags{};
+
+	bool operator==(const particle_module&) const = default;
 };
 
 struct particle_module_init_atlas
@@ -363,14 +594,6 @@ struct particle_module_init_decal
 	bool m_bypass_stacking_limiter{};
 
 	bool operator==(const particle_module_init_decal&) const = default;
-};
-
-struct particle_float_range
-{
-	float min{};
-	float max{};
-
-	bool operator==(const particle_float_range&) const = default;
 };
 
 struct particle_module_init_flare
@@ -1046,90 +1269,63 @@ struct particle_module_def
 	bool operator==(const particle_module_def&) const = default;
 };
 
-struct particle_module_group_def
+struct particle_curve_control_point_def
 {
-	std::optional<std::vector<particle_module_def>> module_defs{};
-	bool disabled{};
+	float time{};
+	float value{};
+	float inv_time_delta{};
 
-	bool operator==(const particle_module_group_def&) const = default;
+	bool operator==(const particle_curve_control_point_def&) const = default;
 };
 
-struct particle_state_def
+inline void validate(const particle_system& data)
 {
-	std::optional<std::array<particle_module_group_def, 3>> module_group_defs{};
-	std::uint32_t element_type{};
-	std::uint64_t flags{};
-
-	bool operator==(const particle_state_def&) const = default;
-};
-
-struct particle_int_range
-{
-	std::int32_t min{};
-	std::int32_t max{};
-
-	bool operator==(const particle_int_range&) const = default;
-};
-
-struct particle_emitter_def
-{
-	std::optional<std::vector<particle_state_def>> state_defs{};
-	particle_float_range particle_spawn_rate{};
-	particle_float_range particle_life{};
-	particle_float_range particle_delay{};
-	std::uint32_t particle_count_max{};
-	particle_int_range particle_burst_count{};
-	particle_float_range emitter_life{};
-	particle_float_range emitter_delay{};
-	std::int32_t random_seed{};
-	particle_float_range spawn_range_sq{};
-	float fade_out_max_distance{};
-	particle_curve_def fade_curve_def{};
-	float spawn_frustum_cull_radius{};
-	std::uint32_t flags{};
-	std::string gravity_options{};
-	std::array<std::uint32_t, 4> group_i_ds{};
-	particle_float_range emit_by_distance_density{};
-	std::uint32_t instance_pool{};
-	std::uint32_t solo_instance_max{};
-	std::string instance_action{};
-	std::vector<std::string> m_data_flags{};
-	particle_float_range particle_spawn_shape_range{};
-
-	bool operator==(const particle_emitter_def&) const = default;
-};
-
-struct particle_system
-{
-	std::optional<std::string> name{};
-	std::optional<std::vector<particle_emitter_def>> emitter_defs{};
-	std::optional<std::vector<particle_scripted_input_node>> scripted_input_node_defs{};
-	std::int32_t version{};
-	std::uint32_t flags{};
-	std::int32_t occlusion_override_emitter_index{};
-	std::string phase_options{};
-	float draw_frustum_cull_radius{};
-	float update_frustum_cull_radius{};
-	float sun_distance{};
-	std::int32_t pre_roll_m_sec{};
-	std::array<float, 4> editor_position{};
-	std::array<float, 4> editor_rotation{};
-	std::array<float, 4> game_tweak_position{};
-	std::array<float, 4> game_tweak_rotation{};
-
-	bool operator==(const particle_system&) const = default;
-};
-
-inline void validate(const particle_module& data)
-{
-	if (std::ranges::none_of(particle_module_type_names, [&](const auto& entry) { return entry.second == data.m_type; }))
+	if (!data.name)
 	{
-		throw std::runtime_error("particle_module.m_type names no value");
+		throw std::runtime_error("particle_system has no name");
+	}
+
+	detail::name(*data.name, "particle_system");
+
+	if (data.emitter_defs)
+	{
+		for (const auto& item : *data.emitter_defs)
+		{
+			validate(item);
+		}
+	}
+
+	if (data.scripted_input_node_defs)
+	{
+		for (const auto& item : *data.scripted_input_node_defs)
+		{
+			validate(item);
+		}
+	}
+
+	if (std::ranges::none_of(particle_phase_options_names, [&](const auto& entry) { return entry.second == data.phase_options; }))
+	{
+		throw std::runtime_error("particle_system.phase_options names no value");
+	}
+
+	if ((data.emitter_defs && data.emitter_defs->size() > 0x7FFFFFFFull))
+	{
+		throw std::runtime_error("particle_system has arrays that its count does not fit");
+	}
+
+	if ((data.scripted_input_node_defs && data.scripted_input_node_defs->size() > 0x7FFFFFFFull))
+	{
+		throw std::runtime_error("particle_system has arrays that its count does not fit");
 	}
 
 }
 
-inline void validate(const particle_curve_control_point_def& data)
+inline void validate(const particle_float_range& data)
+{
+	(void) data;
+}
+
+inline void validate(const particle_int_range& data)
 {
 	(void) data;
 }
@@ -1147,6 +1343,99 @@ inline void validate(const particle_curve_def& data)
 	if ((data.control_points && data.control_points->size() > 0x7FFFFFFFull))
 	{
 		throw std::runtime_error("particle_curve_def has arrays that its count does not fit");
+	}
+
+}
+
+inline void validate(const particle_emitter_def& data)
+{
+	if (data.state_defs)
+	{
+		for (const auto& item : *data.state_defs)
+		{
+			validate(item);
+		}
+	}
+
+	validate(data.particle_spawn_rate);
+
+	validate(data.particle_life);
+
+	validate(data.particle_delay);
+
+	validate(data.particle_burst_count);
+
+	validate(data.emitter_life);
+
+	validate(data.emitter_delay);
+
+	validate(data.spawn_range_sq);
+
+	validate(data.fade_curve_def);
+
+	if (std::ranges::none_of(particle_gravity_options_names, [&](const auto& entry) { return entry.second == data.gravity_options; }))
+	{
+		throw std::runtime_error("particle_emitter_def.gravity_options names no value");
+	}
+
+	validate(data.emit_by_distance_density);
+
+	if (std::ranges::none_of(particle_instance_pool_action_names, [&](const auto& entry) { return entry.second == data.instance_action; }))
+	{
+		throw std::runtime_error("particle_emitter_def.instance_action names no value");
+	}
+
+	for (const auto& name : data.m_data_flags)
+	{
+		if (std::ranges::none_of(particle_data_flags_names, [&](const auto& entry) { return entry.second == name; }))
+		{
+			throw std::runtime_error("particle_emitter_def.m_data_flags names no flag");
+		}
+	}
+
+	validate(data.particle_spawn_shape_range);
+
+	if ((data.state_defs && data.state_defs->size() > 0x7FFFFFFFull))
+	{
+		throw std::runtime_error("particle_emitter_def has arrays that its count does not fit");
+	}
+
+}
+
+inline void validate(const particle_module_group_def& data)
+{
+	if (data.module_defs)
+	{
+		for (const auto& item : *data.module_defs)
+		{
+			validate(item);
+		}
+	}
+
+	if ((data.module_defs && data.module_defs->size() > 0x7FFFFFFFull))
+	{
+		throw std::runtime_error("particle_module_group_def has arrays that its count does not fit");
+	}
+
+}
+
+inline void validate(const particle_state_def& data)
+{
+	if (data.module_group_defs)
+	{
+		for (const auto& item : *data.module_group_defs)
+		{
+			validate(item);
+		}
+	}
+
+}
+
+inline void validate(const particle_module& data)
+{
+	if (std::ranges::none_of(particle_module_type_names, [&](const auto& entry) { return entry.second == data.m_type; }))
+	{
+		throw std::runtime_error("particle_module.m_type names no value");
 	}
 
 }
@@ -1204,11 +1493,6 @@ inline void validate(const particle_module_init_decal& data)
 		throw std::runtime_error("particle_module_init_decal.m_projection_axis names no value");
 	}
 
-}
-
-inline void validate(const particle_float_range& data)
-{
-	(void) data;
 }
 
 inline void validate(const particle_module_init_flare& data)
@@ -1864,135 +2148,9 @@ inline void validate(const particle_module_def& data)
 
 }
 
-inline void validate(const particle_module_group_def& data)
-{
-	if (data.module_defs)
-	{
-		for (const auto& item : *data.module_defs)
-		{
-			validate(item);
-		}
-	}
-
-	if ((data.module_defs && data.module_defs->size() > 0x7FFFFFFFull))
-	{
-		throw std::runtime_error("particle_module_group_def has arrays that its count does not fit");
-	}
-
-}
-
-inline void validate(const particle_state_def& data)
-{
-	if (data.module_group_defs)
-	{
-		for (const auto& item : *data.module_group_defs)
-		{
-			validate(item);
-		}
-	}
-
-}
-
-inline void validate(const particle_int_range& data)
+inline void validate(const particle_curve_control_point_def& data)
 {
 	(void) data;
-}
-
-inline void validate(const particle_emitter_def& data)
-{
-	if (data.state_defs)
-	{
-		for (const auto& item : *data.state_defs)
-		{
-			validate(item);
-		}
-	}
-
-	validate(data.particle_spawn_rate);
-
-	validate(data.particle_life);
-
-	validate(data.particle_delay);
-
-	validate(data.particle_burst_count);
-
-	validate(data.emitter_life);
-
-	validate(data.emitter_delay);
-
-	validate(data.spawn_range_sq);
-
-	validate(data.fade_curve_def);
-
-	if (std::ranges::none_of(particle_gravity_options_names, [&](const auto& entry) { return entry.second == data.gravity_options; }))
-	{
-		throw std::runtime_error("particle_emitter_def.gravity_options names no value");
-	}
-
-	validate(data.emit_by_distance_density);
-
-	if (std::ranges::none_of(particle_instance_pool_action_names, [&](const auto& entry) { return entry.second == data.instance_action; }))
-	{
-		throw std::runtime_error("particle_emitter_def.instance_action names no value");
-	}
-
-	for (const auto& name : data.m_data_flags)
-	{
-		if (std::ranges::none_of(particle_data_flags_names, [&](const auto& entry) { return entry.second == name; }))
-		{
-			throw std::runtime_error("particle_emitter_def.m_data_flags names no flag");
-		}
-	}
-
-	validate(data.particle_spawn_shape_range);
-
-	if ((data.state_defs && data.state_defs->size() > 0x7FFFFFFFull))
-	{
-		throw std::runtime_error("particle_emitter_def has arrays that its count does not fit");
-	}
-
-}
-
-inline void validate(const particle_system& data)
-{
-	if (!data.name)
-	{
-		throw std::runtime_error("particle_system has no name");
-	}
-
-	detail::name(*data.name, "particle_system");
-
-	if (data.emitter_defs)
-	{
-		for (const auto& item : *data.emitter_defs)
-		{
-			validate(item);
-		}
-	}
-
-	if (data.scripted_input_node_defs)
-	{
-		for (const auto& item : *data.scripted_input_node_defs)
-		{
-			validate(item);
-		}
-	}
-
-	if (std::ranges::none_of(particle_phase_options_names, [&](const auto& entry) { return entry.second == data.phase_options; }))
-	{
-		throw std::runtime_error("particle_system.phase_options names no value");
-	}
-
-	if ((data.emitter_defs && data.emitter_defs->size() > 0x7FFFFFFFull))
-	{
-		throw std::runtime_error("particle_system has arrays that its count does not fit");
-	}
-
-	if ((data.scripted_input_node_defs && data.scripted_input_node_defs->size() > 0x7FFFFFFFull))
-	{
-		throw std::runtime_error("particle_system has arrays that its count does not fit");
-	}
-
 }
 
 } // namespace vfx

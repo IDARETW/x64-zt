@@ -15,6 +15,7 @@
 #include "neutral/lighting.hpp"
 #include "neutral/material.hpp"
 #include "neutral/physics.hpp"
+#include "neutral/plain.hpp"
 #include "neutral/rumble.hpp"
 #include "neutral/shader.hpp"
 #include "neutral/sound.hpp"
@@ -315,11 +316,25 @@ namespace zonetool::iw8
 			return false;
 		}
 
+		// IW8_NEUTRAL_TRACE=<type id> logs the name of each asset of that type before its adapter reads it, so that a crash
+		// in an adapter names the asset.
+		bool neutral_traced(const std::int32_t type)
+		{
+			char list[256]{};
+			return GetEnvironmentVariableA("IW8_NEUTRAL_TRACE", list, sizeof(list)) && std::string_view(list) == std::to_string(type);
+		}
+
 		std::optional<neutral_data> neutral_of(const std::int32_t type, const void* header, std::string* kept = nullptr)
 		{
 			if (neutral_skipped(type))
 			{
 				return std::nullopt;
+			}
+
+			neutral::plain::trace_enabled = neutral_traced(type);
+			if (neutral::plain::trace_enabled)
+			{
+				ZONETOOL_INFO("neutral adapter reads %s", asset_name(type, header).data());
 			}
 
 			switch (type)
