@@ -16,8 +16,8 @@ namespace zonetool
 // Replay 1.20 sound_globals assets to and from neutral data (docs/NEUTRAL_ASSETS.md).
 namespace zonetool::iw8::neutral
 {
-	std::expected<asset_data::sound_globals, std::string> to_neutral(const SndGlobals& native);
-	SndGlobals* from_neutral(const asset_data::sound_globals& data, const asset_resolver& resolve, zone_memory& memory);
-	std::size_t native_size(const asset_data::sound_globals& data);
+	std::expected<asset_data::sound_globals::sound_globals, std::string> to_neutral(const SndGlobals& native);
+	SndGlobals* from_neutral(const asset_data::sound_globals::sound_globals& data, const asset_resolver& resolve, zone_memory& memory);
+	std::size_t native_size(const asset_data::sound_globals::sound_globals& data);
 
 }

@@ -22,6 +22,7 @@
 #include "neutral/techset.hpp"
 #include "neutral/stream.hpp"
 #include "neutral/text.hpp"
+#include "neutral/vfx.hpp"
 #include "neutral/world.hpp"
 #include "neutral/xanim.hpp"
 #include "neutral/xmodel.hpp"
@@ -270,9 +271,9 @@ namespace zonetool::iw8
 			neutral::xanim_source, neutral::light_def_source, neutral::grading_clut_source, neutral::xmodel_source,
 			neutral::xmodel_surfs_source, neutral::decal_volume_material_source, neutral::stream_key_source,
 			neutral::material_source, neutral::shader_source, asset_data::technique_set, asset_data::physics_fx_shape,
-			asset_data::detail_collision, asset_data::physics_asset, asset_data::sound_bank_resident, asset_data::sound_bank_transient,
-			asset_data::sound_globals, asset_data::com_world, asset_data::glass_world, asset_data::map_edge_list,
-			asset_data::nav_mesh, asset_data::clip_map, asset_data::fog_spline, asset_data::particle_sim_animation,
+			asset_data::detail_collision, asset_data::physics_asset, asset_data::sound::sound_bank_resident, asset_data::sound::sound_bank_transient,
+			asset_data::sound_globals::sound_globals, asset_data::world::com_world, asset_data::world::glass_world, asset_data::world::map_edge_list,
+			asset_data::world::nav_mesh, asset_data::world::clip_map, asset_data::world::fog_spline, asset_data::effects::particle_sim_animation, asset_data::vfx::particle_system,
 			asset_data::impact_table, asset_data::surface_effect_table, asset_data::physics_fx_pipeline,
 			neutral::vector_field_source>;
 
@@ -384,6 +385,8 @@ namespace zonetool::iw8
 				return accepted(neutral::to_neutral(*static_cast<const clipMap_t*>(header)), "clip map", kept);
 			case ASSET_TYPE_FOG_SPLINE:
 				return accepted(neutral::to_neutral(*static_cast<const GfxFogSpline*>(header)), "fog spline", kept);
+			case ASSET_TYPE_VFX:
+				return accepted(neutral::to_neutral(*static_cast<const ParticleSystemDef*>(header)), "particle system", kept);
 			case ASSET_TYPE_COMWORLD:
 				return accepted(neutral::to_neutral(*static_cast<const ComWorld*>(header)), "com world", kept);
 			case ASSET_TYPE_GLASSWORLD:

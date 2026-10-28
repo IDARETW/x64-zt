@@ -1,0 +1,49 @@
+{
+ "family": "vfx",
+ "assets": [
+  {
+   "type": "ASSET_TYPE_VFX",
+   "struct": "ParticleSystemDef",
+   "neutral": "particle_system",
+   "name": "name"
+  }
+ ],
+ "tokens": {},
+ "tagged": [
+  {
+   "owner": "ParticleModuleDef",
+   "member": "moduleData",
+   "tag": "moduleType",
+   "dispatch": "stream_particlemodulegroupdef",
+   "prefix": "PARTICLE_MODULE_",
+   "skip": [
+    "moduleBase"
+   ]
+  }
+ ],
+ "external": {
+  "ParticleLinkedAssetListDef": {
+   "neutral": "particle_linked_asset_list",
+   "read": "read_particle_linked_asset_list",
+   "write": "write_particle_linked_asset_list",
+   "size": "size_particle_linked_asset_list"
+  },
+  "ParticleScriptedInputNodeDef": {
+   "neutral": "particle_scripted_input_node",
+   "read": "read_particle_scripted_input_node",
+   "write": "write_particle_scripted_input_node",
+   "size": "size_particle_scripted_input_node"
+  }
+ },
+ "data_includes": [
+  "particle_data.hpp"
+ ],
+ "adapter_includes": [
+  "particle.hpp"
+ ],
+ "flag_enums": [
+  "ParticleDataFlags",
+  "ParticleModuleAxesFlags",
+  "ParticleSpawnFlags"
+ ]
+}

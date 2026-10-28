@@ -8,12 +8,16 @@
 #include <stdexcept>
 #include <string>
 #include <string_view>
+#include <type_traits>
 #include <utility>
+#include <variant>
 #include <vector>
 
 // Neutral world assets (docs/NEUTRAL_ASSETS.md), emitted by tools/gen_iw8_neutral.py from the IW8 structs and stream
 // traversals: do not edit; change the spec (tools/neutral_families/world.json) or the generator.
 namespace zonetool::asset_data
+{
+namespace world
 {
 inline constexpr std::array<std::pair<std::int64_t, std::string_view>, 3> pmr_octree_flags_names{{
 	{1, "empty_node"},
@@ -1326,4 +1330,5 @@ inline void validate(const fog_spline& data)
 
 }
 
+} // namespace world
 } // namespace zonetool::asset_data
