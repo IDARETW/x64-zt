@@ -361,6 +361,21 @@ namespace zonetool::iw8::neutral
 		asset_data::content::x_anim_notify_info read_x_anim_notify_info(const XAnimNotifyInfo& native);
 		void write_x_anim_notify_info(XAnimNotifyInfo& native, const asset_data::content::x_anim_notify_info& data, const asset_resolver& resolve, plain::context& memory);
 		std::size_t size_x_anim_notify_info(const asset_data::content::x_anim_notify_info& data);
+		asset_data::content::dynentitylist read_dynentitylist(const DynEntityList& native);
+		void write_dynentitylist(DynEntityList& native, const asset_data::content::dynentitylist& data, const asset_resolver& resolve, plain::context& memory);
+		std::size_t size_dynentitylist(const asset_data::content::dynentitylist& data);
+		asset_data::content::dyn_entity_def read_dyn_entity_def(const DynEntityDef& native);
+		void write_dyn_entity_def(DynEntityDef& native, const asset_data::content::dyn_entity_def& data, const asset_resolver& resolve, plain::context& memory);
+		std::size_t size_dyn_entity_def(const asset_data::content::dyn_entity_def& data);
+		asset_data::content::client_entity_link_to_def read_client_entity_link_to_def(const ClientEntityLinkToDef& native);
+		void write_client_entity_link_to_def(ClientEntityLinkToDef& native, const asset_data::content::client_entity_link_to_def& data, const asset_resolver& resolve, plain::context& memory);
+		std::size_t size_client_entity_link_to_def(const asset_data::content::client_entity_link_to_def& data);
+		asset_data::content::spatial_partition_population_node read_spatial_partition_population_node(const SpatialPartition_Population_Node& native);
+		void write_spatial_partition_population_node(SpatialPartition_Population_Node& native, const asset_data::content::spatial_partition_population_node& data, const asset_resolver& resolve, plain::context& memory);
+		std::size_t size_spatial_partition_population_node(const asset_data::content::spatial_partition_population_node& data);
+		asset_data::content::spatial_partition_transient_population read_spatial_partition_transient_population(const SpatialPartition_TransientPopulation& native);
+		void write_spatial_partition_transient_population(SpatialPartition_TransientPopulation& native, const asset_data::content::spatial_partition_transient_population& data, const asset_resolver& resolve, plain::context& memory);
+		std::size_t size_spatial_partition_transient_population(const asset_data::content::spatial_partition_transient_population& data);
 
 		asset_data::content::att_ammo_general read_att_ammo_general(const AttAmmoGeneral& native)
 		{
@@ -6483,6 +6498,230 @@ namespace zonetool::iw8::neutral
 			return size;
 		}
 
+		asset_data::content::spatial_partition_transient_population read_spatial_partition_transient_population(const SpatialPartition_TransientPopulation& native)
+		{
+			plain::trace("read_spatial_partition_transient_population");
+			asset_data::content::spatial_partition_transient_population data;
+			data.buckets = plain::read_array(native.buckets, native.partitionCount, "SpatialPartition_TransientPopulation.buckets", [&](const auto& item) { return read_spatial_partition_population_node(item); });
+			data.bucket_tails = plain::read_array(native.bucketTails, native.partitionCount, "SpatialPartition_TransientPopulation.bucketTails", [&](const auto& item) { return read_spatial_partition_population_node(item); });
+			data.partition_ids = plain::read_array(native.partitionIds, native.partitionCount, "SpatialPartition_TransientPopulation.partitionIds", [&](const auto& item) { return item; });
+			data.current_population = native.currentPopulation;
+			return data;
+		}
+
+		void write_spatial_partition_transient_population(SpatialPartition_TransientPopulation& native, const asset_data::content::spatial_partition_transient_population& data, [[maybe_unused]] const asset_resolver& resolve, [[maybe_unused]] plain::context& memory)
+		{
+			native.buckets = plain::write_array<SpatialPartition_Population_Node>(data.buckets, memory, [&](auto& out, const auto& in) { write_spatial_partition_population_node(out, in, resolve, memory); });
+			native.bucketTails = plain::write_array<SpatialPartition_Population_Node>(data.bucket_tails, memory, [&](auto& out, const auto& in) { write_spatial_partition_population_node(out, in, resolve, memory); });
+			native.partitionIds = plain::write_array<std::uint32_t>(data.partition_ids, memory, [&](auto& out, const auto& in) { out = in; });
+			native.currentPopulation = data.current_population;
+			native.partitionCount = plain::count_of<std::uint32_t>(data.buckets);
+		}
+
+		std::size_t size_spatial_partition_transient_population([[maybe_unused]] const asset_data::content::spatial_partition_transient_population& data)
+		{
+			std::size_t size = 0;
+			if (data.buckets)
+			{
+				size += plain::sized(std::max<std::size_t>(data.buckets->size(), 1) * sizeof(SpatialPartition_Population_Node));
+				for (const auto& item : *data.buckets)
+				{
+					size += size_spatial_partition_population_node(item);
+				}
+			}
+			if (data.bucket_tails)
+			{
+				size += plain::sized(std::max<std::size_t>(data.bucket_tails->size(), 1) * sizeof(SpatialPartition_Population_Node));
+				for (const auto& item : *data.bucket_tails)
+				{
+					size += size_spatial_partition_population_node(item);
+				}
+			}
+			if (data.partition_ids)
+			{
+				size += plain::sized(std::max<std::size_t>(data.partition_ids->size(), 1) * sizeof(std::uint32_t));
+			}
+			return size;
+		}
+
+		asset_data::content::spatial_partition_population_node read_spatial_partition_population_node(const SpatialPartition_Population_Node& native)
+		{
+			plain::trace("read_spatial_partition_population_node");
+			asset_data::content::spatial_partition_population_node data;
+			data.spatial_node_next = native.spatialNodeNext;
+			return data;
+		}
+
+		void write_spatial_partition_population_node(SpatialPartition_Population_Node& native, const asset_data::content::spatial_partition_population_node& data, [[maybe_unused]] const asset_resolver& resolve, [[maybe_unused]] plain::context& memory)
+		{
+			native.spatialNodeNext = data.spatial_node_next;
+		}
+
+		std::size_t size_spatial_partition_population_node([[maybe_unused]] const asset_data::content::spatial_partition_population_node& data)
+		{
+			std::size_t size = 0;
+			return size;
+		}
+
+		asset_data::content::dynentitylist read_dynentitylist(const DynEntityList& native)
+		{
+			plain::trace("read_dynentitylist");
+			asset_data::content::dynentitylist data;
+			data.name = plain::read_string(native.name);
+			data.index = static_cast<std::uint16_t>(native.index);
+			data.dyn_ent_count = std::to_array(native.dynEntCount);
+			data.dyn_ent_count_total = native.dynEntCountTotal;
+			data.dyn_ent_def_list_0 = plain::read_array(native.dynEntDefList[0], native.dynEntCount[0], "DynEntityList.dynEntDefList[0]", [&](const auto& item) { return read_dyn_entity_def(item); });
+			data.dyn_ent_def_list_1 = plain::read_array(native.dynEntDefList[1], native.dynEntCount[1], "DynEntityList.dynEntDefList[1]", [&](const auto& item) { return read_dyn_entity_def(item); });
+			data.dyn_ent_spatial_population_0 = plain::read_single(native.dynEntSpatialPopulation[0], [&](const auto& item) { return read_spatial_partition_transient_population(item); });
+			data.dyn_ent_spatial_population_1 = plain::read_single(native.dynEntSpatialPopulation[1], [&](const auto& item) { return read_spatial_partition_transient_population(item); });
+			data.dyn_ent_no_spatial_list = read_spatial_partition_population_node(native.dynEntNoSpatialList);
+			data.dyn_ent_no_spatial_list_tail = read_spatial_partition_population_node(native.dynEntNoSpatialListTail);
+			return data;
+		}
+
+		void write_dynentitylist(DynEntityList& native, const asset_data::content::dynentitylist& data, [[maybe_unused]] const asset_resolver& resolve, [[maybe_unused]] plain::context& memory)
+		{
+			native.name = plain::write_string(memory, data.name);
+			native.index = static_cast<DynEntityListId>(data.index);
+			std::ranges::copy(data.dyn_ent_count, native.dynEntCount);
+			native.dynEntCountTotal = data.dyn_ent_count_total;
+			native.dynEntDefList[0] = plain::write_array<DynEntityDef>(data.dyn_ent_def_list_0, memory, [&](auto& out, const auto& in) { write_dyn_entity_def(out, in, resolve, memory); });
+			native.dynEntDefList[1] = plain::write_array<DynEntityDef>(data.dyn_ent_def_list_1, memory, [&](auto& out, const auto& in) { write_dyn_entity_def(out, in, resolve, memory); });
+			native.dynEntSpatialPopulation[0] = plain::write_single<SpatialPartition_TransientPopulation>(data.dyn_ent_spatial_population_0, memory, [&](auto& out, const auto& in) { write_spatial_partition_transient_population(out, in, resolve, memory); });
+			native.dynEntSpatialPopulation[1] = plain::write_single<SpatialPartition_TransientPopulation>(data.dyn_ent_spatial_population_1, memory, [&](auto& out, const auto& in) { write_spatial_partition_transient_population(out, in, resolve, memory); });
+			write_spatial_partition_population_node(native.dynEntNoSpatialList, data.dyn_ent_no_spatial_list, resolve, memory);
+			write_spatial_partition_population_node(native.dynEntNoSpatialListTail, data.dyn_ent_no_spatial_list_tail, resolve, memory);
+		}
+
+		std::size_t size_dynentitylist([[maybe_unused]] const asset_data::content::dynentitylist& data)
+		{
+			std::size_t size = 0;
+			size += plain::string_size(data.name);
+			if (data.dyn_ent_def_list_0)
+			{
+				size += plain::sized(std::max<std::size_t>(data.dyn_ent_def_list_0->size(), 1) * sizeof(DynEntityDef));
+				for (const auto& item : *data.dyn_ent_def_list_0)
+				{
+					size += size_dyn_entity_def(item);
+				}
+			}
+			if (data.dyn_ent_def_list_1)
+			{
+				size += plain::sized(std::max<std::size_t>(data.dyn_ent_def_list_1->size(), 1) * sizeof(DynEntityDef));
+				for (const auto& item : *data.dyn_ent_def_list_1)
+				{
+					size += size_dyn_entity_def(item);
+				}
+			}
+			if (data.dyn_ent_spatial_population_0)
+			{
+				size += plain::sized(sizeof(SpatialPartition_TransientPopulation));
+				size += size_spatial_partition_transient_population(*data.dyn_ent_spatial_population_0);
+			}
+			if (data.dyn_ent_spatial_population_1)
+			{
+				size += plain::sized(sizeof(SpatialPartition_TransientPopulation));
+				size += size_spatial_partition_transient_population(*data.dyn_ent_spatial_population_1);
+			}
+			size += size_spatial_partition_population_node(data.dyn_ent_no_spatial_list);
+			size += size_spatial_partition_population_node(data.dyn_ent_no_spatial_list_tail);
+			return size;
+		}
+
+		asset_data::content::client_entity_link_to_def read_client_entity_link_to_def(const ClientEntityLinkToDef& native)
+		{
+			plain::trace("read_client_entity_link_to_def");
+			asset_data::content::client_entity_link_to_def data;
+			data.anchor_index = native.anchorIndex;
+			data.origin_offset = plain::read_scalars<float, 3>(&native.originOffset);
+			data.angle_offset = plain::read_scalars<float, 3>(&native.angleOffset);
+			return data;
+		}
+
+		void write_client_entity_link_to_def(ClientEntityLinkToDef& native, const asset_data::content::client_entity_link_to_def& data, [[maybe_unused]] const asset_resolver& resolve, [[maybe_unused]] plain::context& memory)
+		{
+			native.anchorIndex = data.anchor_index;
+			plain::write_scalars(&native.originOffset, data.origin_offset);
+			plain::write_scalars(&native.angleOffset, data.angle_offset);
+		}
+
+		std::size_t size_client_entity_link_to_def([[maybe_unused]] const asset_data::content::client_entity_link_to_def& data)
+		{
+			std::size_t size = 0;
+			return size;
+		}
+
+		asset_data::content::dyn_entity_def read_dyn_entity_def(const DynEntityDef& native)
+		{
+			plain::trace("read_dyn_entity_def");
+			asset_data::content::dyn_entity_def data;
+			data.base_model = plain::read_asset(ASSET_TYPE_XMODEL, native.baseModel);
+			data.link_to = plain::read_single(native.linkTo, [&](const auto& item) { return read_client_entity_link_to_def(item); });
+			data.initial_pose = read_gfx_placement(native.initialPose);
+			data.spatial_node = read_spatial_partition_population_node(native.spatialNode);
+			data.client_active_mask = native.clientActiveMask;
+			data.basis = plain::enum_name(asset_data::content::dyn_entity_basis_names, static_cast<std::int64_t>(native.basis), "DynEntityDef.basis");
+			data.type = plain::enum_name(asset_data::content::dyn_entity_type_names, static_cast<std::int64_t>(native.type), "DynEntityDef.type");
+			data.priority = plain::enum_name(asset_data::content::dyn_entity_spatial_activation_mode_names, static_cast<std::int64_t>(native.priority), "DynEntityDef.priority");
+			data.spatial_partition_index = native.spatialPartitionIndex;
+			data.client_id = std::to_array(native.clientId);
+			data.scriptable_map_index = native.scriptableMapIndex;
+			data.dyn_entity_list_id = static_cast<std::uint16_t>(native.dynEntityListId);
+			data.brush_model = native.brushModel;
+			data.scriptable_sub_index = native.scriptableSubIndex;
+			data.transient_index_stored = native.transientIndexStored;
+			data.scriptable_max_part_count_or_physics_asset_rigid_bodies_count = plain::read_scalars<std::uint8_t, 1>(&native.___u15)[0];
+			data.spawn_active = native.spawnActive;
+			data.no_physics = native.noPhysics;
+			data.distant_shadows = native.distantShadows;
+			data.no_spot_shadows = native.noSpotShadows;
+			data.collision_flags = native.collisionFlags;
+			data.is_transient = native.isTransient;
+			data.transient_zone_loaded = native.transientZoneLoaded;
+			return data;
+		}
+
+		void write_dyn_entity_def(DynEntityDef& native, const asset_data::content::dyn_entity_def& data, [[maybe_unused]] const asset_resolver& resolve, [[maybe_unused]] plain::context& memory)
+		{
+			native.baseModel = plain::resolve_asset<XModel>(resolve, ASSET_TYPE_XMODEL, data.base_model);
+			native.linkTo = plain::write_single<ClientEntityLinkToDef>(data.link_to, memory, [&](auto& out, const auto& in) { write_client_entity_link_to_def(out, in, resolve, memory); });
+			write_gfx_placement(native.initialPose, data.initial_pose, resolve, memory);
+			write_spatial_partition_population_node(native.spatialNode, data.spatial_node, resolve, memory);
+			native.clientActiveMask = data.client_active_mask;
+			native.basis = static_cast<DynEntityBasis>(plain::enum_value(asset_data::content::dyn_entity_basis_names, data.basis, "DynEntityDef.basis"));
+			native.type = static_cast<DynEntityType>(plain::enum_value(asset_data::content::dyn_entity_type_names, data.type, "DynEntityDef.type"));
+			native.priority = static_cast<DynEntitySpatialActivationMode>(plain::enum_value(asset_data::content::dyn_entity_spatial_activation_mode_names, data.priority, "DynEntityDef.priority"));
+			native.spatialPartitionIndex = data.spatial_partition_index;
+			std::ranges::copy(data.client_id, native.clientId);
+			native.scriptableMapIndex = data.scriptable_map_index;
+			native.dynEntityListId = static_cast<DynEntityListId>(data.dyn_entity_list_id);
+			native.brushModel = data.brush_model;
+			native.scriptableSubIndex = data.scriptable_sub_index;
+			native.transientIndexStored = data.transient_index_stored;
+			plain::write_scalars(&native.___u15, std::array<std::uint8_t, 1>{data.scriptable_max_part_count_or_physics_asset_rigid_bodies_count});
+			native.spawnActive = data.spawn_active;
+			native.noPhysics = data.no_physics;
+			native.distantShadows = data.distant_shadows;
+			native.noSpotShadows = data.no_spot_shadows;
+			native.collisionFlags = data.collision_flags;
+			native.isTransient = data.is_transient;
+			native.transientZoneLoaded = data.transient_zone_loaded;
+		}
+
+		std::size_t size_dyn_entity_def([[maybe_unused]] const asset_data::content::dyn_entity_def& data)
+		{
+			std::size_t size = 0;
+			if (data.link_to)
+			{
+				size += plain::sized(sizeof(ClientEntityLinkToDef));
+				size += size_client_entity_link_to_def(*data.link_to);
+			}
+			size += size_gfx_placement(data.initial_pose);
+			size += size_spatial_partition_population_node(data.spatial_node);
+			return size;
+		}
+
 	}
 
 	std::expected<asset_data::content::attachment, std::string> to_neutral(const WeaponAttachment& native)
@@ -6763,6 +7002,34 @@ namespace zonetool::iw8::neutral
 	std::size_t native_size(const asset_data::content::xcam& data)
 	{
 		return plain::rounded(sizeof(XCam)) + size_xcam(data) + 64;
+	}
+
+	std::expected<asset_data::content::dynentitylist, std::string> to_neutral(const DynEntityList& native)
+	{
+		try
+		{
+			auto data = read_dynentitylist(native);
+			validate(data);
+			return data;
+		}
+		catch (const std::exception& error)
+		{
+			return std::unexpected(error.what());
+		}
+	}
+
+	DynEntityList* from_neutral(const asset_data::content::dynentitylist& data, const asset_resolver& resolve, zone_memory& memory)
+	{
+		validate(data);
+		plain::context context(memory);
+		auto* native = context.allocate<DynEntityList>();
+		write_dynentitylist(*native, data, resolve, context);
+		return native;
+	}
+
+	std::size_t native_size(const asset_data::content::dynentitylist& data)
+	{
+		return plain::rounded(sizeof(DynEntityList)) + size_dynentitylist(data) + 64;
 	}
 
 }

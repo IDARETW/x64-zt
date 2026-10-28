@@ -60,9 +60,23 @@
    "struct": "XCam",
    "neutral": "xcam",
    "name": "name"
+  },
+  {
+   "type": "ASSET_TYPE_DYNENTITY_LIST",
+   "struct": "DynEntityList",
+   "neutral": "dynentitylist",
+   "name": "name"
   }
  ],
  "kept_counts": [
   "XCam.*"
+ ],
+ "scalar_enums": [
+  "DynEntityListId"
+ ],
+ "runtime": [
+  "SpatialPartition_TransientPopulation.getNodeFromIndex",
+  "SpatialPartition_TransientPopulation.getIndexFromNode",
+  "SpatialPartition_TransientPopulation.userData"
  ]
 }
