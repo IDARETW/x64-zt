@@ -3,6 +3,7 @@
 #include "asset_data.hpp"
 #include <algorithm>
 #include <array>
+#include <bit>
 #include <cmath>
 #include <cstdint>
 #include <cstring>
@@ -91,6 +92,105 @@ struct material
 
 	bool operator==(const material&) const = default;
 };
+
+// What a shader argument binds: a code constant, texture, buffer, material texture or material constant (the profile's
+// argument kinds), the shader stage that reads it, and where it goes. The numbers are those of the profile.
+struct technique_argument
+{
+	std::uint32_t kind{};
+	std::uint32_t stage{};
+	std::uint32_t destination{};
+	std::uint32_t index{};
+
+	bool operator==(const technique_argument&) const = default;
+};
+
+// One way of drawing a material (a pass of the frame): its shaders by name, the arguments they read, and the state of
+// the pipeline. The numbers (type, flags, formats, state bits) are those of the profile that wrote the technique.
+struct technique
+{
+	std::string name;
+	std::uint32_t type{};
+	std::uint32_t flags{};
+	std::uint32_t input_layout_count{};
+	std::array<std::uint8_t, 25> pipeline_state_map{};
+	// One hash per pipeline state and input layout.
+	std::vector<std::uint64_t> pipeline_state_hashes;
+	std::array<std::uint64_t, 4> custom_buffer_flags{};
+	std::optional<std::array<std::uint8_t, 16>> root_parameter_map;
+	std::optional<std::string> vertex_shader;
+	std::optional<std::string> hull_shader;
+	std::optional<std::string> domain_shader;
+	std::optional<std::string> pixel_shader;
+	// The arguments in the profile's order, and how many of them are never, per-object, per-primitive and stable.
+	std::vector<technique_argument> arguments;
+	std::array<std::uint32_t, 4> argument_counts{};
+	std::array<std::uint32_t, 3> argument_sizes{};
+	std::uint32_t color_target_count{};
+	std::vector<std::array<std::uint8_t, 5>> state_bits;
+	std::array<std::uint8_t, 5> target_formats{};
+	std::uint32_t custom_sampler_flags{};
+	std::uint32_t constant_layout{};
+	std::uint32_t stage_config{};
+	std::array<std::uint64_t, 2> default_state_bits{};
+
+	bool operator==(const technique&) const = default;
+};
+
+// A technique set: the techniques of a kind of surface, one for each bit of its mask (in the order of the bits). A
+// technique can be shared with other sets.
+struct technique_set
+{
+	std::string name;
+	std::uint64_t flags{};
+	std::uint32_t geometry_type{};
+	std::array<std::uint64_t, 4> mask{};
+	std::vector<std::optional<technique>> techniques;
+
+	bool operator==(const technique_set&) const = default;
+};
+
+inline void validate(const technique_set& data)
+{
+	detail::name(data.name, "techset");
+	std::size_t bits = 0;
+	for (const auto word : data.mask)
+	{
+		bits += static_cast<std::size_t>(std::popcount(word));
+	}
+
+	if (data.techniques.size() != bits)
+	{
+		throw std::runtime_error("techset " + data.name + " has a technique count that is not the bits of its mask");
+	}
+
+	for (const auto& value : data.techniques)
+	{
+		if (!value)
+		{
+			continue;
+		}
+
+		detail::name(value->name, "technique");
+		const auto states = value->state_bits.size();
+		const auto total = static_cast<std::size_t>(value->argument_counts[0]) + value->argument_counts[1] + value->argument_counts[2] +
+			value->argument_counts[3];
+		if (value->pipeline_state_hashes.size() != states * value->input_layout_count || value->arguments.size() != total ||
+			states > 0xFF || value->input_layout_count > 0xFF || value->color_target_count > 0xFF || value->argument_counts[0] > 0xFF ||
+			value->argument_counts[1] > 0xFF || value->argument_counts[2] > 0xFF || value->argument_counts[3] > 0xFF)
+		{
+			throw std::runtime_error("technique " + value->name + " has counts that do not agree");
+		}
+
+		for (const auto& shader : {value->vertex_shader, value->hull_shader, value->domain_shader, value->pixel_shader})
+		{
+			if (shader)
+			{
+				detail::name(*shader, "technique shader");
+			}
+		}
+	}
+}
 
 inline void validate(const material& data)
 {
