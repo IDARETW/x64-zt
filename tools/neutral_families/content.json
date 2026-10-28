@@ -1,0 +1,59 @@
+{
+ "family": "content",
+ "assets": [
+  {
+   "type": "ASSET_TYPE_ATTACHMENT",
+   "struct": "WeaponAttachment",
+   "neutral": "attachment",
+   "name": "szInternalName"
+  },
+  {
+   "type": "ASSET_TYPE_ANIMCLASS",
+   "struct": "AnimationClass",
+   "neutral": "animclass",
+   "name": "className"
+  },
+  {
+   "type": "ASSET_TYPE_LUA_FILE",
+   "struct": "LuaFile",
+   "neutral": "luafile",
+   "name": "name"
+  },
+  {
+   "type": "ASSET_TYPE_LEADERBOARD",
+   "struct": "LeaderboardDef",
+   "neutral": "leaderboarddef",
+   "name": "name"
+  },
+  {
+   "type": "ASSET_TYPE_VIRTUAL_LEADERBOARD",
+   "struct": "VirtualLeaderboardDef",
+   "neutral": "virtualleaderboarddef",
+   "name": "name"
+  },
+  {
+   "type": "ASSET_TYPE_CLOTHASSET",
+   "struct": "ClothAsset",
+   "neutral": "clothasset",
+   "name": "name"
+  },
+  {
+   "type": "ASSET_TYPE_SUPER_TERRAIN",
+   "struct": "StTerrain",
+   "neutral": "stterrain",
+   "name": "name"
+  },
+  {
+   "type": "ASSET_TYPE_COLLISION_TILE",
+   "struct": "CollisionTile",
+   "neutral": "collisiontile",
+   "name": "name"
+  },
+  {
+   "type": "ASSET_TYPE_VEHICLE",
+   "struct": "VehicleDef",
+   "neutral": "vehicle",
+   "name": "name"
+  }
+ ]
+}

@@ -72,6 +72,10 @@ class Source:
         return out
 
 
+# `*reinterpret_cast<const T*>(&data)` or `(&data.member)`: the first scalar of a struct, read through a cast.
+CAST = r'\*reinterpret_cast<const ([\w:]+)\*>\(&\w+(?:\[\w+\])?(?:\.(\w+(?:\.\w+)*))?\)'
+
+
 class Rules:
     """What each pointer member is, from the stream traversals."""
 
@@ -90,8 +94,14 @@ class Rules:
         self.asset_arrays = {}
         self.overlay_pointers = set()
         self.referenced = set()
+        # The rules of the members of the object a traversal function is about, by that object's struct: a member name alone
+        # is ambiguous (`anims` is 22 pointers in one struct and 614 in another).
+        self.owner_arrays = {}
+        self.indexed = {}
+        headers =[(h.start(), h.group(1)) for h in re.finditer(r'void stream_\w+\(Stream& stream, (\w+)& data\)', text)]
+        self.streamed_structs = {name for _, name in headers}
         member = r'(?:\w+(?:\[\w+\])?\.)*?(\w+)'
-        for m in re.finditer(r'stream\.string\(' + member + r'\);', text):
+        for m in re.finditer(r'stream\.string\(' + member + r'(?:\[\w+\])?\);', text):
             self.strings.add(m.group(1))
         for m in re.finditer(r'stream\.asset\((ASSET_TYPE_\w+), ' + member + r'\);', text):
             self.assets[m.group(2)] = m.group(1)
@@ -108,14 +118,27 @@ class Rules:
                 rule = ('literal', int(count))
             elif re.fullmatch(r'\w+(?:\[\w+\])?\.(\w+)', count):
                 rule = ('member', re.fullmatch(r'\w+(?:\[\w+\])?\.(\w+)', count).group(1))
-            elif re.fullmatch(r'\*reinterpret_cast<const ([\w:]+)\*>\(&\w+(?:\[\w+\])?\)', count):
-                rule = ('first', re.fullmatch(r'\*reinterpret_cast<const ([\w:]+)\*>\(&\w+(?:\[\w+\])?\)', count).group(1))
+            elif re.fullmatch(CAST, count):
+                shape = re.fullmatch(CAST, count)
+                rule = ('first', shape.group(1), shape.group(2))
+            elif len(set(re.findall(CAST, count))) == 1 and re.fullmatch(r'[@\d\s+*()<>-]*', re.sub(CAST, '@', count)):
+                # Arithmetic over one first-scalar read (`((first + 31) >> 5) * first`): the cast becomes @.
+                cast = re.search(CAST, count)
+                rule = ('first_expr', cast.group(1), re.sub(CAST, '@', count), cast.group(2))
             elif 'outer_' not in count and 'reinterpret_cast' not in count and re.search(r'\.\w+', count):
                 rule = ('expr', count)
             else:
                 continue
             if rule not in self.arrays.setdefault(field, []):
                 self.arrays[field].append(rule)
+            # `data.x[1]`: the rule of one element of a pointer array that has a count of its own for each element.
+            element = re.search(r'\[(\d+)\]$', arguments[0])
+            if element and rule not in self.indexed.setdefault((field, int(element.group(1))), []):
+                self.indexed[(field, int(element.group(1)))].append(rule)
+            if arguments[0].startswith('data.') and re.fullmatch(r'data\.\w+', arguments[0]):
+                function = [name for start, name in headers if start < call.start()]
+                if function and rule not in self.owner_arrays.setdefault((function[-1], field), []):
+                    self.owner_arrays[(function[-1], field)].append(rule)
             self.referenced.update(re.findall(r'\.(\w+)', count))
             self.referenced.add(count)
             # `if (const auto items_N = stream.inline_array(...))` followed by a helper over the pointers, or a loop of asset calls
@@ -173,7 +196,7 @@ class Rules:
 
     def expression_applies(self, text, members):
         """True when every member path of a count expression exists in the owner and ends in a plain scalar."""
-        for first, rest in re.findall(r'\b\w+(?:\[\w+\])?\.(\w+)((?:\.\w+)*)', text):
+        for first, rest, index in re.findall(r'\b\w+(?:\[\w+\])?\.(\w+)((?:\.\w+)*)(\[\d+\])?', text):
             current = members
             names = [first] + [p for p in rest.split('.') if p]
             for depth, name in enumerate(names):
@@ -181,6 +204,9 @@ class Rules:
                 if not found:
                     return False
                 if depth == len(names) - 1:
+                    # An element of an array of scalars (`counts[1]`) stands in for a scalar.
+                    if index and len(found['dims']) == 1 and not found['pointer'] and found['type'] in SCALARS:
+                        continue
                     if not self.plain_scalar(found):
                         return False
                 elif found['pointer'] or found['dims'] or found['type'] not in self.source.structs or \
@@ -190,19 +216,48 @@ class Rules:
                     current = Source.members(self.source.structs[found['type']][1])
         return True
 
-    def array_count(self, field, members):
+    def first_scalar_path(self, members, via):
+        """The members that lead to the first scalar of the struct, or of its member `via`."""
+        if not via:
+            return self.leading_scalar(members)
+        path, current = [], members
+        names = via.split('.')
+        for depth, name in enumerate(names):
+            member = next((m for m in current if m['name'] == name), None)
+            if not member or member['pointer']:
+                return None
+            if depth == len(names) - 1 and self.plain_scalar(member):
+                return path + [member]
+            if depth == len(names) - 1 and len(member['dims']) == 1 and member['type'] in SCALARS:
+                return path + [dict(member, name=member['name'] + '[0]', dims=[])]
+            if member['dims'] or member['type'] not in self.source.structs or self.source.structs[member['type']][0] != 'struct':
+                return None
+            path.append(member)
+            current = Source.members(self.source.structs[member['type']][1])
+        inner = self.leading_scalar(current)
+        return path + inner if inner else None
+
+    def array_count(self, field, members, owner=None, index=None):
         """The count rule of an array member: the first candidate that the owner can satisfy."""
         names = {m['name'] for m in members}
+        # What the traversal of the owner's own struct says comes before what other structs say about the same name.
+        candidates = self.owner_arrays.get((owner, field))
+        if index is not None:
+            candidates = self.indexed.get((field, index), [])
+        elif candidates is None:
+            # A struct with a traversal of its own that names no rule for the member does not stream it.
+            candidates = [] if owner in self.streamed_structs else self.arrays.get(field, [])
         # A literal count carries no check against the owner: it is tried last.
-        for rule in sorted(self.arrays.get(field, []), key=lambda r: r[0] == 'literal'):
+        for rule in sorted(candidates, key=lambda r: r[0] == 'literal'):
             if rule[0] == 'literal':
                 return rule
             if rule[0] == 'member' and rule[1] in names:
                 return rule
-            if rule[0] == 'first':
-                path = self.leading_scalar(members)
+            if rule[0] in ('first', 'first_expr'):
+                path = self.first_scalar_path(members, rule[-1] if rule[0] == 'first_expr' else rule[2])
                 if path and path[-1]['type'].split('::')[-1] == rule[1].split('::')[-1]:
-                    return ('expr', 'data.' + '.'.join(p['name'] for p in path))
+                    text = 'data.' + '.'.join(p['name'] for p in path)
+                    return ('expr', text if rule[0] == 'first' else rule[2].replace('@', '(%s)' % text))
             if rule[0] == 'expr' and self.expression_applies(rule[1], members):
                 return rule
         return None
@@ -222,6 +277,11 @@ class Family:
         self.path = []
         self.runtime = set(spec.get('runtime', []))
         self.spec_flag_enums = set(spec.get('flag_enums', []))
+        self.spec_scalar_enums = set(spec.get('scalar_enums', []))
+        self.blocks = spec.get('blocks', {})
+        self.kept_counts = set(spec.get('kept_counts', []))
+        self.data_members = set(spec.get('data_members', []))
+        self.prefix_arrays = spec.get('prefix_arrays', {})
         self.problems = []
         self.synthetic = {}
         self.synthetic_member = {}
@@ -241,6 +301,8 @@ class Family:
 
     # ---- names -----------------------------------------------------------------------------------
     def words(self, name):
+        if name.endswith(']'):
+            name = name[:name.index('[')] + '_' + name[name.index('[') + 1:-1]
         return '_'.join(self.token_names.get(t.lower(), t.lower()) for t in tokens(name))
 
     def struct_name(self, name):
@@ -313,57 +375,72 @@ class Family:
     def classify(self, owner, m, members):
         """The kind of a member: how to_neutral reads it and from_neutral writes it."""
         name, type_name = m['name'], m['type']
+        # An element of an unrolled pointer array (x[1]) is looked up by the array's name and its index.
+        rule_name, element = name, None
+        if name.endswith(']'):
+            rule_name, element = name[:name.index('[')], int(name[name.index('[') + 1:-1])
+        prefix = self.prefix_arrays.get('%s.%s' % (owner, name))
+        if prefix:
+            return {'kind': 'array', 'element': 'asset|%s|%s' % (prefix['asset'], type_name), 'native_element': type_name + '*',
+                    'count': ('member', prefix['count']), 'prefix': True}
         if type_name in self.external and not m['pointer']:
             return {'kind': 'external', 'ext': self.external[type_name]}
+        if m['pointer'] == 1 and len(m['dims']) == 1 and element is None and self.mappable(type_name) and \
+                sum((name, i) in self.rules.indexed for i in range(m['dims'][0])) >= m['dims'][0] - 1:
+            # An element that the stream does not name (the last of 33) has no array.
+            counts = [self.rules.array_count(name, members, owner, i) if (name, i) in self.rules.indexed else ('literal', 0)
+                      for i in range(m['dims'][0])]
+            if all(counts):
+                return {'kind': 'array', 'element': type_name, 'native_element': type_name, 'count': ('indexed', counts)}
         tagged = self.tagged.get((owner, name))
         if tagged:
             return {'kind': 'tagged', 'tag': tagged['tag'], 'cases': tagged['cases']}
         if any(owner == o and name == t['tag'] for (o, _), t in self.tagged.items()):
             return {'kind': 'tag'}
-        if PADDING.match(name):
+        if PADDING.match(name) and '%s.%s' % (owner, name) not in self.data_members and '*.%s' % name not in self.data_members:
             return {'kind': 'padding'}
         if '%s.%s' % (owner, name) in self.runtime:
             return {'kind': 'runtime'}
         if type_name == 'scr_string_t' and not m['pointer']:
-            if m['dims']:
-                self.problems.append('%s.%s: an inline array of script strings' % (owner, name))
+            if len(m['dims']) > 1:
+                self.problems.append('%s.%s: a multidimensional array of script strings' % (owner, name))
                 return {'kind': 'unknown'}
             return {'kind': 'script_string'}
         if m['pointer'] == 2 and type_name == 'char':
-            count = self.rules.array_count(name, members)
+            count = self.rules.array_count(rule_name, members, owner, element)
             if count:
                 return {'kind': 'array', 'element': 'char*', 'native_element': 'const char*', 'count': count}
             return {'kind': 'padding'}
         if m['pointer'] == 1 and type_name == 'char':
-            if name in self.rules.strings:
+            if rule_name in self.rules.strings:
                 return {'kind': 'string'}
-            count = self.rules.array_count(name, members)
+            count = self.rules.array_count(rule_name, members, owner, element)
             if count:
                 return {'kind': 'array', 'element': 'char', 'native_element': 'char', 'count': count}
             return {'kind': 'padding'}
-        if m['pointer'] == 2 and name in self.rules.asset_arrays:
-            count = self.rules.array_count(name, members)
+        if m['pointer'] == 2 and rule_name in self.rules.asset_arrays:
+            count = self.rules.array_count(rule_name, members, owner, element)
             if count:
-                return {'kind': 'array', 'element': 'asset|%s|%s' % (self.rules.asset_arrays[name], type_name),
+                return {'kind': 'array', 'element': 'asset|%s|%s' % (self.rules.asset_arrays[rule_name], type_name),
                         'native_element': type_name + '*', 'count': count}
-        if m['pointer'] == 2 and name not in self.rules.asset_arrays and type_name in self.source.structs and \
+        if m['pointer'] == 2 and rule_name not in self.rules.asset_arrays and type_name in self.source.structs and \
                 self.source.structs[type_name][0] == 'struct':
-            count = self.rules.array_count(name, members)
+            count = self.rules.array_count(rule_name, members, owner, element)
             if count:
                 return {'kind': 'array', 'element': 'ptr|%s' % type_name, 'native_element': type_name + '*', 'count': count}
         if m['pointer']:
-            count = self.rules.array_count(name, members)
-            if name in self.rules.assets:
-                return {'kind': 'asset', 'asset': self.rules.assets[name], 'target': type_name}
+            count = self.rules.array_count(rule_name, members, owner, element)
+            if rule_name in self.rules.assets:
+                return {'kind': 'asset', 'asset': self.rules.assets[rule_name], 'target': type_name}
             if count and m['pointer'] == 1:
                 if not self.mappable(type_name):
                     self.problems.append('%s.%s: an array of %s has a stream rule and no mapping' % (owner, name, type_name))
                     return {'kind': 'unknown'}
                 result = {'kind': 'array', 'element': type_name, 'native_element': type_name, 'count': count}
                 declared = self.declared_size(type_name)
-                for streamed in self.rules.element_sizes.get(name, ()):
+                for streamed in self.rules.element_sizes.get(rule_name, ()):
                     if declared and streamed != declared:
-                        group = self.groups.get(name)
+                        group = self.groups.get(rule_name)
                         if group and group * declared == streamed:
                             result['group'] = group
                         else:
@@ -375,6 +452,10 @@ class Family:
         if type_name == 'char' and len(m['dims']) == 1:
             return {'kind': 'text', 'size': m['dims'][0]}
         if type_name in self.source.enums and self.source.enums[type_name][1] and name in self.rules.referenced:
+            return {'kind': 'scalar'}
+        if type_name in self.blocks and not m['pointer']:
+            return {'kind': 'block', 'neutral': self.blocks[type_name]}
+        if type_name in self.spec_scalar_enums:
             return {'kind': 'scalar'}
         if type_name in self.source.enums and self.source.enums[type_name][1]:
             if type_name in self.spec_flag_enums:
@@ -392,6 +473,12 @@ class Family:
         self.problems.append('%s.%s: unknown type %s' % (owner, name, type_name))
         return {'kind': 'unknown'}
 
+    def unrolled(self, m):
+        """A pointer array (T* x[2]) whose elements have counts of their own in the stream is one member per element."""
+        if m['pointer'] == 1 and len(m['dims']) == 1 and m['dims'][0] <= 8 and m['type'] != 'char' and                 all((m['name'], i) in self.rules.indexed for i in range(m['dims'][0])):
+            return [dict(m, name='%s[%d]' % (m['name'], i), dims=[]) for i in range(m['dims'][0])]
+        return [m]
+
     def declared_size(self, type_name):
         """The size in bytes of a scalar or vector type, or None when it is not known here."""
         if type_name in self.SIZES:
@@ -407,7 +494,7 @@ class Family:
 
     def mappable(self, type_name):
         """True when an array element of this type has a neutral form."""
-        return type_name in self.external or (type_name in SCALARS or type_name in self.source.enums or type_name == 'scr_string_t' or type_name in VECTORS or
+        return type_name in self.external or type_name in self.blocks or (type_name in SCALARS or type_name in self.source.enums or type_name == 'scr_string_t' or type_name in VECTORS or
                 (type_name in self.source.structs and self.source.structs[type_name][0] == 'struct') or bool(self.vector_of(type_name)))
 
     def vector_of(self, type_name):
@@ -453,7 +540,7 @@ class Family:
         return {'kind': 'overlay', 'bits': max(sizes) * 8, 'alternatives': [a['name'] for a in alternatives]}
 
     def visit(self, name):
-        if name in self.structs or self.vector_of(name) or (name not in self.source.structs and name not in self.synthetic):
+        if name in self.structs or name in self.blocks or self.vector_of(name) or (name not in self.source.structs and name not in self.synthetic):
             return
         if name in self.synthetic:
             kind, members = 'struct', [self.synthetic_member[name]]
@@ -462,7 +549,7 @@ class Family:
             if kind == 'union':
                 self.problems.append('%s: a union is not mapped' % name)
                 return
-            members = Source.members(body)
+            members = [e for m in Source.members(body) for e in self.unrolled(m)]
         classes = [self.classify(name, m, members) for m in members]
         for alias in self.owner_pointers:
             if self.case_owner.get(name) == alias['owner']:
@@ -483,6 +570,9 @@ class Family:
                 extras.append(({'name': c['share_id'], 'type': 'std::uint32_t', 'pointer': 0, 'dims': []}, {'kind': 'share_id', 'array': m['name']}))
         members = members + [m for m, _ in extras]
         classes = classes + [c for _, c in extras]
+        for m, c in zip(members, classes):
+            if c.get('prefix'):
+                m['dims'] = []
         self.structs[name] = list(zip(members, classes))
         self.path.append(name)
         for m, c in self.structs[name]:
@@ -492,7 +582,14 @@ class Family:
         counted = {}
         for m, c in self.structs[name]:
             if c['kind'] == 'array' and c['count'][0] == 'member':
+                if '%s.%s' % (name, c['count'][1]) in self.kept_counts or '%s.*' % name in self.kept_counts or '*' in self.kept_counts:
+                    c['kept_count'] = c['count'][1]
+                    continue
                 counted.setdefault(c['count'][1], []).append(m['name'])
+        if '%s.*' % name in self.kept_counts or '*' in self.kept_counts:
+            for m, c in self.structs[name]:
+                if c['kind'] == 'array' and c['count'][0] == 'expr':
+                    c['kept_expr'] = True
         for m, c in self.structs[name]:
             if m['name'] in counted:
                 c['counts'] = counted[m['name']]
@@ -507,7 +604,7 @@ class Family:
                     self.visit(case_type)
             if c['kind'] == 'array' and c['element'].startswith('ptr|') and m['type'] in self.path:
                 self.problems.append('%s.%s: pointers to %s make the struct contain itself' % (name, m['name'], m['type']))
-            if c['kind'] == 'array' and m['type'] in self.source.structs and m['type'] not in self.external and not c['element'].startswith('asset|'):
+            if c['kind'] == 'array' and m['type'] in self.source.structs and m['type'] not in self.external and m['type'] not in self.blocks and not c['element'].startswith('asset|'):
                 self.visit(m['type'])
             if c['kind'] in ('enum', 'flags'):
                 self.enums[m['type']] = self.source.enums[m['type']]
@@ -552,6 +649,8 @@ class Family:
             return 'std::optional<%s>' % (self.qual + self.struct_name(type_name.split('|')[1]))
         if type_name in self.external:
             return self.external_ns() + self.external[type_name]['neutral']
+        if type_name in self.blocks:
+            return self.blocks[type_name]
         vector = self.vector_of(type_name)
         if vector:
             return 'std::array<%s, %d>' % vector
@@ -569,14 +668,18 @@ class Family:
         kind = c['kind']
         if kind == 'scalar':
             return self.nest(self.scalar_type(m['type']), m['dims'])
+        if kind == 'block':
+            return self.nest(c['neutral'], m['dims'])
         if kind == 'owner_flag':
             return 'bool'
         if kind == 'share_id':
             return 'std::uint32_t'
         if kind == 'text':
             return 'std::string'
-        if kind in ('string', 'asset', 'script_string'):
-            return 'std::optional<std::string>'
+        if kind in ('string', 'script_string'):
+            return self.nest('std::optional<std::string>', m['dims'])
+        if kind == 'asset':
+            return self.nest('std::optional<std::string>', m['dims'])
         if kind == 'enum':
             return 'std::string'
         if kind == 'flags':
@@ -599,7 +702,7 @@ class Family:
                 return 'std::optional<%s>' % element
             if c['count'][0] == 'literal':
                 return 'std::optional<std::array<%s, %d>>' % (element, c['count'][1])
-            return 'std::optional<std::vector<%s>>' % element
+            return self.nest('std::optional<std::vector<%s>>' % element, [] if c.get('prefix') else m['dims'])
         raise SystemExit('no neutral type for %s' % kind)
 
     def emitted(self, members):
@@ -673,7 +776,7 @@ class Family:
         """The arrays of a struct by the count member they share."""
         groups = collections.OrderedDict()
         for m, c in self.structs[name]:
-            if c['kind'] == 'array' and c['count'][0] == 'member':
+            if c['kind'] == 'array' and c['count'][0] == 'member' and not c.get('kept_count'):
                 groups.setdefault(c['count'][1], []).append(m)
         return groups
 
@@ -729,15 +832,43 @@ class Family:
                     pointer = next(x for x, _ in self.structs[name] if x['name'] == c['pointer'])
                     body.append('\tif (data.%s && data.%s)\n\t{\n\t\tthrow std::runtime_error("%s has a %s that is both the member of its owner and a separate object");\n\t}\n'
                                 % (self.member_name(name, m), self.member_name(name, pointer), neutral, self.member_name(name, pointer)))
+                if c['kind'] == 'array' and c['count'][0] == 'indexed':
+                    field = 'data.' + self.member_name(name, m)
+                    for index, rule in enumerate(c['count'][1]):
+                        body.append('\tif (%s[%d] && static_cast<std::int64_t>(%s) != static_cast<std::int64_t>(%s[%d]->size()))\n\t{\n'
+                                    '\t\tthrow std::runtime_error("%s.%s has a length that its count does not give");\n\t}\n'
+                                    % (field, index, self.count_text(name, rule, 'neutral'), field, index, neutral, self.member_name(name, m)))
+                if c['kind'] == 'array' and c.get('kept_count'):
+                    count = next(x for x, _ in self.structs[name] if x['name'] == c['kept_count'])
+                    field = 'data.' + self.member_name(name, m)
+                    body.append('\tif (%s && %s->size() != data.%s)\n\t{\n\t\tthrow std::runtime_error("%s.%s has a length that its count does not give");\n\t}\n'
+                                % (field, field, self.member_name(name, count), neutral, self.member_name(name, m)))
                 if c['kind'] == 'array' and c['count'][0] == 'expr':
                     field = 'data.' + self.member_name(name, m)
                     expression = self.expression(name, c['count'][1], 'neutral')
+                    if c.get('kept_expr'):
+                        body.append('\tif (%s && static_cast<std::int64_t>(%s) != static_cast<std::int64_t>(%s->size()))\n\t{\n'
+                                    '\t\tthrow std::runtime_error("%s.%s has a length that its count does not give");\n\t}\n'
+                                    % (field, expression, field, neutral, self.member_name(name, m)))
+                        continue
+                    if m['dims']:
+                        body.append('\tfor (const auto& item : %s)\n\t{\n\t\tif (static_cast<std::int64_t>(%s) != (item ? static_cast<std::int64_t>(item->size()) : 0))\n\t\t{\n'
+                                    '\t\t\tthrow std::runtime_error("%s.%s has a length that its count does not give");\n\t\t}\n\t}\n'
+                                    % (field, expression, neutral, self.member_name(name, m)))
+                        continue
                     body.append('\tif (static_cast<std::int64_t>(%s) != (%s ? static_cast<std::int64_t>(%s->size()) : 0))\n\t{\n'
                                 '\t\tthrow std::runtime_error("%s.%s has a length that its count does not give");\n\t}\n'
                                 % (expression, field, field, neutral, self.member_name(name, m)))
             for count, arrays in self.count_groups(name).items():
                 limit = self.count_limit(name, count)
-                names = ['data.' + self.member_name(name, a) for a in arrays]
+                names = ['data.' + self.member_name(name, a) + ('[0]' if a['dims'] else '') for a in arrays]
+                for a in arrays:
+                    if a['dims']:
+                        whole = 'data.' + self.member_name(name, a)
+                        checks_dims = ('std::ranges::any_of(%s, [&](const auto& item) { return !item != !%s[0] || (item && item->size() != %s[0]->size()); })'
+                                       % (whole, whole, whole))
+                        body.append('\tif (%s)\n\t{\n\t\tthrow std::runtime_error("%s.%s has arrays of different lengths");\n\t}\n'
+                                    % (checks_dims, neutral, self.member_name(name, a)))
                 checks = ['(%s && %s->size() > %s)' % (n, n, limit) for n in names]
                 for other in names[1:]:
                     checks.append('(!%s != !%s)' % (names[0], other))
@@ -776,8 +907,8 @@ class Family:
     def native_type(self, name):
         return name
 
-    def read_expr(self, owner, m, c):
-        field = 'native.' + m['name']
+    def read_expr(self, owner, m, c, suffix=''):
+        field = 'native.' + m['name'] + suffix
         what = '"%s.%s"' % (owner, m['name'])
         kind = c['kind']
         if kind == 'scalar':
@@ -786,11 +917,19 @@ class Family:
                     return 'plain::read_block<%s>(&%s)' % (self.neutral_type(m, c), field)
                 return 'std::to_array(%s)' % field
             return field if m['type'] in SCALARS else 'static_cast<%s>(%s)' % (self.scalar_type(m['type']), field)
+        if kind == 'block':
+            if m['dims']:
+                return self.loop_read(m, 'plain::read_block<%s>(&%s[i])' % (c['neutral'], field), self.neutral_type(m, c))
+            return 'plain::read_block<%s>(&%s)' % (c['neutral'], field)
         if kind == 'text':
             return 'plain::read_text(%s, %s)' % (field, what)
         if kind == 'string':
+            if m['dims']:
+                return self.loop_read(m, 'plain::read_string(%s[i])' % field, self.neutral_type(m, c))
             return 'plain::read_string(%s)' % field
         if kind == 'script_string':
+            if m['dims']:
+                return self.loop_read(m, 'plain::read_script_string(%s[i])' % field, self.neutral_type(m, c))
             return 'plain::read_script_string(%s)' % field
         if kind == 'external':
             if m['dims']:
@@ -826,7 +965,19 @@ class Family:
                 return self.loop_read(m, '%s(%s[i])' % (reader, field), self.neutral_type(m, c))
             return '%s(%s)' % (reader, field)
         if kind == 'asset':
+            if m['dims']:
+                return self.loop_read(m, 'plain::read_asset(%s, %s[i])' % (c['asset'], field), self.neutral_type(m, c))
             return 'plain::read_asset(%s, %s)' % (c['asset'], field)
+        if kind == 'array' and c.get('prefix'):
+            return 'plain::read_prefix(%s, %s, %s, [&](const auto& item) { return %s; })' % (
+                field, 'native.' + c['count'][1], what, self.element_read(c['element'], 'item'))
+        if kind == 'array' and c['count'][0] == 'indexed':
+            table = ', '.join(self.count_text(owner, rule, 'native') for rule in c['count'][1])
+            return ('[&] { const std::size_t counts[] = {%s}; %s out; for (std::size_t i = 0; i < out.size(); ++i) '
+                    '{ out[i] = plain::read_array_if_present(%s[i], counts[i], %s, [&](const auto& item) { return %s; }); } return out; }()') % (
+                table, self.neutral_type(m, c), field, what, self.element_read(c['element'], 'item'))
+        if kind == 'array' and m['dims'] and not suffix:
+            return self.loop_read(m, self.read_expr(owner, m, c, '[i]'), self.neutral_type(m, c))
         if kind == 'array':
             count = c['count']
             if count == ('literal', 1):
@@ -839,9 +990,17 @@ class Family:
                 return ('plain::read_array(reinterpret_cast<const std::array<%s, %d>*>(%s), %s, %s, '
                         '[&](const auto& item) { return plain::read_block<%s>(&item); })') % (
                     c['element'], c['group'], field, native_count, what, self.neutral_type(m, c)[len('std::optional<std::vector<'):-2])
-            return 'plain::read_array(%s, %s, %s, [&](const auto& item) { return %s; })' % (
-                field, native_count, what, self.element_read(c['element'], 'item'))
+            return 'plain::read_array%s(%s, %s, %s, [&](const auto& item) { return %s; })' % (
+                '_if_present' if c.get('kept_count') or c.get('kept_expr') else '', field, native_count, what, self.element_read(c['element'], 'item'))
         raise SystemExit('no read for %s' % kind)
+
+    def count_text(self, owner, rule, side):
+        """A count rule as an expression over the native members (side native) or the neutral fields."""
+        if rule[0] == 'literal':
+            return str(rule[1])
+        if rule[0] == 'member':
+            return ('native.%s' % rule[1]) if side == 'native' else ('data.%s' % self.field_name(owner, rule[1]))
+        return self.expression(owner, rule[1], side)
 
     def expression(self, owner, text, side):
         """A count expression of the stream rules over the native members (side native) or the neutral fields."""
@@ -854,7 +1013,8 @@ class Family:
             m, c = members[name]
             if 'counts' in c:
                 # A count that an array derives has no field: it is the length of that array.
-                array = 'data.' + self.member_name(owner, members[c['counts'][0]][0])
+                first = members[c['counts'][0]][0]
+                array = 'data.' + self.member_name(owner, first) + ('[0]' if first['dims'] else '')
                 return '(%s ? %s->size() : std::size_t{})' % (array, array)
             return 'data.' + self.member_name(owner, m) + self.path_names(m['type'], found.group(2))
         return re.sub(r'\b\w+(?:\[\w+\])?\.(\w+)((?:\.\w+)*)', member, text)
@@ -880,6 +1040,8 @@ class Family:
             return 'plain::read_script_string(%s)' % item
         if type_name == 'char*':
             return 'plain::read_string(%s)' % item
+        if type_name in self.blocks:
+            return 'plain::read_block<%s>(&%s)' % (self.blocks[type_name], item)
         vector = self.vector_of(type_name)
         if vector:
             return 'plain::read_scalars<%s, %d>(&%s)' % (vector[0], vector[1], item)
@@ -890,9 +1052,9 @@ class Family:
     def loop_read(self, m, element, result_type):
         return '[&] { %s out; for (std::size_t i = 0; i < out.size(); ++i) { out[i] = %s; } return out; }()' % (result_type, element)
 
-    def write_stmts(self, owner, m, c):
-        field = 'native.' + m['name']
-        data = 'data.' + self.member_name(owner, m)
+    def write_stmts(self, owner, m, c, suffix=''):
+        field = 'native.' + m['name'] + suffix
+        data = 'data.' + self.member_name(owner, m) + suffix
         what = '"%s.%s"' % (owner, m['name'])
         kind = c['kind']
         if kind == 'scalar':
@@ -901,11 +1063,20 @@ class Family:
             if m['dims']:
                 return ['std::ranges::copy(%s, %s);' % (data, field)]
             return ['%s = %s;' % (field, data if m['type'] in SCALARS else 'static_cast<%s>(%s)' % (m['type'], data))]
+        if kind == 'block':
+            if m['dims']:
+                return ['for (std::size_t i = 0; i < %s.size(); ++i)' % data, '{', '\tplain::write_block(&%s[i], %s[i]);' % (field, data), '}']
+            return ['plain::write_block(&%s, %s);' % (field, data)]
         if kind == 'text':
             return ['plain::write_text(%s, %s, %s);' % (field, data, what)]
         if kind == 'string':
+            if m['dims']:
+                return ['for (std::size_t i = 0; i < %s.size(); ++i)' % data, '{', '\t%s[i] = plain::write_string(memory, %s[i]);' % (field, data), '}']
             return ['%s = plain::write_string(memory, %s);' % (field, data)]
         if kind == 'script_string':
+            if m['dims']:
+                return ['for (std::size_t i = 0; i < %s.size(); ++i)' % data, '{',
+                        '\t%s[i] = static_cast<scr_string_t>(plain::write_script_string(%s[i]));' % (field, data), '}']
             return ['%s = static_cast<scr_string_t>(plain::write_script_string(%s));' % (field, data)]
         if kind == 'external':
             writer = c['ext']['write']
@@ -951,7 +1122,16 @@ class Family:
                         '\t%s(%s[i], %s[i], resolve, memory);' % (writer, field, data), '}']
             return ['%s(%s, %s, resolve, memory);' % (writer, field, data)]
         if kind == 'asset':
+            if m['dims']:
+                return ['for (std::size_t i = 0; i < %s.size(); ++i)' % data, '{',
+                        '	%s[i] = plain::resolve_asset<%s>(resolve, %s, %s[i]);' % (field, c['target'], c['asset'], data), '}']
             return ['%s = plain::resolve_asset<%s>(resolve, %s, %s);' % (field, c['target'], c['asset'], data)]
+        if kind == 'array' and c.get('prefix'):
+            return ['plain::write_prefix(%s, %s, [&](auto& out, const auto& in) { %s });' % (
+                field, data, self.element_write('out', 'in', c['element']))]
+        if kind == 'array' and m['dims'] and not suffix:
+            return (['for (std::size_t i = 0; i < data.%s.size(); ++i)' % self.member_name(owner, m), '{'] +
+                    self.indented(self.write_stmts(owner, m, c, '[i]'), 1) + ['}'])
         if kind == 'array':
             count = c['count']
             native_element = c['native_element']
@@ -989,15 +1169,20 @@ class Family:
             return '%s = static_cast<scr_string_t>(plain::write_script_string(%s));' % (out, source)
         if type_name == 'char*':
             return '%s = plain::write_string(memory, %s);' % (out, source)
+        if type_name in self.blocks:
+            return 'plain::write_block(&%s, %s);' % (out, source)
         if self.vector_of(type_name):
             return 'plain::write_scalars(&%s, %s);' % (out, source)
         if type_name in self.source.structs:
             return 'write_%s(%s, %s, resolve, memory);' % (self.struct_name(type_name), out, source)
         return '%s = %s;' % (out, source if type_name in SCALARS else 'static_cast<%s>(%s)' % (type_name, source))
 
-    def size_stmts(self, owner, m, c):
-        data = 'data.' + self.member_name(owner, m)
+    def size_stmts(self, owner, m, c, suffix=''):
+        data = 'data.' + self.member_name(owner, m) + suffix
         kind = c['kind']
+        if kind == 'array' and m['dims'] and not suffix and not c.get('prefix'):
+            return (['for (std::size_t i = 0; i < data.%s.size(); ++i)' % self.member_name(owner, m), '{'] +
+                    self.indented(self.size_stmts(owner, m, c, '[i]'), 1) + ['}'])
         if kind == 'external':
             if m['dims']:
                 return ['for (const auto& item : %s)' % data, '{', '\tsize += %s(item);' % c['ext']['size'], '}']
@@ -1011,6 +1196,8 @@ class Family:
             lines.append('}, %s);' % data)
             return lines
         if kind == 'string':
+            if m['dims']:
+                return ['for (const auto& item : %s)' % data, '{', '\tsize += plain::string_size(item);', '}']
             return ['size += plain::string_size(%s);' % data]
         if kind == 'struct' and m['type'] in self.structs:
             if m['dims']:
@@ -1103,7 +1290,7 @@ class Family:
         # The counts: set from the first array that uses them.
         for count, arrays in self.count_groups(name).items():
             count_member = next(m for m, _ in members if m['name'] == count)
-            first = self.member_name(name, arrays[0])
+            first = self.member_name(name, arrays[0]) + ('[0]' if arrays[0]['dims'] else '')
             write.append('\tnative.%s = plain::count_of<%s>(data.%s);' % (count, count_member['type'], first))
         for m, c in members:
             if 'counts' in c and c['kind'] not in ('array',):

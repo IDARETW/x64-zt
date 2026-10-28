@@ -8,13 +8,17 @@
 #include "zone/asset_files.hpp"
 #include "zone/loader.hpp"
 #include "zone/writer.hpp"
+#include "neutral/content.hpp"
 #include "neutral/effects.hpp"
 #include "neutral/fx.hpp"
+#include "neutral/fxworld.hpp"
+#include "neutral/gameplay.hpp"
 #include "neutral/image.hpp"
 #include "neutral/impact.hpp"
 #include "neutral/lighting.hpp"
 #include "neutral/material.hpp"
 #include "neutral/physics.hpp"
+#include "neutral/physics_events.hpp"
 #include "neutral/plain.hpp"
 #include "neutral/rumble.hpp"
 #include "neutral/scriptable.hpp"
@@ -277,6 +281,49 @@ namespace zonetool::iw8
 			asset_data::sound_globals::sound_globals, asset_data::world::com_world, asset_data::world::glass_world, asset_data::world::map_edge_list,
 			asset_data::world::nav_mesh, asset_data::world::clip_map, asset_data::world::fog_spline, asset_data::effects::particle_sim_animation, asset_data::vfx::particle_system, asset_data::scriptable::scriptable,
 			asset_data::impact_table, asset_data::surface_effect_table, asset_data::physics_fx_pipeline,
+			asset_data::fxworld::fx_world,
+			asset_data::fxworld::fx_world_transient_zone,
+			asset_data::physics_events::physics_sfx_event,
+			asset_data::physics_events::physics_vfx_event,
+			asset_data::content::vehicle,
+			asset_data::content::attachment,
+			asset_data::content::animclass,
+			asset_data::content::luafile,
+			asset_data::content::leaderboarddef,
+			asset_data::content::virtualleaderboarddef,
+			asset_data::content::clothasset,
+			asset_data::content::stterrain,
+			asset_data::content::collisiontile,
+			asset_data::gameplay::animpkg,
+			asset_data::gameplay::sfxpkg,
+			asset_data::gameplay::vfxpkg,
+			asset_data::gameplay::tracer,
+			asset_data::gameplay::laser,
+			asset_data::gameplay::camera,
+			asset_data::gameplay::hudoutline,
+			asset_data::gameplay::footstepvfx,
+			asset_data::gameplay::xcompositemodel,
+			asset_data::gameplay::xanimcurve,
+			asset_data::gameplay::keyvaluepairs,
+			asset_data::gameplay::blendspace2d,
+			asset_data::gameplay::camo,
+			asset_data::gameplay::accessory,
+			asset_data::gameplay::locdmgtable,
+			asset_data::gameplay::bulletpenetration,
+			asset_data::gameplay::cinematicmotion,
+			asset_data::gameplay::decalvolumemask,
+			asset_data::gameplay::gesture,
+			asset_data::gameplay::reticle,
+			asset_data::gameplay::streaminginfo,
+			asset_data::gameplay::suit,
+			asset_data::gameplay::suitanimpackage,
+			asset_data::gameplay::coverselector,
+			asset_data::gameplay::enemyselector,
+			asset_data::gameplay::carryobject,
+			asset_data::gameplay::execution,
+			asset_data::gameplay::clientcharacter,
+			asset_data::gameplay::physicslibrary,
+			asset_data::gameplay::ttf,
 			neutral::vector_field_source>;
 
 		template <typename T>
@@ -403,6 +450,92 @@ namespace zonetool::iw8
 				return accepted(neutral::to_neutral(*static_cast<const GfxFogSpline*>(header)), "fog spline", kept);
 			case ASSET_TYPE_VFX:
 				return accepted(neutral::to_neutral(*static_cast<const ParticleSystemDef*>(header)), "particle system", kept);
+			case ASSET_TYPE_ANIM_PACKAGE:
+				return accepted(neutral::to_neutral(*static_cast<const WeaponAnimPackage*>(header)), "animation package", kept);
+			case ASSET_TYPE_SFX_PACKAGE:
+				return accepted(neutral::to_neutral(*static_cast<const WeaponSFXPackage*>(header)), "sound package", kept);
+			case ASSET_TYPE_VFX_PACKAGE:
+				return accepted(neutral::to_neutral(*static_cast<const WeaponVFXPackage*>(header)), "effects package", kept);
+			case ASSET_TYPE_TRACER:
+				return accepted(neutral::to_neutral(*static_cast<const TracerDef*>(header)), "tracer", kept);
+			case ASSET_TYPE_LASER:
+				return accepted(neutral::to_neutral(*static_cast<const LaserDef*>(header)), "laser", kept);
+			case ASSET_TYPE_CAMERA:
+				return accepted(neutral::to_neutral(*static_cast<const CameraDef*>(header)), "camera", kept);
+			case ASSET_TYPE_HUDOUTLINE:
+				return accepted(neutral::to_neutral(*static_cast<const HudOutlineDef*>(header)), "hudoutline", kept);
+			case ASSET_TYPE_FOOTSTEP_VFX:
+				return accepted(neutral::to_neutral(*static_cast<const FootstepVFX*>(header)), "footstepvfx", kept);
+			case ASSET_TYPE_XCOMPOSITEMODEL:
+				return accepted(neutral::to_neutral(*static_cast<const XCompositeModelDef*>(header)), "xcompositemodel", kept);
+			case ASSET_TYPE_XANIMCURVE:
+				return accepted(neutral::to_neutral(*static_cast<const XAnimCurve*>(header)), "xanimcurve", kept);
+			case ASSET_TYPE_KEYVALUEPAIRS:
+				return accepted(neutral::to_neutral(*static_cast<const KeyValuePairs*>(header)), "keyvaluepairs", kept);
+			case ASSET_TYPE_BLENDSPACE2D:
+				return accepted(neutral::to_neutral(*static_cast<const BlendSpace2DDef*>(header)), "blendspace2d", kept);
+			case ASSET_TYPE_CAMO:
+				return accepted(neutral::to_neutral(*static_cast<const Camo*>(header)), "camo", kept);
+			case ASSET_TYPE_ACCESSORY:
+				return accepted(neutral::to_neutral(*static_cast<const AccessoryDef*>(header)), "accessory", kept);
+			case ASSET_TYPE_LOCDMGTABLE:
+				return accepted(neutral::to_neutral(*static_cast<const LocDmgTable*>(header)), "locdmgtable", kept);
+			case ASSET_TYPE_BULLETPENETRATION:
+				return accepted(neutral::to_neutral(*static_cast<const BulletPenetration*>(header)), "bulletpenetration", kept);
+			case ASSET_TYPE_CINEMATICMOTION:
+				return accepted(neutral::to_neutral(*static_cast<const CinematicMotionDef*>(header)), "cinematicmotion", kept);
+			case ASSET_TYPE_DECAL_VOLUME_MASK:
+				return accepted(neutral::to_neutral(*static_cast<const GfxDecalVolumeMask*>(header)), "decalvolumemask", kept);
+			case ASSET_TYPE_GESTURE:
+				return accepted(neutral::to_neutral(*static_cast<const Gesture*>(header)), "gesture", kept);
+			case ASSET_TYPE_RETICLE:
+				return accepted(neutral::to_neutral(*static_cast<const ReticleDef*>(header)), "reticle", kept);
+			case ASSET_TYPE_STREAMING_INFO:
+				return accepted(neutral::to_neutral(*static_cast<const StreamingInfo*>(header)), "streaminginfo", kept);
+			case ASSET_TYPE_SUIT:
+				return accepted(neutral::to_neutral(*static_cast<const SuitDef*>(header)), "suit", kept);
+			case ASSET_TYPE_SUITANIMPACKAGE:
+				return accepted(neutral::to_neutral(*static_cast<const SuitAnimPackage*>(header)), "suitanimpackage", kept);
+			case ASSET_TYPE_COVERSELECTOR:
+				return accepted(neutral::to_neutral(*static_cast<const CoverSelector*>(header)), "coverselector", kept);
+			case ASSET_TYPE_ENEMYSELECTOR:
+				return accepted(neutral::to_neutral(*static_cast<const EnemySelector*>(header)), "enemyselector", kept);
+			case ASSET_TYPE_CARRYOBJECT:
+				return accepted(neutral::to_neutral(*static_cast<const CarryObjectDef*>(header)), "carryobject", kept);
+			case ASSET_TYPE_EXECUTION:
+				return accepted(neutral::to_neutral(*static_cast<const ExecutionDef*>(header)), "execution", kept);
+			case ASSET_TYPE_CLIENTCHARACTER:
+				return accepted(neutral::to_neutral(*static_cast<const ClientCharacter*>(header)), "clientcharacter", kept);
+			case ASSET_TYPE_PHYSICSLIBRARY:
+				return accepted(neutral::to_neutral(*static_cast<const PhysicsLibrary*>(header)), "physics library", kept);
+			case ASSET_TYPE_TTF:
+				return accepted(neutral::to_neutral(*static_cast<const TTFDef*>(header)), "font", kept);
+			case ASSET_TYPE_ATTACHMENT:
+				return accepted(neutral::to_neutral(*static_cast<const WeaponAttachment*>(header)), "weapon attachment", kept);
+			case ASSET_TYPE_ANIMCLASS:
+				return accepted(neutral::to_neutral(*static_cast<const AnimationClass*>(header)), "animation class", kept);
+			case ASSET_TYPE_LUA_FILE:
+				return accepted(neutral::to_neutral(*static_cast<const LuaFile*>(header)), "Lua file", kept);
+			case ASSET_TYPE_LEADERBOARD:
+				return accepted(neutral::to_neutral(*static_cast<const LeaderboardDef*>(header)), "leaderboard", kept);
+			case ASSET_TYPE_VIRTUAL_LEADERBOARD:
+				return accepted(neutral::to_neutral(*static_cast<const VirtualLeaderboardDef*>(header)), "virtual leaderboard", kept);
+			case ASSET_TYPE_CLOTHASSET:
+				return accepted(neutral::to_neutral(*static_cast<const ClothAsset*>(header)), "cloth", kept);
+			case ASSET_TYPE_SUPER_TERRAIN:
+				return accepted(neutral::to_neutral(*static_cast<const StTerrain*>(header)), "super terrain", kept);
+			case ASSET_TYPE_COLLISION_TILE:
+				return accepted(neutral::to_neutral(*static_cast<const CollisionTile*>(header)), "collision tile", kept);
+			case ASSET_TYPE_PHYSICS_SFX_EVENT_ASSET:
+				return accepted(neutral::to_neutral(*static_cast<const PhysicsSFXEventAsset*>(header)), "physics sound events", kept);
+			case ASSET_TYPE_PHYSICS_VFX_EVENT_ASSET:
+				return accepted(neutral::to_neutral(*static_cast<const PhysicsVFXEventAsset*>(header)), "physics effect events", kept);
+			case ASSET_TYPE_VEHICLE:
+				return accepted(neutral::to_neutral(*static_cast<const VehicleDef*>(header)), "vehicle", kept);
+			case ASSET_TYPE_FXWORLD:
+				return accepted(neutral::to_neutral(*static_cast<const FxWorld*>(header)), "effects world", kept);
+			case ASSET_TYPE_FXWORLD_TRANSIENT_ZONE:
+				return accepted(neutral::to_neutral(*static_cast<const FxWorldTransientZone*>(header)), "effects transient zone", kept);
 			case ASSET_TYPE_SCRIPTABLE:
 				return accepted(neutral::to_neutral(*static_cast<const ScriptableDef*>(header)), "scriptable", kept);
 			case ASSET_TYPE_COMWORLD:

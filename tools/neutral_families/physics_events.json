@@ -1,0 +1,11 @@
+{
+ "family": "physics_events",
+ "assets": [
+  {"type": "ASSET_TYPE_PHYSICS_SFX_EVENT_ASSET", "struct": "PhysicsSFXEventAsset", "neutral": "physics_sfx_event", "name": "name"},
+  {"type": "ASSET_TYPE_PHYSICS_VFX_EVENT_ASSET", "struct": "PhysicsVFXEventAsset", "neutral": "physics_vfx_event", "name": "name"}
+ ],
+ "tagged": [
+  {"owner": "PhysicsSFXEventAssetRule", "member": "u", "tag": "type", "prefix": "Types_PhysicsSFXEvent", "skip": ["rule", "ruleCount"]},
+  {"owner": "PhysicsVFXEventAssetRule", "member": "u", "tag": "type", "prefix": "Types_PhysicsVFXEvent", "skip": ["rule", "ruleCount"]}
+ ]
+}

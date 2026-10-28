@@ -1,0 +1,188 @@
+{
+ "family": "gameplay",
+ "assets": [
+  {
+   "type": "ASSET_TYPE_ANIM_PACKAGE",
+   "struct": "WeaponAnimPackage",
+   "neutral": "animpkg",
+   "name": "name"
+  },
+  {
+   "type": "ASSET_TYPE_SFX_PACKAGE",
+   "struct": "WeaponSFXPackage",
+   "neutral": "sfxpkg",
+   "name": "name"
+  },
+  {
+   "type": "ASSET_TYPE_VFX_PACKAGE",
+   "struct": "WeaponVFXPackage",
+   "neutral": "vfxpkg",
+   "name": "name"
+  },
+  {
+   "type": "ASSET_TYPE_TRACER",
+   "struct": "TracerDef",
+   "neutral": "tracer",
+   "name": "name"
+  },
+  {
+   "type": "ASSET_TYPE_LASER",
+   "struct": "LaserDef",
+   "neutral": "laser",
+   "name": "name"
+  },
+  {
+   "type": "ASSET_TYPE_CAMERA",
+   "struct": "CameraDef",
+   "neutral": "camera",
+   "name": "name"
+  },
+  {
+   "type": "ASSET_TYPE_HUDOUTLINE",
+   "struct": "HudOutlineDef",
+   "neutral": "hudoutline",
+   "name": "name"
+  },
+  {
+   "type": "ASSET_TYPE_FOOTSTEP_VFX",
+   "struct": "FootstepVFX",
+   "neutral": "footstepvfx",
+   "name": "name"
+  },
+  {
+   "type": "ASSET_TYPE_XCOMPOSITEMODEL",
+   "struct": "XCompositeModelDef",
+   "neutral": "xcompositemodel",
+   "name": "name"
+  },
+  {
+   "type": "ASSET_TYPE_XANIMCURVE",
+   "struct": "XAnimCurve",
+   "neutral": "xanimcurve",
+   "name": "name"
+  },
+  {
+   "type": "ASSET_TYPE_KEYVALUEPAIRS",
+   "struct": "KeyValuePairs",
+   "neutral": "keyvaluepairs",
+   "name": "name"
+  },
+  {
+   "type": "ASSET_TYPE_BLENDSPACE2D",
+   "struct": "BlendSpace2DDef",
+   "neutral": "blendspace2d",
+   "name": "name"
+  },
+  {
+   "type": "ASSET_TYPE_CAMO",
+   "struct": "Camo",
+   "neutral": "camo",
+   "name": "name"
+  },
+  {
+   "type": "ASSET_TYPE_ACCESSORY",
+   "struct": "AccessoryDef",
+   "neutral": "accessory",
+   "name": "name"
+  },
+  {
+   "type": "ASSET_TYPE_LOCDMGTABLE",
+   "struct": "LocDmgTable",
+   "neutral": "locdmgtable",
+   "name": "name"
+  },
+  {
+   "type": "ASSET_TYPE_BULLETPENETRATION",
+   "struct": "BulletPenetration",
+   "neutral": "bulletpenetration",
+   "name": "name"
+  },
+  {
+   "type": "ASSET_TYPE_CINEMATICMOTION",
+   "struct": "CinematicMotionDef",
+   "neutral": "cinematicmotion",
+   "name": "name"
+  },
+  {
+   "type": "ASSET_TYPE_DECAL_VOLUME_MASK",
+   "struct": "GfxDecalVolumeMask",
+   "neutral": "decalvolumemask",
+   "name": "name"
+  },
+  {
+   "type": "ASSET_TYPE_GESTURE",
+   "struct": "Gesture",
+   "neutral": "gesture",
+   "name": "name"
+  },
+  {
+   "type": "ASSET_TYPE_RETICLE",
+   "struct": "ReticleDef",
+   "neutral": "reticle",
+   "name": "name"
+  },
+  {
+   "type": "ASSET_TYPE_STREAMING_INFO",
+   "struct": "StreamingInfo",
+   "neutral": "streaminginfo",
+   "name": "name"
+  },
+  {
+   "type": "ASSET_TYPE_SUIT",
+   "struct": "SuitDef",
+   "neutral": "suit",
+   "name": "name"
+  },
+  {
+   "type": "ASSET_TYPE_SUITANIMPACKAGE",
+   "struct": "SuitAnimPackage",
+   "neutral": "suitanimpackage",
+   "name": "name"
+  },
+  {
+   "type": "ASSET_TYPE_COVERSELECTOR",
+   "struct": "CoverSelector",
+   "neutral": "coverselector",
+   "name": "name"
+  },
+  {
+   "type": "ASSET_TYPE_ENEMYSELECTOR",
+   "struct": "EnemySelector",
+   "neutral": "enemyselector",
+   "name": "name"
+  },
+  {
+   "type": "ASSET_TYPE_CARRYOBJECT",
+   "struct": "CarryObjectDef",
+   "neutral": "carryobject",
+   "name": "name"
+  },
+  {
+   "type": "ASSET_TYPE_EXECUTION",
+   "struct": "ExecutionDef",
+   "neutral": "execution",
+   "name": "name"
+  },
+  {
+   "type": "ASSET_TYPE_CLIENTCHARACTER",
+   "struct": "ClientCharacter",
+   "neutral": "clientcharacter",
+   "name": "name"
+  },
+  {
+   "type": "ASSET_TYPE_PHYSICSLIBRARY",
+   "struct": "PhysicsLibrary",
+   "neutral": "physicslibrary",
+   "name": "name"
+  },
+  {
+   "type": "ASSET_TYPE_TTF",
+   "struct": "TTFDef",
+   "neutral": "ttf",
+   "name": "name"
+  }
+ ],
+ "flag_enums": [
+  "TransientInfoFlags"
+ ]
+}
