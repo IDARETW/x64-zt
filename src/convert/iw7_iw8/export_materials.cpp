@@ -1019,7 +1019,10 @@ namespace zonetool::convert::iw7_iw8
 				entries.push_back(kind.unlit ? (i == 4 ? 1 : -1) : (i == 7 ? 1 : i == 4 ? 0 : -1));
 			}
 
-			const auto shadow = shadow_only || (!kind.unlit && kind.solid());
+			// IW7's *_nocast techsets leave out the shadow-map depth techniques (6 and its instanced 44,
+			// vertcol_simple_..._atest) that their casting twins carry (mo_l_sm_atest_i0c0s0n0pa0[_nocast]): Renaissance's
+			// tree canopies and leaf cards cast through their own shadow-box LODs, not their visible surfaces.
+			const auto shadow = shadow_only || (!kind.unlit && kind.solid() && !techset_has_token(material, "nocast"));
 			// IW7 draws its decals (decal sheets, stripes, signs, scrapes) over the coplanar surface beneath with a depth
 			// bias: the polygon offset of the material's lit or emissive technique state. Its lit pass takes IW3's decal
 			// polygon offset, which the pipeline draws biased; the pipeline's rank nudge alone left the wayfinding signs
@@ -1312,6 +1315,52 @@ namespace zonetool::convert::iw7_iw8
 		}
 	}
 
+	// The colour blend of a material's state bits. IW7 keeps H1's blend bits in its third load word (source RGB in bits 0-3,
+	// destination RGB in bits 4-7, the IW blend enum: 1 zero, 2 one, 3 source colour, 5 source alpha, 6 inverse source
+	// alpha, 9 destination colour). Its unlit technique (8) holds the material's own blend; the lit techniques (13 to 26)
+	// draw it premultiplied: mo/foliage_flower_potted_alpha (mo_l_sm_ndw_blend_i0c0s0o0n0pa0) holds 0x0F014565 (source
+	// alpha, inverse source alpha) for 8 and 0x0F014562 (one, inverse source alpha) for 13 to 26.
+	std::optional<surface_kind> iw7_state_blend(const iw7::Material* material, bool& premultiplied)
+	{
+		if (!material || !material->stateBitsTable)
+		{
+			return std::nullopt;
+		}
+
+		for (auto technique = 8; technique <= 26; technique++)
+		{
+			const auto state = material->stateBitsEntry[technique];
+			if ((technique != 8 && technique < 13) || state == 0xFF || state >= material->stateBitsCount)
+			{
+				continue;
+			}
+
+			const auto bits = material->stateBitsTable[state].loadBits[2];
+			const auto source = bits & 0xF;
+			const auto destination = (bits >> 4) & 0xF;
+			if (destination == 2 && (source == 2 || source == 5))
+			{
+				return surface_kind::additive;
+			}
+			if (source == 5 && destination == 6)
+			{
+				return surface_kind::blend;
+			}
+			if (source == 2 && destination == 6)
+			{
+				premultiplied = true;
+				return surface_kind::additive;
+			}
+			if ((source == 1 && destination == 3) || (source == 9 && destination == 1))
+			{
+				return surface_kind::multiply;
+			}
+			return std::nullopt;
+		}
+
+		return std::nullopt;
+	}
+
 	material_class classify_material(const iw7::Material* material)
 	{
 		material_class result{};
@@ -1375,6 +1424,17 @@ namespace zonetool::convert::iw7_iw8
 			}
 
 			break;
+		}
+
+		// Blend tokens without a name rule (Renaissance's w_/m_l_sm_ndw_blendaddrgb_..., Breakneck's w_l_sm_ndw_blendx0_...)
+		// take the blend of the material's own state bits, which the names only describe.
+		if (result.kind == surface_kind::opaque &&
+			std::ranges::any_of(tokens, [](const auto token) { return token.starts_with("blend"); }))
+		{
+			if (const auto kind = iw7_state_blend(material, result.premultiplied))
+			{
+				result.kind = *kind;
+			}
 		}
 
 		return result;

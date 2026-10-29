@@ -181,7 +181,7 @@ bool isReplayEntity(const std::string &classname)
     // Keep this list closed.  An arbitrary `mp_*_spawn` or `trigger_*` class can
     // carry gameplay state that Replay does not understand; accepting it as a
     // generic entity would make a map appear converted while losing that state.
-    static constexpr std::array<const char *, 27> classes{{
+    static constexpr std::array<const char *, 25> classes{{
         "worldspawn",
         "info_player_start",
         "mp_global_intermission",
@@ -192,8 +192,6 @@ bool isReplayEntity(const std::string &classname)
         "mp_dom_spawn",
         "mp_dom_spawn_allies_start",
         "mp_dom_spawn_axis_start",
-        "mp_sab_spawn_allies_start",
-        "mp_sab_spawn_axis_start",
         "mp_sd_spawn_attacker",
         "mp_sd_spawn_defender",
         "mp_tdm_spawn",
@@ -267,13 +265,15 @@ bool isModeSpecificSpawn(const std::string &classname)
 {
     // Replay's free-for-all and domination register mp_dm_spawn and
     // mp_dom_spawn exactly like TDM registers mp_tdm_spawn (spawnlogic
-    // addspawnpoints). Replay has no sabotage, and its CTF uses mp_ctf_spawn (the
-    // IW3 importer renames mod CTF team spawns to it).
-    static constexpr std::array<const char *, 4> classes{{
+    // addspawnpoints). Replay has no sabotage (its start spawns included), and its
+    // CTF uses mp_ctf_spawn (the IW3 importer renames mod CTF team spawns to it).
+    static constexpr std::array<const char *, 6> classes{{
         "mp_ctf_spawn_allies",
         "mp_ctf_spawn_axis",
         "mp_sab_spawn_allies",
         "mp_sab_spawn_axis",
+        "mp_sab_spawn_allies_start",
+        "mp_sab_spawn_axis_start",
     }};
     for (const char *known : classes)
     {
@@ -319,6 +319,14 @@ bool isOldSchoolPickup(const std::string &classname)
     // and retaining the IW3 weapon classname would make the server instantiate
     // an unsupported gameplay entity. Keep the projection explicit and noisy.
     return classname.starts_with("weapon_") && classname.ends_with("_mp") && classname.size() > 10;
+}
+
+bool hasExploder(const Entity &entity)
+{
+    return std::any_of(entity.begin(), entity.end(), [](const KeyValue &pair) {
+        const auto key = lowercase(pair.key);
+        return key == "script_exploder" || key == "script_prefab_exploder";
+    });
 }
 
 const KeyValue *entityModel(const Entity &entity)
@@ -568,11 +576,16 @@ size_t iw3ToIw8EntityString(const std::string &input, std::string &output,
             ++projectedSourceMarkers[name];
             continue;
         }
-        if (name == "trigger_damage")
+        if (name == "trigger_damage" && !hasExploder(entity))
         {
-            // IW3 damage triggers only notify map script (window prefabs,
-            // destructibles). Replay runs no IW3 GSC, and the former
-            // trigger_hurt mapping inverted them into damage volumes.
+            // IW3 damage triggers notify map script. Those of window prefabs and
+            // destructibles have no consumer (native glass, the compatibility
+            // layer's own destructibles); the former trigger_hurt mapping inverted
+            // them into damage volumes. Exploder triggers stay native
+            // trigger_damage (Replay G_Trigger_DamageCheckHit 0x12762A0 and
+            // G_Trigger_DamageGrenadeTouch 0x1276690 test that class): the
+            // compatibility layer's iw3compat_exploder_load waits on them
+            // (mp_4doffice: 12, exploders 1-10, 15 and 16).
             ++projectedSourceMarkers[name];
             continue;
         }

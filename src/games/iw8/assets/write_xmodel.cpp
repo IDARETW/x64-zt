@@ -120,6 +120,8 @@ void writeReactiveMotion(ZoneWriter &zw, const cx::Iw8ReactiveMotion &motion)
     std::memcpy(info, motion.wind.data(), sizeof(float) * 4);
     std::memcpy(info + 0x10, &PTR_NULL, sizeof(uint64_t));
     std::memcpy(info + 0x18, &PTR_FOLLOWS, sizeof(uint64_t));
+    if (motion.parts.size() > 0xFF)
+        throw std::runtime_error("reactive motion has more than 255 parts");
     info[0x50] = static_cast<uint8_t>(motion.parts.size());
     zw.align(15);
     zw.write(info, sizeof(info));

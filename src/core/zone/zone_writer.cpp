@@ -206,6 +206,12 @@ namespace zonetool
 
 	std::uint64_t zone_writer::offset_value(const std::uint8_t block, const std::size_t position) const
 	{
+		// An offset keeps 32 bits of position (one-based): a larger block cannot be addressed.
+		if (position >= 0xFFFFFFFFull)
+		{
+			throw std::runtime_error("zone block position exceeds the 32-bit offset range");
+		}
+
 		// Stock zones address the data of the asset that is loading from its start (bit 36), other data absolutely.
 		if (this->layout_.relative_offsets && !this->asset_starts_.empty())
 		{
