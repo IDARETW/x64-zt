@@ -5971,6 +5971,20 @@ Json BuildRender(const Json &world, const VisibilityGroups &visibility,
         }
     };
 
+    // IW3 orders blended layers by sort, then by material (GfxDrawSurf materialSortedIndex), whatever their polygon
+    // offset: a sort's layers stack in one material order across the map. IW3 extractions (no "translucent_glass")
+    // keep that order: every decal-sort layer (sorts 9 to 23, ranks 1 to 15) draws from Replay's decal range, not
+    // only the polygon-offset ones, and a range orders its layers by rank and then by material before any per-surface
+    // grouping. Discovery's dome roofs drew rus_ter_snow_soft_blend (offset1, decal range) under
+    // rus_dec_snow_grunge_10 and a_ter_snow_ice_3_blend (no offset, translucent range), the reverse of IW3's order,
+    // and its snow decals swapped order from one reflection probe zone to the next (owner test 2026-10-28).
+    const bool iw3LayerOrder = !world.value("translucent_glass", false);
+    const auto decalRange = [&](const MaterialPlan &material) {
+        const unsigned rank = (material.flags >> 12) & 0x3Fu;
+        return material.kind == SurfaceKind::glass &&
+               (material.depthBias || (iw3LayerOrder && rank >= 1 && rank <= 15));
+    };
+
     for (std::size_t modelIndex = 0; modelIndex < models.size(); ++modelIndex)
     {
         const BrushModel &model = models[modelIndex];
@@ -6020,8 +6034,8 @@ Json BuildRender(const Json &world, const VisibilityGroups &visibility,
             // (R_AddAllBspDrawSurfacesCamera 0x18D19C0): stock Shipment keeps 19
             // such surfaces between its opaque and translucent ones. In the
             // translucent range they depth-fought the wall under them.
-            const bool ad = ag && ma.depthBias && !a->skyObject;
-            const bool bd = bg && mb.depthBias && !b->skyObject;
+            const bool ad = ag && decalRange(ma) && !a->skyObject;
+            const bool bd = bg && decalRange(mb) && !b->skyObject;
             if (ad != bd)
                 return ad;
             // The sky's surfaces draw first in the translucent range, over the sky box: the opaque ones, then the
@@ -6035,6 +6049,8 @@ Json BuildRender(const Json &world, const VisibilityGroups &visibility,
             // layer order (rank = IW3 sort - 8, flags bits 12-17).
             if (ag && ((ma.flags >> 12) & 0x3Fu) != ((mb.flags >> 12) & 0x3Fu))
                 return ((ma.flags >> 12) & 0x3Fu) < ((mb.flags >> 12) & 0x3Fu);
+            if (ag && iw3LayerOrder && a->material != b->material)
+                return a->material < b->material;
             if (ma.kind != mb.kind)
                 return static_cast<unsigned>(ma.kind) < static_cast<unsigned>(mb.kind);
             if (ma.environment != mb.environment)
@@ -6128,8 +6144,7 @@ Json BuildRender(const Json &world, const VisibilityGroups &visibility,
                                                                                 material.kind == SurfaceKind::cutout ||
                                                                                 shadowOnly)},
                                               {"infinite", surface.skyObject},
-                                              {"decal", material.kind == SurfaceKind::glass && material.depthBias &&
-                                                            !surface.skyObject},
+                                              {"decal", decalRange(material) && !surface.skyObject},
                                               {"sunShadowMask", material.castsShadow ? sunShadowMask : 0u},
                                               {"reflectionProbe", surface.reflectionProbe},
                                               {"materialParameters", material.environment}});
@@ -6506,22 +6521,30 @@ std::vector<Vec3> HullFromPlanes(const std::vector<Vec4> &source)
     if (points.size() < 4)
         return {};
     // A convex hull of more than 252 vertices (IW7 Riot's rounded brushes) does not build; its vertices are welded on
-    // a coarser grid (the mean of each cell) until it fits.
+    // a coarser grid until it fits. Each cell keeps its vertex farthest from the brush's centre: the mean of a cell
+    // lies inside the hull, so the welded brush shrank by up to a cell at its rounded edges.
+    Vec3 centre{};
+    for (const Vec3 &point : points)
+        centre = Add(centre, point);
+    centre = Multiply(centre, 1.0f / static_cast<float>(points.size()));
     for (float cell = 0.25f; points.size() > 252 && cell <= 64.0f; cell *= 2.0f)
     {
-        std::map<std::array<long, 3>, std::pair<Vec3, unsigned>> cells;
+        std::map<std::array<long, 3>, Vec3> cells;
         for (const Vec3 &point : points)
         {
-            auto &[sum, count] = cells[{std::lround(std::floor(point[0] / cell)), std::lround(std::floor(point[1] / cell)),
-                                        std::lround(std::floor(point[2] / cell))}];
-            sum = Add(sum, point);
-            ++count;
+            const std::array<long, 3> key{std::lround(std::floor(point[0] / cell)),
+                                          std::lround(std::floor(point[1] / cell)),
+                                          std::lround(std::floor(point[2] / cell))};
+            const auto [kept, inserted] = cells.try_emplace(key, point);
+            const Vec3 from = Subtract(point, centre), previous = Subtract(kept->second, centre);
+            if (!inserted && Dot(from, from) > Dot(previous, previous))
+                kept->second = point;
         }
         if (cells.size() > 252)
             continue;
         std::vector<Vec3> welded;
-        for (const auto &[key, value] : cells)
-            welded.push_back(Multiply(value.first, 1.0f / static_cast<float>(value.second)));
+        for (const auto &[key, point] : cells)
+            welded.push_back(point);
         zt::info("iw3: a collision brush of %zu vertices keeps %zu, welded on a %g-unit grid", points.size(),
                  welded.size(), cell);
         points = std::move(welded);

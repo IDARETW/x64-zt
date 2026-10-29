@@ -58,6 +58,11 @@ namespace zonetool::convert::iw7_iw8
 			ZONETOOL_WARNING("iw7: zone \"techsets_%s\" was not found; materials keep default images", this->name_.data());
 		}
 
+		// The localized zones of a map (eng_<map> and its patch) hold its language-dependent assets: the map zones name
+		// Breakneck's whiteboard image (equipment_whiteboard_languages_c) and hold only that name. They only fill in.
+		this->load("eng_patch_" + this->name_);
+		this->load("eng_" + this->name_);
+
 		// The multiplayer common zones hold models that maps place (flags, tag_origin) without holding them, their
 		// techsets zones the materials of the common effects that map effects use, and the global zones the images of
 		// those materials. The base common and global zones (which the game loads before them) hold the rest that map

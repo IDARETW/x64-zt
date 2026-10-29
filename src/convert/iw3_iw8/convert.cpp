@@ -274,7 +274,8 @@ bool writeMetadata(const std::string &directory, const MapMetadata &metadata)
     {
         data["description"] = metadata.description;
     }
-    if (metadata.compassRotation)
+    // An authored rotation of 0 stays authored: left out, build-map would turn the minimap by northyaw instead.
+    if (metadata.compassRotation || metadata.compassRotationSet)
     {
         data["compassRotation"] = metadata.compassRotation;
     }
@@ -282,6 +283,8 @@ bool writeMetadata(const std::string &directory, const MapMetadata &metadata)
     {
         data["ladderRungDistance"] = metadata.ladderRungDistance;
     }
+    if (metadata.minimapScale != 1.0f)
+        data["minimapScale"] = metadata.minimapScale;
     if (metadata.exposureAdjust != 0.0f)
         data["exposureAdjust"] = metadata.exposureAdjust;
     std::ofstream output(std::filesystem::path(directory) / "map.json", std::ios::binary);

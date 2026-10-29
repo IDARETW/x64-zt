@@ -51,10 +51,12 @@ bool writeMaterial(iw8::ZoneWriter &zw, const Iw8Material &im)
                              ? nullptr
                              : reinterpret_cast<const char **>(iw8::PTR_FOLLOWS); // 0x70 follows
 
-        // Defensive: keep the //CNT fields exactly in step with the emitted table lengths.
-        m.textureCount = static_cast<uint8_t>(im.textures.size() & 0xFF);
-        m.constantCount = static_cast<uint8_t>(im.constants.size() & 0xFF);
-        m.layerCount = static_cast<uint8_t>(im.subMaterials.size() & 0xFF);
+        // The //CNT fields are bytes: a longer table cannot be described, so it fails instead of being cut.
+        if (im.textures.size() > 0xFF || im.constants.size() > 0xFF || im.subMaterials.size() > 0xFF)
+            throw std::runtime_error("material " + im.name + " has more than 255 textures, constants or layers");
+        m.textureCount = static_cast<uint8_t>(im.textures.size());
+        m.constantCount = static_cast<uint8_t>(im.constants.size());
+        m.layerCount = static_cast<uint8_t>(im.subMaterials.size());
 
         static_assert(sizeof(Material) == 0x78, "IW8 Material must be 0x78 (g_assetSizes[11])");
         // Replay reads the 0x78 structure from TEMP_PRELOAD at 8-byte alignment. Its name and
