@@ -5,8 +5,8 @@
 // feather, an alpha mask, the particle lit by the scene) on the bindings of Replay's lit effect set (VS 372e0e1a,
 // PS a9864c07): its per-particle lighting map at t0, the albedo at t2, the scene depth at t4, the scope buffer at t5
 // and the Particle_MaterialData at t6; the flow maps and the mask follow at t7-t9. The unmasked lit flows (d29f9b4f,
-// and d241aa2a without the feather) bind a white mask. FLOW_UVD: IW7's lit UV distortion (c258449e, 5d9b9a5b) on the same
-// bindings, its noise map in the flow map's slot.
+// and d241aa2a without the feather) bind a white mask. FLOW_UVD: IW7's lit UV distortion (c258449e, 5d9b9a5b, and the
+// twins without the dissolve 684ca3a1, 69656d4c) on the same bindings, its noise map in the flow map's slot.
 cbuffer Stable : register(b2) { float4 stable[9]; }
 #ifdef FLOW_LIT
 cbuffer Material : register(b3) { float4 material[5]; }
@@ -78,11 +78,14 @@ Output main(Input input)
     // IW7 c258449e / 5d9b9a5b (eq_effect_blend_lin[_ct]_ndw_shl_uvd_ad_nocast_norm_spec): the UVs move by a scrolling noise
     // map (the flow map's slot), uv + (noise.xy * 2 - 1) * strength / atlas, the noise at uv * scale + time * scroll (row
     // 3: scroll xy, scale zw; row 4: strength, atlas yz, dissolve K w); the vertex alpha dissolves the alpha instead of
-    // scaling it, alpha = saturate((texel.a + vertex alpha) * K - K).
+    // scaling it, alpha = saturate((texel.a + vertex alpha) * K - K). Their twins without the dissolve (K 0: 684ca3a1,
+    // eq_effect_blend_lin_ndw_shl_uvd_nocast_norm_spec; 69656d4c, eq_effect_blend_lin_ndw_uvd_nocast) scale it,
+    // alpha = texel.a * vertex alpha.
     float2 noiseUV = input.uv * material[3].zw + stable[8].w * material[3].xy;
     float2 offset = (flowMap.Sample(colorSampler, noiseUV).xy * 2 - 1) * material[4].x / material[4].yz;
     float4 texel = colorMap.SampleBias(colorSampler, input.uv + offset, stable[7].y);
-    float alpha = saturate((texel.a + input.color.a) * material[4].w - material[4].w);
+    float alpha = material[4].w > 0 ? saturate((texel.a + input.color.a) * material[4].w - material[4].w)
+                                    : texel.a * input.color.a;
 #else
     float4 flow = flowMap.SampleLevel(colorSampler, input.uv, 0);
     float4 surface = flowSurface.SampleLevel(colorSampler, input.uv, 0);

@@ -222,6 +222,17 @@ float4 FlowTexel(float2 uv, float time) {
     return texel;
 }
 #endif
+#if defined(MAP_UVD) && !defined(MAP_COVERAGE)
+// IW7's model UV distortion (mopw_effectunlit_add_lin_ct_ndw_uvd_nocast_evc: PS 5e1809e2): the noise map
+// (MaterialTextureID_flowMap, slot 0x39); MAP_UVD_SCROLL is uvDistortParms (scroll xy, scale zw) and MAP_UVD_STRENGTH
+// the strength over textureAtlas.xy.
+Texture2D<float4> uvdNoiseMap : register(t12);
+// The colour map at the UVs moved by the scrolling noise: uv + (noise.xy * 2 - 1) * strength / atlas.
+float4 UvdTexel(float2 uv, float time) {
+    float2 noise = uvdNoiseMap.Sample(colorSampler, uv * MAP_UVD_SCROLL.zw + time * MAP_UVD_SCROLL.xy).xy;
+    return sourceAtlas.SampleBias(colorSampler, uv + (noise * 2 - 1) * MAP_UVD_STRENGTH, MAP_MIP_BIAS);
+}
+#endif
 #ifndef MAP_TILE_SPAN_BITS
 #define MAP_TILE_SPAN_WORDS 1
 #define MAP_TILE_SPAN_BITS {0u}
@@ -1167,6 +1178,10 @@ float4 main(Input input) : SV_TARGET0 {
 #if defined(MAP_FLOW) && !defined(MAP_COVERAGE)
     // The game time: pixel view row 4 .w in both the static-model and the entity techniques (code constant 0).
     texel = FlowTexel(sampleUV, replayView[4].w);
+#endif
+#if defined(MAP_UVD) && !defined(MAP_COVERAGE)
+    // The same game time (pixel view row 4 .w) moves the noise.
+    texel = UvdTexel(sampleUV, replayView[4].w);
 #endif
 #if defined(MAP_UNLIT_MASKS) && !defined(MAP_COVERAGE)
     // An unlit surface's mask (IW7's mask / mask_mua techsets: effect quads, glows, light cards, sky discs) rides in the
