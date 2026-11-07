@@ -128,6 +128,8 @@ struct SourceMaterial
     float revealSharpness{};
     // The axes along which an IW7 material's colour sampler clamps (iw7ClampAxes: bit 0 U, bit 1 V).
     unsigned clampAxes{};
+    // Whether the material dims by the volumetric extinction before it (iw7VolumetricExtinction: IW7's god-ray cards).
+    bool volumetricExtinction{};
     // An unlit material's mask (maskMap) and whether an extraction gives unlit materials theirs (unlitMask).
     std::string mask;
     bool unlitMask{};
@@ -2896,6 +2898,7 @@ SourceMaterial ReadMaterial(const std::filesystem::path &root,
         material.revealSharpness = std::max(source.at("iw7RevealSharpness").get<float>(), 1e-6f);
     }
     material.clampAxes = source.value("iw7ClampAxes", 0u) & 3u;
+    material.volumetricExtinction = source.value("iw7VolumetricExtinction", false);
     return material;
 }
 
@@ -3386,6 +3389,10 @@ std::string g_transmissionDefines;
 // MAP_UV_CLAMP when a material's colour sampler clamps (an extraction's iw7ClampAxes): each generated material keeps
 // its axes in row 3.w of its pixel constants; IW3 maps compile without it.
 std::string g_uvClampDefines;
+// MAP_VOLUMETRIC_EXTINCTION when a material dims by the volumetric extinction before it (an extraction's
+// iw7VolumetricExtinction): each generated material keeps 1 for it in row 2.w of its pixel constants; IW3 maps compile
+// without it.
+std::string g_extinctionDefines;
 // MAP_IW7_SPECULAR when the extraction's specular maps hold IW7's F0 and gloss ("iw7_specular"); IW3 maps compile
 // without it.
 std::string g_iw7SpecularDefines;
@@ -3424,7 +3431,7 @@ Json BuildTechset(const std::string &map, const unsigned columns, const unsigned
     std::string pixelSource =
         "#define MAP_SOURCE_SUN_MASK 1\n#define MAP_SOURCE_CHANNELS 1\n" + glassEnvironment +
         g_emissionDefines + g_backFaceDefines + g_revealDefines + g_iw7SpecularDefines + g_skyObjectDefines +
-        g_unlitMaskDefines + g_uvAnimationDefines + g_transmissionDefines + g_uvClampDefines;
+        g_unlitMaskDefines + g_uvAnimationDefines + g_transmissionDefines + g_uvClampDefines + g_extinctionDefines;
     if (const char *diag = std::getenv("IW8_ZONETOOL_DIAG_NO_PROBES"); diag && *diag == '1')
         pixelSource += "#define MAP_DIAG_NO_PROBES 1\n";
     if (model)
@@ -5257,17 +5264,18 @@ RenderPlan PrepareRenderAssets(const std::filesystem::path &exportRoot, const Js
                              ? "#define MAP_UNLIT_MASKS 1\n"
                              : "";
     // The rows a material stamps into its pixel constants: transmission and reveal sharpness (row 1), mask UV animation
-    // (row 2), UV animation and clamp axes (row 3).
+    // and volumetric extinction (row 2), UV animation and clamp axes (row 3).
     std::unordered_map<std::string, std::array<std::array<float, 4>, 3>> materialRows;
     for (const SourceMaterial &material : materials)
         if (material.uvAnimation != std::array<float, 3>{} || material.maskUvAnimation != std::array<float, 3>{} ||
-            material.transmission != std::array<float, 3>{} || material.revealSharpness != 0 || material.clampAxes != 0)
+            material.transmission != std::array<float, 3>{} || material.revealSharpness != 0 || material.clampAxes != 0 ||
+            material.volumetricExtinction)
         {
             const auto row = [](const std::array<float, 3> &xyz, const float w) {
                 return std::array{xyz[0], xyz[1], xyz[2], w};
             };
             materialRows.emplace(material.name, std::array{row(material.transmission, material.revealSharpness),
-                                                           row(material.maskUvAnimation, 0),
+                                                           row(material.maskUvAnimation, material.volumetricExtinction ? 1.0f : 0.0f),
                                                            row(material.uvAnimation, static_cast<float>(material.clampAxes))});
         }
     const auto anyMaterial = [&](const auto &field) {
@@ -5282,6 +5290,10 @@ RenderPlan PrepareRenderAssets(const std::filesystem::path &exportRoot, const Js
     g_uvClampDefines = std::ranges::any_of(materials, [](const SourceMaterial &material) { return material.clampAxes != 0; })
                            ? "#define MAP_UV_CLAMP 1\n"
                            : "";
+    g_extinctionDefines =
+        std::ranges::any_of(materials, [](const SourceMaterial &material) { return material.volumetricExtinction; })
+            ? "#define MAP_VOLUMETRIC_EXTINCTION 1\n"
+            : "";
     // IW3 DXT5 normal maps keep Y replicated in RGB and X in alpha (red equals
     // green texel for texel). Every consumer here reads X from red, so move
     // alpha into red once per image; this left one bump axis flat before.
@@ -6476,12 +6488,13 @@ RenderPlan PrepareRenderAssets(const std::filesystem::path &exportRoot, const Js
             [source = std::move(owned)]() mutable { return std::pair{std::move(source), std::optional<Image>{}}; },
             bytes, tint, domain);
     };
-    // With MAP_UV_ANIMATION, MAP_TRANSMISSION, MAP_REVEAL_LAYERS or MAP_UV_CLAMP every generated material keeps its rows
-    // (or zeros) in its pixel constants: transmission and reveal sharpness in row 1, mask UV animation in row 2, UV
-    // animation and clamp axes in row 3; Replay's stock world materials keep their own rows.
+    // With MAP_UV_ANIMATION, MAP_TRANSMISSION, MAP_REVEAL_LAYERS, MAP_UV_CLAMP or MAP_VOLUMETRIC_EXTINCTION every generated
+    // material keeps its rows (or zeros) in its pixel constants: transmission and reveal sharpness in row 1, mask UV
+    // animation and volumetric extinction in row 2, UV animation and clamp axes in row 3; Replay's stock world materials
+    // keep their own rows.
     const auto stampMaterialRows = [&](Json &definition) {
         if ((g_uvAnimationDefines.empty() && g_transmissionDefines.empty() && g_revealDefines.empty() &&
-             g_uvClampDefines.empty()) ||
+             g_uvClampDefines.empty() && g_extinctionDefines.empty()) ||
             !definition.contains("buffers") || definition.at("buffers").empty() ||
             definition.value("techset", std::string{}).find("_native_world_cull") != std::string::npos)
             return;

@@ -98,11 +98,12 @@ SamplerState gtaoSampler : register(s8);
 cbuffer ReplayView : register(b2) {
     float4 replayView[8];
 };
-#if (defined(MAP_UV_ANIMATION) || defined(MAP_TRANSMISSION) || defined(MAP_REVEAL_LAYERS) || defined(MAP_UV_CLAMP)) && \
-    !defined(MAP_COVERAGE)
+#if (defined(MAP_UV_ANIMATION) || defined(MAP_TRANSMISSION) || defined(MAP_REVEAL_LAYERS) || defined(MAP_UV_CLAMP) || \
+     defined(MAP_VOLUMETRIC_EXTINCTION)) && !defined(MAP_COVERAGE)
 // The material's pixel constants (cb3, the converter's stamp): row 1 holds its transmission (MAP_TRANSMISSION) and its
 // reveal ramp's sharpness (w, MAP_REVEAL_LAYERS), row 3 its UV animation and row 2 its mask's (MAP_UV_ANIMATION), row
-// 3.w the axes its colour sampler clamps (MAP_UV_CLAMP: bit 0 U, bit 1 V).
+// 3.w the axes its colour sampler clamps (MAP_UV_CLAMP: bit 0 U, bit 1 V), row 2.w 1 when it dims by the volumetric
+// extinction (MAP_VOLUMETRIC_EXTINCTION).
 cbuffer MaterialConstants : register(b3) {
     float4 materialConstants[4];
 };
@@ -118,6 +119,20 @@ float2 AnimatedUv(float2 uv, float3 animation, float t) {
 cbuffer ReplayLighting : register(b7) {
     float4 replayLighting[MAP_LIGHTING_ROWS];
 };
+#if defined(MAP_VOLUMETRIC_EXTINCTION) && !defined(MAP_COVERAGE)
+// Replay's volumetric extinction (code texture 26: t111) before a pixel, read as its lit translucent world shaders read it
+// (tw/twc lit_3_lit_bad_*, PS 077107f8): at the screen position and the depth slice of the view depth less 4 through the
+// four segments of cb7[48] and their scales cb7[49] (the far end past 0.984375 of depth). IW7's god-ray PS a9891c63
+// reads its own the same way (t1, code texture 52).
+Texture3D<float4> volumetricExtinction : register(t111);
+float VolumetricExtinction(float4 position, float2 screenUV) {
+    float depth = position.z > 0.984375 ? -4 : position.w - 4;
+    float3 ends = float3(replayLighting[48].x, replayLighting[48].x + replayLighting[48].y,
+                         replayLighting[48].x + replayLighting[48].y + replayLighting[48].z);
+    float slice = dot(saturate((depth - float4(0, ends)) * replayLighting[49]), .25);
+    return volumetricExtinction.SampleLevel(gtaoSampler, float3(screenUV, slice), 0).x;
+}
+#endif
 
 // Blinn-Phong power p as Beckmann roughness^2 = 2 / (p + 2), widened by the
 // normal variance and converted back.
@@ -1656,6 +1671,11 @@ float4 main(Input input) : SV_TARGET0 {
     if (!skyPlaced)
         fogFactor = saturate(exp(-MAP_FOG_DENSITY * (length(input.relativePosition) - MAP_FOG_START)));
 #endif
+#endif
+#if defined(MAP_VOLUMETRIC_EXTINCTION) && !defined(MAP_COVERAGE) && MAP_DEBUG_MODE == 0
+    // IW7's additive surfaces (god-ray cards) dim by the volumetric extinction before them (row 2.w).
+    if (materialConstants[2].w != 0 && !skyPlaced)
+        color *= VolumetricExtinction(input.position, screenUV);
 #endif
     // IW3 falloff (1024; vertcol_simple_fog_foa, zfeather_foa_nf_eo):
     // f = saturate((N.V)^2 * parms.x + parms.y), colour *= f *

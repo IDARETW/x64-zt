@@ -909,6 +909,33 @@ namespace zonetool::convert::iw7_iw8
 				classify_material(material).unlit;
 		}
 
+		// Whether a material's pixel shaders read IW7's volumetric extinction: a code texture argument of the pixel stage
+		// (shader 0x10) for code texture 52, as the god-ray cards' PS a9891c63 does (t1, at the pixel's screen position and
+		// depth slice; wc_unlit_falloff_add_lin_ct_ndw_ua), whose colour dims by it.
+		bool reads_volumetric_extinction(const source_map& source, const iw7::Material* material)
+		{
+			const auto* techset = material ? source.resolve(iw7::ASSET_TYPE_TECHNIQUE_SET, material->techniqueSet) : nullptr;
+			for (auto t = 0u; techset && techset->techniques && t < techset->techniqueCount; t++)
+			{
+				const auto* technique = techset->techniques[t];
+				for (auto p = 0u; technique && p < technique->hdr.passCount; p++)
+				{
+					const auto& pass = technique->passArray[p];
+					const auto count = pass.perPrimArgCount + pass.perObjArgCount + pass.stableArgCount;
+					for (auto a = 0; pass.args && a < count; a++)
+					{
+						const auto& argument = pass.args[a];
+						if (argument.type == iw7::MTL_ARG_CODE_TEXTURE && argument.shader == 0x10 && argument.u.codeSampler == 52)
+						{
+							return true;
+						}
+					}
+				}
+			}
+
+			return false;
+		}
+
 		// The axes along which a layer's colour sampler clamps: bit 0 U, bit 1 V. IW7's sampler state byte keeps the
 		// filter and mip mode below bit 5 and clamps U, V and W in bits 5 to 7 (0x13 wraps, 0x53 clamps V, 0xF3 all: the
 		// blood hand prints and wall_stain5).
@@ -2105,6 +2132,7 @@ namespace zonetool::convert::iw7_iw8
 		std::size_t missing{};
 		std::array<std::size_t, 7> kinds{};
 		std::size_t flags{};
+		std::size_t volumetric_extinction{};
 		std::size_t missing_color_maps{};
 		for (const auto& [name, material] : output.materials)
 		{
@@ -2287,6 +2315,17 @@ namespace zonetool::convert::iw7_iw8
 				exported["skyObject"] = true;
 			}
 
+			// An additive material that IW7 dims by the volumetric extinction before it (reads_volumetric_extinction: the
+			// god-ray cards): the pipeline's shader reads Replay's (MAP_VOLUMETRIC_EXTINCTION), as Replay's blended world
+			// shaders read theirs (lit_3_lit_bad_*). Nearly every IW7 forward shader reads it (Breakneck 2978 materials);
+			// Replay's opaque ones do not (world PS a3f48686), as the volumetric pass covers them afterwards, and its blended
+			// ones also add the in-scatter (t110), which the pipeline's shader does not yet.
+			if (!layer && kind.kind == surface_kind::additive && reads_volumetric_extinction(source, material))
+			{
+				exported["iw7VolumetricExtinction"] = true;
+				volumetric_extinction++;
+			}
+
 			// A model flow material (model_flow_material): the pipeline's model shader pulls its colour along the flow map.
 			if (model_flow_material(material) && !layer)
 			{
@@ -2396,6 +2435,11 @@ namespace zonetool::convert::iw7_iw8
 		if (flags)
 		{
 			ZONETOOL_INFO("iw7: %zu flag and foliage materials move by IW7's flag wave", flags);
+		}
+
+		if (volumetric_extinction)
+		{
+			ZONETOOL_INFO("iw7: %zu materials dim by the volumetric extinction before them", volumetric_extinction);
 		}
 	}
 
