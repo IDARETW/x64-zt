@@ -41,6 +41,9 @@ inline constexpr size_t DecalVisDataCount = DpvsStatic + 0x14;
 inline constexpr size_t PrimaryLightVisData = 0x41C0;
 inline constexpr size_t ReflectionProbeVisData = 0x41C8;
 inline constexpr size_t VolumetricVisData = 0x41D0;
+// GfxWorldDraw (+0x648) volumetrics at +0x3190: count, GfxVolumetric array (264 bytes
+// each), mask atlas image.
+inline constexpr size_t Volumetrics = 0x648 + 0x3190;
 inline constexpr size_t DecalVisData = 0x41D8;
 // Load_GfxWorld's DPVS-dynamic child starts at +0x4210. Loader D93BB0
 // allocates dynEntCellBits[basis] as wordCount[basis] * cellCount dwords,

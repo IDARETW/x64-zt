@@ -152,6 +152,29 @@ struct ReflectionProbe
     // The source's instances; none: one axis-aligned instance of the volume.
     std::vector<ReflectionProbeInstance> instances;
 };
+// A projected mask of a volumetric (GfxVolumetricMask, 40 bytes). R_VOL_AddVolumetric
+// (0x1418B6EC0) binds the image of an opacity mask (type 2) and offsets its UV by
+// scroll * time; other types draw nothing.
+struct VolumetricMask
+{
+    uint32_t type = 0; // 0 none, 2 opacity map
+    uint32_t axis = 0; // VolumetricAxis
+    Image image;
+    std::array<float, 2> scale{}, offset{}, scroll{};
+};
+// A world volumetric (GfxVolumetric, 264 bytes): an oriented fog box that the
+// volumetric pass adds while its Umbra object (user-ID class 3) is visible.
+struct Volumetric
+{
+    std::string livePath;
+    // Flag 2: the anisotropy replaces the vision's; flag 4: the colour replaces its albedo.
+    uint32_t flags = 0;
+    std::array<float, 3> center{}, halfSize{};
+    std::array<std::array<float, 3>, 3> axes{};
+    std::array<float, 3> color{};
+    float density = 0, falloff = 0, heightFade = 0, anisotropy = 0;
+    std::array<VolumetricMask, 4> masks;
+};
 struct NativeLightmapImage
 {
     uint32_t format{};
@@ -246,6 +269,7 @@ struct Mesh : Material
     Image reflectionProbeArrayImage;
     std::vector<NativeLightmap> nativeLightmaps;
     std::vector<GlassPane> glassPanes;
+    std::vector<Volumetric> volumetrics;
     std::vector<unsigned> surfaceMaterials;
     unsigned opaqueCount = 0;
     // World surfaces of Replay's lit decal range (blended with a depth bias), which
@@ -278,6 +302,11 @@ void RegisterMapMaterials(iw8::ZoneWriter &main, iw8::ZoneWriter &techsets,
                           const Mesh &mesh, uint64_t mainImageBudget = 2ull << 30);
 void RegisterMaterialReference(iw8::ZoneWriter &writer, const std::string &name);
 void RegisterReflectionProbeImage(iw8::ZoneWriter &writer, const Mesh &mesh);
+// The images of the world volumetrics' masks, ahead of the GfxWorld that references them.
+void RegisterVolumetricMaskImages(iw8::ZoneWriter &writer, const Mesh &mesh);
+// The GfxVolumetric array of GfxWorldDraw.volumetrics (after lightmapTransientIndex) with
+// each one's live path; mask images are references to their registered definitions.
+void EmitVolumetrics(iw8::ZoneWriter &writer, const Mesh &mesh);
 void StampWorld(std::vector<uint8_t> &world, const Mesh &mesh);
 void EmitSurfaces(iw8::ZoneWriter &writer, const Mesh &mesh);
 void StampTransient(uint8_t *transient, const Mesh &mesh);

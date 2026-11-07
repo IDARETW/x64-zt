@@ -1385,6 +1385,67 @@ Mesh Load(const std::string &path, const nlohmann::json &j)
             m.glassPanes.push_back(pane);
         }
     }
+    if (j.contains("volumetrics"))
+    {
+        // R_VOL_AddVolumetric (0x1418B6EC0) divides by the falloff and gives the first 256 volumes a slot.
+        const auto &volumetrics = j.at("volumetrics");
+        if (!volumetrics.is_array() || volumetrics.size() > 256)
+            throw std::runtime_error("Invalid Replay volumetric table");
+        for (const auto &source : volumetrics)
+        {
+            Volumetric volumetric;
+            volumetric.livePath = source.value("live_path", std::string());
+            volumetric.flags = source.value("flags", 0u);
+            const auto copy = [&](const char *key, auto &target) {
+                const auto values = vector(source.at(key), target.size());
+                std::copy(values.begin(), values.end(), target.begin());
+            };
+            copy("center", volumetric.center);
+            copy("half_size", volumetric.halfSize);
+            copy("color", volumetric.color);
+            const auto &axes = source.at("axes");
+            if (!axes.is_array() || axes.size() != 3)
+                throw std::runtime_error("Invalid Replay volumetric axes");
+            for (std::size_t axis = 0; axis < 3; ++axis)
+            {
+                const auto values = vector(axes.at(axis), 3);
+                std::copy(values.begin(), values.end(), volumetric.axes[axis].begin());
+            }
+            volumetric.density = source.at("density").get<float>();
+            volumetric.falloff = source.at("falloff").get<float>();
+            volumetric.heightFade = source.value("height_fade", 0.0f);
+            volumetric.anisotropy = source.value("anisotropy", 0.0f);
+            if ((volumetric.flags & ~6u) || !std::isfinite(volumetric.density) || volumetric.density < 0 ||
+                !std::isfinite(volumetric.falloff) || volumetric.falloff <= 0 ||
+                !std::isfinite(volumetric.heightFade) || !std::isfinite(volumetric.anisotropy) ||
+                std::any_of(volumetric.halfSize.begin(), volumetric.halfSize.end(), [](const float v) { return !(v > 0); }) ||
+                volumetric.livePath.size() > 255)
+                throw std::runtime_error("Invalid Replay volumetric");
+            const auto masks = source.value("masks", nlohmann::json::array());
+            if (!masks.is_array() || masks.size() > volumetric.masks.size())
+                throw std::runtime_error("Invalid Replay volumetric masks");
+            for (std::size_t index = 0; index < masks.size(); ++index)
+            {
+                const auto &value = masks.at(index);
+                auto &mask = volumetric.masks[index];
+                mask.type = value.at("type").get<uint32_t>();
+                mask.axis = value.at("axis").get<uint32_t>();
+                // Only opacity maps draw (R_VOL_AddVolumetric); an axis is X, Y or Z, with the negative flag 4.
+                if (mask.type != 2 || (mask.axis & ~4u) > 2)
+                    throw std::runtime_error("Unsupported Replay volumetric mask");
+                mask.image = LoadImageDefinition(path, value.at("image"), 0u);
+                for (const auto &[key, target] : {std::pair{"scale", &mask.scale}, std::pair{"offset", &mask.offset},
+                                                  std::pair{"scroll", &mask.scroll}})
+                {
+                    const auto values = vector(value.at(key), 2);
+                    std::copy(values.begin(), values.end(), target->begin());
+                }
+                if (mask.scale[0] == 0 || mask.scale[1] == 0)
+                    throw std::runtime_error("Replay volumetric mask has a zero scale");
+            }
+            m.volumetrics.push_back(std::move(volumetric));
+        }
+    }
     const auto &reflectionProbes = j.at("reflectionProbes");
     if (!reflectionProbes.is_array() || reflectionProbes.empty() || reflectionProbes.size() > 256)
         throw std::runtime_error("Invalid Replay reflection-probe table");
@@ -3008,6 +3069,52 @@ void RegisterReflectionProbeImage(ZoneWriter &w, const Mesh &mesh)
     std::set<std::pair<unsigned, std::string>> registered;
     RegisterImageDefinition(w, mesh.reflectionProbeArrayImage, registered);
 }
+void RegisterVolumetricMaskImages(ZoneWriter &w, const Mesh &mesh)
+{
+    std::set<std::pair<unsigned, std::string>> registered;
+    for (const auto &volumetric : mesh.volumetrics)
+        for (const auto &mask : volumetric.masks)
+            if (mask.type)
+                RegisterImageDefinition(w, mask.image, registered);
+}
+void EmitVolumetrics(ZoneWriter &w, const Mesh &m)
+{
+    if (m.volumetrics.empty())
+        return;
+    // Load_GfxWorldVolumetrics: the array at alignment 8, then each one's livePath and its four
+    // mask image pointers (references here, so nothing follows them).
+    w.align(7);
+    for (const auto &volumetric : m.volumetrics)
+    {
+        uint8_t record[264]{};
+        put(record, 0x00, volumetric.livePath.empty() ? PTR_NULL : PTR_FOLLOWS);
+        put(record, 0x08, volumetric.flags);
+        std::memcpy(record + 0x0C, volumetric.center.data(), 12);
+        for (std::size_t axis = 0; axis < 3; ++axis)
+            std::memcpy(record + 0x18 + axis * 12, volumetric.axes[axis].data(), 12);
+        std::memcpy(record + 0x3C, volumetric.halfSize.data(), 12);
+        std::memcpy(record + 0x48, volumetric.color.data(), 12);
+        put(record, 0x54, volumetric.density);
+        put(record, 0x58, volumetric.falloff);
+        put(record, 0x5C, volumetric.heightFade);
+        put(record, 0x60, volumetric.anisotropy);
+        for (std::size_t index = 0; index < volumetric.masks.size(); ++index)
+        {
+            const auto &mask = volumetric.masks[index];
+            auto *entry = record + 0x68 + index * 40;
+            put(entry, 0x00, mask.type);
+            put(entry, 0x04, mask.axis);
+            put(entry, 0x08, mask.type ? w.assetAlias(static_cast<IW8_XAssetType>(19), mask.image.name) : PTR_NULL);
+            std::memcpy(entry + 0x10, mask.scale.data(), 8);
+            std::memcpy(entry + 0x18, mask.offset.data(), 8);
+            std::memcpy(entry + 0x20, mask.scroll.data(), 8);
+        }
+        w.write(record, sizeof(record));
+    }
+    for (const auto &volumetric : m.volumetrics)
+        if (!volumetric.livePath.empty())
+            w.writeStr(volumetric.livePath);
+}
 void EmitSurfaces(ZoneWriter &w, const Mesh &m)
 {
     if (!m.count)
@@ -3059,14 +3166,16 @@ std::vector<uint8_t> BuildUmbraTome(const Mesh &m, const StaticModels &staticMod
     BuildStaticModelLayout(staticModels);
     const uint32_t worldSurfaceCount = m.worldSurfaceCount();
     const uint32_t staticModelCount = static_cast<uint32_t>(staticModels.instances.size());
+    const uint32_t volumetricCount = static_cast<uint32_t>(m.volumetrics.size());
     const uint32_t objectCount = worldSurfaceCount + staticModelCount +
                                  static_cast<uint32_t>(primaryLights.size()) +
-                                 reflectionProbeInstances;
+                                 reflectionProbeInstances + volumetricCount;
     // Umbra user IDs carry the object class in bits 28-30 (query consumer
-    // 0x18CCA80): 0 world surface, 1 static model, 4 primary light (sets the
-    // light's primaryLightVisData bit), 5 reflection-probe instance. Static
-    // local lights reach the light binning (0x186C4F0) only through these
-    // query results.
+    // 0x18CCA80): 0 world surface, 1 static model, 3 world volumetric (its
+    // volumetricVisData bit, which R_VOL_AddVolumetrics 0x1418B71E0 reads), 4
+    // primary light (sets the light's primaryLightVisData bit), 5
+    // reflection-probe instance. Static local lights reach the light binning
+    // (0x186C4F0) only through these query results.
     std::vector<uint32_t> userIDList;
     userIDList.reserve(objectCount);
     for (uint32_t surface = 0; surface < worldSurfaceCount; ++surface)
@@ -3083,6 +3192,8 @@ std::vector<uint8_t> BuildUmbraTome(const Mesh &m, const StaticModels &staticMod
     // shipped tomes list them too (mp_hideout: 41).
     for (uint32_t probe = 0; probe < reflectionProbeInstances; ++probe)
         userIDList.push_back(0x50000000u + probe);
+    for (uint32_t volumetric = 0; volumetric < volumetricCount; ++volumetric)
+        userIDList.push_back(0x30000000u + volumetric);
     if (!objectCount || objectCount > 0x01000000 ||
         uint64_t(worldSurfaceCount) * 56 > m.bounds.size())
         throw std::runtime_error("Replay world surfaces cannot be represented by Umbra object IDs");
