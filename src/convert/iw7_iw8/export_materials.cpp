@@ -1156,10 +1156,13 @@ namespace zonetool::convert::iw7_iw8
 			// (scene[42].x) for all, as the stock effect PS b0ec5d88 does for every converted effect. The dissolve ones,
 			// 39eb46cf and d2bc120f, are 40967ff1 and 6a577499 with an alpha dissolve (alphaDissolveParms). The lit
 			// zfeather flow a386c911 (Frontier) also masks its alpha (its maskMap, 0x9E7BA008) and lights the particle
-			// by the scene; the lit flows of Nova, Paris, Proto and Riot (d241aa2a, the evc one) are not ported.
-			static constexpr std::array<std::string_view, 13> names
+			// by the scene; Paris', Proto's and Riot's zfeather one (d29f9b4f) is a386c911 without the mask, and Nova's evc
+			// one (d241aa2a) is that without the feather (instruction for instruction, registers renumbered).
+			static constexpr std::array<std::string_view, 15> names
 			{
 				"eq_effect_zfeather_blend_lin_ndw_flow_nocast_mask",
+				"eq_effect_zfeather_blend_lin_ndw_flow_nocast",
+				"eq_effect_blend_lin_ndw_flow_nocast_evc",
 				"eq_effectunlit_add_lin_ndw_flow_ad_nocast_evc",
 				"eq_effectunlit_add_lin_ndw_flow_ad_nocast_mkhdr_evc",
 				"eq_effectunlit_blend_lin_ct_ndw_flow_nocast_mkhdr_evc",

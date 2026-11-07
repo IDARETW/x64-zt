@@ -2049,13 +2049,12 @@ SourceFxMaterial ReadFxMaterial(const std::filesystem::path &root,
             material.flow->dissolve = flow.at("dissolve").get<float>();
         material.flow->mask = flow.value("mask", std::string());
         // The owned flow PS covers the blended and additive families, either with the zfeather intersection; the lit
-        // flow (blended, with its mask) has no HDR expansion or dissolve.
+        // flow (blended, with or without its mask) has no HDR expansion or dissolve.
         const bool flowFamily = material.family == FxMaterialFamily::alpha ||
                                 material.family == FxMaterialFamily::alphaFeather ||
                                 material.family == FxMaterialFamily::additive ||
                                 material.family == FxMaterialFamily::additiveFeather;
-        const bool litFlow = material.lit && !material.flow->hdr && !material.flow->dissolve &&
-                             !material.flow->mask.empty();
+        const bool litFlow = material.lit && !material.flow->hdr && !material.flow->dissolve;
         if ((material.lit && !litFlow) || (!material.lit && !material.flow->mask.empty()) || material.frameBlend ||
             !flowFamily || !(material.flow->period[0] > 0) || !(material.flow->period[2] > 0) ||
             (material.flow->dissolve && !(std::isfinite(*material.flow->dissolve) && *material.flow->dissolve > 0)))
@@ -8126,13 +8125,16 @@ RenderPlan PrepareRenderAssets(const std::filesystem::path &exportRoot, const Js
             if (source.lit)
             {
                 // Albedo, the black transmittance of the lit set (its alpha is then the particle's coverage), the flow
-                // maps and the mask.
+                // maps and the mask: white for the lit flows without one (d29f9b4f / d241aa2a, a386c911 less its mask).
                 residentImage(direct, 0, flowImage(source.image), {1, 1, 1, 1}, "fxflow", false, nullptr, true);
                 residentImage(direct, 1, SolidImage({0, 0, 0, 255}), {1, 1, 1, 1}, "fxlit", false, nullptr, true);
                 residentImage(direct, 2, flowImage(source.flow->map), {1, 1, 1, 1}, "fxflow", false, nullptr, true);
                 residentImage(direct, 3, flowImage(source.flow->surface), {1, 1, 1, 1}, "fxflow", false, nullptr, true);
-                residentImage(direct, 4, flowImage(source.flow->mask), {1, 1, 1, 1}, "fxflow", false, nullptr, true);
-                zt::info("iw7: FX material %s keeps native animated flow, lit by the scene, with its mask", name.c_str());
+                const bool masked = !source.flow->mask.empty();
+                residentImage(direct, 4, masked ? flowImage(source.flow->mask) : SolidImage({255, 255, 255, 255}),
+                              {1, 1, 1, 1}, masked ? "fxflow" : "fxlit", false, nullptr, true);
+                zt::info("iw7: FX material %s keeps native animated flow, lit by the scene, %s", name.c_str(),
+                         masked ? "with its mask" : "without a mask");
             }
             else
             {
