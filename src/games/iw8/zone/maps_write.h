@@ -49,6 +49,7 @@ void emitGfxMapBody(iw8::ZoneWriter &zw, const char *assetName, const std::strin
                     const replaysunshadow::Data &sunShadow,
                     const std::array<float, 3> &sunDirection = {0.0f, 0.0f, 1.0f},
                     const iw8::heightfield::Data *heightfield = nullptr,
-                    const iw8::locallights::Data *localLights = nullptr);
+                    const iw8::locallights::Data *localLights = nullptr,
+                    uint32_t scriptablePrimaryLightCount = 0);
 
 } // namespace iw8maps

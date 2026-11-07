@@ -456,6 +456,30 @@ namespace zonetool::convert::iw7_iw8
 	// Adds the models of the world's static models, which export_models writes before export_world.
 	void collect_static_models(const source_map& source, extraction& output);
 	void export_world(const source_map& source, extraction& output);
+
+	// The primary-light indices of the extraction. Replay keeps a map's GSC-scripted lights (IW7 ComWorld's scriptable
+	// range) as the last lights of its table (stock mp_t_reflex: 40 of 47, from 7), and the pipeline pads a table with
+	// local lights to Replay's 256 sorted slots after its last light: with scriptable lights, the extraction places that
+	// padding before them, so every index from the first scriptable light on moves by the padding.
+	struct light_layout
+	{
+		std::uint32_t source_count{};
+		std::uint32_t first_scriptable{};
+		std::uint32_t scriptable_count{};
+		std::uint32_t padding{};
+
+		std::uint32_t count() const
+		{
+			return this->source_count + this->padding;
+		}
+
+		std::uint32_t index(const std::uint32_t source) const
+		{
+			return this->scriptable_count && source >= this->first_scriptable ? source + this->padding : source;
+		}
+	};
+
+	light_layout light_layout_of(const source_map& source);
 	void export_com_world(const source_map& source, extraction& output);
 	void export_entities(const source_map& source, extraction& output);
 	void export_collision(const source_map& source, extraction& output);

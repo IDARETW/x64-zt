@@ -598,7 +598,14 @@ size_t iw3ToIw8EntityString(const std::string &input, std::string &output,
             ++projectedSourceMarkers["script_struct:barrel_fireFX_origin"];
             continue;
         }
-        if (!isReplayEntity(name))
+        // A GSC-scripted primary light: Replay spawns light, light_spot and light_omni entities that carry pl#
+        // (G_Spawn_ScriptPrimaryLight 0x140FC4A00), the light's index in ComWorld's scriptable range. Only the IW7
+        // extraction writes them (IW3 exports hold no light entities).
+        const bool scriptLight = (name == "light" || name == "light_spot" || name == "light_omni") &&
+                                 std::any_of(entity.begin(), entity.end(), [](const KeyValue &pair) {
+                                     return lowercase(pair.key) == "pl#";
+                                 });
+        if (!isReplayEntity(name) && !scriptLight)
         {
             if (isOldSchoolPickup(name))
             {

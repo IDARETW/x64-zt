@@ -1215,7 +1215,7 @@ namespace zonetool::convert::iw7_iw8
 			std::vector<std::vector<std::uint32_t>> smodels;
 		};
 
-		std::optional<authored_shadow_membership> export_shadow_membership(const iw7::GfxWorld& world)
+		std::optional<authored_shadow_membership> export_shadow_membership(const iw7::GfxWorld& world, const light_layout& layout)
 		{
 			if (!world.shadowGeomOptimized)
 			{
@@ -1247,7 +1247,7 @@ namespace zonetool::convert::iw7_iw8
 						throw std::runtime_error(std::format("shadow geometry for light {} names surface {} out of range", light, surface));
 					}
 
-					result.surfaces[surface].push_back(light);
+					result.surfaces[surface].push_back(layout.index(light));
 				}
 
 				for (std::uint32_t i = 0; i < geometry.smodelCount; ++i)
@@ -1258,7 +1258,7 @@ namespace zonetool::convert::iw7_iw8
 						throw std::runtime_error(std::format("shadow geometry for light {} names static model {} out of range", light, smodel));
 					}
 
-					result.smodels[smodel].push_back(light);
+					result.smodels[smodel].push_back(layout.index(light));
 				}
 			}
 
@@ -1816,7 +1816,7 @@ namespace zonetool::convert::iw7_iw8
 		auto probes = export_reflection_probes(source, output);
 		const floor_light floors(source, world, lightmaps);
 		iw7_light_grid grid(world.lightGrid.probeData, output.light_grid_intensity);
-		const auto shadow_membership = export_shadow_membership(world);
+		const auto shadow_membership = export_shadow_membership(world, light_layout_of(source));
 		export_light_grid(source, floors, grid, output);
 		export_gpu_light_grid(source, output);
 
@@ -2059,7 +2059,7 @@ namespace zonetool::convert::iw7_iw8
 
 		const auto com_world = source.com_world();
 		const auto sun_index = 1u;
-		const auto light_count = com_world ? com_world->primaryLightCount : 0u;
+		const auto light_count = com_world ? light_layout_of(source).count() : 0u;
 
 		// The broken models of the scriptables that break, which only the map script sets, and the models that the map
 		// script sets by name.
