@@ -316,6 +316,11 @@ namespace zonetool::convert::iw7_iw8
 				return this->dropped_;
 			}
 
+			std::size_t flare_ghosts() const
+			{
+				return this->flare_ghosts_;
+			}
+
 		private:
 			const source_map& source_;
 			extraction& output_;
@@ -339,6 +344,8 @@ namespace zonetool::convert::iw7_iw8
 			// the size of its flare at the source (the radial scales), which its size modules take.
 			bool glare_state_{};
 			float glare_scale_{1.0f};
+			// The flare states away from their source (ghosts) that stay Replay flares.
+			std::size_t flare_ghosts_{};
 			std::optional<std::set<std::string>> bank_aliases_;
 
 			// The aliases of the map's sound bank (<map>.all).
@@ -553,8 +560,8 @@ namespace zonetool::convert::iw7_iw8
 				// IW7's glares (Frontier's fixture, warning and boost glares: flares at their source with IW7's additive glow
 				// materials, which ignore depth) flickered as Replay flares: Replay's flare occlusion (cs_flare_occlusion, a 3x3
 				// screen mask at the source) switched them on and off with the view, the source lying on its fixture. They
-				// draw as billboards of the flare's size at the source, with their own materials; the screen-space pieces of a
-				// flare away from its source (ghosts) are left out. Sun flares stay Replay flares.
+				// draw as billboards of the flare's size at the source, with their own materials. The screen-space pieces of a
+				// flare away from its source (ghosts) and sun flares stay Replay flares.
 				this->glare_state_ = false;
 				this->glare_scale_ = 1.0f;
 				if (state.elementType == iw7::PARTICLE_ELEMENT_TYPE_FLARE && this->current_.find("sun") == std::string::npos)
@@ -572,22 +579,32 @@ namespace zonetool::convert::iw7_iw8
 						}
 					}
 
-					if (!flare_module || std::abs(flare_module->m_position - 1.0f) > 0.05f)
+					if (!flare_module)
 					{
-						this->drop("flare away from its source (no Replay flare draws without its occlusion)");
+						this->drop("flare without its flare module");
 						complete = false;
 						return {{"state", hex(record)}, {"groups", json::array({json::array(), json::array(), json::array()})}};
 					}
 
-					auto scale = std::max(flare_module->m_radialScaleX.min, flare_module->m_radialScaleY.min);
-					if (flare_module->m_depthScaleRange.max > flare_module->m_depthScaleRange.min)
+					// A piece away from its source (a ghost along the line from the source through the screen's centre,
+					// m_position != 1) is a screen-space flare that no billboard can stand for: it stays a Replay flare,
+					// whose module has IW7's layout, with its own occlusion query (converted with Replay's depth bias).
+					if (std::abs(flare_module->m_position - 1.0f) <= 0.05f)
 					{
-						scale *= flare_module->m_depthScaleValue.max;
-					}
+						auto scale = std::max(flare_module->m_radialScaleX.min, flare_module->m_radialScaleY.min);
+						if (flare_module->m_depthScaleRange.max > flare_module->m_depthScaleRange.min)
+						{
+							scale *= flare_module->m_depthScaleValue.max;
+						}
 
-					this->glare_state_ = true;
-					this->glare_scale_ = scale > 0.0f && std::isfinite(scale) ? scale : 1.0f;
-					record.elementType = 0;
+						this->glare_state_ = true;
+						this->glare_scale_ = scale > 0.0f && std::isfinite(scale) ? scale : 1.0f;
+						record.elementType = 0;
+					}
+					else
+					{
+						this->flare_ghosts_++;
+					}
 				}
 				const auto source_flags = replay_state_flags(state.flags);
 
@@ -4209,5 +4226,9 @@ iw7_destructible_think( model, effect, sound, health )
 
 		ZONETOOL_INFO("iw7: converted %zu of %zu effects (%zu with their children), %zu not in the loaded zones; left out: %s", converted,
 			effects.size(), converter.converted(), converter.missing().size(), dropped.empty() ? "nothing" : dropped.data());
+		if (converter.flare_ghosts())
+		{
+			ZONETOOL_INFO("iw7: %zu flare states away from their source (ghosts) stay Replay flares", converter.flare_ghosts());
+		}
 	}
 }
