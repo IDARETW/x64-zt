@@ -103,10 +103,12 @@ Output main(uint id : SV_VertexID) {
     // world's origin, the box showed its walls to a camera away from the origin: IW7 Breakneck's
     // spawns are 40000 units out, beyond the box's 32768.
     bool sky = (uint)o.metadata.y % 4 == 1;
+    bool skyObject = false;
 #ifdef MAP_SKY_OBJECTS
     // The sky's other surfaces (flag bit 23: an extraction's distant models) keep their directions from the play space
     // as positions, drawn at infinity as the sky box is.
-    sky = sky || ((uint)o.metadata.y & 8388608) != 0;
+    skyObject = !sky && ((uint)o.metadata.y & 8388608) != 0;
+    sky = sky || skyObject;
 #endif
     if (sky) {
         relative.xyz = p;
@@ -142,6 +144,12 @@ Output main(uint id : SV_VertexID) {
     // farther than any geometry.
     if (sky)
         o.position.z = o.position.w * 1e-7;
+    // The sky's other surfaces keep the order of their distances (one scale for all, export_world): a constant z gives
+    // the reversed depth 0.012 / w, a perspective depth from 2e-7 at their farthest (60000 units as drawn) toward the
+    // camera, in front of the sky box and behind the world. With one depth for all, the pieces of Breakneck's black hole
+    // flickered against each other in shards as the GPU's draw order changed.
+    if (skyObject)
+        o.position.z = .012;
 #ifdef GLASS_PANE
     uint color = vertex.color;
 #else
