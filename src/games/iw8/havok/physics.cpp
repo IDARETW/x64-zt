@@ -203,15 +203,155 @@ namespace zonetool::iw8::havok
 		builder.set(body, "materialId", source.material_id);
 		builder.set(body, "qualityId", source.quality_id);
 		builder.set(body, "motionType", source.motion_type);
-		// The position is a point (w 1), the orientation the identity.
-		builder.set(body, "position", std::array{0.0f, 0.0f, 0.0f, 1.0f});
-		builder.set(body, "orientation", std::array{0.0f, 0.0f, 0.0f, 1.0f});
+		builder.set(body, "position", source.position);
+		builder.set(body, "orientation", source.orientation);
 		builder.set(body, "mass", source.mass);
 		builder.set(body, "motionPropertiesId", source.motion_properties_id);
 		builder.set(body, "desiredBodyId", std::uint32_t{0x00FFFFFF});
 		builder.set(body, "motionId", std::uint32_t{0x7FFFFFFF});
 		builder.set(body, "activationPriority", source.activation_priority);
 		builder.set(body, "attachedBody", std::int32_t{-1});
+		return root;
+	}
+
+	std::uint32_t add_physics_system(object_builder& builder, const physics_system_asset& asset)
+	{
+		if (asset.bodies.empty())
+		{
+			throw std::runtime_error("a physics system has no bodies");
+		}
+
+		const auto root = builder.object("HavokPhysicsAsset");
+		builder.set(root, "useCategory", asset.use_category);
+		const auto system = builder.object("hknpPhysicsSystemData");
+		builder.point(root, "physicsSystemData", system);
+
+		const auto count = static_cast<std::uint32_t>(asset.bodies.size());
+		const auto per_body = [&](const auto& value)
+		{
+			std::vector<std::int32_t> values;
+			for (const auto& body : asset.bodies)
+			{
+				values.push_back(static_cast<std::int32_t>(value(body)));
+			}
+
+			return add_values(builder, "int", values);
+		};
+
+		builder.point(root, "bodyQualityNameCRCLookup", per_body([](const auto& body) { return body.body_quality_crc; }));
+		builder.point(root, "materialNameCRCLookup", per_body([](const auto& body) { return body.material_crc; }));
+		builder.point(root, "motionPropertiesNameCRCLookup", per_body([](const auto& body) { return body.motion_properties_crc; }));
+
+		// One empty event name per body, for sounds and effects.
+		const std::vector<std::uint32_t> names(count, add_string(builder, ""));
+		builder.point(root, "bodySFXAssetNames", add_strings(builder, names));
+		builder.point(root, "bodyVFXAssetNames", add_strings(builder, names));
+		builder.point(root, "bodyServerUsage", add_values(builder, "int", std::vector<std::int32_t>(count)));
+		if (!asset.hinges.empty())
+		{
+			builder.point(root, "constraintServerUsage", add_values(builder, "int", std::vector<std::int32_t>(asset.hinges.size())));
+		}
+
+		builder.point(root, "bodyDrivers", add_values(builder, "int", std::vector<std::int32_t>(count)));
+		builder.point(root, "simulationCategories", per_body([](const auto& body) { return body.simulation_category; }));
+		builder.point(system, "name", add_string(builder, "Default Physics System Data"));
+		builder.set(system, "microStepMultiplier", std::uint8_t{1});
+
+		const auto body_type = "hknpPhysicsSystemData::bodyCinfoWithAttachment";
+		const auto bodies = builder.array(body_type, count, std::vector<std::uint8_t>(count * builder.types().size_of(type_of(builder, body_type))));
+		builder.point(system, "bodyCinfos", bodies);
+		for (std::uint32_t i = 0; i < count; i++)
+		{
+			const auto& source = asset.bodies[i].body;
+			builder.point(bodies, "shape", source.shape, i);
+			builder.point(bodies, "name", add_string(builder, source.name), i);
+			builder.set(bodies, "collisionFilterInfo", source.collision_filter_info, i);
+			builder.set(bodies, "materialId", source.material_id, i);
+			builder.set(bodies, "qualityId", source.quality_id, i);
+			builder.set(bodies, "motionType", source.motion_type, i);
+			builder.set(bodies, "position", source.position, i);
+			builder.set(bodies, "orientation", source.orientation, i);
+			builder.set(bodies, "mass", source.mass, i);
+			builder.set(bodies, "motionPropertiesId", source.motion_properties_id, i);
+			builder.set(bodies, "desiredBodyId", std::uint32_t{0x00FFFFFF}, i);
+			builder.set(bodies, "motionId", std::uint32_t{0x7FFFFFFF}, i);
+			builder.set(bodies, "activationPriority", source.activation_priority, i);
+			builder.set(bodies, "attachedBody", std::int32_t{-1}, i);
+		}
+
+		if (asset.hinges.empty())
+		{
+			return root;
+		}
+
+		const auto hinge_count = static_cast<std::uint32_t>(asset.hinges.size());
+		const auto constraints = builder.array("hknpConstraintCinfo", hinge_count,
+			std::vector<std::uint8_t>(hinge_count * builder.types().size_of(type_of(builder, "hknpConstraintCinfo"))));
+		builder.point(system, "constraintCinfos", constraints);
+		for (std::uint32_t i = 0; i < hinge_count; i++)
+		{
+			const auto& hinge = asset.hinges[i];
+			if (hinge.body_a >= count || hinge.body_b >= count || hinge.body_a == hinge.body_b)
+			{
+				throw std::runtime_error(std::format("hinge {} joins bodies {} and {} of {}", hinge.name, hinge.body_a, hinge.body_b, count));
+			}
+
+			const auto data = builder.object(hinge.limited ? "hkpLimitedHingeConstraintData" : "hkpHingeConstraintData");
+			builder.set(data, "atoms.transforms.type", std::uint16_t{2});
+			builder.set(data, "atoms.transforms.transformA", hinge.transform_a);
+			builder.set(data, "atoms.transforms.transformB", hinge.transform_b);
+			builder.set(data, "atoms.setupStabilization.type", std::uint16_t{23});
+			builder.set(data, "atoms.setupStabilization.enabled", std::uint8_t{hinge.stabilization});
+			builder.set(data, "atoms.setupStabilization.maxLinImpulse", hinge.max_linear_impulse);
+			builder.set(data, "atoms.setupStabilization.maxAngImpulse", hinge.max_angular_impulse);
+			builder.set(data, "atoms.setupStabilization.maxAngle", hinge.max_angle);
+			if (hinge.limited)
+			{
+				// The angular motor is off and has no motor, as in shipped limited hinges.
+				builder.set(data, "atoms.angMotor.type", std::uint16_t{18});
+				builder.set(data, "atoms.angFriction.type", std::uint16_t{17});
+				builder.set(data, "atoms.angFriction.isEnabled", std::uint8_t{hinge.friction});
+				builder.set(data, "atoms.angFriction.firstFrictionAxis", hinge.friction_axis);
+				builder.set(data, "atoms.angFriction.numFrictionAxes", hinge.friction_axes);
+				builder.set(data, "atoms.angFriction.maxFrictionTorque", hinge.max_friction_torque);
+				builder.set(data, "atoms.angLimit.type", std::uint16_t{14});
+				builder.set(data, "atoms.angLimit.isEnabled", std::uint8_t{hinge.limit});
+				builder.set(data, "atoms.angLimit.limitAxis", hinge.limit_axis);
+				builder.set(data, "atoms.angLimit.cosineAxis", hinge.cosine_axis);
+				builder.set(data, "atoms.angLimit.minAngle", hinge.min_angle);
+				builder.set(data, "atoms.angLimit.maxAngle", hinge.max_limit_angle);
+				builder.set(data, "atoms.angLimit.angularLimitsTauFactor", hinge.limit_tau);
+				builder.set(data, "atoms.angLimit.angularLimitsDampFactor", hinge.limit_damping);
+			}
+
+			// The tau and damping factors of the 2D angular and ball and socket atoms are those of shipped hinges (-1: the
+			// solver's own; 1).
+			builder.set(data, "atoms.2dAng.type", std::uint16_t{12});
+			builder.set(data, "atoms.2dAng.freeRotationAxis", hinge.free_axis);
+			builder.set(data, "atoms.2dAng.tauFactor", -1.0f);
+			builder.set(data, "atoms.2dAng.dampingFactor", -1.0f);
+			builder.set(data, "atoms.ballSocket.type", std::uint16_t{5});
+			builder.set(data, "atoms.ballSocket.solvingMethod", hinge.solving_method);
+			builder.set(data, "atoms.ballSocket.bodiesToNotify", hinge.bodies_to_notify);
+			builder.set(data, "atoms.ballSocket.velocityStabilizationFactor", hinge.velocity_stabilization);
+			builder.set(data, "atoms.ballSocket.enableLinearImpulseLimit", std::uint8_t{hinge.linear_impulse_limit});
+			builder.set(data, "atoms.ballSocket.breachImpulse", hinge.breach_impulse);
+			builder.set(data, "atoms.ballSocket.tauFactor", 1.0f);
+			builder.set(data, "atoms.ballSocket.dampingFactor", 1.0f);
+			builder.set(data, "atoms.ballSocket.inertiaStabilizationFactor", hinge.inertia_stabilization);
+
+			builder.point(constraints, "constraintData", data, i);
+			builder.set(constraints, "bodyA", hinge.body_a, i);
+			builder.set(constraints, "bodyB", hinge.body_b, i);
+			// The flags of every shipped Replay constraint (bit 2, IS_DISABLED in the hk2018.1 headers). IW7's are 0, in the
+			// meaning of Havok 2014; HavokPhysics_AddConstraintInstance (0x14161BE30) adds each one to the world and then
+			// makes a second world call on it (vtable +0x1C8, with 1).
+			builder.set(constraints, "flags", std::uint16_t{4}, i);
+			builder.point(constraints, "name", add_string(builder, hinge.name), i);
+			builder.set(constraints, "desiredConstraintId", std::uint32_t{0x7FFFFFFF}, i);
+			builder.set(constraints, "constraintGroupId", std::uint32_t{0x7FFFFFFF}, i);
+		}
+
 		return root;
 	}
 

@@ -2790,6 +2790,8 @@ namespace zonetool::iw8
 			std::size_t other_values{};
 			std::string first_difference;
 			rebuilt_shapes shapes;
+			// The assets with constraints, by their bodies and constraint data types: their names.
+			std::map<std::string, std::vector<std::string>> constrained;
 		};
 
 		// A HavokPhysicsShapeList built again: the same entries and tags, shapes with the same geometry.
@@ -2897,7 +2899,8 @@ namespace zonetool::iw8
 		}
 
 		// A one-body HavokPhysicsAsset built again from its values: the objects other than the shape must have the same bytes.
-		void verify_physics_asset(const havok::tagfile& file, const havok::type_table& types, physics_counts& counts)
+		void verify_physics_asset(const havok::tagfile& file, const std::span<const std::uint8_t> record, const std::string_view label,
+			const havok::type_table& types, physics_counts& counts)
 		{
 			const auto& root = file.items.at(1);
 			const auto system_index = item_target(root, member_offset(types, root.type, "physicsSystemData"));
@@ -2917,6 +2920,30 @@ namespace zonetool::iw8
 			const auto* bodies = target_of(system, "bodyCinfos");
 			const auto* materials = target_of(system, "materials");
 			const auto* motions = target_of(system, "motionProperties");
+			if (const auto* constraints = target_of(system, "constraintCinfos"))
+			{
+				// "<bodies> bodies: <constraint data type>, ..." names the kind.
+				auto kind = std::format("{} bodies:", bodies ? bodies->count : 0);
+				const auto data_at = member_offset(types, constraints->type, "constraintData");
+				const auto stride = types.size_of(constraints->type);
+				for (std::uint32_t i = 0; i < constraints->count; i++)
+				{
+					const auto data = item_target(*constraints, i * stride + data_at);
+					kind += std::format("{} {}", i ? "," : "", data ? types.identity(file.items.at(data).type) : "none");
+				}
+
+				counts.constrained[kind].push_back(std::string(label));
+				char debug[MAX_PATH]{};
+				if (GetEnvironmentVariableA("IW8_DUMP_DEBUG", debug, sizeof(debug)) && counts.constrained[kind].size() == 1)
+				{
+					// Asset names hold folders (mw120r/<map>/...): one file name of them.
+					auto file_name = std::string(label);
+					std::ranges::replace_if(file_name, [](const char c) { return c == '/' || c == '\\' || c == ':'; }, '_');
+					std::ofstream(std::filesystem::path(debug) / (file_name + ".hkx"), std::ios::binary)
+						.write(reinterpret_cast<const char*>(record.data()), static_cast<std::streamsize>(record.size()));
+				}
+			}
+
 			const auto one = [&](const std::string_view name)
 			{
 				const auto* list = target_of(root, name);
@@ -3107,7 +3134,8 @@ namespace zonetool::iw8
 
 		// IW8_REWRITE=physics builds the Havok data of the zone again without the game: each HavokPhysicsShapeList (col_map,
 		// map_ents) and each one-body HavokPhysicsAsset, with their shapes. Lists must keep their entries and tags, assets the
-		// bytes of their objects, and shapes their geometry.
+		// bytes of their objects, and shapes their geometry. The assets with constraints are listed by their bodies and
+		// constraint kinds; with IW8_DUMP_DEBUG, the first asset of each kind is written there (<name>.hkx).
 		void verify_physics(const std::filesystem::path& zone_folder, const loaded_zone& zone)
 		{
 			const auto& compendium = replay_compendium(zone_folder);
@@ -3165,7 +3193,7 @@ namespace zonetool::iw8
 						}
 						else
 						{
-							verify_physics_asset(file, compendium, counts);
+							verify_physics_asset(file, bytes, key.second, compendium, counts);
 						}
 					}
 					catch (const std::exception& e)
@@ -3189,6 +3217,18 @@ namespace zonetool::iw8
 				counts.first_lod_difference.empty() ? "" : ", first: ", counts.first_lod_difference.data(), counts.other_values,
 				counts.first_difference.empty() ? "" : ", first: ", counts.first_difference.data(), counts.other_assets,
 				counts.shapes.built, counts.shapes.copied, counts.shapes.masses, counts.shapes.mass_error);
+
+			for (const auto& [kind, names] : counts.constrained)
+			{
+				std::string list;
+				for (std::size_t i = 0; i < names.size() && i < 8; i++)
+				{
+					list += (i ? ", " : "") + names[i];
+				}
+
+				ZONETOOL_INFO("%s: %zu physics assets with %s (%s%s)", zone.name.data(), names.size(), kind.data(), list.data(),
+					names.size() > 8 ? ", ..." : "");
+			}
 		}
 
 		struct comparison

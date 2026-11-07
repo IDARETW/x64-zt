@@ -127,6 +127,78 @@ PhysicsAsset BakePhysicsAsset(std::string name, const PhysicsMesh &mesh,
                               bool keyframedBody = false,
                               const ClutterBody *clutter = nullptr);
 
+// The rigid bodies of a model that moves in pieces and the hinges between them, as the source game keeps them (game
+// units): a door on its box, a lamp head on its rods. Each body moves the bone of its name.
+struct PhysicsSystemBody
+{
+    std::string name;
+    // The frame of the body in the model.
+    std::array<float, 3> position{};
+    std::array<float, 4> orientation{0.0f, 0.0f, 0.0f, 1.0f};
+    // kg; 0 for a body that does not move.
+    float mass{};
+    // The convex pieces of its shape in the body's frame, each with its convex radius.
+    struct Piece
+    {
+        std::vector<std::array<float, 3>> points;
+        float convexRadius{};
+    };
+    std::vector<Piece> pieces;
+};
+
+// A hinge (or a limited hinge, with friction and an angle range) by the values of its Havok constraint atoms.
+struct PhysicsHinge
+{
+    struct Frame
+    {
+        // The columns of its rotation.
+        std::array<std::array<float, 3>, 3> rotation{};
+        std::array<float, 3> translation{};
+    };
+
+    std::string name;
+    std::uint32_t bodyA{};
+    std::uint32_t bodyB{};
+    // In body A and in body B.
+    Frame frameA;
+    Frame frameB;
+    bool stabilization{};
+    float maxLinearImpulse{};
+    float maxAngularImpulse{};
+    float maxAngle{};
+    std::uint8_t freeAxis{};
+    std::uint8_t solvingMethod{};
+    std::uint8_t bodiesToNotify{};
+    std::uint8_t velocityStabilization{};
+    bool linearImpulseLimit{};
+    float breachImpulse{};
+    float inertiaStabilization{};
+    bool limited{};
+    bool friction{};
+    std::uint8_t frictionAxis{};
+    std::uint8_t frictionAxes{};
+    float maxFrictionTorque{};
+    bool limit{};
+    std::uint8_t limitAxis{};
+    std::uint8_t cosineAxis{};
+    float minAngle{};
+    float maxLimitAngle{};
+    float limitTau{};
+    float limitDamping{};
+};
+
+struct PhysicsSystem
+{
+    std::vector<PhysicsSystemBody> bodies;
+    std::vector<PhysicsHinge> hinges;
+};
+
+// A clutter PhysicsAsset of the system's bodies and hinges, as shipped Replay clutter in pieces (mp_emporium
+// container_electrical_box_01_small: a door hinged to its box): each body a convex hull, or the compound of its pieces,
+// with the clutter's material and class; the mesh gives the contents and surface type. Native Havok only.
+PhysicsAsset BakePhysicsSystem(std::string name, const PhysicsSystem &system, const PhysicsMesh &mesh,
+                               const ClutterBody &clutter);
+
 // The Havok data of an XModelDetailCollision asset: a HavokPhysicsXModelLOD with the model's collision mesh, which the
 // detail physics world holds for bullet and melee traces (shipped static models carry one beside their PhysicsAsset).
 struct XModelDetailCollision

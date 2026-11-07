@@ -382,6 +382,10 @@ namespace zonetool::convert::iw7_iw8
 	// Writes the physics preset of a clutter model (extracted/physic/iw7_<model>, IW3's "PHYSIC\mass\...\sndAliasPrefix\..."
 	// text, which the pipeline reads) and returns its name.
 	std::string write_physics_preset(const extraction& output, const std::string& model, const clutter_body& body);
+	// Writes the bodies and hinges of a clutter model whose PhysicsAsset holds several bodies (extracted/physic/
+	// iw7_<model>.system.json, which the pipeline makes the Replay physics asset of its clutter) and returns its name;
+	// nothing for a model of one body, or a system that does not convert (it moves as one body).
+	std::optional<std::string> write_physics_system(const source_map& source, const extraction& output, const std::string& model);
 	// Whether the loaded zones or the stream files hold the surfaces of every LOD of a model, as export_models needs.
 	bool model_has_surfaces(const source_map& source, const iw7::XModel* model);
 
@@ -429,6 +433,83 @@ namespace zonetool::convert::iw7_iw8
 
 	// Reads the Havok data of an IW7 clip map or map entities: a binary packfile of Havok 2014 (hk_2014.2.5-r1).
 	havok_shapes read_havok_shapes(const char* data, std::size_t size);
+
+	// A frame of a constraint in the space of its body: the columns of its rotation and its translation (game units).
+	struct havok_frame
+	{
+		std::array<std::array<float, 3>, 3> rotation{};
+		std::array<float, 3> translation{};
+	};
+
+	// A convex piece of a body's shape in the body's space (game units), with the convex radius of its shape.
+	struct havok_piece
+	{
+		std::vector<std::array<float, 3>> points;
+		float convex_radius{};
+	};
+
+	// A rigid body of an IW7 physics system: the bone that it moves (by name), its frame in the model (game units), its
+	// mass in kg (0 when it does not move) and its shape.
+	struct havok_body
+	{
+		std::string name;
+		std::array<float, 3> position{};
+		std::array<float, 4> orientation{0.0f, 0.0f, 0.0f, 1.0f};
+		float mass{};
+		std::vector<havok_piece> pieces;
+	};
+
+	// A hinge between two bodies (hkpHingeConstraintData), or a limited one with its friction and angle range
+	// (hkpLimitedHingeConstraintData), by the values of its constraint atoms.
+	struct havok_hinge
+	{
+		std::string name;
+		std::uint32_t body_a{};
+		// None: body A hangs from the world.
+		std::optional<std::uint32_t> body_b;
+		havok_frame frame_a;
+		havok_frame frame_b;
+		// hkpSetupStabilizationAtom.
+		bool stabilization{};
+		float max_linear_impulse{};
+		float max_angular_impulse{};
+		float max_angle{};
+		// hkp2dAngConstraintAtom: the axis of frame A that the bodies turn about.
+		std::uint8_t free_axis{};
+		// hkpBallSocketConstraintAtom.
+		std::uint8_t solving_method{};
+		std::uint8_t bodies_to_notify{};
+		// hkUFloat8 encoding.
+		std::uint8_t velocity_stabilization{};
+		bool linear_impulse_limit{};
+		float breach_impulse{};
+		float inertia_stabilization{};
+		// hkpLimitedHingeConstraintData: hkpAngFrictionConstraintAtom and hkpAngLimitConstraintAtom.
+		bool limited{};
+		bool friction{};
+		std::uint8_t friction_axis{};
+		std::uint8_t friction_axes{};
+		float max_friction_torque{};
+		bool limit{};
+		std::uint8_t limit_axis{};
+		std::uint8_t cosine_axis{};
+		float min_angle{};
+		float max_limit_angle{};
+		float limit_tau{};
+		float limit_damping{};
+	};
+
+	// The rigid bodies of an IW7 PhysicsAsset (its hknpPhysicsSystemData) and the hinges between them. A constraint of
+	// another kind, or a shape that does not read, is named in `unsupported`.
+	struct havok_system
+	{
+		std::vector<havok_body> bodies;
+		std::vector<havok_hinge> hinges;
+		std::vector<std::string> unsupported;
+	};
+
+	// Reads the physics system of an IW7 PhysicsAsset's Havok data (a binary packfile of Havok 2014).
+	havok_system read_havok_system(const char* data, std::size_t size);
 
 	// Writes the effects that the map places with its createfx script: IW3 map scripts that place and load them, and the
 	// particle systems as native Replay effects (extracted/vfx/<name>.json), with the materials and models that they use.

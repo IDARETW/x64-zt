@@ -2195,6 +2195,146 @@ std::vector<std::uint8_t> BuildFxShape(const std::vector<std::array<float, 3>> &
     return hk::write_self_describing_tagfile(hk::breadth_first(builder.finish("20180200", {})), *g_nativeCompendium);
 }
 
+PhysicsAsset BakePhysicsSystem(std::string name, const PhysicsSystem &system, const PhysicsMesh &mesh,
+                               const ClutterBody &clutter)
+{
+    namespace hk = zonetool::iw8::havok;
+    if (!g_nativeCompendium)
+        throw std::runtime_error("a clutter physics system needs native Havok");
+    if (system.bodies.size() < 2)
+        throw std::runtime_error("a clutter physics system has fewer than two bodies");
+
+    hk::object_builder builder(*g_nativeCompendium);
+    const std::uint64_t shapeUserData = std::uint64_t{mesh.surfaceType} << 19;
+    const auto havokPoint = [](const std::array<float, 3> &value) {
+        return hk::vector3{value[0] / 32.0f, value[1] / 32.0f, value[2] / 32.0f};
+    };
+    // The hull of a piece; one of more vertices than a convex shape keeps welds them, as the clutter hulls do.
+    const auto hullOf = [&](const PhysicsSystemBody::Piece &piece) {
+        std::vector<hk::vector3> points;
+        for (const auto &point : piece.points)
+            points.push_back(havokPoint(point));
+        auto polytope = hk::convex_hull(points, 0.0f);
+        for (float weld = 0.25f / 32.0f; polytope.vertices.size() > hk::max_convex_shape_vertices; weld *= 2.0f)
+            polytope = hk::convex_hull(polytope.vertices, weld);
+        return polytope;
+    };
+
+    // Shipped clutter in pieces (container_electrical_box_01_small, uk_appliance_microwave_02_destr): use category 3,
+    // every moving body of the clutter's quality, motion properties and simulation category, activation priority 5.
+    hk::physics_system_asset asset;
+    asset.use_category = 3;
+    for (const auto &body : system.bodies)
+    {
+        if (body.pieces.empty() || !(body.mass > 0.0f))
+            throw std::runtime_error("clutter physics body " + body.name + " has no shape or does not move");
+
+        std::uint32_t shape = 0;
+        if (body.pieces.size() == 1)
+        {
+            const auto polytope = hullOf(body.pieces.front());
+            shape = hk::add_convex_polytope_shape(
+                builder, polytope, {.user_data = shapeUserData, .convex_radius = body.pieces.front().convexRadius / 32.0f});
+            hk::add_mass_properties(builder, shape, hk::convex_mass_properties(polytope, body.mass));
+        }
+        else
+        {
+            // The compound of its pieces: each piece with the mass properties of density 1000, the compound with the
+            // body's mass, as the Replay tools give them.
+            std::vector<hk::polytope> polytopes;
+            std::vector<hk::compound_instance> instances;
+            for (const auto &piece : body.pieces)
+            {
+                polytopes.push_back(hullOf(piece));
+                hk::compound_instance instance;
+                instance.convex_radius = piece.convexRadius / 32.0f;
+                instance.shape = hk::add_convex_polytope_shape(
+                    builder, polytopes.back(), {.user_data = shapeUserData, .convex_radius = instance.convex_radius});
+                const auto volume = hk::convex_mass_properties(polytopes.back(), 1.0f).volume;
+                hk::add_mass_properties(builder, instance.shape,
+                                        hk::convex_mass_properties(polytopes.back(), 1000.0f * volume));
+                instance.vertices = polytopes.back().vertices;
+                instances.push_back(std::move(instance));
+            }
+            shape = hk::add_compound_shape(builder, instances);
+            hk::add_mass_properties(builder, shape, hk::compound_mass_properties(polytopes, body.mass));
+        }
+
+        hk::physics_system_asset::body entry;
+        entry.body.shape = shape;
+        entry.body.name = body.name;
+        entry.body.collision_filter_info = mesh.contents;
+        entry.body.material_id = 0xFFFF;
+        entry.body.quality_id = 0xFF;
+        entry.body.motion_type = 2;
+        entry.body.mass = body.mass;
+        entry.body.motion_properties_id = 0xFFFF;
+        entry.body.activation_priority = 5;
+        entry.body.position = {body.position[0] / 32.0f, body.position[1] / 32.0f, body.position[2] / 32.0f, 1.0f};
+        entry.body.orientation = body.orientation;
+        entry.body_quality_crc = clutter.debris ? 0x98996C20u : 0x7923E35Cu;
+        entry.material_crc = clutter.materialCrc;
+        entry.motion_properties_crc = clutter.debris ? 0x8B8AA36Fu : 0x9F53AC92u;
+        entry.simulation_category = clutter.debris ? 5 : 4;
+        asset.bodies.push_back(std::move(entry));
+    }
+
+    const auto transform = [](const PhysicsHinge::Frame &frame) {
+        std::array<float, 16> values{};
+        for (std::size_t column = 0; column < 3; ++column)
+            std::copy_n(frame.rotation[column].data(), 3, values.data() + column * 4);
+        for (std::size_t axis = 0; axis < 3; ++axis)
+            values[12 + axis] = frame.translation[axis] / 32.0f;
+        return values;
+    };
+
+    for (const auto &source : system.hinges)
+    {
+        hk::hinge_constraint hinge;
+        hinge.name = source.name;
+        hinge.body_a = source.bodyA;
+        hinge.body_b = source.bodyB;
+        hinge.transform_a = transform(source.frameA);
+        hinge.transform_b = transform(source.frameB);
+        hinge.stabilization = source.stabilization;
+        hinge.max_linear_impulse = source.maxLinearImpulse;
+        hinge.max_angular_impulse = source.maxAngularImpulse;
+        hinge.max_angle = source.maxAngle;
+        hinge.free_axis = source.freeAxis;
+        hinge.solving_method = source.solvingMethod;
+        hinge.bodies_to_notify = source.bodiesToNotify;
+        hinge.velocity_stabilization = source.velocityStabilization;
+        hinge.linear_impulse_limit = source.linearImpulseLimit;
+        hinge.breach_impulse = source.breachImpulse;
+        hinge.inertia_stabilization = source.inertiaStabilization;
+        hinge.limited = source.limited;
+        hinge.friction = source.friction;
+        hinge.friction_axis = source.frictionAxis;
+        hinge.friction_axes = source.frictionAxes;
+        hinge.max_friction_torque = source.maxFrictionTorque;
+        hinge.limit = source.limit;
+        hinge.limit_axis = source.limitAxis;
+        hinge.cosine_axis = source.cosineAxis;
+        hinge.min_angle = source.minAngle;
+        hinge.max_limit_angle = source.maxLimitAngle;
+        hinge.limit_tau = source.limitTau;
+        hinge.limit_damping = source.limitDamping;
+        asset.hinges.push_back(std::move(hinge));
+    }
+
+    const auto root = hk::add_physics_system(builder, asset);
+    PhysicsAsset result;
+    result.name = std::move(name);
+    result.contents = mesh.contents;
+    result.useCategory = 3;
+    result.simulationCategory = clutter.debris ? 5 : 4;
+    result.havokData = hk::write_compact_tagfile(
+        builder.finish("20180200", hk::replay_compendium_signature, root), *g_nativeCompendium);
+    zt::info("collision: built native PhysicsAsset '%s' of %zu bodies and %zu hinges (%zu bytes)", result.name.c_str(),
+             system.bodies.size(), system.hinges.size(), result.havokData.size());
+    return result;
+}
+
 void UseNativeHavok(const std::filesystem::path &zoneFolder, const bool checkWithReplay)
 {
     g_nativeCompendium = &zonetool::iw8::havok::replay_compendium(zoneFolder);

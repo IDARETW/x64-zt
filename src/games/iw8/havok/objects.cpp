@@ -777,6 +777,32 @@ namespace zonetool::iw8::havok
 			return {static_cast<float>(sign * q[0] / length), static_cast<float>(sign * q[1] / length), static_cast<float>(sign * q[2] / length),
 				static_cast<float>(sign * q[3] / length)};
 		}
+
+		// The rotation matrix of a unit quaternion (x, y, z, w; columns are the rotated axes), as quaternion_of reads them.
+		matrix3 rotation_matrix(const std::array<float, 4>& q)
+		{
+			const double x = q[0], y = q[1], z = q[2], w = q[3];
+			return {{{1.0 - 2.0 * (y * y + z * z), 2.0 * (x * y - w * z), 2.0 * (x * z + w * y)},
+				{2.0 * (x * y + w * z), 1.0 - 2.0 * (x * x + z * z), 2.0 * (y * z - w * x)},
+				{2.0 * (x * z - w * y), 2.0 * (y * z + w * x), 1.0 - 2.0 * (x * x + y * y)}}};
+		}
+
+		// Principal moments and axes of an inertia tensor, the axes right-handed.
+		std::pair<std::array<double, 3>, matrix3> principal_axes(const matrix3& inertia)
+		{
+			auto [moments, axes] = diagonalize(inertia);
+			const auto determinant = axes[0][0] * (axes[1][1] * axes[2][2] - axes[1][2] * axes[2][1]) -
+				axes[0][1] * (axes[1][0] * axes[2][2] - axes[1][2] * axes[2][0]) + axes[0][2] * (axes[1][0] * axes[2][1] - axes[1][1] * axes[2][0]);
+			if (determinant < 0.0)
+			{
+				for (auto& row : axes)
+				{
+					row[2] = -row[2];
+				}
+			}
+
+			return {moments, axes};
+		}
 	}
 
 	mass_properties convex_mass_properties(const polytope& shape, const float mass, const float inertia_factor)
@@ -948,6 +974,77 @@ namespace zonetool::iw8::havok
 		for (std::size_t i = 0; i < 3; i++)
 		{
 			result.centre[i] = static_cast<float>(centre[i] + origin[i]);
+			result.inertia[i] = static_cast<float>(moments[i]);
+		}
+
+		result.rotation = quaternion_of(axes);
+		return result;
+	}
+
+	mass_properties compound_mass_properties(const std::span<const polytope> shapes, const float mass, const float inertia_factor)
+	{
+		if (shapes.empty())
+		{
+			throw std::runtime_error("a compound shape without pieces has no mass properties");
+		}
+
+		// Each piece at unit mass without the inertia factor, then at its share of the mass by its volume.
+		std::vector<mass_properties> pieces;
+		double volume{};
+		for (const auto& shape : shapes)
+		{
+			pieces.push_back(convex_mass_properties(shape, 1.0f, 1.0f));
+			volume += pieces.back().volume;
+		}
+
+		std::array<double, 3> centre{};
+		for (const auto& piece : pieces)
+		{
+			for (std::size_t axis = 0; axis < 3; axis++)
+			{
+				centre[axis] += piece.volume / volume * piece.centre[axis];
+			}
+		}
+
+		// The inertia about the common centre: each piece's own (its principal moments in its frame) and that of its
+		// offset from the centre.
+		matrix3 inertia{};
+		for (const auto& piece : pieces)
+		{
+			const auto share = mass * piece.volume / volume;
+			const auto r = rotation_matrix(piece.rotation);
+			const std::array<double, 3> d{piece.centre[0] - centre[0], piece.centre[1] - centre[1], piece.centre[2] - centre[2]};
+			const auto distance = d[0] * d[0] + d[1] * d[1] + d[2] * d[2];
+			for (std::size_t i = 0; i < 3; i++)
+			{
+				for (std::size_t j = 0; j < 3; j++)
+				{
+					double own{};
+					for (std::size_t k = 0; k < 3; k++)
+					{
+						own += r[i][k] * piece.inertia[k] * r[j][k];
+					}
+
+					inertia[i][j] += share * (own + (i == j ? distance : 0.0) - d[i] * d[j]);
+				}
+			}
+		}
+
+		for (auto& row : inertia)
+		{
+			for (auto& value : row)
+			{
+				value *= inertia_factor;
+			}
+		}
+
+		const auto [moments, axes] = principal_axes(inertia);
+		mass_properties result;
+		result.volume = static_cast<float>(volume);
+		result.mass = mass;
+		for (std::size_t i = 0; i < 3; i++)
+		{
+			result.centre[i] = static_cast<float>(centre[i]);
 			result.inertia[i] = static_cast<float>(moments[i]);
 		}
 
