@@ -1155,9 +1155,11 @@ namespace zonetool::convert::iw7_iw8
 			// ones also multiply by IW7's tonemap code constant 222; the owned PS takes Replay's effect exposure
 			// (scene[42].x) for all, as the stock effect PS b0ec5d88 does for every converted effect. The dissolve ones,
 			// 39eb46cf and d2bc120f, are 40967ff1 and 6a577499 with an alpha dissolve (alphaDissolveParms). The lit
-			// flow permutations remain separate adapters.
-			static constexpr std::array<std::string_view, 12> names
+			// zfeather flow a386c911 (Frontier) also masks its alpha (its maskMap, 0x9E7BA008) and lights the particle
+			// by the scene; the lit flows of Nova, Paris, Proto and Riot (d241aa2a, the evc one) are not ported.
+			static constexpr std::array<std::string_view, 13> names
 			{
+				"eq_effect_zfeather_blend_lin_ndw_flow_nocast_mask",
 				"eq_effectunlit_add_lin_ndw_flow_ad_nocast_evc",
 				"eq_effectunlit_add_lin_ndw_flow_ad_nocast_mkhdr_evc",
 				"eq_effectunlit_blend_lin_ct_ndw_flow_nocast_mkhdr_evc",
@@ -1352,6 +1354,14 @@ namespace zonetool::convert::iw7_iw8
 					throw std::runtime_error(std::format("IW7 flow material {} lacks an image or its flow constants", material->name));
 				result["iw7Flow"] = {{"map", *map}, {"surface", *surface}, {"scale", *scale}, {"period", *period},
 					{"hdr", has("mkhdr")}};
+				// The lit flow multiplies its alpha by its mask's (PS a386c911, t4.w).
+				if (has("mask"))
+				{
+					const auto& mask = images[static_cast<std::size_t>(image_role::mask)];
+					if (!mask)
+						throw std::runtime_error(std::format("IW7 lit flow material {} lacks its mask", material->name));
+					result["iw7Flow"]["mask"] = *mask;
+				}
 				// The dissolve flow (ad: PS 39eb46cf, d2bc120f) takes its threshold scale from alphaDissolveParms.x (Scorch's
 				// eq/vfx_space_sun_flareup_atl_nofog: 1).
 				if (has("ad"))
@@ -1819,6 +1829,8 @@ namespace zonetool::convert::iw7_iw8
 					role = image_role::flow;
 				else if (flow && texture.nameHash == 0x65F8D867u)
 					role = image_role::flow_surface;
+				else if (flow && texture.nameHash == 0x9E7BA008u)
+					role = image_role::mask;
 				const auto image = role ? source.resolve(iw7::ASSET_TYPE_IMAGE, texture.image) : nullptr;
 				if (!image || !image->name)
 				{
