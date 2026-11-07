@@ -37,6 +37,13 @@ struct DynamicEntityCounts
     // stay on the no-spatial list.
     std::array<float, 3> modelMins{};
     std::array<float, 3> modelMaxs{};
+    // MapEnts dynEntMaxPosePartCount / dynEntsWithExtraPosePartsCount: the most pose parts of an entry and the entries
+    // with more than one. A simulated model entry has one pose part per rigid body (DynEntCL_IsEntryUsable 0x1417F0770:
+    // physicsAssetRigidBodiesCount unless the basis is a brush or the entry has no physics), and Replay keeps the extra
+    // parts of each such entry in a client pool of (max - 1) * min(entries, client entries) records
+    // (DynEntCL_AllocateClientMemory 0x1417F0410); DynEntCL_AddEntity pops one block per entry.
+    std::uint8_t maxPoseParts{1};
+    std::uint32_t entriesWithExtraPoseParts{};
 };
 
 DynamicEntityCounts CountDynamicEntities(const std::vector<DynamicEntity> &entities);
