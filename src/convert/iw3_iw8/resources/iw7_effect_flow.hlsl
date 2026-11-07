@@ -7,6 +7,8 @@
 // and the Particle_MaterialData at t6; the flow maps and the mask follow at t7-t9. The unmasked lit flows (d29f9b4f,
 // and d241aa2a without the feather) bind a white mask. FLOW_UVD: IW7's lit UV distortion (c258449e, 5d9b9a5b, and the
 // twins without the dissolve 684ca3a1, 69656d4c) on the same bindings, its noise map in the flow map's slot.
+// FLOW_ATEST: IW7's alpha-tested lit effects (c4e82cfb, c4b7c455; with FLOW_UVD 5e767f2f) on the same bindings, cut at
+// 0.501961 and drawn opaque.
 cbuffer Stable : register(b2) { float4 stable[9]; }
 #ifdef FLOW_LIT
 cbuffer Material : register(b3) { float4 material[5]; }
@@ -86,6 +88,11 @@ Output main(Input input)
     float4 texel = colorMap.SampleBias(colorSampler, input.uv + offset, stable[7].y);
     float alpha = material[4].w > 0 ? saturate((texel.a + input.color.a) * material[4].w - material[4].w)
                                     : texel.a * input.color.a;
+#elif defined(FLOW_ATEST)
+    // IW7 c4e82cfb / c4b7c455 (eq_effect_atest_lin_nocast, eq/el_effect_atest_lin_shl_nocast_norm_spec): the plain
+    // texel, no flow; its alpha times the particle's is cut below.
+    float4 texel = colorMap.SampleBias(colorSampler, input.uv, stable[7].y);
+    float alpha = texel.a * input.color.a;
 #else
     float4 flow = flowMap.SampleLevel(colorSampler, input.uv, 0);
     float4 surface = flowSurface.SampleLevel(colorSampler, input.uv, 0);
@@ -101,7 +108,12 @@ Output main(Input input)
     float4 texel = lerp(a, b, weight);
     float alpha = texel.a * input.color.a * surface.r;
 #endif
-#if defined(FLOW_UVD)
+#if defined(FLOW_ATEST)
+    // IW7's alpha test (c4e82cfb, c4b7c455, 5e767f2f): the particle is cut below 0.501961 and draws opaque (o0.w = 1).
+    if (alpha < 0.501961)
+        discard;
+    alpha = 1;
+#elif defined(FLOW_UVD)
     // Its dissolve above; it has no mask.
 #elif defined(FLOW_LIT)
     // a386c911 multiplies the alpha by its mask's alpha at the particle's UV (its VS passes the UV unchanged).
