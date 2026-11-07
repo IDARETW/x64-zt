@@ -4602,8 +4602,10 @@ Json BuildFxMaterialDefinition(const SourceFxMaterial &source)
             {"imageDefinitions", Json::array()}};
 }
 
-// feather: the zfeather flow twin (IW7 PS d384b91e), which also reads the template's scene depth and Particle_MaterialData.
-Json BuildFlowFxTechset(const Json &stock, const std::string &name, const bool feather)
+// feather: the zfeather flow twins (IW7 PS d384b91e, 4622c9c5, a6efe634), which also read the template's scene depth and
+// Particle_MaterialData. additive: the additive flow (IW7 PS 40967ff1, 6a577499, 8ce146ac), which cuts and outputs as
+// Replay's additive effects do.
+Json BuildFlowFxTechset(const Json &stock, const std::string &name, const bool feather, const bool additive)
 {
     using NativeTechnique = zonetool::iw8::MaterialTechnique;
     using NativeArgument = zonetool::iw8::MaterialShaderArgument;
@@ -4618,9 +4620,11 @@ Json BuildFlowFxTechset(const Json &stock, const std::string &name, const bool f
     nativeSet.techniqueMask.mask[0] = 1ull << emissive;
     Put(setHeader, 0, nativeSet);
     result["header"] = Hex(setHeader);
-    const auto pixel = Shader(17, feather ? "iw7_fx_flow_feather" : "iw7_fx_flow", "iw7_effect_flow.hlsl",
-        Compile((feather ? "#define FLOW_FEATHER 1\n" : "") + ResourceText(IDR_IW3_EFFECT_FLOW_PIXEL_SHADER), "ps_5_0",
-                "iw7_effect_flow.hlsl"));
+    const std::string variant = std::string(additive ? "_add" : "") + (feather ? "_feather" : "");
+    const std::string defines = std::string(additive ? "#define FLOW_ADDITIVE 1\n" : "") +
+                                (feather ? "#define FLOW_FEATHER 1\n" : "");
+    const auto pixel = Shader(17, "iw7_fx_flow" + variant, "iw7_effect_flow.hlsl",
+        Compile(defines + ResourceText(IDR_IW3_EFFECT_FLOW_PIXEL_SHADER), "ps_5_0", "iw7_effect_flow.hlsl"));
     for (auto technique : stock.at("techniques"))
     {
         auto header = Unhex(technique.at("header").get<std::string>());
@@ -7959,7 +7963,10 @@ RenderPlan PrepareRenderAssets(const std::filesystem::path &exportRoot, const Js
             const std::string techsetFile = stem + ".fx." + id + ".techset.json";
             const auto stock = flowLibrary->TechniqueSet(
                 "elcq/unlit_6_effect_bad_ta0_802_1004_0_1_0_0_0_100000023_0_0_2_0_0");
-            WriteJson(mapDirectory / techsetFile, BuildFlowFxTechset(stock, techsetName, source.feather.has_value()));
+            const bool additive = source.family == FxMaterialFamily::additive ||
+                                  source.family == FxMaterialFamily::additiveFeather;
+            WriteJson(mapDirectory / techsetFile,
+                      BuildFlowFxTechset(stock, techsetName, source.feather.has_value(), additive));
             direct = BuildFlowFxMaterialDefinition(source, techsetName);
             direct["techsetDefinition"] = techsetFile;
             const std::array<std::string, 3> inputs{source.image, source.flow->map, source.flow->surface};
