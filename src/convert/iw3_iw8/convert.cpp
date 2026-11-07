@@ -1724,6 +1724,7 @@ int writeMapPackage(const Args &args, const std::string &map, const std::string 
             prepared ? prepared->staticModelCollisionModels : noStaticCollisionModels);
         replayrender::RegisterMapMaterials(writer, techsets, renderMesh);
         replayrender::RegisterReflectionProbeImage(writer, renderMesh);
+        replayrender::RegisterVolumetricMaskImages(writer, renderMesh);
         if (glassInitCount)
             iw8::writePhysicsAsset(writer, glassPhysics);
         // Models and effects this zone registers; only these go into the level

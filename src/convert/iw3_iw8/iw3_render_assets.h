@@ -229,6 +229,8 @@ struct RenderPlan
     std::vector<nlohmann::json> assetMaterials;
     std::vector<ReflectionProbePlan> reflectionProbes;
     nlohmann::json reflectionProbeArrayImage;
+    // The world volumetrics (replayrender::Volumetric definitions), their mask images resident.
+    nlohmann::json volumetrics = nlohmann::json::array();
     // HLSL define: map-average reflection SH evaluated by translucent glass.
     std::string glassEnvironment;
     // HLSL defines for the model vertex shaders: the per-material IW3 falloff

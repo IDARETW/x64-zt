@@ -5435,6 +5435,63 @@ RenderPlan PrepareRenderAssets(const std::filesystem::path &exportRoot, const Js
                                       {"semantic", 1},
                                       {"category", 1},
                                       {"mipCount", arrayMipCount}};
+    // World volumetrics (an IW7 extraction's GfxWorldDraw.volumetrics): Replay's GfxVolumetric holds the same
+    // oriented box, density, falloff and projected masks. An opacity mask's image becomes a resident RGBA8 image
+    // with its source levels, each padded to 16 bytes as the resident loader reads them.
+    std::set<std::string> volumetricMaskFiles;
+    for (const auto &source : world.value("volumetrics", Json::array()))
+    {
+        Json volumetric = source;
+        Json masks = Json::array();
+        for (const auto &mask : source.value("masks", Json::array()))
+        {
+            const auto imageName = mask.at("image").get<std::string>();
+            const auto &faces = image(imageName);
+            if (faces.size() != 1)
+                throw std::runtime_error("volumetric mask image is not a 2D image: " + imageName);
+            const auto &top = faces.front();
+            std::vector<Image> generated;
+            std::vector<const Image *> levels{&top};
+            for (const auto &mip : top.mips)
+                levels.push_back(&mip);
+            if (top.mips.empty())
+                for (auto width = top.width, height = top.height; width > 1 || height > 1;)
+                {
+                    width = std::max(1u, width / 2);
+                    height = std::max(1u, height / 2);
+                    generated.push_back(Resize(generated.empty() ? top : generated.back(), width, height, false));
+                }
+            for (const auto &mip : generated)
+                levels.push_back(&mip);
+            std::vector<std::uint8_t> pixels;
+            for (std::size_t level = 0; level < levels.size(); ++level)
+            {
+                const auto &current = *levels[level];
+                if (current.width != std::max(1u, top.width >> level) ||
+                    current.height != std::max(1u, top.height >> level) ||
+                    current.rgba.size() != std::size_t(current.width) * current.height * 4)
+                    throw std::runtime_error("volumetric mask image has an inconsistent mip chain: " + imageName);
+                pixels.insert(pixels.end(), current.rgba.begin(), current.rgba.end());
+                pixels.resize((pixels.size() + 15) & ~std::size_t{15});
+            }
+            const auto digest = Sha256(pixels);
+            const std::string stem = map + "_volumetric_mask_" + Hex(std::span(digest).first(8));
+            if (volumetricMaskFiles.insert(stem).second)
+                WriteBytes(mapDirectory / (stem + ".rgba"), pixels);
+            Json entry = mask;
+            entry["image"] = {{"name", "mw120r/" + stem},
+                              {"width", top.width},
+                              {"height", top.height},
+                              {"rgba8", stem + ".rgba"},
+                              {"format", 6},
+                              {"mipCount", levels.size()}};
+            masks.push_back(std::move(entry));
+        }
+        volumetric["masks"] = std::move(masks);
+        plan.volumetrics.push_back(std::move(volumetric));
+    }
+    if (!plan.volumetrics.empty())
+        zt::info("iw3: %zu world volumetrics, %zu mask images", plan.volumetrics.size(), volumetricMaskFiles.size());
     timing.lap("materials and reflection probes");
     std::vector<std::array<unsigned, 2>> lightmapDimensions;
     for (const auto &pair : world.value("lightmaps", Json::array()))

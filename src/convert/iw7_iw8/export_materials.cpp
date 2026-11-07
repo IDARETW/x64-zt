@@ -2411,4 +2411,28 @@ namespace zonetool::convert::iw7_iw8
 				material ? "" : " without its material");
 		}
 	}
+
+	std::optional<std::string> export_volumetric_mask(const iw7::GfxImage* image, const extraction& output)
+	{
+		if (!image || !image->name)
+		{
+			return std::nullopt;
+		}
+
+		// A mask's channels are data: the source levels, unchanged (the role of materials' masks).
+		const auto name = file_name(asset_name(image->name)) + "_volumetric";
+		const auto path = output.extracted / "images" / (name + ".dds");
+		if (std::filesystem::exists(path))
+		{
+			return name;
+		}
+
+		image_file entry{image, image_role::mask};
+		if (!write_image(entry, path))
+		{
+			return std::nullopt;
+		}
+
+		return name;
+	}
 }

@@ -1822,6 +1822,74 @@ namespace zonetool::convert::iw7_iw8
 		}
 	}
 
+	namespace
+	{
+		// The world's volumetrics (GfxWorldDraw.volumetrics): oriented fog boxes of a density and an edge falloff, with up
+		// to four masks projected along their axes. Replay's GfxVolumetric holds the same box, density, falloff and masks;
+		// IW7's has no colour, height fade or anisotropy (flags 0: the vision's albedo and anisotropy, no fade).
+		json export_volumetrics(const source_map& source, const extraction& output)
+		{
+			const auto& volumetrics = source.world()->draw.volumetrics;
+			auto result = json::array();
+			std::size_t mask_count{};
+			for (auto i = 0u; volumetrics.volumetrics && i < volumetrics.volumetricCount; i++)
+			{
+				const auto& volumetric = volumetrics.volumetrics[i];
+				if (volumetric.flags)
+				{
+					ZONETOOL_WARNING("iw7: volumetric %u has flags 0x%X, whose meaning is unknown; converted without them", i,
+						volumetric.flags);
+				}
+
+				auto masks = json::array();
+				for (const auto& mask : volumetric.masks)
+				{
+					if (mask.type == iw7::VOLUMETRIC_MASK_UNUSED)
+					{
+						continue;
+					}
+
+					// Replay draws opacity maps only (R_VOL_AddVolumetric).
+					const auto* image = source.resolve(iw7::ASSET_TYPE_IMAGE, mask.image);
+					const auto file = mask.type == iw7::VOLUMETRIC_MASK_OPACITYMAP ? export_volumetric_mask(image, output)
+						: std::nullopt;
+					if (!file)
+					{
+						ZONETOOL_WARNING("iw7: volumetric %u loses a mask (type %u, image %s)", i, static_cast<unsigned>(mask.type),
+							image && image->name ? image->name : "none");
+						continue;
+					}
+
+					masks.push_back({{"type", 2}, {"axis", static_cast<unsigned>(mask.axis)}, {"image", *file},
+						{"scale", {mask.scale[0], mask.scale[1]}}, {"offset", {mask.offset[0], mask.offset[1]}},
+						{"scroll", {mask.scroll[0], mask.scroll[1]}}});
+					mask_count++;
+				}
+
+				const auto& box = volumetric.obb;
+				result.push_back({
+					{"live_path", volumetric.livePath ? volumetric.livePath : ""},
+					{"flags", 0},
+					{"center", {box.center[0], box.center[1], box.center[2]}},
+					{"axes", {{box.xAxis[0], box.xAxis[1], box.xAxis[2]}, {box.yAxis[0], box.yAxis[1], box.yAxis[2]},
+						{box.zAxis[0], box.zAxis[1], box.zAxis[2]}}},
+					{"half_size", {box.halfSize[0], box.halfSize[1], box.halfSize[2]}},
+					{"color", {1.0f, 1.0f, 1.0f}},
+					{"density", volumetric.density},
+					{"falloff", volumetric.falloff},
+					{"masks", std::move(masks)},
+				});
+			}
+
+			if (!result.empty())
+			{
+				ZONETOOL_INFO("iw7: %zu world volumetrics with %zu masks", result.size(), mask_count);
+			}
+
+			return result;
+		}
+	}
+
 	void export_world(const source_map& source, extraction& output)
 	{
 		const auto& world = *source.world();
@@ -2152,6 +2220,8 @@ namespace zonetool::convert::iw7_iw8
 			{"replay_stock_world", replay_stock_world()},
 			{"light_regions", json::array()},
 			{"reflection_probes", std::move(probes.entries)},
+			// IW7's fog boxes, which Replay's GfxWorldDraw holds alike.
+			{"volumetrics", export_volumetrics(source, output)},
 		};
 
 		// The surfaces (nearly all of the file) are written by glaze, ahead of the tree's keys.

@@ -461,6 +461,18 @@ void emitGfxMapBody(ZoneWriter &zw, const char *assetName, const std::string &me
             reflectionProbeVisDataCount);
     stamp64(gw.data(), replaymap::PrimaryLightVisData, PTR_FOLLOWS);
     stamp64(gw.data(), replaymap::ReflectionProbeVisData, PTR_FOLLOWS);
+    // World volumetrics (GfxWorldDraw.volumetrics: count, array, no mask atlas) and their
+    // visibility words, which the Umbra query sets (class-3 objects) and R_InitWorld clears
+    // from the volumetric count: the count and its resident words go together.
+    const auto volumetricCount = static_cast<uint32_t>(mesh.volumetrics.size());
+    const uint32_t volumetricVisDataCount = (volumetricCount + 31u) >> 5;
+    if (volumetricCount)
+    {
+        stamp32(gw.data(), replaymap::Volumetrics, volumetricCount);
+        stamp64(gw.data(), replaymap::Volumetrics + 8, PTR_FOLLOWS);
+        stamp32(gw.data(), replaymap::VolumetricVisDataCount, volumetricVisDataCount);
+        stamp64(gw.data(), replaymap::VolumetricVisData, PTR_FOLLOWS);
+    }
     // R_EntityMoved 1959A60 indexes localClient*80 + entityNum/32.
     stamp32(gw.data(), 0x3F20, 160);
     stamp64(gw.data(), 0x3F28, PTR_FOLLOWS);
@@ -653,6 +665,7 @@ void emitGfxMapBody(ZoneWriter &zw, const char *assetName, const std::string &me
         zw.align(3);
         zw.writeT<uint32_t>(0); // lightmap 0 resides in transient zone slot 0
     }
+    replayrender::EmitVolumetrics(zw, mesh);
     // Native byte allocation has no extra alignment. The compressed forest
     // follows lightmapTransientIndex and precedes the brush-model array.
     if (!sunShadow.bytes.empty())
@@ -731,6 +744,8 @@ void emitGfxMapBody(ZoneWriter &zw, const char *assetName, const std::string &me
     const size_t additionalPrimaryLights = size_t(primaryLightCount - 2) * 0x98;
     const size_t additionalPrimaryLightVis = size_t(primaryLightVisDataCount - 1) * 4;
     const size_t reflectionProbeVis = size_t(reflectionProbeVisDataCount) * 4;
+    // Each visibility family is aligned to 128 bytes in stream 4.
+    const size_t volumetricVis = volumetricVisDataCount ? 128 + ((size_t(volumetricVisDataCount) * 4 + 127) & ~size_t(127)) : 0;
     const size_t smodelVisDataCount = (staticModels.instances.size() + 31) >> 5;
     const size_t additionalSmodelVis =
         smodelVisDataCount ? 24 * ((smodelVisDataCount * 4 + 127) & ~size_t(127)) : 0;
@@ -744,7 +759,7 @@ void emitGfxMapBody(ZoneWriter &zw, const char *assetName, const std::string &me
         4 * size_t(dynEntWordCounts[0] + dynEntWordCounts[1]);
     zw.reserveCalc(0xD00 + additionalSceneBits + additionalCellVisBits + additionalSunBits +
                     additionalPrimaryLights + additionalPrimaryLightVis + reflectionProbeVis +
-                    additionalSmodelVis +
+                    volumetricVis + additionalSmodelVis +
                    dynEntCellBitsBytes + dynEntViewBitsBytes + dynEntSceneBytes +
                    dynEntMotionBytes +
                    // Light shadow/motion bitsets, plus slack for the realignment
