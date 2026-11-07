@@ -1234,7 +1234,7 @@ inline void emitComWorldBody(ZoneBuffer &zb, const char *assetName, const MapSun
                 // 1/255 long (124 of 124, perpendicular to dir within 3e-8). Replay
                 // gives a zero tube (1, 1, 1) / 255 (R_InitPrimaryLights 18D9839),
                 // which leans off dir and sends the runtime light volume through its
-                // capsule path (sub_14186EAE0: radius scaled, caps reprojected).
+                // capsule path (R_GenerateSpotLightModelMain 0x14186EAE0: radius scaled, caps reprojected).
                 std::array<float, 3> tube{source->bulbLength[0], source->bulbLength[1],
                                           source->bulbLength[2]};
                 const float tubeLength =

@@ -1411,7 +1411,7 @@ namespace zonetool::convert::iw7_iw8
 		// the slabs; IW7 keeps world-space hulls). Audio and NPC zone names come out by name. The roles without a Replay
 		// counterpart in converted maps clear: vision sets (1, blend 4: converted maps ship no vision sets) and audio occluders
 		// (0x20); a trigger keeps its index either way. IW7 has no priority; Replay plays the highest-priority audio zone and,
-		// between zones of equal priority, the one whose box lies inside the other's (sub_1416F1B90, verified-static), so
+		// between zones of equal priority, the one whose box lies inside the other's (CG_TriggerUpdateForCameraBounds 0x1416F1B90, verified-static), so
 		// every IW7 zone takes one priority (10) and the nesting picks the inner zone. Stock zones' default ambience is a
 		// map-wide priority-0 trigger of the map's own zone (mp_shipment trigger 1); IW7 plays its map zone outside every
 		// trigger, so a map-wide priority-0 trigger of that zone follows the others.

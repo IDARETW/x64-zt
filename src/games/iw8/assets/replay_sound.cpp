@@ -898,7 +898,7 @@ void RegisterBank(ZoneWriter &writer, const Bank &source)
     // StreamKey (Preload_StreamKey 0x140E33FB0): 64 bytes, name at 0, data at 40,
     // size at 56. Byte 60 = 2 selects the sound behaviour whose first callback
     // (0x141394D60 -> SNDL_LoadBank 0x141B86070) indexes the loaded SAB; byte 61
-    // bit 1 = resident data loaded inline (sub_140E34050). Stock "mp_shipment_all_loaded"
+    // bit 1 = resident data loaded inline (Preload_StreamKeyData 0x140E34050). Stock "mp_shipment_all_loaded"
     // carries the same 2 / 3.
     writer.add(ASSET_TYPE_STREAMKEY, bank.streamKey, [shared](ZoneWriter &out) {
         const Bank &bank = *shared;

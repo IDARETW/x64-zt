@@ -3336,7 +3336,7 @@ void AppendTextureArgument(Json &technique, const std::string_view hex)
         throw std::runtime_error("technique argument counts exceed the argument array");
     // Within the material-texture arguments (type 5) Replay resolves each slot
     // by searching the material's slot-sorted texture table onward from the
-    // previous argument's match, with no end check (sub_1419824A0). The
+    // previous argument's match, with no end check (R_ResourceBindings_ApplyBufferCommandList 0x1419824A0). The
     // arguments must therefore ascend by slot: t9/slot 0x3C appended after
     // t8/slot 0x3F walked off the table and bound garbage (map-load crash at
     // 0x1413BEAD0, x64dbg owner session 2026-10-15).

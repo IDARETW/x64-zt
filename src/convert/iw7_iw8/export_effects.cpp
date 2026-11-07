@@ -861,7 +861,7 @@ namespace zonetool::convert::iw7_iw8
 					return result;
 				case iw7::PARTICLE_MODULE_INIT_FLARE:
 				{
-					// The layouts agree. Replay's flare builder (sub_141BA5920) scales a flare by value.min + value.max * (depth
+					// The layouts agree. Replay's flare builder (ParticleEmitter_BuildSpriteVertices 0x141BA5920) scales a flare by value.min + value.max * (depth
 					// - range.min) / range.max, unclamped, unless range.max is 0, and divides its size by its depth: a size in
 					// world units. IW7's ranges grow the flare from nothing over its first units to full size (range 1 to 99,
 					// value 0 to 1: a clamped ramp); as Replay's they scaled a far flare by its depth / 99, so that Breakneck's
@@ -1359,7 +1359,7 @@ namespace zonetool::convert::iw7_iw8
 				{
 					// IW7's emissive graph is Replay's first version (PARTICLE_EMISSIVE_CURVE_NUM_V1 = 2): an intensity for each
 					// of the two sets that module flag 4 picks between. Replay's is the third (10 curves): per set a colour (curves
-					// 0-2 and 5-7) times an intensity (3 and 8), which its update (sub_141BBD5E0) writes per particle, and a value
+					// 0-2 and 5-7) times an intensity (3 and 8), which its update (ParticleModule_ApplyGeoTrailGraphBatch 0x141BBD5E0) writes per particle, and a value
 					// (4 and 9) that only states with flag bit 42 read and Init leaves at 0. The colours are white. Exactly one of the
 					// tint and the emissive intensity carries the map's light unit: the tint of an unlit effect material
 					// (export_effect_material), else the intensities (the glow of lit embers and smoke).
