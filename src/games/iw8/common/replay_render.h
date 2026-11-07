@@ -59,6 +59,9 @@ struct Technique
     std::string name;
     std::vector<uint8_t> header, states, rootsig, statebits, args;
     std::array<std::string, 4> shaders;
+    // A forward pass whose pixel shader does not light (the model distortion, as Replay's stock world distortion PS
+    // bd3434da): it needs none of the lit pass's GTAO, sun-shadow and lighting-tile bindings.
+    bool unlitForward{};
 };
 struct DecalVolumeMaterial
 {
