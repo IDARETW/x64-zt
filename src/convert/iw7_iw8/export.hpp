@@ -207,6 +207,9 @@ namespace zonetool::convert::iw7_iw8
 
 	// Semantic rumble definitions referenced by the placed Scriptables, with source evidence kept separately.
 	void export_rumbles(const source_map& source, const std::filesystem::path& extracted);
+	// The name export_rumbles gives the converted RumbleInfo (graph: the RumbleGraph) of an IW7 asset name; Replay's
+	// level NetConstStrings rumble table and the script calls that play it use this name.
+	std::string converted_rumble_name(const source_map& source, std::string_view original, bool graph = false);
 
 	// A name that a file of the extraction can take: '*' and the other characters that paths reject become '_'.
 	std::string file_name(std::string_view name);
