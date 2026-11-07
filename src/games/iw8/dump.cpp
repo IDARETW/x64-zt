@@ -1995,15 +1995,13 @@ namespace zonetool::iw8
 				grid.emplace(key_of(cell_of(found.triangles[t])), t);
 			}
 
-			std::vector<bool> used(found.triangles.size());
-			std::size_t matched{};
+			// The triangles of `found` within the tolerance of each triangle of `expected`, closest first.
+			std::vector<std::vector<std::size_t>> candidates(expected.triangles.size());
 			for (std::size_t t = 0; t < expected.triangles.size(); t++)
 			{
-				// The closest unused triangle within the tolerance.
 				const auto& want = expected.triangles[t];
 				const auto cell = cell_of(want);
-				std::optional<std::size_t> best;
-				auto best_distance = tolerance;
+				std::vector<std::pair<float, std::size_t>> nearby;
 				for (std::int64_t dx = -1; dx <= 1; dx++)
 				{
 					for (std::int64_t dy = -1; dy <= 1; dy++)
@@ -2014,11 +2012,12 @@ namespace zonetool::iw8
 							for (auto entry = begin; entry != end; ++entry)
 							{
 								const auto& have = found.triangles[entry->second];
-								if (used[entry->second] || found.triangle_tags[entry->second] != expected.triangle_tags[t])
+								if (found.triangle_tags[entry->second] != expected.triangle_tags[t])
 								{
 									continue;
 								}
 
+								auto closest = std::numeric_limits<float>::infinity();
 								for (std::size_t turn = 0; turn < 3; turn++)
 								{
 									float distance{};
@@ -2030,27 +2029,78 @@ namespace zonetool::iw8
 										}
 									}
 
-									if (distance <= best_distance)
-									{
-										best = entry->second;
-										best_distance = distance;
-									}
+									closest = std::min(closest, distance);
+								}
+
+								if (closest <= tolerance)
+								{
+									nearby.emplace_back(closest, entry->second);
 								}
 							}
 						}
 					}
 				}
 
-				if (best)
+				std::ranges::sort(nearby);
+				for (const auto& [distance, index] : nearby)
 				{
-					used[*best] = true;
+					candidates[t].push_back(index);
+				}
+			}
+
+			// Each triangle takes the closest free one; one left without takes another's by an augmenting path. Near-coincident
+			// slivers, whose vertices lie closer than the quantization moves them, would otherwise take each other's.
+			constexpr auto none = std::numeric_limits<std::size_t>::max();
+			std::vector<std::size_t> owner(found.triangles.size(), none);
+			std::vector<std::size_t> unmatched;
+			std::size_t matched{};
+			for (std::size_t t = 0; t < expected.triangles.size(); t++)
+			{
+				const auto free = std::ranges::find_if(candidates[t], [&](const std::size_t f) { return owner[f] == none; });
+				if (free != candidates[t].end())
+				{
+					owner[*free] = t;
 					matched++;
 				}
+				else
+				{
+					unmatched.push_back(t);
+				}
+			}
+
+			std::vector<std::size_t> visited(found.triangles.size(), none);
+			const std::function<bool(std::size_t, std::size_t)> augment = [&](const std::size_t t, const std::size_t round)
+			{
+				for (const auto f : candidates[t])
+				{
+					if (visited[f] == round)
+					{
+						continue;
+					}
+
+					visited[f] = round;
+					if (owner[f] == none || augment(owner[f], round))
+					{
+						owner[f] = t;
+						return true;
+					}
+				}
+
+				return false;
+			};
+
+			for (const auto t : unmatched)
+			{
+				matched += augment(t, t);
 			}
 
 			if (found_used)
 			{
-				*found_used = std::move(used);
+				found_used->assign(found.triangles.size(), false);
+				for (std::size_t f = 0; f < owner.size(); f++)
+				{
+					(*found_used)[f] = owner[f] != none;
+				}
 			}
 
 			return matched;
