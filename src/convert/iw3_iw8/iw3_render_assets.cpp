@@ -258,6 +258,8 @@ struct SourceFxMaterial
         // IW7's alpha-tested lit effects (iw7AlphaTest: PSs c4e82cfb, c4b7c455, and 5e767f2f with the UV distortion):
         // cut at 0.501961 and drawn opaque; without the distortion they read no flow image.
         bool atest{};
+        // The zfeather UV-distortion twins (PSs 8d6f8ca6, 971dbac6): their noise per atlas cell, at frac(uv * atlas).
+        bool cell{};
     };
     std::optional<Flow> flow;
 };
@@ -2094,6 +2096,7 @@ SourceFxMaterial ReadFxMaterial(const std::filesystem::path &root,
         SourceFxMaterial::Flow flow{uvd.at("map").get<std::string>(), {}, FxLiteral(uvd.at("scroll"), "uv distortion"),
                                     FxLiteral(uvd.at("parameters"), "uv distortion parameters"), false};
         flow.uvd = true;
+        flow.cell = uvd.value("cell", false);
         // A dissolve K of 0: the twin without the dissolve (684ca3a1), whose alpha is the texel's times the particle's.
         if (flow.period[3] > 0)
             flow.dissolve = flow.period[3];
@@ -2109,8 +2112,11 @@ SourceFxMaterial ReadFxMaterial(const std::filesystem::path &root,
         // The owned lit effect PS cuts and draws it opaque (FLOW_ATEST), alone or with the UV distortion.
         if (!material.flow)
             material.flow.emplace();
-        if (!material.lit || material.frameBlend || material.family != FxMaterialFamily::alpha ||
-            (!material.flow->uvd && !material.flow->map.empty()) || material.flow->dissolve)
+        // The zfeather twin (971dbac6) feathers inside its UV distortion's dissolve.
+        const bool family = material.family == FxMaterialFamily::alpha ||
+                            (material.family == FxMaterialFamily::alphaFeather && material.flow->uvd);
+        if (!material.lit || material.frameBlend || !family ||
+            (!material.flow->uvd && (!material.flow->map.empty() || material.flow->dissolve)))
             throw std::runtime_error("unsupported IW7 alpha-tested effect contract: " + name);
         material.flow->atest = true;
     }
@@ -4727,7 +4733,7 @@ Json BuildFxMaterialDefinition(const SourceFxMaterial &source)
 // 14 stable and 5 never arguments), its mask at MaterialTextureID_opacityMap. uvd: IW7's lit UV distortion (PS c258449e,
 // 5d9b9a5b) on the lit set in place of the flow, with its tint in pixel row 0.
 Json BuildFlowFxTechset(const Json &stock, const std::string &name, const bool feather, const bool additive,
-                        const bool lit, const bool uvd = false, const bool atest = false)
+                        const bool lit, const SourceFxMaterial::Flow &flow)
 {
     using NativeTechnique = zonetool::iw8::MaterialTechnique;
     using NativeArgument = zonetool::iw8::MaterialShaderArgument;
@@ -4744,14 +4750,15 @@ Json BuildFlowFxTechset(const Json &stock, const std::string &name, const bool f
     result["header"] = Hex(setHeader);
     if (lit && additive)
         throw std::runtime_error("Replay's lit effect set has no additive flow");
+    const bool uvd = flow.uvd, atest = flow.atest, cell = flow.uvd && flow.cell;
     if ((uvd || atest) && !lit)
         throw std::runtime_error("the owned UV distortion and alpha test are lit only");
     const std::string variant = std::string(lit ? "_lit" : "") + (additive ? "_add" : "") + (feather ? "_feather" : "") +
-                                (uvd ? "_uvd" : "") + (atest ? "_atest" : "");
+                                (uvd ? "_uvd" : "") + (cell ? "_cell" : "") + (atest ? "_atest" : "");
     const std::string defines = std::string(lit ? "#define FLOW_LIT 1\n" : "") +
                                 (additive ? "#define FLOW_ADDITIVE 1\n" : "") +
                                 (feather ? "#define FLOW_FEATHER 1\n" : "") + (uvd ? "#define FLOW_UVD 1\n" : "") +
-                                (atest ? "#define FLOW_ATEST 1\n" : "");
+                                (cell ? "#define FLOW_UVD_CELL 1\n" : "") + (atest ? "#define FLOW_ATEST 1\n" : "");
     const auto pixel = Shader(17, "iw7_fx_flow" + variant, "iw7_effect_flow.hlsl",
         Compile(defines + ResourceText(IDR_IW3_EFFECT_FLOW_PIXEL_SHADER), "ps_5_0", "iw7_effect_flow.hlsl"));
     for (auto technique : stock.at("techniques"))
@@ -8352,7 +8359,7 @@ RenderPlan PrepareRenderAssets(const std::filesystem::path &exportRoot, const Js
                                   source.family == FxMaterialFamily::additiveFeather;
             WriteJson(mapDirectory / techsetFile,
                       BuildFlowFxTechset(stock, techsetName, source.feather.has_value(), additive, source.lit,
-                                         source.flow->uvd, source.flow->atest));
+                                         *source.flow));
             direct = BuildFlowFxMaterialDefinition(source, techsetName);
             direct["techsetDefinition"] = techsetFile;
             const auto flowImage = [&](const std::string &input) -> const Image & {

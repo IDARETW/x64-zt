@@ -1271,10 +1271,12 @@ namespace zonetool::convert::iw7_iw8
 		// strength the w of 0x9CFFD90E), and the alpha dissolves by the vertex alpha (alphaDissolveParms.x). Their twins
 		// without the dissolve scale the alpha by the vertex alpha instead, with the same rows less the dissolve's:
 		// 684ca3a1 (Geneva, Nova, Renaissance) and 69656d4c (Mars Oasis, Turista; lit by the per-particle lighting map
-		// alone, as the owned lit PS lights them all).
+		// alone, as the owned lit PS lights them all). The zfeather twins take the noise per atlas cell, at
+		// frac(uv * textureAtlas.xy) * zw + time * xy, and feather the texel's alpha inside the dissolve: 8d6f8ca6 (Nova; colour
+		// tint) and 971dbac6 (Codphish, Depot, Frontier, Geneva, Pixel, Renaissance; then alpha-tested).
 		bool uvd_effect_material(const iw7::Material* material)
 		{
-			static constexpr std::array<std::string_view, 6> names
+			static constexpr std::array<std::string_view, 8> names
 			{
 				"eq_effect_blend_lin_ndw_shl_uvd_ad_nocast_norm_spec",
 				"eq_effect_blend_lin_ct_ndw_shl_uvd_ad_nocast_norm_spec",
@@ -1283,6 +1285,9 @@ namespace zonetool::convert::iw7_iw8
 				// The alpha-tested twin (5e767f2f; atest_effect_material).
 				"eq_effect_atest_lin_uvd_nocast",
 				"el_effect_atest_lin_uvd_nocast",
+				// The zfeather twins.
+				"eq_effect_zfeather_blend_lin_ct_ndw_shl_uvd_ad_nocast_norm_spec",
+				"eq_effect_zfeather_atest_lin_shl_uvd_ad_nocast_norm_spec",
 			};
 			return material && material->techniqueSet &&
 				std::ranges::find(names, std::string_view(asset_name(material->techniqueSet->name))) != names.end();
@@ -1293,10 +1298,11 @@ namespace zonetool::convert::iw7_iw8
 		// attenuated. c4e82cfb (eq_effect_atest_lin_nocast) lights it by the per-particle lighting map; c4b7c455
 		// (eq/el_effect_atest_lin_shl_nocast_norm_spec, eq_effect_atest_lin_shl_nocast_evc_norm_spec: Breakneck's debris) by
 		// its normal map and the scene's lights, which the owned lit effect PS takes from the lighting map as for the lit
-		// flows; 5e767f2f (eq/el_effect_atest_lin_uvd_nocast) is c4e82cfb with the UV distortion.
+		// flows; 5e767f2f (eq/el_effect_atest_lin_uvd_nocast) is c4e82cfb with the UV distortion, 971dbac6
+		// (eq_effect_zfeather_atest_lin_shl_uvd_ad_nocast_norm_spec) its feathered, dissolving twin.
 		bool atest_effect_material(const iw7::Material* material)
 		{
-			static constexpr std::array<std::string_view, 6> names
+			static constexpr std::array<std::string_view, 7> names
 			{
 				"eq_effect_atest_lin_nocast",
 				"eq_effect_atest_lin_shl_nocast_norm_spec",
@@ -1304,6 +1310,7 @@ namespace zonetool::convert::iw7_iw8
 				"eq_effect_atest_lin_shl_nocast_evc_norm_spec",
 				"eq_effect_atest_lin_uvd_nocast",
 				"el_effect_atest_lin_uvd_nocast",
+				"eq_effect_zfeather_atest_lin_shl_uvd_ad_nocast_norm_spec",
 			};
 			return material && material->techniqueSet &&
 				std::ranges::find(names, std::string_view(asset_name(material->techniqueSet->name))) != names.end();
@@ -1558,8 +1565,10 @@ namespace zonetool::convert::iw7_iw8
 					throw std::runtime_error(std::format("IW7 UV-distortion material {} lacks an image or its constants", material->name));
 				}
 
+				// The pinned zfeather twins (8d6f8ca6, 971dbac6) take their noise per atlas cell.
 				result["iw7Uvd"] = {{"map", *map}, {"scroll", *scroll},
-					{"parameters", {(*strength)[3], (*atlas_cells)[0], (*atlas_cells)[1], dissolves ? (*dissolve)[0] : 0.0f}}};
+					{"parameters", {(*strength)[3], (*atlas_cells)[0], (*atlas_cells)[1], dissolves ? (*dissolve)[0] : 0.0f}},
+					{"cell", techset_has_token(material, "zfeather")}};
 			}
 
 			// An alpha-tested lit effect (atest_effect_material): the pipeline's owned lit effect PS cuts and draws it opaque
