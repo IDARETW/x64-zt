@@ -5,6 +5,7 @@
 #include <execution>
 #include <bit>
 #include <limits>
+#include <mutex>
 #include <utils/compression.hpp>
 
 namespace zonetool::convert::iw7_iw8
@@ -582,6 +583,24 @@ namespace zonetool::convert::iw7_iw8
 			return true;
 		}
 
+		// A DDS file of the extraction that cannot be written: an I/O failure of the conversion, not an image that another
+		// candidate can stand in for, so it stops the conversion instead of leaving the material without the image (a
+		// Breakneck build whose extraction folder a stopped conversion still held lost a specular map this way).
+		struct image_write_failure : std::runtime_error
+		{
+			using std::runtime_error::runtime_error;
+		};
+
+		// The reason a DDS write failed. A path that reaches Windows' MAX_PATH cannot be opened by DirectXTex or by the
+		// pipeline's readers of the extraction: a shorter output folder converts (C:/IW7/work/output paths stay near 200).
+		std::string write_failure_text(const std::filesystem::path& path)
+		{
+			const auto length = path.native().size();
+			return length >= MAX_PATH
+				? std::format("cannot write {}: its path of {} characters reaches Windows' MAX_PATH ({})", path.string(), length, MAX_PATH)
+				: std::format("cannot write {}", path.string());
+		}
+
 		// Writes an image as the DDS file that the pipeline reads.
 		bool write_image(image_file& file, const std::filesystem::path& path)
 		{
@@ -599,7 +618,7 @@ namespace zonetool::convert::iw7_iw8
 				if (FAILED(DirectX::SaveToDDSFile(source.GetImages(), source.GetImageCount(), source.GetMetadata(),
 					DirectX::DDS_FLAGS_NONE, path.wstring().data())))
 				{
-					return false;
+					throw image_write_failure(write_failure_text(path));
 				}
 				const auto& metadata = source.GetMetadata();
 				ZONETOOL_INFO("iw7: source mip chain %s -> %s: %zux%zu, %zu levels (BC7 blocks unchanged)", image.name,
@@ -692,8 +711,7 @@ namespace zonetool::convert::iw7_iw8
 			if (FAILED(DirectX::SaveToDDSFile(stored.GetImages(), stored.GetImageCount(), stored.GetMetadata(),
 				DirectX::DDS_FLAGS_FORCE_DX9_LEGACY, path.wstring().data())))
 			{
-				ZONETOOL_WARNING("iw7: cannot write %s", path.string().data());
-				return false;
+				throw image_write_failure(write_failure_text(path));
 			}
 			if (file.source_mips)
 			{
@@ -1973,6 +1991,8 @@ namespace zonetool::convert::iw7_iw8
 			}
 
 			const std::vector<std::string> round(pending.begin(), pending.end());
+			std::mutex write_failures_lock;
+			std::vector<std::string> write_failures;
 			std::for_each(std::execution::par, round.begin(), round.end(), [&](const std::string& name)
 			{
 				// An exception that leaves a parallel algorithm terminates the tool.
@@ -1981,12 +2001,25 @@ namespace zonetool::convert::iw7_iw8
 				{
 					file.written = write_image(file, folder / (name + ".dds"));
 				}
+				catch (const image_write_failure& e)
+				{
+					file.written = false;
+					const std::lock_guard lock(write_failures_lock);
+					write_failures.emplace_back(e.what());
+				}
 				catch (const std::exception& e)
 				{
 					ZONETOOL_WARNING("iw7: image \"%s\" does not convert: %s", file.image->name, e.what());
 					file.written = false;
 				}
 			});
+
+			if (!write_failures.empty())
+			{
+				std::ranges::sort(write_failures);
+				throw std::runtime_error(std::format("{} extraction image(s) could not be written, first: {}", write_failures.size(),
+					write_failures.front()));
+			}
 		}
 
 		std::size_t missing{};
