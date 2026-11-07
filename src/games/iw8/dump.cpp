@@ -2116,6 +2116,11 @@ namespace zonetool::iw8
 			std::size_t built_bytes{};
 			std::size_t other_primitives{};
 			std::size_t relaxed{};
+			std::size_t interior_meshes{};
+			std::size_t interior_equal{};
+			std::size_t interior_differing{};
+			std::size_t interior_set{};
+			std::optional<std::string> first_interior_mismatch;
 			float largest_error{};
 			for (const auto& asset : zone.assets)
 			{
@@ -2182,6 +2187,41 @@ namespace zonetool::iw8
 						if (std::ranges::find(stock.convex_keys, 0xFFFFFFFF) != stock.convex_keys.end())
 						{
 							throw fail("a stock convex shape has no primitive");
+						}
+
+						// The builder's interior rule over the stock sections must give the stored flags, bit for bit.
+						if (!stock.interior_words.empty())
+						{
+							interior_meshes++;
+							std::size_t differing{};
+							for (std::size_t w = 0; w < stock.interior_words.size(); w++)
+							{
+								const auto derived = w < stock.derived_interior_words.size() ? stock.derived_interior_words[w] : 0u;
+								differing += static_cast<std::size_t>(std::popcount(stock.interior_words[w] ^ derived));
+								interior_set += static_cast<std::size_t>(std::popcount(stock.interior_words[w]));
+							}
+
+							interior_equal += differing == 0 && !stock.derived_interior_words.empty();
+							interior_differing += differing;
+							if (differing && std::getenv("IW8_INTERIOR_DETAIL"))
+							{
+								for (std::uint32_t bit = 0; bit < static_cast<std::uint32_t>(stock.interior_bits); bit++)
+								{
+									const auto stored = (stock.interior_words[bit >> 5] >> (bit & 31) & 1) != 0;
+									const auto derived = (bit >> 5) < stock.derived_interior_words.size() &&
+										(stock.derived_interior_words[bit >> 5] >> (bit & 31) & 1) != 0;
+									if (stored != derived)
+									{
+										ZONETOOL_INFO("interior \"%s\" item %u key %u (section %u primitive %u half %u): stored %d derived %d",
+											key.second.data(), index, bit, bit >> 8, (bit >> 1) & 0x7F, bit & 1, stored, derived);
+									}
+								}
+							}
+							if (differing && !first_interior_mismatch)
+							{
+								first_interior_mismatch = std::format("{} \"{}\" item {}: {} of {} bits differ", format ? format->name : "?",
+									key.second, index, differing, stock.interior_bits);
+							}
 						}
 
 						// Other custom primitives (convex pieces of shared vertices) are not built.
@@ -2315,6 +2355,9 @@ namespace zonetool::iw8
 				"primitives left out); tagfiles %zu bytes, built %zu; %zu with other custom primitives; largest vertex error %.6f, %zu meshes "
 				"with a larger packing tolerance", zone.name.data(), meshes, triangles, convex_shapes, removed, degenerate, stock_bytes, built_bytes,
 				other_primitives, largest_error, relaxed);
+			ZONETOOL_INFO("%s: interior flags: %zu of %zu meshes give the stored flags bit for bit (%zu stored bits set, %zu differ)%s%s",
+				zone.name.data(), interior_equal, interior_meshes, interior_set, interior_differing,
+				first_interior_mismatch ? "; first: " : "", first_interior_mismatch ? first_interior_mismatch->data() : "");
 		}
 
 		std::uint32_t member_offset(const havok::type_table& types, const std::uint32_t type, const std::string_view name)

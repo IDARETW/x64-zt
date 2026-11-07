@@ -56,6 +56,11 @@ namespace zonetool::iw8::havok
 		// Primitives that the Replay tools removed (0xDE, 0xAD, 0xDE, 0xAD), and custom primitives that are not convex shapes.
 		std::size_t removed{};
 		std::size_t custom{};
+		// The interior flags that the mesh stores (triangleIsInterior, one bit per primitive key), and the flags that the
+		// Havok builder's rule gives the decoded sections (the writer's interior::flag).
+		std::int32_t interior_bits{};
+		std::vector<std::uint32_t> interior_words;
+		std::vector<std::uint32_t> derived_interior_words;
 	};
 
 	// Decodes the mesh and checks its trees: each node must hold the bounds of the primitives below it, within one step of the
