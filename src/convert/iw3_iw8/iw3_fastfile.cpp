@@ -7880,14 +7880,21 @@ Json BuildLighting(const Json &world, const Json &commonWorld, const std::string
             sunColor = Multiply(compiled, 1.0f / luminance);
         }
     }
-    return {{"schema", 1},
-            {"intensity", intensity},
-            {"color", sunColor},
-            {"direction", Unit(direction)},
-            {"up", {0.0f, 0.0f, 0.0f}},
-            {"sun_primary_light_index", world.at("sun_primary_light_index")},
-            {"primary_lights", commonWorld.at("primary_lights")},
-            {"ies_profiles", commonWorld.contains("ies_profiles") ? commonWorld.at("ies_profiles") : Json::array()}};
+    Json result = {{"schema", 1},
+                   {"intensity", intensity},
+                   {"color", sunColor},
+                   {"direction", Unit(direction)},
+                   {"up", {0.0f, 0.0f, 0.0f}},
+                   {"sun_primary_light_index", world.at("sun_primary_light_index")},
+                   {"primary_lights", commonWorld.at("primary_lights")},
+                   {"ies_profiles", commonWorld.contains("ies_profiles") ? commonWorld.at("ies_profiles") : Json::array()}};
+    // The source's GSC-scripted lights (IW7's scriptable range), last in its table.
+    if (commonWorld.contains("scriptable_primary_light_count"))
+    {
+        result["scriptable_primary_light_count"] = commonWorld.at("scriptable_primary_light_count");
+        result["first_scriptable_primary_light"] = commonWorld.at("first_scriptable_primary_light");
+    }
+    return result;
 }
 
 void CopyCompass(const std::filesystem::path &extracted, const std::filesystem::path &prepared,

@@ -114,10 +114,37 @@ namespace zonetool::convert::iw7_iw8
 			}
 		}
 
-		// Keeps the entities of the classes that the IW3 entity conversion takes: the others are IW7 features without a
-		// Replay counterpart (Blitz spawns, 3D path nodes, client triggers).
-		std::string with_converting_classes(const std::string& entities)
+		// A GSC-scripted light entity: a light class whose "pl#" lies in the source's scriptable range, with the index that
+		// the light takes in the extraction (light_layout). Other light entities describe lights that ComWorld already holds.
+		std::optional<std::string> script_light_block(const std::string& block, const std::string_view classname,
+			const light_layout& layout)
 		{
+			if (!layout.scriptable_count || (classname != "light" && classname != "light_spot" && classname != "light_omni"))
+			{
+				return std::nullopt;
+			}
+
+			static const std::regex index_key(R"re("pl#" "(\d+)")re");
+			std::smatch match;
+			std::uint32_t index{};
+			if (!std::regex_search(block, match, index_key) ||
+				std::from_chars(block.data() + match.position(1), block.data() + match.position(1) + match.length(1), index).ec !=
+				std::errc{} || index < layout.first_scriptable || index >= layout.first_scriptable + layout.scriptable_count)
+			{
+				return std::nullopt;
+			}
+
+			return block.substr(0, match.position(1)) + std::to_string(layout.index(index)) +
+				block.substr(match.position(1) + match.length(1));
+		}
+
+		// Keeps the entities of the classes that the IW3 entity conversion takes: the others are IW7 features without a
+		// Replay counterpart (Blitz spawns, 3D path nodes, client triggers). Light entities stay when they are GSC-scripted
+		// lights ("pl#" in the scriptable range), as Replay spawns them (G_Spawn_ScriptPrimaryLight 0x140FC4A00: classes
+		// light, light_spot and light_omni, key pl#; mp_neon's script_light_flicker), with their index in the layout.
+		std::string with_converting_classes(const std::string& entities, const light_layout& layout)
+		{
+			std::size_t script_lights{};
 			std::string result;
 			result.reserve(entities.size());
 			std::map<std::string, std::size_t> dropped;
@@ -147,6 +174,11 @@ namespace zonetool::convert::iw7_iw8
 				{
 					result += block;
 				}
+				else if (const auto light = script_light_block(block, classname, layout))
+				{
+					result += *light;
+					script_lights++;
+				}
 				else
 				{
 					dropped[classname]++;
@@ -160,6 +192,11 @@ namespace zonetool::convert::iw7_iw8
 			for (const auto& [name, count] : dropped)
 			{
 				ZONETOOL_INFO("iw7: dropped %zu entities of class \"%s\", which Replay maps do not have", count, name.data());
+			}
+
+			if (script_lights)
+			{
+				ZONETOOL_INFO("iw7: kept %zu GSC-scripted light entities", script_lights);
 			}
 
 			return result;
@@ -1012,6 +1049,31 @@ namespace zonetool::convert::iw7_iw8
 		return light_type(sun.type) == 1 && luminance > 0.0f ? 1.0f / luminance : 1.0f;
 	}
 
+	light_layout light_layout_of(const source_map& source)
+	{
+		light_layout layout;
+		const auto com_world = source.com_world();
+		if (!com_world)
+		{
+			return layout;
+		}
+
+		layout.source_count = com_world->primaryLightCount;
+		layout.first_scriptable = com_world->primaryLightCount;
+		// IW7 keeps its scriptable lights last too (mp_neon: light 59 of 60); a range elsewhere stays static.
+		if (com_world->scriptablePrimaryLightCount && com_world->firstScriptablePrimaryLight > sun_light &&
+			com_world->firstScriptablePrimaryLight + com_world->scriptablePrimaryLightCount == com_world->primaryLightCount)
+		{
+			layout.first_scriptable = com_world->firstScriptablePrimaryLight;
+			layout.scriptable_count = com_world->scriptablePrimaryLightCount;
+			// The pipeline's sorted-light slots (convert.cpp sortedLightLimit).
+			constexpr std::uint32_t sorted_light_slots = 256;
+			layout.padding = layout.source_count < sorted_light_slots ? sorted_light_slots - layout.source_count : 0;
+		}
+
+		return layout;
+	}
+
 	void export_com_world(const source_map& source, extraction& output)
 	{
 		const auto com_world = source.com_world();
@@ -1077,8 +1139,21 @@ namespace zonetool::convert::iw7_iw8
 			ies_profiles.push_back({{"definition", name}, {"profile", def->iesProfile}, {"texels", std::move(texels)}});
 			return name;
 		};
+		const auto layout = light_layout_of(source);
 		for (auto i = 0u; i < com_world->primaryLightCount; i++)
 		{
+			// The pipeline's null slots go before the scriptable lights, which stay last (light_layout).
+			if (layout.padding && i == layout.first_scriptable)
+			{
+				for (auto p = 0u; p < layout.padding; p++)
+				{
+					lights.push_back({{"type", 0}, {"can_use_shadow_map", false}, {"exponent", 0}, {"color", {0.0f, 0.0f, 0.0f}},
+						{"direction", {0.0f, 0.0f, 0.0f}}, {"origin", {0.0f, 0.0f, 0.0f}}, {"radius", 0.0f},
+						{"cos_half_fov_outer", 0.0f}, {"cos_half_fov_inner", 0.0f}, {"rotation_limit", 0.0f},
+						{"translation_limit", 0.0f}, {"definition", ""}});
+				}
+			}
+
 			const auto& light = com_world->primaryLights[i];
 			auto type = light_type(light.type);
 			std::array<float, 3> color{light.color[0], light.color[1], light.color[2]};
@@ -1243,14 +1318,23 @@ namespace zonetool::convert::iw7_iw8
 			ZONETOOL_INFO("iw7: lights: %zu spots keep the IES profiles of %zu light definitions", ies_lights, ies_profiles.size());
 		}
 
-		write_json(output.extracted / (bsp_name(source) + ".replay-comworld.json"),
+		json common_world =
 		{
 			{"schema", 1},
 			{"name", bsp_name(source)},
 			{"in_use", true},
 			{"primary_lights", std::move(lights)},
 			{"ies_profiles", std::move(ies_profiles)},
-		});
+		};
+		if (layout.scriptable_count)
+		{
+			common_world["scriptable_primary_light_count"] = layout.scriptable_count;
+			common_world["first_scriptable_primary_light"] = layout.index(layout.first_scriptable);
+			ZONETOOL_INFO("iw7: lights: %u GSC-scripted lights from %u, last after %u null slots", layout.scriptable_count,
+				layout.index(layout.first_scriptable), layout.padding);
+		}
+
+		write_json(output.extracted / (bsp_name(source) + ".replay-comworld.json"), common_world);
 
 		ZONETOOL_INFO("iw7: exported %u primary lights with %zu local lights", com_world->primaryLightCount, local_lights);
 	}
@@ -1930,7 +2014,7 @@ namespace zonetool::convert::iw7_iw8
 			entities += std::format("{{\n\"classname\" \"script_brushmodel\"\n\"model\" \"*{}\"\n}}\n", glass_brush_model(source, i));
 		}
 
-		entities = with_converting_classes(entities);
+		entities = with_converting_classes(entities, light_layout_of(source));
 		for (auto match = std::sregex_iterator(entities.begin(), entities.end(), model_key); match != std::sregex_iterator(); ++match)
 		{
 			output.entity_models.insert(file_name((*match)[1].str()));

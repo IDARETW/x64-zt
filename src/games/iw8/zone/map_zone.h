@@ -1132,6 +1132,9 @@ struct MapSun
     float direction[3]{-0.5795004963874817f, 0.4210316836833954f, 0.6977904438972473f};
     float up[3]{};
     uint32_t sunPrimaryLightIndex = 1;
+    // The source's GSC-scripted primary lights (IW7 ComWorld's scriptable range): the last lights of the table, as
+    // Replay's stock worlds keep them (mp_t_reflex: 40 of its 47 lights, from 7). None by default.
+    uint32_t scriptablePrimaryLightCount = 0;
     // Stock light units per IW3 unit (--style iw8, iw3::LightUnitScale); 1 for iw3.
     float lightUnitScale = 1.0f;
     std::vector<PrimaryLight> primaryLights;
@@ -1146,8 +1149,12 @@ inline void emitComWorldBody(ZoneBuffer &zb, const char *assetName, const MapSun
 {
     const uint32_t primaryLightCount =
         lighting.primaryLights.empty() ? 2u : static_cast<uint32_t>(lighting.primaryLights.size());
-    if (primaryLightCount < 2 || lighting.sunPrimaryLightIndex >= primaryLightCount)
+    if (primaryLightCount < 2 || lighting.sunPrimaryLightIndex >= primaryLightCount ||
+        lighting.scriptablePrimaryLightCount > primaryLightCount - lighting.sunPrimaryLightIndex - 1)
         throw std::runtime_error("invalid primary-light table");
+    // G_Spawn_ScriptPrimaryLight (0x140FC4A00) indexes a script light's entity by its pl# minus this first index
+    // (ComWorld +0x44, s_primaryLightScriptBaseIndex).
+    const uint32_t firstScriptablePrimaryLight = primaryLightCount - lighting.scriptablePrimaryLightCount;
 
     uint8_t cw[kSizeComWorld];
     std::memset(cw, 0, sizeof(cw));
@@ -1163,7 +1170,8 @@ inline void emitComWorldBody(ZoneBuffer &zb, const char *assetName, const MapSun
     // passes [0, count-1] without a zero-count guard (18D9690).
     stamp32(cw, kCW_primaryLightCount, primaryLightCount);
     stamp64(cw, 0x38, PTR_FOLLOWS);
-    stamp32(cw, 0x44, primaryLightCount); // firstScriptablePrimaryLight
+    stamp32(cw, 0x40, lighting.scriptablePrimaryLightCount);
+    stamp32(cw, 0x44, firstScriptablePrimaryLight);
     stamp32(cw, 0x48, 1);                 // one resident transient-table entry
     stamp64(cw, 0x50, PTR_FOLLOWS);
     std::memset(cw + 0x78, 0xFF, 0x30); // stock initial state for an empty Umbra gate set

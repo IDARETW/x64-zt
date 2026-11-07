@@ -311,9 +311,11 @@ void emitGfxMapBody(ZoneWriter &zw, const char *assetName, const std::string &me
                     const replaysunshadow::Data &sunShadow,
                     const std::array<float, 3> &sunDirection,
                     const iw8::heightfield::Data *heightfield,
-                    const iw8::locallights::Data *localLights)
+                    const iw8::locallights::Data *localLights,
+                    const uint32_t scriptablePrimaryLightCount)
 {
-    if (primaryLightCount < 2 || sunPrimaryLightIndex >= primaryLightCount)
+    if (primaryLightCount < 2 || sunPrimaryLightIndex >= primaryLightCount ||
+        scriptablePrimaryLightCount > primaryLightCount - sunPrimaryLightIndex - 1)
         throw std::runtime_error("invalid primary-light table for GfxWorld");
 
     const auto lightGrid = replaylightgrid::Load(meshPath);
@@ -346,13 +348,17 @@ void emitGfxMapBody(ZoneWriter &zw, const char *assetName, const std::string &me
     stamp32(gw.data(), kGW_bspVersion, 243);
     stamp32(gw.data(), 0x14, sunPrimaryLightIndex); // lastSunPrimaryLightIndex
     stamp32(gw.data(), 0x18, primaryLightCount);
-    // Empty mutable/scriptable/moving ranges begin immediately after the two
-    // primary lights. Stock Replay worlds use these end indices even when all
-    // corresponding counts are zero.
-    stamp32(gw.data(), 0x1C, primaryLightCount); // firstMutablePrimaryLight
-    stamp32(gw.data(), 0x24, primaryLightCount); // firstStaticScriptablePrimaryLight
-    stamp32(gw.data(), 0x2C, primaryLightCount); // firstScriptablePrimaryLight
-    stamp32(gw.data(), 0x34, primaryLightCount); // firstMovingScriptablePrimaryLight
+    // The mutable and scriptable ranges follow the static lights; stock Replay worlds use these end indices even when
+    // all their counts are zero. The source's GSC-scripted lights are the last lights and take both the mutable and
+    // the static scriptable range, the Scriptables' own range staying empty and the moving one starting at the end
+    // (stock mp_t_reflex: 7/40, 7/40, 7/0, 47/0; mp_br_quarry: 643/2 likewise).
+    const uint32_t firstScriptable = primaryLightCount - scriptablePrimaryLightCount;
+    stamp32(gw.data(), 0x1C, firstScriptable);             // firstMutablePrimaryLight
+    stamp32(gw.data(), 0x20, scriptablePrimaryLightCount); // mutablePrimaryLightCount
+    stamp32(gw.data(), 0x24, firstScriptable);             // firstStaticScriptablesPrimaryLight
+    stamp32(gw.data(), 0x2C, firstScriptable);             // firstStaticScriptablePrimaryLight
+    stamp32(gw.data(), 0x30, scriptablePrimaryLightCount); // staticScriptablePrimaryLightCount
+    stamp32(gw.data(), 0x34, primaryLightCount);           // firstMovingScriptablePrimaryLight
     // These are world-wide material sort ranges, not per-surface values. Both
     // shipped Replay mp_m_king and mp_rust GfxWorld assets carry this table.
     // Leaving the zero-initialized ranges excludes decal draw keys (7..17),

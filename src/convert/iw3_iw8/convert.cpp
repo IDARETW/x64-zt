@@ -881,6 +881,9 @@ iw8::MapSun loadLighting(const Args &args, const std::string &dumpDirectory,
     }
 
     iw8::MapSun lighting;
+    // The source's GSC-scripted lights (IW7's scriptable range): their count and first index, checked once the table
+    // has its final size below.
+    std::optional<std::pair<uint32_t, uint32_t>> scriptableLights;
     if (args.lightingProfile == "source")
     {
         const std::string path = path_join(dumpDirectory, assetName + ".lighting.json");
@@ -1068,6 +1071,9 @@ iw8::MapSun loadLighting(const Args &args, const std::string &dumpDirectory,
                 lighting.primaryLights.push_back(std::move(light));
             }
         }
+        if (data.contains("scriptable_primary_light_count"))
+            scriptableLights = {data.at("scriptable_primary_light_count").get<uint32_t>(),
+                                data.at("first_scriptable_primary_light").get<uint32_t>()};
         // IES profiles of the source's light definitions (IW7), already in Replay's segment sampling.
         if (const auto profiles = data.find("ies_profiles"); profiles != data.end())
             for (const auto &source : *profiles)
@@ -1099,6 +1105,17 @@ iw8::MapSun loadLighting(const Args &args, const std::string &dumpDirectory,
         info("local lights: reserve %zu null primary slots for Replay's %zu sorted lights",
              sortedLightLimit - lighting.primaryLights.size(), sortedLightLimit);
         lighting.primaryLights.resize(sortedLightLimit);
+    }
+
+    // The source's GSC-scripted lights: the last lights of its table (the IW7 extraction places its padding before
+    // them), which the ComWorld and GfxWorld writers give Replay's scriptable ranges.
+    if (scriptableLights && scriptableLights->first)
+    {
+        const auto [count, first] = *scriptableLights;
+        if (first + count != lighting.primaryLights.size() || first <= lighting.sunPrimaryLightIndex)
+            throw std::runtime_error("source scriptable primary lights are not the last lights of the table");
+        lighting.scriptablePrimaryLightCount = count;
+        info("lighting: %u script primary light(s) from %u", count, first);
     }
 
     lighting.intensity *= args.sunIntensityScale;
@@ -1831,17 +1848,18 @@ int writeMapPackage(const Args &args, const std::string &map, const std::string 
             info("local lights: %zu volume(s), %zu dynamic-shadow, %zu mesh vertices",
                  localLights.umbraLights.size(), localLights.aabbLights.size(),
                  localLights.vertices.size());
+        const uint32_t scriptablePrimaryLightCount = lighting.scriptablePrimaryLightCount;
         writer.add(ASSET_TYPE_GFX_MAP, assetName,
                    [assetName, renderPath, &renderMesh, primaryLightCount,
                     sunPrimaryLightIndex, staticModels, dynamicCounts,
                     &sunShadow, sunDirection, &heightfield,
-                    &localLights](iw8::ZoneWriter &output) {
+                    &localLights, scriptablePrimaryLightCount](iw8::ZoneWriter &output) {
                        iw8maps::emitGfxMapBody(output, assetName.c_str(), renderPath,
                                                renderMesh, primaryLightCount, sunPrimaryLightIndex,
                                                staticModels, dynamicCounts.models,
                                                dynamicCounts.brushes, sunShadow, sunDirection,
                                                heightfield ? &*heightfield : nullptr,
-                                               &localLights);
+                                               &localLights, scriptablePrimaryLightCount);
                    });
         writer.add(ASSET_TYPE_GLASS_MAP, assetName,
                    [assetName, &renderMesh](iw8::ZoneWriter &output) {
