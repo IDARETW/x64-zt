@@ -1539,35 +1539,52 @@ namespace zonetool::convert::iw7_iw8
 				}
 				case iw7::PARTICLE_MODULE_INIT_SPAWN_SHAPE_MESH:
 				{
-					// IW7: the mesh count at 32, the models at 40, their vertex and triangle counts at 56. No stock Replay
-					// effect spawns on a mesh (common zones, Shipment), so Replay's mesh tables are not checked: the
-					// particles spawn on the sphere of the first model's bounds (Frontier: the ops table's sun).
+					// IW7: the mesh count at 32, the face flag at 36, the models at 40 and one vertex and triangle count per
+					// model at 56. Replay's module (0x80) keeps them in the same order: count 0x30, m_useFaces 0x34, models
+					// 0x38, counts 0x48. ParticleModule_InitMeshSpawnBatch (0x141BB7120) picks a model, then a vertex (face
+					// flag 0) or a triangle (1) below that model's count, and walks the model's first LOD to place the
+					// particle; its three curves only replace the static offset when spawn flag 2 is set, as the other
+					// shapes' curves do. The pipeline sets the counts from the converted first LOD (ResolveNativeFx).
 					const auto& list = *reinterpret_cast<const iw7::ParticleLinkedAssetListDef*>(bytes + 40);
-					const auto* model = list.assetList && list.numAssets ? list.assetList[0].model : nullptr;
-					model = model ? this->source_.resolve(iw7::ASSET_TYPE_XMODEL, const_cast<iw7::XModel*>(model)) : nullptr;
-					if (!model)
+					const auto* counts = *reinterpret_cast<const iw7::ParticleSpawnMeshAssetDef* const*>(bytes + 56);
+					std::uint32_t count{};
+					std::memcpy(&count, bytes + 32, sizeof(count));
+					if (!list.assetList || list.numAssets <= 0 || static_cast<std::uint32_t>(list.numAssets) != count || !counts)
 					{
-						this->drop("spawn mesh without its model");
+						this->drop("spawn mesh without its models and counts");
 						return std::nullopt;
 					}
 
-					focus::ParticleModuleInitSpawnShapeSphere sphere{};
-					sphere.base = shape;
-					sphere.base.base.type = replay_module(iw7::PARTICLE_MODULE_INIT_SPAWN_SHAPE_SPHERE);
-					sphere.base.spawnType = 4;
-					auto radius = 0.0f;
-					for (std::size_t axis = 0; axis < 3; axis++)
+					auto models = json::array();
+					auto records = json::array();
+					for (auto a = 0; a < list.numAssets; a++)
 					{
-						sphere.base.offset.v[axis] += model->bounds.midPoint[axis];
-						radius = std::max(radius, model->bounds.halfSize[axis]);
+						auto* model = const_cast<iw7::XModel*>(list.assetList[a].model);
+						const auto* resolved = model ? this->source_.resolve(iw7::ASSET_TYPE_XMODEL, model) : nullptr;
+						if (!resolved || !model_has_surfaces(this->source_, resolved))
+						{
+							// Every model takes part in the pick: one that does not export would leave a hole in the table.
+							this->drop("spawn mesh whose model has no surfaces in the loaded zones");
+							return std::nullopt;
+						}
+
+						models.push_back(linked_asset("xmodel", this->output_.add_model(this->source_, model)));
+						focus::ParticleSpawnMeshAssetDef record{};
+						record.numVertsTotal = counts[a].m_numVertsTotal;
+						record.numTrisTotal = counts[a].m_numTrisTotal;
+						records.push_back(hex(record));
 					}
 
-					sphere.radius = {radius, radius};
-					result.record.moduleType = sphere.base.base.type;
-					result.set(0, sphere);
-					curves(offsetof(focus::ParticleModuleInitSpawnShapeSphere, curves), 4);
-					ZONETOOL_INFO("iw7: effect \"%s\" spawns on the sphere of model \"%s\" (radius %g) for its spawn mesh",
-						this->current_.data(), model->name, radius);
+					focus::ParticleModuleInitSpawnShapeMesh mesh{};
+					mesh.base = shape;
+					mesh.base.spawnType = 3;
+					mesh.numMeshAssets = count;
+					mesh.useFaces = bytes[36] != 0 ? 1 : 0;
+					result.set(0, mesh);
+					result.list(offsetof(focus::ParticleModuleInitSpawnShapeMesh, linkedAssets), std::move(models));
+					const auto mesh_data = 0x10 + offsetof(focus::ParticleModuleInitSpawnShapeMesh, meshAssetData);
+					result.children[mesh_data] = {{"offset", mesh_data}, {"mesh_data", std::move(records)}};
+					curves(offsetof(focus::ParticleModuleInitSpawnShapeMesh, curves), 3);
 					return result;
 				}
 				default:

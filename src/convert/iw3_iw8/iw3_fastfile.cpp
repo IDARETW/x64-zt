@@ -9080,6 +9080,48 @@ constexpr std::uint64_t kStatePlaySounds = 1ull << 27;
 // Replay's particle shape (common_mp), for a debris shape that does not build.
 constexpr char kDefaultFxShape[] = "vfx_physfxpip_particle_default";
 
+// Replay's mesh spawn (ParticleModule_InitMeshSpawnBatch 0x141BB7120) picks a vertex or
+// triangle index below a model's count record and walks that model's first LOD by the
+// surfaces' vertex or triangle counts; an index past them spawns the particle at the
+// origin with a warning. The records therefore take the converted first LOD's totals.
+void FitSpawnMeshCounts(iw8::vfx::Module &module, const PreparedMap &map, const std::string &effect)
+{
+    constexpr auto payload = offsetof(iw8_focus::ParticleModuleDef, moduleData);
+    constexpr auto listOffset = payload + offsetof(iw8_focus::ParticleModuleInitSpawnShapeMesh, linkedAssets);
+    const auto list = std::ranges::find(module.importedChildren, listOffset, &iw8::vfx::Module::ImportedChild::offset);
+    const auto mesh = std::ranges::find_if(module.importedChildren,
+                                           [](const auto &child) { return child.meshData; });
+    if (list == module.importedChildren.end() || mesh == module.importedChildren.end() ||
+        list->entries.size() != mesh->meshAssets.size())
+        throw std::runtime_error("its spawn mesh lacks matching model and count arrays");
+    for (std::size_t index = 0; index < list->entries.size(); ++index)
+    {
+        const auto &assets = list->entries[index].assets;
+        if (assets.size() != 1 || assets[0].second.first != ASSET_TYPE_XMODEL)
+            throw std::runtime_error("its spawn mesh entry does not name one model");
+        const auto &name = assets[0].second.second;
+        const auto model = std::ranges::find(map.xmodels, name,
+                                             [](const PreparedXModel &prepared) { return prepared.model.name; });
+        if (model == map.xmodels.end() || model->lods.empty())
+            throw std::runtime_error("its spawn mesh model " + name + " does not convert");
+        std::uint32_t vertices = 0, triangles = 0;
+        for (const auto &surface : model->lods.front().surfaces)
+        {
+            vertices += surface.vertCount;
+            triangles += surface.triCount;
+        }
+        if (!vertices || !triangles)
+            throw std::runtime_error("its spawn mesh model " + name + " has no first-LOD geometry");
+        auto &record = mesh->meshAssets[index];
+        if (record.numVertsTotal != vertices || record.numTrisTotal != triangles)
+            zt::info("iw3: effect %s spawns on %s with its converted first LOD: %u vertices, %u triangles "
+                     "(source %u, %u)",
+                     effect.c_str(), name.c_str(), vertices, triangles, record.numVertsTotal, record.numTrisTotal);
+        record.numVertsTotal = vertices;
+        record.numTrisTotal = triangles;
+    }
+}
+
 // The converted names of the assets that a native effect links (effects by their
 // aliases, materials by the converted effect materials, the light definition of the
 // map's FX lights) and the particle material data of its material modules, as
@@ -9131,6 +9173,9 @@ iw8::vfx::Effect ResolveNativeFx(const NativeFx &fx, const PreparedMap &map,
                         materialData)
                         std::memcpy(module.native.moduleData + offsetof(iw8_focus::ParticleModuleInitMaterial, materialData),
                                     materialData->data(), materialData->size());
+                    if (module.native.moduleType ==
+                        static_cast<std::uint16_t>(iw8_focus::ParticleModuleType::initSpawnShapeMesh))
+                        FitSpawnMeshCounts(module, map, fx.effect.name);
                 }
     return effect;
 }
