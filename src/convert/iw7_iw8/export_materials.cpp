@@ -890,6 +890,27 @@ namespace zonetool::convert::iw7_iw8
 			return std::nullopt;
 		}
 
+		// A material constant by its name hash, for constants whose 12-character names coincide (uvDistortPar...).
+		std::optional<std::array<float, 4>> material_constant(const iw7::Material* material, const unsigned int hash)
+		{
+			for (auto i = 0; material && i < material->constantCount; i++)
+			{
+				const auto& constant = material->constantTable[i];
+				if (constant.nameHash == hash)
+				{
+					std::array<float, 4> value{};
+					for (std::size_t c = 0; c < 4; c++)
+					{
+						value[c] = std::isfinite(constant.literal[c]) ? constant.literal[c] : 0.0f;
+					}
+
+					return value;
+				}
+			}
+
+			return std::nullopt;
+		}
+
 		// Whether a material's technique set name holds a token (its names join tokens with '_').
 		bool techset_has_token(const iw7::Material* material, const std::string_view token)
 		{
@@ -1232,6 +1253,22 @@ namespace zonetool::convert::iw7_iw8
 				std::ranges::find(names, std::string_view(asset_name(material->techniqueSet->name))) != names.end();
 		}
 
+		// The lit UV-distortion effects, each name pinned to its disassembled PS: c258449e (Breakneck's blood drips and oil
+		// tendrils) and its colour-tint twin 5d9b9a5b (techsets_common; the same rows one later and the albedo times
+		// colorTint). The UVs move by a scrolling noise map (the texture of hash 0x38436E1C): uv + (noise.xy * 2 - 1) *
+		// strength / textureAtlas.xy, the noise at uv * uvDistortParms.zw + time * uvDistortParms.xy (constant 0x2B8BA1BC;
+		// strength the w of 0x9CFFD90E), and the alpha dissolves by the vertex alpha (alphaDissolveParms.x).
+		bool uvd_effect_material(const iw7::Material* material)
+		{
+			static constexpr std::array<std::string_view, 2> names
+			{
+				"eq_effect_blend_lin_ndw_shl_uvd_ad_nocast_norm_spec",
+				"eq_effect_blend_lin_ct_ndw_shl_uvd_ad_nocast_norm_spec",
+			};
+			return material && material->techniqueSet &&
+				std::ranges::find(names, std::string_view(asset_name(material->techniqueSet->name))) != names.end();
+		}
+
 		bool flow_effect_material(const iw7::Material* material)
 		{
 			// Each name is pinned to its disassembled source PS, all one flow with alpha blending: bfc071e2 (colour tint,
@@ -1343,8 +1380,9 @@ namespace zonetool::convert::iw7_iw8
 				const auto eye_offset = has("eyeoffset") && material_constant(material, "eyeOffsetParms");
 				technique = std::format("effect{}{}{}{}", feather ? "_zfeather" : "", falloff ? "_falloff" : "", additive ? "_add" : "",
 					eye_offset ? "_eyeoffset" : "");
-				// A flow PS without the ct token has no tint multiply (39e31a06, 2241e5f5, 6d8b8710, d384b91e).
-				auto tint = flow && !has("ct") ? std::array{1.0f, 1.0f, 1.0f, 1.0f}
+				// A flow or UV-distortion PS without the ct token has no tint multiply (39e31a06, 2241e5f5, 6d8b8710, d384b91e;
+				// c258449e).
+				auto tint = (flow || uvd_effect_material(material)) && !has("ct") ? std::array{1.0f, 1.0f, 1.0f, 1.0f}
 					: material_constant(material, "colorTint").value_or(std::array{1.0f, 1.0f, 1.0f, 1.0f});
 				for (std::size_t c = 0; c < 3; c++)
 				{
@@ -1462,6 +1500,26 @@ namespace zonetool::convert::iw7_iw8
 					result["iw7Flow"]["dissolve"] = (*dissolve)[0];
 				}
 			}
+
+			// The UV distortion (uvd_effect_material): the noise map, its scroll and scale, and the strength, the atlas and
+			// the dissolve K; the pipeline's owned lit effect PS distorts the UVs (FLOW_UVD).
+			if (uvd_effect_material(material))
+			{
+				const auto& map = images[static_cast<std::size_t>(image_role::flow)];
+				const auto scroll = material_constant(material, 0x2B8BA1BCu);
+				const auto strength = material_constant(material, 0x9CFFD90Eu);
+				const auto atlas_cells = material_constant(material, "textureAtlas");
+				const auto dissolve = material_constant(material, "alphaDissolveParms");
+				if (!color || !map || !scroll || !strength || !atlas_cells || !dissolve || !((*atlas_cells)[0] > 0.0f) ||
+					!((*atlas_cells)[1] > 0.0f) || !((*dissolve)[0] > 0.0f))
+				{
+					throw std::runtime_error(std::format("IW7 UV-distortion material {} lacks an image or its constants", material->name));
+				}
+
+				result["iw7Uvd"] = {{"map", *map}, {"scroll", *scroll},
+					{"parameters", {(*strength)[3], (*atlas_cells)[0], (*atlas_cells)[1], (*dissolve)[0]}}};
+			}
+
 			return result;
 		}
 	}
@@ -1874,6 +1932,8 @@ namespace zonetool::convert::iw7_iw8
 			auto& roles = candidates[name];
 			const auto flow = (output.effect_materials.contains(name) && flow_effect_material(material)) ||
 				model_flow_material(material);
+			// A UV-distortion effect's noise map takes the flow map's role (uvd_effect_material).
+			const auto uvd = output.effect_materials.contains(name) && uvd_effect_material(material);
 			const auto layer = layer_of(name);
 			// A layer of a stock layered surface (material_stock_layered), or a lit blended or alpha-tested world material
 			// that draws as a stock decal or cut-out: their alpha, reveal and thickness maps go to Replay's shaders as IW7
@@ -1921,6 +1981,8 @@ namespace zonetool::convert::iw7_iw8
 					role = image_role::flow_surface;
 				else if (flow && texture.nameHash == 0x9E7BA008u)
 					role = image_role::mask;
+				else if (uvd && texture.nameHash == 0x38436E1Cu)
+					role = image_role::flow;
 				const auto image = role ? source.resolve(iw7::ASSET_TYPE_IMAGE, texture.image) : nullptr;
 				if (!image || !image->name)
 				{

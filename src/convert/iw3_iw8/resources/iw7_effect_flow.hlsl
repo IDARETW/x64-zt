@@ -5,7 +5,8 @@
 // feather, an alpha mask, the particle lit by the scene) on the bindings of Replay's lit effect set (VS 372e0e1a,
 // PS a9864c07): its per-particle lighting map at t0, the albedo at t2, the scene depth at t4, the scope buffer at t5
 // and the Particle_MaterialData at t6; the flow maps and the mask follow at t7-t9. The unmasked lit flows (d29f9b4f,
-// and d241aa2a without the feather) bind a white mask.
+// and d241aa2a without the feather) bind a white mask. FLOW_UVD: IW7's lit UV distortion (c258449e, 5d9b9a5b) on the same
+// bindings, its noise map in the flow map's slot.
 cbuffer Stable : register(b2) { float4 stable[9]; }
 #ifdef FLOW_LIT
 cbuffer Material : register(b3) { float4 material[5]; }
@@ -73,6 +74,16 @@ struct Output
 
 Output main(Input input)
 {
+#ifdef FLOW_UVD
+    // IW7 c258449e / 5d9b9a5b (eq_effect_blend_lin[_ct]_ndw_shl_uvd_ad_nocast_norm_spec): the UVs move by a scrolling noise
+    // map (the flow map's slot), uv + (noise.xy * 2 - 1) * strength / atlas, the noise at uv * scale + time * scroll (row
+    // 3: scroll xy, scale zw; row 4: strength, atlas yz, dissolve K w); the vertex alpha dissolves the alpha instead of
+    // scaling it, alpha = saturate((texel.a + vertex alpha) * K - K).
+    float2 noiseUV = input.uv * material[3].zw + stable[8].w * material[3].xy;
+    float2 offset = (flowMap.Sample(colorSampler, noiseUV).xy * 2 - 1) * material[4].x / material[4].yz;
+    float4 texel = colorMap.SampleBias(colorSampler, input.uv + offset, stable[7].y);
+    float alpha = saturate((texel.a + input.color.a) * material[4].w - material[4].w);
+#else
     float4 flow = flowMap.SampleLevel(colorSampler, input.uv, 0);
     float4 surface = flowSurface.SampleLevel(colorSampler, input.uv, 0);
     float2 velocity = (flow.xy * 2 - 1) * flow.z * FLOW_SCALE;
@@ -86,7 +97,10 @@ Output main(Input input)
     float4 b = colorMap.SampleBias(colorSampler, input.uv - velocity * phaseB, stable[7].y);
     float4 texel = lerp(a, b, weight);
     float alpha = texel.a * input.color.a * surface.r;
-#ifdef FLOW_LIT
+#endif
+#if defined(FLOW_UVD)
+    // Its dissolve above; it has no mask.
+#elif defined(FLOW_LIT)
     // a386c911 multiplies the alpha by its mask's alpha at the particle's UV (its VS passes the UV unchanged).
     alpha *= flowMask.Sample(colorSampler, input.uv).a;
 #else
@@ -118,6 +132,10 @@ Output main(Input input)
     // a386c911 lights the squared colour by its per-particle light; Replay's lit effects read theirs at the
     // particle's lighting UV, times the effect lighting scale (a9864c07: t0 * scene[42].y).
     float3 color = linearColor * particleLighting.SampleLevel(screenSampler, input.lightingUV, 0).rgb * scene[42].y;
+#ifdef FLOW_UVD
+    // 5d9b9a5b tints the squared albedo (colorTint, row 0; white for c258449e).
+    color *= material[0].rgb;
+#endif
 #else
     float3 hdr = material[3].x != 0 ? -log2(1 - min(linearColor, 0.99)) : linearColor;
     float3 color = hdr * material[0].rgb * input.emissive.rgb * input.emissive.w;
