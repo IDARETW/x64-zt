@@ -4602,7 +4602,8 @@ Json BuildFxMaterialDefinition(const SourceFxMaterial &source)
             {"imageDefinitions", Json::array()}};
 }
 
-Json BuildFlowFxTechset(const Json &stock, const std::string &name)
+// feather: the zfeather flow twin (IW7 PS d384b91e), which also reads the template's scene depth and Particle_MaterialData.
+Json BuildFlowFxTechset(const Json &stock, const std::string &name, const bool feather)
 {
     using NativeTechnique = zonetool::iw8::MaterialTechnique;
     using NativeArgument = zonetool::iw8::MaterialShaderArgument;
@@ -4617,8 +4618,9 @@ Json BuildFlowFxTechset(const Json &stock, const std::string &name)
     nativeSet.techniqueMask.mask[0] = 1ull << emissive;
     Put(setHeader, 0, nativeSet);
     result["header"] = Hex(setHeader);
-    const auto pixel = Shader(17, "iw7_fx_flow", "iw7_effect_flow.hlsl",
-        Compile(ResourceText(IDR_IW3_EFFECT_FLOW_PIXEL_SHADER), "ps_5_0", "iw7_effect_flow.hlsl"));
+    const auto pixel = Shader(17, feather ? "iw7_fx_flow_feather" : "iw7_fx_flow", "iw7_effect_flow.hlsl",
+        Compile((feather ? "#define FLOW_FEATHER 1\n" : "") + ResourceText(IDR_IW3_EFFECT_FLOW_PIXEL_SHADER), "ps_5_0",
+                "iw7_effect_flow.hlsl"));
     for (auto technique : stock.at("techniques"))
     {
         auto header = Unhex(technique.at("header").get<std::string>());
@@ -7957,7 +7959,7 @@ RenderPlan PrepareRenderAssets(const std::filesystem::path &exportRoot, const Js
             const std::string techsetFile = stem + ".fx." + id + ".techset.json";
             const auto stock = flowLibrary->TechniqueSet(
                 "elcq/unlit_6_effect_bad_ta0_802_1004_0_1_0_0_0_100000023_0_0_2_0_0");
-            WriteJson(mapDirectory / techsetFile, BuildFlowFxTechset(stock, techsetName));
+            WriteJson(mapDirectory / techsetFile, BuildFlowFxTechset(stock, techsetName, source.feather.has_value()));
             direct = BuildFlowFxMaterialDefinition(source, techsetName);
             direct["techsetDefinition"] = techsetFile;
             const std::array<std::string, 3> inputs{source.image, source.flow->map, source.flow->surface};
