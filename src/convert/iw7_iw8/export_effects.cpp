@@ -3945,6 +3945,16 @@ iw7_destructible_think( model, effect, sound, health )
 
 							args = std::format("{}, {}", str("notify"), num("param"));
 						}
+						else if (t == "rumble")
+						{
+							// Replay's native rumble event (17) queues a per-client rumble unless the RumbleInfo broadcasts;
+							// which client a Scriptable's per-client rumble reaches is not established, so no script call
+							// stands in for it (every captured IW7 Scriptable rumble, damage_light / damage_heavy, is
+							// per-client).
+							omitted(event.value("broadcast", false) ? "broadcast rumble without a converted handler"
+								: "per-client rumble: its recipient is not established");
+							continue;
+						}
 						else
 						{
 							omitted("no converted handler");

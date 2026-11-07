@@ -253,8 +253,9 @@ namespace zonetool::convert::iw7_iw8
 		return enabled;
 	}
 
-	// MW120R_RUNTIME_SKY=1: the distant models and world surfaces draw in the sky at run time with their own materials
-	// (AGENTS.md plan 2.1), where they were drawn into the sky's cube map.
+	// The distant models and world surfaces draw in the sky at run time with their own materials (AGENTS.md plan 2.1),
+	// where they were drawn into the sky's cube map: the default since the owner's Breakneck test of b28905c ("the sky
+	// looks pretty well correct"; its shard flicker fixed in 8d3b406). MW120R_RUNTIME_SKY=0 bakes them into the cube map.
 	// MW120R_IW7_EXPOSURE=1: the map keeps IW7's light units throughout (the sun, lights, emission, fog and sky as the
 	// lightmaps keep them) and Replay meters it with IW7's own auto exposure (AGENTS.md plan 3.4): Replay's vision
 	// keeps IW7's tonemap exposure fields, with IW7's defaults.
@@ -266,7 +267,7 @@ namespace zonetool::convert::iw7_iw8
 
 	inline bool runtime_sky()
 	{
-		static const bool enabled = [] { const char* value = std::getenv("MW120R_RUNTIME_SKY"); return value && *value == '1'; }();
+		static const bool enabled = [] { const char* value = std::getenv("MW120R_RUNTIME_SKY"); return !value || *value != '0'; }();
 		return enabled;
 	}
 	int material_layer_count(const iw7::Material* material);
