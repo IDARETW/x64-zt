@@ -285,9 +285,10 @@ bool isModeSpecificSpawn(const std::string &classname)
 
 bool isSourceOnlyMarker(const std::string &classname)
 {
-    // IW3 emits these records for FX placement and AI traversal authoring. The
-    // current Replay map contract has no native fx_origin or aipaths asset
-    // writer, so retaining the markers would advertise state with no consumer.
+    // IW3 emits these records for FX placement and AI traversal authoring. Replay
+    // has no native fx_origin; the pathnode and negotiation markers feed the
+    // generated bot navigation instead (replay_navigation), which appends one
+    // node_pathnode record per PathData fixed node in node order.
     static constexpr std::array<const char *, 4> classes{{
         "fx_origin",
         "node_negotiation_begin",
@@ -760,9 +761,14 @@ size_t iw3ToIw8EntityString(const std::string &input, std::string &output,
         for (const auto &[classname, count] : projectedSourceMarkers)
         {
             total += count;
-            zt::warn("iw3: projected out %zu '%s' source-only/editor entity record(s); "
-                     "no native Replay consumer is emitted",
-                     count, classname.c_str());
+            if (classname.starts_with("node_"))
+                zt::info("iw3: projected out %zu '%s' record(s); the generated bot navigation takes them "
+                         "(PathData pathnodes with their own node_pathnode records)",
+                         count, classname.c_str());
+            else
+                zt::warn("iw3: projected out %zu '%s' source-only/editor entity record(s); "
+                         "no native Replay consumer is emitted",
+                         count, classname.c_str());
         }
         zt::warn("iw3: projected out %zu source-only/editor/mode entity record(s); "
                  "native gameplay state requires a corresponding Replay asset contract",

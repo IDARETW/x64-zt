@@ -28,6 +28,17 @@ struct Triangle
     std::uint32_t flags{};
 };
 
+// An authored traversal (IW7 node_negotiation_begin -> its node_negotiation_end). It becomes a Begin pathnode
+// (type 16) with the animscript and one negotiation link to an End pathnode (type 17): Replay builds a bfx nav link
+// of each such link at load (Nav_SetupNavLinks 0x140FFD280) and reads the animscript for the bot zone graph
+// (Bot_InitZoneGraph 0x14135A260, Bot_AnimscriptToNegotiationType 0x1413398B0).
+struct Traversal
+{
+    Vec3 begin{};
+    Vec3 end{};
+    std::string animscript;
+};
+
 // World collision and authoring markers of one converted map.
 struct Source
 {
@@ -35,6 +46,7 @@ struct Source
     std::vector<Triangle> triangles;
     std::vector<Vec3> pathNodes; // IW3 node_pathnode origins
     std::vector<Vec3> spawns;    // every mp_*_spawn* origin
+    std::vector<Traversal> traversals;
 };
 
 struct Data;

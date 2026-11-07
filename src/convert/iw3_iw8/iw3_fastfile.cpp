@@ -12425,6 +12425,21 @@ PreparedMap PrepareFastfile(const ImportOptions &options)
                     navigation.triangles.push_back(triangle);
                 }
         }
+        // Authored traversals (IW7 node_negotiation_begin, whose target names its node_negotiation_end). Wall runs
+        // and boost jumps are IW7 movement that a Replay player does not have, so they stay out.
+        struct NegotiationBegin
+        {
+            iw8::navigation::Vec3 origin{};
+            std::string target;
+            std::string animscript;
+        };
+        std::vector<NegotiationBegin> negotiationBegins;
+        std::unordered_map<std::string, iw8::navigation::Vec3> negotiationEnds;
+        std::size_t unsupportedTraversals = 0;
+        const auto field = [](const EntityFields &entity, const char *key) {
+            const auto found = entity.find(key);
+            return found == entity.end() ? std::string{} : found->second;
+        };
         for (const EntityFields &entity : ParseEntityFields(entities))
         {
             const auto classname = entity.find("classname");
@@ -12439,11 +12454,35 @@ PreparedMap PrepareFastfile(const ImportOptions &options)
                 navigation.pathNodes.push_back(ParseVector(origin->second));
             else if (name.starts_with("mp_") && name.find("_spawn") != std::string::npos)
                 navigation.spawns.push_back(ParseVector(origin->second));
+            else if (name == "node_negotiation_begin")
+            {
+                const std::string animscript = field(entity, "animscript");
+                if (animscript.find("wall_run") != std::string::npos ||
+                    animscript.find("wallrun") != std::string::npos ||
+                    animscript.find("boost") != std::string::npos)
+                    ++unsupportedTraversals;
+                else if (!animscript.empty() && !field(entity, "target").empty())
+                    negotiationBegins.push_back(
+                        {ParseVector(origin->second), field(entity, "target"), animscript});
+            }
+            else if (name == "node_negotiation_end" && !field(entity, "targetname").empty())
+                negotiationEnds.emplace(field(entity, "targetname"), ParseVector(origin->second));
         }
-        zt::info("iw3: navigation source has %zu hulls, %zu triangles, %zu pathnode markers and "
-                 "%zu spawns",
-                 navigation.hulls.size(), navigation.triangles.size(),
-                 navigation.pathNodes.size(), navigation.spawns.size());
+        std::size_t unpairedTraversals = 0;
+        for (const NegotiationBegin &begin : negotiationBegins)
+        {
+            const auto end = negotiationEnds.find(begin.target);
+            if (end == negotiationEnds.end())
+                ++unpairedTraversals;
+            else
+                navigation.traversals.push_back({begin.origin, end->second, begin.animscript});
+        }
+        zt::info("iw3: navigation source has %zu hulls, %zu triangles, %zu pathnode markers, "
+                 "%zu spawns and %zu traversals (%zu IW7-only wall runs/boost jumps, %zu without an end "
+                 "node left out)",
+                 navigation.hulls.size(), navigation.triangles.size(), navigation.pathNodes.size(),
+                 navigation.spawns.size(), navigation.traversals.size(), unsupportedTraversals,
+                 unpairedTraversals);
     }
     result.footsteps = result.scratch / "footsteps.native";
     WriteFootsteps(result.footsteps, brushModels, renderPlan);
