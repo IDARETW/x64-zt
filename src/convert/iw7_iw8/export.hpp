@@ -37,6 +37,9 @@ namespace zonetool::convert::iw7_iw8
 		std::set<std::string> exported_models;
 		// The models beyond the range of Replay model bounds at every placement (planets): the sky draws them.
 		std::set<std::string> distant_models;
+		// The light definitions that effect lights link (other than light_fx_default): export_com_world converts those with
+		// an IES profile, which the pipeline keeps by name; the others take the map's effect light definition.
+		std::set<std::string> particle_light_defs;
 		// The largest coordinate of the models that fit Replay's model bounds at some placements and pass them at others:
 		// those placements are the sky's (placement_beyond_bounds).
 		std::map<std::string, float> model_extents;

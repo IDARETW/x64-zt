@@ -1230,7 +1230,7 @@ namespace zonetool::convert::iw7_iw8
 					result.set(0, light);
 					base();
 					result.list(offsetof(focus::ParticleModuleInitLightSpot, linkedAssets),
-						json::array({linked_asset("lightdef", "light_fx_default")}));
+						json::array({linked_asset("lightdef", this->light_definition(source.m_linkedAssetList))}));
 					return result;
 				}
 				case iw7::PARTICLE_MODULE_INIT_LIGHT_OMNI:
@@ -1255,7 +1255,7 @@ namespace zonetool::convert::iw7_iw8
 					result.set(0, light);
 					base();
 					result.list(offsetof(focus::ParticleModuleInitLightOmni, linkedAssets),
-						json::array({linked_asset("lightdef", "light_fx_default")}));
+						json::array({linked_asset("lightdef", this->light_definition(source.m_linkedAssetList))}));
 					return result;
 				}
 				case iw7::PARTICLE_MODULE_INIT_DECAL:
@@ -1614,6 +1614,22 @@ namespace zonetool::convert::iw7_iw8
 					return result;
 				}
 				}
+			}
+
+			// The light definition that an effect light links: IW7's own (registered for export_com_world, which converts it
+			// when it has an IES profile), or Replay's light_fx_default, which the pipeline gives the map's effect light
+			// definition (Breakneck's rivet spot light links IW7's light_fx_default).
+			std::string light_definition(const iw7::ParticleLinkedAssetListDef& list)
+			{
+				const auto* def = list.assetList && list.numAssets > 0 && list.assetList[0].lightDef ?
+					this->source_.resolve(iw7::ASSET_TYPE_LIGHT_DEF, list.assetList[0].lightDef) : nullptr;
+				const auto name = def && def->name ? std::string(asset_name(def->name)) : std::string("light_fx_default");
+				if (name != "light_fx_default")
+				{
+					this->output_.particle_light_defs.insert(name);
+				}
+
+				return name;
 			}
 
 			// The entries of a list of child effects, which convert with the effect.
