@@ -37,6 +37,7 @@ struct Data
     {
         float distance{};
         std::uint16_t node{};
+        bool negotiation{}; // pathlink_s +7: the link crosses a traversal
     };
     struct Node
     {
@@ -45,6 +46,7 @@ struct Data
         std::int32_t tacpoint{-1};
         std::array<float, 2> forward{};
         std::vector<Link> links;
+        std::string animscript; // pathnode_constant_t +0x14 (script string), traversal Begin nodes only
     };
     struct TreeNode
     {
@@ -111,6 +113,9 @@ constexpr std::uint16_t kPathDataVersion = 30;
 constexpr std::int32_t kNavMeshVersion = 19;
 constexpr std::uint32_t kDynamicNodeSlots = 64;
 constexpr std::uint16_t kPathnodeType = 1;
+// s_pathNodeNames 0x14459F9C0: 16 "Begin", 17 "End" (Path_IsNodeTraversal 0x1411D9B30 tests 16 and 27).
+constexpr std::uint16_t kNegotiationBeginType = 16;
+constexpr std::uint16_t kNegotiationEndType = 17;
 constexpr std::uint32_t kGraphVersion = 0x2E;
 constexpr std::size_t kGraphHeaderSize = 340;
 constexpr std::size_t kAreaSize = 72;
@@ -1682,6 +1687,20 @@ Result Build(const Source &source)
             queue.push_back(static_cast<std::uint32_t>(cell));
         }
     }
+    // Floors that only an authored traversal reaches (Breakneck's raised platforms: jump_up_80 / jump_down_80)
+    // have no pathnode marker; their traversal ends seed them, as the ends' own search does below.
+    for (const Traversal &traversal : source.traversals)
+        for (const Vec3 &point : {traversal.begin, traversal.end})
+        {
+            std::int32_t cell = Locate(grid, point, 72.0f, 36.0f, 4);
+            if (cell < 0)
+                cell = Locate(grid, point, 96.0f, 48.0f, 8);
+            if (cell >= 0 && !reached[static_cast<std::size_t>(cell)])
+            {
+                reached[static_cast<std::size_t>(cell)] = 1;
+                queue.push_back(static_cast<std::uint32_t>(cell));
+            }
+        }
     for (std::size_t head = 0; head < queue.size(); ++head)
         for (int direction = 0; direction < 4; ++direction)
         {
@@ -1876,6 +1895,67 @@ Result Build(const Source &source)
         nodes = std::move(keptNodes);
         links = std::move(keptLinks);
     }
+    // Authored traversals as Begin/End node pairs after the generated nodes (fixed nodes: Nav_SetupNavLinks walks
+    // Path_FixedNodeCount). The Begin node's one negotiation link to its End node becomes a bfx nav link; both
+    // nodes also link to the generated nodes they reach on foot, as those link to each other.
+    std::vector<std::uint16_t> nodeTypes(nodes.size(), kPathnodeType);
+    std::vector<std::string> animscripts(nodes.size());
+    std::size_t traversalCount = 0;
+    std::size_t droppedTraversals = 0;
+    {
+        const std::size_t generated = nodes.size();
+        const auto walkLinks = [&](const std::size_t node) {
+            for (std::size_t other = 0; other < generated; ++other)
+            {
+                const float distance = Distance(nodes[node].origin, nodes[other].origin);
+                if (distance > kLinkDistance ||
+                    !WalkableLine(grid, nodes[node].cell, nodes[node].origin, nodes[other].cell,
+                                  nodes[other].origin) ||
+                    !WalkableLine(grid, nodes[other].cell, nodes[other].origin, nodes[node].cell,
+                                  nodes[node].origin))
+                    continue;
+                links[node].push_back({distance, static_cast<std::uint16_t>(other)});
+                links[other].push_back({distance, static_cast<std::uint16_t>(node)});
+            }
+        };
+        // Traversal ends sit on ledges and in windows, where the radius erosion leaves no walkable cell within the
+        // marker search (four cells); they take the nearest walkable cell within eight. The node keeps its
+        // authored origin: the cell only places it in a zone and its walking links.
+        const auto locateEnd = [&](const Vec3 &point) {
+            const std::int32_t cell = Locate(grid, point, 72.0f, 36.0f, 4);
+            return cell >= 0 ? cell : Locate(grid, point, 96.0f, 48.0f, 8);
+        };
+        for (const Traversal &traversal : source.traversals)
+        {
+            const std::int32_t beginCell = locateEnd(traversal.begin);
+            const std::int32_t endCell = locateEnd(traversal.end);
+            if (beginCell < 0 || endCell < 0 || nodes.size() + 2 > kMaxFixedNodes)
+            {
+                if (droppedTraversals < 6)
+                    zt::info("navigation: traversal %s from (%.0f %.0f %.0f) to (%.0f %.0f %.0f) left out: no "
+                             "walkable cell near its %s",
+                             traversal.animscript.c_str(), traversal.begin[0], traversal.begin[1],
+                             traversal.begin[2], traversal.end[0], traversal.end[1], traversal.end[2],
+                             beginCell < 0 ? (endCell < 0 ? "begin and end" : "begin") : endCell < 0 ? "end" : "node limit");
+                ++droppedTraversals;
+                continue;
+            }
+            const std::size_t begin = nodes.size();
+            nodes.push_back({traversal.begin, static_cast<std::uint32_t>(beginCell)});
+            nodes.push_back({traversal.end, static_cast<std::uint32_t>(endCell)});
+            nodeTypes.push_back(kNegotiationBeginType);
+            nodeTypes.push_back(kNegotiationEndType);
+            animscripts.push_back(traversal.animscript);
+            animscripts.emplace_back();
+            links.emplace_back();
+            links.emplace_back();
+            links[begin].push_back({Distance(traversal.begin, traversal.end),
+                                    static_cast<std::uint16_t>(begin + 1), true});
+            walkLinks(begin);
+            walkLinks(begin + 1);
+            ++traversalCount;
+        }
+    }
     const std::size_t fixedCount = nodes.size();
     if (fixedCount == 0 || links.front().empty())
     {
@@ -2030,10 +2110,11 @@ Result Build(const Source &source)
     {
         Data::Node &out = data->nodes[node];
         out.origin = nodes[node].origin;
-        out.type = kPathnodeType;
+        out.type = nodeTypes[node];
         out.tacpoint = static_cast<std::int32_t>(node);
         out.forward = {1.0f, 0.0f};
         out.links = std::move(links[node]);
+        out.animscript = std::move(animscripts[node]);
     }
     for (std::size_t zone = 0; zone < zoneCount; ++zone)
     {
@@ -2182,8 +2263,12 @@ Result Build(const Source &source)
              "and %zu coverage nodes; %zu unlinked dropped), %zu links, %zu unlinked spawn "
              "nodes, %zu zones",
              fixedCount, markerNodes, droppedMarkers, spawnNodes,
-             fixedCount + droppedUnlinked - markerNodes - spawnNodes, droppedUnlinked, linkCount,
-             isolated, zoneCount);
+             fixedCount + droppedUnlinked - markerNodes - spawnNodes - 2 * traversalCount, droppedUnlinked,
+             linkCount, isolated, zoneCount);
+    if (traversalCount || droppedTraversals)
+        zt::info("navigation: %zu authored traversals as Begin/End pathnodes with a negotiation link (%zu off the "
+                 "walkable mesh or past the node limit left out)",
+                 traversalCount, droppedTraversals);
     zt::info("navigation: tactical graph %zu points, %zu visible pairs, %zu vis bytes; %.1fs",
              pointCount, visiblePairs, visBytes, seconds);
     if (const char *debugPath = std::getenv("IW8_ZONETOOL_NAV_DEBUG"); debugPath && *debugPath)
@@ -2323,7 +2408,9 @@ void EmitTree(ZoneWriter &zw, const Data &data, const std::int32_t index)
     }
 }
 
-void EmitPathData(ZoneWriter &zw, const std::string &name, const Data &data)
+// animscripts: the zone's script-string index of each node's animscript (0 without one), interned at registration.
+void EmitPathData(ZoneWriter &zw, const std::string &name, const Data &data,
+                  const std::vector<std::uint32_t> &animscripts)
 {
     const auto nodeCount = static_cast<std::uint32_t>(data.nodes.size());
     std::array<std::uint8_t, 0x98> root{};
@@ -2351,6 +2438,7 @@ void EmitPathData(ZoneWriter &zw, const std::string &name, const Data &data)
         {
             const Data::Node &node = data.nodes[index];
             std::uint8_t *out = nodes.data() + static_cast<std::size_t>(index) * 192;
+            Stamp32(out, 0x14, animscripts[index]);          // animscript
             std::memcpy(out + 0x20, node.origin.data(), 12); // vLocalOrigin
             StampF(out, 0x2C, 0.0f);                         // yaw_orient.fLocalAngle
             StampF(out, 0x30, node.forward[0]);
@@ -2378,6 +2466,7 @@ void EmitPathData(ZoneWriter &zw, const std::string &name, const Data &data)
             {
                 StampF(links.data(), link * 12, node.links[link].distance);
                 Stamp16(links.data(), link * 12 + 4, node.links[link].node);
+                links[link * 12 + 7] = node.links[link].negotiation ? 1 : 0; // negotiationLink
             }
             zw.write(links.data(), links.size());
         }
@@ -2496,8 +2585,14 @@ void Register(ZoneWriter &writer, const std::string &assetName, const Result &re
     if (!result.data)
         return;
     const auto data = result.data;
-    writer.add(ASSET_TYPE_AIPATHS, assetName,
-               [assetName, data](ZoneWriter &zw) { EmitPathData(zw, assetName, *data); });
+    // Script strings must be registered before the zone builds; the assets emit during the build.
+    std::vector<std::uint32_t> animscripts(data->nodes.size(), 0);
+    for (std::size_t node = 0; node < data->nodes.size(); ++node)
+        if (!data->nodes[node].animscript.empty())
+            animscripts[node] = writer.internScriptString(data->nodes[node].animscript);
+    writer.add(ASSET_TYPE_AIPATHS, assetName, [assetName, data, animscripts](ZoneWriter &zw) {
+        EmitPathData(zw, assetName, *data, animscripts);
+    });
     writer.add(ASSET_TYPE_NAVMESH, assetName,
                [assetName, data](ZoneWriter &zw) { EmitNavMesh(zw, assetName, *data); });
     writer.add(ASSET_TYPE_TACGRAPH, assetName,
