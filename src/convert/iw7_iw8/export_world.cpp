@@ -524,7 +524,8 @@ namespace zonetool::convert::iw7_iw8
 				const auto& instance = world.dpvs.smodelDrawInsts[i];
 				const auto name = file_name(asset_name(instance.model ? iw7::get_asset_name(iw7::ASSET_TYPE_XMODEL, instance.model) : nullptr));
 				const auto model = output.models.find(name);
-				if (!(output.distant_models.contains(name) || beyond_world(world, i)) || model == output.models.end() || !model->second)
+				if (!(output.distant_models.contains(name) || beyond_world(world, i) || placement_beyond_bounds(world, i, output)) ||
+					model == output.models.end() || !model->second)
 				{
 					continue;
 				}
@@ -1710,6 +1711,19 @@ namespace zonetool::convert::iw7_iw8
 		return false;
 	}
 
+	bool placement_beyond_bounds(const iw7::GfxWorld& world, const unsigned int instance, const extraction& output)
+	{
+		const auto& draw = world.dpvs.smodelDrawInsts[instance];
+		if (!draw.model)
+		{
+			return false;
+		}
+
+		const auto extent = output.model_extents.find(file_name(asset_name(iw7::get_asset_name(iw7::ASSET_TYPE_XMODEL, draw.model))));
+		return extent != output.model_extents.end() &&
+			extent->second * std::max(draw.placement.scale, 1.0f) > largest_model_coordinate;
+	}
+
 	void collect_static_models(const source_map& source, extraction& output)
 	{
 		const auto& world = *source.world();
@@ -1946,8 +1960,9 @@ namespace zonetool::convert::iw7_iw8
 		std::map<unsigned, std::tuple<std::size_t, std::size_t, std::size_t, std::string>> other_lighting;
 		for (auto i = 0u; i < dpvs.smodelCount; i++)
 		{
-			// The sky draws the static models beyond the range of the world.
-			if (beyond_world(world, i))
+			// The sky draws the static models beyond the range of the world, and the placements that take their model past
+			// Replay's model bounds.
+			if (beyond_world(world, i) || placement_beyond_bounds(world, i, output))
 			{
 				continue;
 			}

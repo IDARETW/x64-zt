@@ -250,7 +250,8 @@ namespace zonetool::convert::iw7_iw8
 				const auto& instance = world.dpvs.smodelDrawInsts[i];
 				const auto name = file_name(asset_name(instance.model ? iw7::get_asset_name(iw7::ASSET_TYPE_XMODEL, instance.model) : nullptr));
 				const auto model = output.models.find(name);
-				if ((output.distant_models.contains(name) || beyond_world(world, i)) && model != output.models.end() && model->second)
+				if ((output.distant_models.contains(name) || beyond_world(world, i) || placement_beyond_bounds(world, i, output)) &&
+					model != output.models.end() && model->second)
 				{
 					instances.push_back(i);
 				}

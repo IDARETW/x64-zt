@@ -79,9 +79,6 @@ namespace zonetool::convert::iw7_iw8
 			return result;
 		}
 
-		// Replay packs the bounds of model triangle clusters as half floats (at most 65504).
-		constexpr float largest_model_coordinate = 60000.0f;
-
 		template <typename Vertices>
 		float largest_coordinate(const Vertices& vertices)
 		{
@@ -144,14 +141,21 @@ namespace zonetool::convert::iw7_iw8
 			return surface;
 		}
 
-		// The largest scale that the world places a model at (1 for a model that it does not place).
-		float largest_placement_scale(const source_map& source, const std::string& name)
+		// The smallest and the largest scale that the world places a model at, each at least 1 (a model's own coordinates
+		// must fit the bounds whatever it is scaled down to); 1 and 1 for a model that it does not place.
+		struct placement_scales
 		{
-			static std::unordered_map<const source_map*, std::unordered_map<std::string, float>> cache;
+			float smallest{1.0f};
+			float largest{1.0f};
+		};
+
+		placement_scales placement_scale_range(const source_map& source, const std::string& name)
+		{
+			static std::unordered_map<const source_map*, std::unordered_map<std::string, placement_scales>> cache;
 			auto& scales = cache[&source];
 			if (scales.empty())
 			{
-				scales.emplace("", 1.0f);
+				scales.emplace("", placement_scales{});
 				if (const auto* world = source.world())
 				{
 					for (auto i = 0u; i < world->dpvs.smodelCount; i++)
@@ -162,14 +166,21 @@ namespace zonetool::convert::iw7_iw8
 							continue;
 						}
 
-						auto& scale = scales[file_name(asset_name(iw7::get_asset_name(iw7::ASSET_TYPE_XMODEL, instance.model)))];
-						scale = std::max(scale, instance.placement.scale);
+						const auto key = file_name(asset_name(iw7::get_asset_name(iw7::ASSET_TYPE_XMODEL, instance.model)));
+						const auto [entry, added] = scales.try_emplace(key, placement_scales{instance.placement.scale,
+							instance.placement.scale});
+						if (!added)
+						{
+							entry->second.smallest = std::min(entry->second.smallest, instance.placement.scale);
+							entry->second.largest = std::max(entry->second.largest, instance.placement.scale);
+						}
 					}
 				}
 			}
 
 			const auto found = scales.find(name);
-			return found != scales.end() ? std::max(found->second, 1.0f) : 1.0f;
+			return found != scales.end() ? placement_scales{std::max(found->second.smallest, 1.0f), std::max(found->second.largest, 1.0f)}
+				: placement_scales{};
 		}
 
 		// A model's export, planned in model order: its materials (each registers with the extraction), LOD distances
@@ -193,9 +204,11 @@ namespace zonetool::convert::iw7_iw8
 				return std::nullopt;
 			}
 
-			// A model that the world places beyond the range of model bounds spans the map: the sky draws it (Breakneck's
-			// black hole, 4932 units placed at scale 60, cut through the level with its default-white disc).
-			const auto placement_scale = largest_placement_scale(source, name);
+			// A model that every placement takes beyond the range of model bounds spans the map: the sky draws it (Breakneck's
+			// black hole, 4932 units placed at scale 60, cut through the level with its default-white disc). One that fits at
+			// some placements keeps its model there and leaves the others to the sky (placement_beyond_bounds).
+			const auto scales = placement_scale_range(source, name);
+			auto extent = 0.0f;
 
 			// IW7_LOD_DUMP=<model>: the model's LODs (distance, flags, materials and technique sets) and LOD fields.
 			if (const auto dump = std::getenv("IW7_LOD_DUMP"); dump && name == dump)
@@ -250,19 +263,28 @@ namespace zonetool::convert::iw7_iw8
 						largest = surface.motion ? largest_coordinate(surface.motion_vertices) : largest_coordinate(surface.vertices);
 					}
 
-					if (largest * placement_scale > largest_model_coordinate)
+					if (largest * scales.smallest > largest_model_coordinate)
 					{
 						ZONETOOL_WARNING("iw7: model \"%s\" reaches %.0f units (placed at scale %g), beyond the range of Replay model "
-							"bounds: the sky draws it", name.data(), largest * placement_scale, placement_scale);
+							"bounds: the sky draws it", name.data(), largest * scales.largest, scales.largest);
 						output.distant_models.insert(name);
 						return std::nullopt;
 					}
+
+					extent = std::max(extent, largest);
 				}
 
 				// IW7 LOD distances need not grow (650, 419.8, 2500); Replay takes a strictly growing sequence.
 				previous_distance = lod + 1 == model->numLods ? std::max(1000000.0f, previous_distance + 1.0f)
 					: std::max(previous_distance + 1.0f, std::isfinite(info.dist) ? info.dist : 0.0f);
 				planned.distance = previous_distance;
+			}
+
+			if (extent * scales.largest > largest_model_coordinate)
+			{
+				ZONETOOL_INFO("iw7: model \"%s\" (%.0f units) fits Replay's model bounds up to scale %g: the sky draws its placements "
+					"at larger scales (up to %g)", name.data(), extent, largest_model_coordinate / extent, scales.largest);
+				output.model_extents.insert_or_assign(name, extent);
 			}
 
 			return plan;

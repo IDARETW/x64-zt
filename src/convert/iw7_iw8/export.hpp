@@ -35,8 +35,11 @@ namespace zonetool::convert::iw7_iw8
 		std::map<std::string, const iw7::XModel*> models;
 		// The models that export_models wrote.
 		std::set<std::string> exported_models;
-		// The models beyond the range of Replay model bounds (planets): the sky draws them.
+		// The models beyond the range of Replay model bounds at every placement (planets): the sky draws them.
 		std::set<std::string> distant_models;
+		// The largest coordinate of the models that fit Replay's model bounds at some placements and pass them at others:
+		// those placements are the sky's (placement_beyond_bounds).
+		std::map<std::string, float> model_extents;
 		// The world surfaces beyond the range of Replay world vertices (Parkour's mountains), in world space: the sky draws
 		// them.
 		std::vector<mesh_surface> distant_surfaces;
@@ -452,6 +455,12 @@ namespace zonetool::convert::iw7_iw8
 	// Whether a static model of the world reaches beyond the range of the world: the sky draws it, not the world
 	// (Breakneck's black hole sphere, placed 85000 units from the middle of the world at scale 58).
 	bool beyond_world(const iw7::GfxWorld& world, unsigned int instance);
+	// Replay packs the bounds of model triangle clusters as half floats (at most 65504): a model's largest coordinate
+	// times its placement scale must stay within this.
+	constexpr float largest_model_coordinate = 60000.0f;
+	// Whether a static model placement takes its model past Replay's model bounds although other placements of the model
+	// fit them (extraction::model_extents): the sky draws that placement, the world the others.
+	bool placement_beyond_bounds(const iw7::GfxWorld& world, unsigned int instance, const extraction& output);
 
 	// Adds the models of the world's static models, which export_models writes before export_world.
 	void collect_static_models(const source_map& source, extraction& output);
