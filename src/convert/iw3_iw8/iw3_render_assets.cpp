@@ -228,6 +228,8 @@ struct SourceFxMaterial
         // IW7's dissolve flow (PS 39eb46cf, d2bc120f): alphaDissolveParms.x, the K of
         // alpha = saturate((texel.a * mask + vertex alpha) * K - K).
         std::optional<float> dissolve;
+        // The lit flow's alpha mask (PS a386c911: its alpha times the flow's), empty for none.
+        std::string mask;
     };
     std::optional<Flow> flow;
 };
@@ -2045,13 +2047,17 @@ SourceFxMaterial ReadFxMaterial(const std::filesystem::path &root,
                                               flow.at("hdr").get<bool>()};
         if (flow.contains("dissolve"))
             material.flow->dissolve = flow.at("dissolve").get<float>();
-        // The owned flow PS covers the blended and additive families, either with the zfeather intersection.
+        material.flow->mask = flow.value("mask", std::string());
+        // The owned flow PS covers the blended and additive families, either with the zfeather intersection; the lit
+        // flow (blended, with its mask) has no HDR expansion or dissolve.
         const bool flowFamily = material.family == FxMaterialFamily::alpha ||
                                 material.family == FxMaterialFamily::alphaFeather ||
                                 material.family == FxMaterialFamily::additive ||
                                 material.family == FxMaterialFamily::additiveFeather;
-        if (material.lit || material.frameBlend || !flowFamily || !(material.flow->period[0] > 0) ||
-            !(material.flow->period[2] > 0) ||
+        const bool litFlow = material.lit && !material.flow->hdr && !material.flow->dissolve &&
+                             !material.flow->mask.empty();
+        if ((material.lit && !litFlow) || (!material.lit && !material.flow->mask.empty()) || material.frameBlend ||
+            !flowFamily || !(material.flow->period[0] > 0) || !(material.flow->period[2] > 0) ||
             (material.flow->dissolve && !(std::isfinite(*material.flow->dissolve) && *material.flow->dissolve > 0)))
             throw std::runtime_error("unsupported IW7 flow material contract: " + name);
     }
@@ -2137,7 +2143,8 @@ SourceFxMaterial ReadFxMaterial(const std::filesystem::path &root,
     material.image = texture.at("image").get<std::string>();
     if (!validImageName(material.image))
         throw std::runtime_error("IW3 FX material has an invalid image name: " + name);
-    if (material.flow && (!validImageName(material.flow->map) || !validImageName(material.flow->surface)))
+    if (material.flow && (!validImageName(material.flow->map) || !validImageName(material.flow->surface) ||
+                          (!material.flow->mask.empty() && !validImageName(material.flow->mask))))
         throw std::runtime_error("IW7 flow material has an invalid image name: " + name);
     const auto &sampler = texture.at("samplerState");
     const std::string filter = sampler.at("filter").get<std::string>();
@@ -4615,8 +4622,10 @@ Json BuildFxMaterialDefinition(const SourceFxMaterial &source)
 
 // feather: the zfeather flow twins (IW7 PS d384b91e, 4622c9c5, a6efe634), which also read the template's scene depth and
 // Particle_MaterialData. additive: the additive flow (IW7 PS 40967ff1, 6a577499, 8ce146ac), which cuts and outputs as
-// Replay's additive effects do.
-Json BuildFlowFxTechset(const Json &stock, const std::string &name, const bool feather, const bool additive)
+// Replay's additive effects do. lit: IW7's lit flow (PS a386c911) on Replay's lit effect set (VS 372e0e1a / PS a9864c07,
+// 14 stable and 5 never arguments), its mask at MaterialTextureID_opacityMap.
+Json BuildFlowFxTechset(const Json &stock, const std::string &name, const bool feather, const bool additive,
+                        const bool lit)
 {
     using NativeTechnique = zonetool::iw8::MaterialTechnique;
     using NativeArgument = zonetool::iw8::MaterialShaderArgument;
@@ -4631,8 +4640,11 @@ Json BuildFlowFxTechset(const Json &stock, const std::string &name, const bool f
     nativeSet.techniqueMask.mask[0] = 1ull << emissive;
     Put(setHeader, 0, nativeSet);
     result["header"] = Hex(setHeader);
-    const std::string variant = std::string(additive ? "_add" : "") + (feather ? "_feather" : "");
-    const std::string defines = std::string(additive ? "#define FLOW_ADDITIVE 1\n" : "") +
+    if (lit && additive)
+        throw std::runtime_error("Replay's lit effect set has no additive flow");
+    const std::string variant = std::string(lit ? "_lit" : "") + (additive ? "_add" : "") + (feather ? "_feather" : "");
+    const std::string defines = std::string(lit ? "#define FLOW_LIT 1\n" : "") +
+                                (additive ? "#define FLOW_ADDITIVE 1\n" : "") +
                                 (feather ? "#define FLOW_FEATHER 1\n" : "");
     const auto pixel = Shader(17, "iw7_fx_flow" + variant, "iw7_effect_flow.hlsl",
         Compile(defines + ResourceText(IDR_IW3_EFFECT_FLOW_PIXEL_SHADER), "ps_5_0", "iw7_effect_flow.hlsl"));
@@ -4644,8 +4656,10 @@ Json BuildFlowFxTechset(const Json &stock, const std::string &name, const bool f
             continue;
         // Keep the native stable bindings. Row4 is viewOrigin; request gameTime in free row8.
         const auto original = Unhex(technique.at("args").get<std::string>());
-        if (native.perPrimArgCount || native.perObjArgCount || native.stableArgCount != 13 ||
-            native.neverArgCount != 4 || original.size() != 17 * sizeof(NativeArgument))
+        const unsigned stableCount = lit ? 14 : 13, neverCount = lit ? 5 : 4;
+        if (native.perPrimArgCount || native.perObjArgCount || native.stableArgCount != stableCount ||
+            native.neverArgCount != neverCount ||
+            original.size() != (stableCount + neverCount) * sizeof(NativeArgument))
             throw std::runtime_error("Replay flow template has an unexpected argument layout");
         std::vector<std::uint8_t> args;
         const auto argument = [&](const zonetool::iw8::MaterialArgumentType type, const std::uint8_t stage,
@@ -4654,26 +4668,47 @@ Json BuildFlowFxTechset(const Json &stock, const std::string &name, const bool f
             args.resize(offset + sizeof(NativeArgument));
             Put(args, offset, NativeArgument{type, stage, dest, index});
         };
-        for (unsigned index = 0; index < 13; ++index)
+        // The flow images follow the template's own textures (the lit set's Particle_MaterialData holds t6).
+        const std::uint16_t flowRegister = lit ? 7 : 6;
+        for (unsigned index = 0; index < stableCount; ++index)
         {
             if (index == 4)
                 argument(MTL_ARG_CODE_CONST, 16, 8, 2); // gameTime -> pixel CB2[8]
-            if (index == 12)
+            if (index == stableCount - 1)
             {
-                argument(MTL_ARG_MATERIAL_TEXTURE, 16, 6, 57); // native MaterialTextureID_flowMap
-                argument(MTL_ARG_MATERIAL_TEXTURE, 16, 7, 58); // native MaterialTextureID_flowSurfaceParamsMap
+                argument(MTL_ARG_MATERIAL_TEXTURE, 16, flowRegister, 57); // native MaterialTextureID_flowMap
+                argument(MTL_ARG_MATERIAL_TEXTURE, 16, flowRegister + 1, 58); // MaterialTextureID_flowSurfaceParamsMap
+                if (lit)
+                    argument(MTL_ARG_MATERIAL_TEXTURE, 16, 9, 27); // MaterialTextureID_opacityMap: the mask
             }
             args.insert(args.end(), original.begin() + index * sizeof(NativeArgument),
                         original.begin() + (index + 1) * sizeof(NativeArgument));
         }
-        argument(MTL_ARG_MATERIAL_CONST, 16, 0, 36); // emissiveParams0: source tint
-        argument(MTL_ARG_MATERIAL_CONST, 16, 1, 90); // flowMapConsts
-        argument(MTL_ARG_MATERIAL_CONST, 16, 2, 37); // emissiveParams1: source period
-        argument(MTL_ARG_MATERIAL_CONST, 16, 3, 38); // emissiveParams2: HDR mode
-        argument(MTL_ARG_MATERIAL_CONST, 2, 8, 94);
-        argument(MTL_ARG_MATERIAL_CONST, 2, 9, 95);
-        native.stableArgCount = 16;
-        native.neverArgCount = 6;
+        if (lit)
+        {
+            // The lit set's pixel rows (1 layerData1, 2 absorptionScale, 9 atlas) and vertex atlas rows 9-10 stay; the
+            // flow constants take rows 3 and 4.
+            argument(MTL_ARG_MATERIAL_CONST, 16, 1, 9);
+            argument(MTL_ARG_MATERIAL_CONST, 16, 2, 18);
+            argument(MTL_ARG_MATERIAL_CONST, 16, 3, 90); // flowMapConsts
+            argument(MTL_ARG_MATERIAL_CONST, 16, 4, 37); // emissiveParams1: source period
+            argument(MTL_ARG_MATERIAL_CONST, 2, 9, 94);
+            argument(MTL_ARG_MATERIAL_CONST, 16, 9, 94);
+            argument(MTL_ARG_MATERIAL_CONST, 2, 10, 95);
+            native.stableArgCount = 18;
+            native.neverArgCount = 7;
+        }
+        else
+        {
+            argument(MTL_ARG_MATERIAL_CONST, 16, 0, 36); // emissiveParams0: source tint
+            argument(MTL_ARG_MATERIAL_CONST, 16, 1, 90); // flowMapConsts
+            argument(MTL_ARG_MATERIAL_CONST, 16, 2, 37); // emissiveParams1: source period
+            argument(MTL_ARG_MATERIAL_CONST, 16, 3, 38); // emissiveParams2: HDR mode
+            argument(MTL_ARG_MATERIAL_CONST, 2, 8, 94);
+            argument(MTL_ARG_MATERIAL_CONST, 2, 9, 95);
+            native.stableArgCount = 16;
+            native.neverArgCount = 6;
+        }
         native.stableArgSize = 144;
         Put(header, 0, native);
         technique["header"] = Hex(header);
@@ -4703,7 +4738,7 @@ Json BuildFlowFxMaterialDefinition(const SourceFxMaterial &source, const std::st
     if (info.size() != 32)
         throw std::runtime_error("Replay flow material has an unexpected metadata layout");
     std::memcpy(&native.contents, info.data(), info.size());
-    native.textureCount = 3;
+    native.textureCount = source.lit ? 5 : 3;
     native.constantCount = 6;
     native.constantBufferCount = 1;
     std::memcpy(info.data(), &native.contents, info.size());
@@ -4711,6 +4746,52 @@ Json BuildFlowFxMaterialDefinition(const SourceFxMaterial &source, const std::st
                                     1.0f / source.columns, 1.0f / source.rows};
     const std::array<std::uint32_t, 4> atlasBits{source.rows * source.columns, source.columns - 1,
                                                static_cast<unsigned>(std::countr_zero(source.columns)), 0};
+    const auto texture = [](const std::uint8_t id) {
+        NativeTexture value{};
+        value.index = id;
+        const auto bytes = std::span(reinterpret_cast<const std::uint8_t *>(&value), offsetof(NativeTexture, image));
+        return Json{{"header", Hex(bytes)}, {"image", ""}};
+    };
+    if (source.lit)
+    {
+        // The lit set's material (BuildFxMaterialDefinition's lit branch: albedo 0, transmittance 0x44, layerData1 9 in
+        // pixel row 1, absorptionScale 18 in row 2, the atlas in vertex rows 9-10 and pixel row 9) with the flow maps
+        // (57, 58), the mask (27, MaterialTextureID_opacityMap) and the flow constants in pixel rows 3 (90) and 4 (37).
+        const std::array<std::uint32_t, 4> layerData{0xFFFFFFFFu, 0x00FF17E7u, 0x0000BC00u, 0u};
+        const std::array<float, 4> absorption{1, 1, 1, 1};
+        std::vector<std::uint8_t> constants, vertex(176), pixel(160), indices(zonetool::iw8::TECHNIQUE_COUNT, 0xFF);
+        const auto append = [&](const std::uint8_t id, const auto &value) {
+            const auto offset = constants.size();
+            constants.resize(offset + sizeof(NativeConstant));
+            NativeConstant constant{};
+            constant.index = id;
+            std::memcpy(&constant.literal, value.data(), sizeof(constant.literal));
+            Put(constants, offset, constant);
+        };
+        append(9, layerData);
+        append(18, absorption);
+        append(37, source.flow->period);
+        append(90, source.flow->scale);
+        append(94, atlas);
+        append(95, atlasBits);
+        std::memcpy(vertex.data() + 144, atlas.data(), 16);
+        std::memcpy(vertex.data() + 160, atlasBits.data(), 16);
+        std::memcpy(pixel.data() + 16, layerData.data(), 16);
+        std::memcpy(pixel.data() + 32, absorption.data(), 16);
+        std::memcpy(pixel.data() + 48, source.flow->scale.data(), 16);
+        std::memcpy(pixel.data() + 64, source.flow->period.data(), 16);
+        std::memcpy(pixel.data() + 144, atlas.data(), 16);
+        indices[zonetool::iw8::TECHNIQUE_EMISSIVE] = 0;
+        direct["info"] = Hex(info);
+        direct["techset"] = techset;
+        direct["textures"] = Json::array();
+        for (const auto id : std::array<std::uint8_t, 5>{0, 0x44, 57, 58, 27})
+            direct["textures"].push_back(texture(id));
+        direct["constants"] = Hex(constants);
+        direct["bufferIndices"] = Hex(indices);
+        direct["buffers"] = Json::array({Json::array({Hex(vertex), "", "", Hex(pixel)})});
+        return direct;
+    }
     // Pixel row 3: x = mkhdr, y = dissolve K, z = 1 with a dissolve.
     const std::array<float, 4> hdr{source.flow->hdr ? 1.0f : 0.0f, source.flow->dissolve.value_or(0.0f),
                                    source.flow->dissolve ? 1.0f : 0.0f, 0};
@@ -4740,12 +4821,7 @@ Json BuildFlowFxMaterialDefinition(const SourceFxMaterial &source, const std::st
     direct["techset"] = techset;
     direct["textures"] = Json::array();
     for (const auto id : std::array<std::uint8_t, 3>{18, 57, 58})
-    {
-        NativeTexture texture{};
-        texture.index = id;
-        const auto bytes = std::span(reinterpret_cast<const std::uint8_t *>(&texture), offsetof(NativeTexture, image));
-        direct["textures"].push_back({{"header", Hex(bytes)}, {"image", ""}});
-    }
+        direct["textures"].push_back(texture(id));
     direct["constants"] = Hex(constants);
     direct["bufferIndices"] = Hex(indices);
     direct["buffers"] = Json::array({Json::array({Hex(vertex), "", "", Hex(pixel)})});
@@ -8031,23 +8107,41 @@ RenderPlan PrepareRenderAssets(const std::filesystem::path &exportRoot, const Js
                 flowLibrary.emplace(replayZones, "common");
             const std::string techsetName = "tw/mw120r_fx_" + id + "_flow";
             const std::string techsetFile = stem + ".fx." + id + ".techset.json";
+            // The lit flow takes the lit twin of the unlit set (BuildFxMaterialDefinition's litTechset).
             const auto stock = flowLibrary->TechniqueSet(
-                "elcq/unlit_6_effect_bad_ta0_802_1004_0_1_0_0_0_100000023_0_0_2_0_0");
+                source.lit ? "elcq/unlit_6_effect_bad_ta0_802_1004_0_1_0_0_0_10000020b_0_0_2_0_0"
+                           : "elcq/unlit_6_effect_bad_ta0_802_1004_0_1_0_0_0_100000023_0_0_2_0_0");
             const bool additive = source.family == FxMaterialFamily::additive ||
                                   source.family == FxMaterialFamily::additiveFeather;
             WriteJson(mapDirectory / techsetFile,
-                      BuildFlowFxTechset(stock, techsetName, source.feather.has_value(), additive));
+                      BuildFlowFxTechset(stock, techsetName, source.feather.has_value(), additive, source.lit));
             direct = BuildFlowFxMaterialDefinition(source, techsetName);
             direct["techsetDefinition"] = techsetFile;
-            const std::array<std::string, 3> inputs{source.image, source.flow->map, source.flow->surface};
-            for (unsigned channel = 0; channel < inputs.size(); ++channel)
-            {
-                const auto &faces = image(inputs[channel]);
+            const auto flowImage = [&](const std::string &input) -> const Image & {
+                const auto &faces = image(input);
                 if (faces.size() != 1)
                     throw std::runtime_error("IW7 flow material needs 2D images: " + name);
-                residentImage(direct, channel, faces.front(), {1, 1, 1, 1}, "fxflow", false, nullptr, true);
+                return faces.front();
+            };
+            if (source.lit)
+            {
+                // Albedo, the black transmittance of the lit set (its alpha is then the particle's coverage), the flow
+                // maps and the mask.
+                residentImage(direct, 0, flowImage(source.image), {1, 1, 1, 1}, "fxflow", false, nullptr, true);
+                residentImage(direct, 1, SolidImage({0, 0, 0, 255}), {1, 1, 1, 1}, "fxlit", false, nullptr, true);
+                residentImage(direct, 2, flowImage(source.flow->map), {1, 1, 1, 1}, "fxflow", false, nullptr, true);
+                residentImage(direct, 3, flowImage(source.flow->surface), {1, 1, 1, 1}, "fxflow", false, nullptr, true);
+                residentImage(direct, 4, flowImage(source.flow->mask), {1, 1, 1, 1}, "fxflow", false, nullptr, true);
+                zt::info("iw7: FX material %s keeps native animated flow, lit by the scene, with its mask", name.c_str());
             }
-            zt::info("iw7: FX material %s keeps native animated flow and shader HDR expansion", name.c_str());
+            else
+            {
+                const std::array<std::string, 3> inputs{source.image, source.flow->map, source.flow->surface};
+                for (unsigned channel = 0; channel < inputs.size(); ++channel)
+                    residentImage(direct, channel, flowImage(inputs[channel]), {1, 1, 1, 1}, "fxflow", false, nullptr,
+                                  true);
+                zt::info("iw7: FX material %s keeps native animated flow and shader HDR expansion", name.c_str());
+            }
         }
         else if (source.family == FxMaterialFamily::decal)
         {
@@ -8107,10 +8201,13 @@ RenderPlan PrepareRenderAssets(const std::filesystem::path &exportRoot, const Js
             // debris atlases, whose cells keep alpha 1/255 and their grey, drew as grey squares).
             if (source.lit)
             {
-                // The lit technique blends by the albedo's alpha; the transmittance is white (absorptionScale 1
-                // then leaves only the front-lit term).
+                // The lit technique (PS a9864c07) writes the lit colour premultiplied by the albedo's alpha a, and
+                // a * (1 - absorptionScale * transmittance) as both its output alpha and the weight of the fog
+                // in-scatter and volumetric scatter. A black transmittance (absorptionScale 1) makes that a: IW7's
+                // lit particles (smoke, steam, dust) occlude what is behind them and take the fog over their own
+                // coverage. A white one left them drawing additively, the background undimmed.
                 residentImage(direct, 0, sourceImage.front(), {1, 1, 1, 1}, "fx");
-                residentImage(direct, 1, SolidImage({255, 255, 255, 255}), {1, 1, 1, 1}, "fxlit", false, nullptr,
+                residentImage(direct, 1, SolidImage({0, 0, 0, 255}), {1, 1, 1, 1}, "fxlit", false, nullptr,
                               true);
             }
             else if (source.premultiplied || source.family == FxMaterialFamily::alpha ||
