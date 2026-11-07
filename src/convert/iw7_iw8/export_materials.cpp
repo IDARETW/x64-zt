@@ -1130,9 +1130,16 @@ namespace zonetool::convert::iw7_iw8
 	{
 		bool flow_effect_material(const iw7::Material* material)
 		{
-			// The source PS bfc071e2 is the pinned flow/HDR contract; other flow permutations remain separate adapters.
-			return material && material->techniqueSet && asset_name(material->techniqueSet->name) ==
-				"eq_effectunlit_blend_lin_ct_ndw_flow_nocast_mkhdr_evc";
+			// Each name is pinned to its disassembled source PS: bfc071e2 (flow with mkhdr) and d384b91e (the same flow
+			// with the zfeather soft intersection, without mkhdr; Breakneck). Other flow permutations remain separate
+			// adapters.
+			if (!material || !material->techniqueSet)
+			{
+				return false;
+			}
+			const auto name = asset_name(material->techniqueSet->name);
+			return name == "eq_effectunlit_blend_lin_ct_ndw_flow_nocast_mkhdr_evc" ||
+				name == "eq_effectunlit_zfeather_blend_lin_ndw_flow_nocast";
 		}
 
 		// An effect material as the pipeline reads IW3 effect materials: an emissive sprite material of one colour map in

@@ -1,4 +1,5 @@
-// IW7 PS bfc071e2 flow/HDR sampling on Replay's native effect-quad interface.
+// IW7 PS bfc071e2 flow/HDR sampling on Replay's native effect-quad interface; with FLOW_FEATHER, IW7 PS d384b91e
+// (its zfeather twin without mkhdr: the same flow, plus the soft intersection with the scene).
 // The native f9c07ff5 VS supplies squared particle colour and separate emissive intensity.
 cbuffer Stable : register(b2) { float4 stable[9]; }
 cbuffer Material : register(b3) { float4 material[4]; }
@@ -12,14 +13,29 @@ Texture3D<float4> volumetricVisibility : register(t111);
 Texture2D<float4> volumetricDepth : register(t112);
 SamplerState colorSampler : register(s3);
 SamplerState screenSampler : register(s8);
+#ifdef FLOW_FEATHER
+// The template's own bindings (stock unlit effect PS b0ec5d88): the scene depth and each element's
+// Particle_MaterialData (192 bytes, indexed by the particle's COLOR3.x).
+struct ParticleMaterialData
+{
+    float4 rows[12];
+};
+Texture2D<float4> sceneDepth : register(t3);
+StructuredBuffer<ParticleMaterialData> particleMaterialData : register(t5);
+#endif
 
+// The native VS's whole output signature, in its register order and with the interpolation the stock PS declares:
+// a pixel shader that skips an element reads the next one's register (TEXCOORD3 is register 3).
 struct Input
 {
     float4 position : SV_POSITION;
     float4 color : COLOR0;
     float2 uv : TEXCOORD0;
+    float4 viewVector : TEXCOORD3;
     centroid float2 lightingUV : TEXCOORD5;
     float4 emissive : TEXCOORD8;
+    nointerpolation float4 center : POSITION0;
+    nointerpolation uint2 particle : COLOR3;
 };
 struct Output
 {
@@ -42,6 +58,19 @@ Output main(Input input)
     float4 b = colorMap.SampleBias(colorSampler, input.uv - velocity * phaseB, stable[7].y);
     float4 texel = lerp(a, b, weight);
     float alpha = texel.a * input.color.a * surface.r;
+#ifdef FLOW_FEATHER
+    // b0ec5d88 with feature flag 16 and its plain fade (+116 = 0, flags 32/64/128/1024 clear, as the converter writes
+    // them): alpha *= saturate((scene depth - particle depth) * +96.x), +96.x = IW7 featherParms.x. IW7 d384b91e takes
+    // min(|...|, 1), which is the same wherever the particle lies in front of the scene.
+    ParticleMaterialData data = particleMaterialData[input.particle.x];
+    if ((asuint(data.rows[11].w) & 16) != 0)
+    {
+        const uint level = asuint(stable[7].z);
+        const uint2 pixel = (uint2)(input.position.xy * stable[7].x) >> level;
+        const float depth = abs(sceneDepth.Load(int3(pixel, level)).r * 6);
+        alpha *= saturate((depth - input.position.w) * data.rows[6].x);
+    }
+#endif
     if (alpha <= 0.000061)
         discard;
     // Replay supplies the particle RGB squared. IW7 squares (texel * particleColour) before mkhdr.
