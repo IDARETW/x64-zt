@@ -1130,16 +1130,22 @@ namespace zonetool::convert::iw7_iw8
 	{
 		bool flow_effect_material(const iw7::Material* material)
 		{
-			// Each name is pinned to its disassembled source PS: bfc071e2 (flow with mkhdr) and d384b91e (the same flow
-			// with the zfeather soft intersection, without mkhdr; Breakneck). Other flow permutations remain separate
-			// adapters.
-			if (!material || !material->techniqueSet)
+			// Each name is pinned to its disassembled source PS, all one flow with alpha blending: bfc071e2 (colour tint,
+			// mkhdr), 39e31a06 (mkhdr, no tint; Proto), 2241e5f5 (neither; Scorch), 6d8b8710 (neither; Hawkwar) and
+			// d384b91e (6d8b8710 with the zfeather soft intersection; Breakneck). The evc ones also multiply by IW7's
+			// tonemap code constant 222; the owned PS takes Replay's effect exposure (scene[42].x) for all, as the stock
+			// effect PS b0ec5d88 does for every converted effect. The additive and lit flow permutations restructure
+			// their fog and output and remain separate adapters.
+			static constexpr std::array<std::string_view, 5> names
 			{
-				return false;
-			}
-			const auto name = asset_name(material->techniqueSet->name);
-			return name == "eq_effectunlit_blend_lin_ct_ndw_flow_nocast_mkhdr_evc" ||
-				name == "eq_effectunlit_zfeather_blend_lin_ndw_flow_nocast";
+				"eq_effectunlit_blend_lin_ct_ndw_flow_nocast_mkhdr_evc",
+				"eq_effectunlit_blend_lin_ndw_flow_nocast_mkhdr_evc",
+				"eq_effectunlit_blend_lin_ndw_flow_nocast_evc",
+				"eq_effectunlit_blend_lin_ndw_flow_nocast",
+				"eq_effectunlit_zfeather_blend_lin_ndw_flow_nocast",
+			};
+			return material && material->techniqueSet &&
+				std::ranges::find(names, std::string_view(asset_name(material->techniqueSet->name))) != names.end();
 		}
 
 		// An effect material as the pipeline reads IW3 effect materials: an emissive sprite material of one colour map in
@@ -1219,7 +1225,9 @@ namespace zonetool::convert::iw7_iw8
 				const auto eye_offset = has("eyeoffset") && material_constant(material, "eyeOffsetParms");
 				technique = std::format("effect{}{}{}{}", feather ? "_zfeather" : "", falloff ? "_falloff" : "", additive ? "_add" : "",
 					eye_offset ? "_eyeoffset" : "");
-				auto tint = material_constant(material, "colorTint").value_or(std::array{1.0f, 1.0f, 1.0f, 1.0f});
+				// A flow PS without the ct token has no tint multiply (39e31a06, 2241e5f5, 6d8b8710, d384b91e).
+				auto tint = flow && !has("ct") ? std::array{1.0f, 1.0f, 1.0f, 1.0f}
+					: material_constant(material, "colorTint").value_or(std::array{1.0f, 1.0f, 1.0f, 1.0f});
 				for (std::size_t c = 0; c < 3; c++)
 				{
 					tint[c] *= (has("effectunlit") ? light_scale : 1.0f) * (has("mkhdr") && !flow ? hdr_expansion : 1.0f);
