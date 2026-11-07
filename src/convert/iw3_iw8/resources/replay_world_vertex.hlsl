@@ -144,12 +144,14 @@ Output main(uint id : SV_VertexID) {
     // farther than any geometry.
     if (sky)
         o.position.z = o.position.w * 1e-7;
-    // The sky's other surfaces keep the order of their distances (one scale for all, export_world): a constant z gives
-    // the reversed depth 0.012 / w, a perspective depth from 2e-7 at their farthest (60000 units as drawn) toward the
-    // camera, in front of the sky box and behind the world. With one depth for all, the pieces of Breakneck's black hole
-    // flickered against each other in shards as the GPU's draw order changed.
+    // The sky's other surfaces keep the order of their distances (one scale for all, export_world): z = 1e-7 w + 1.2e-4
+    // gives the reversed depth 1e-7 + 1.2e-4 / w, a perspective depth just in front of the sky box (1e-7): 1.02e-7 at
+    // their farthest (60000 units as drawn), about 2e-7 at Breakneck's nearest, far behind the world (Replay's main view
+    // is an infinite reversed projection, depth = zNear / w: BuildInfinitePerspectiveMatrix 0x1413DD900). With one
+    // depth for all, the pieces of Breakneck's black hole flickered against each other in shards as the GPU's draw order
+    // changed.
     if (skyObject)
-        o.position.z = .012;
+        o.position.z = o.position.w * 1e-7 + 1.2e-4;
 #ifdef GLASS_PANE
     uint color = vertex.color;
 #else
