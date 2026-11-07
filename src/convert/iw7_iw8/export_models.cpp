@@ -1081,7 +1081,7 @@ namespace zonetool::convert::iw7_iw8
 	namespace
 	{
 		// The translation (in the space of its parent) of a bone at the first and the last key of an animation that leaves
-		// it unrotated. Replay's part walk (sub_1414D3460) reads the rotation parts, then the translation parts with the
+		// it unrotated. Replay's part walk (XAnimCalcLeafBlendWeights 0x1414D3460) reads the rotation parts, then the translation parts with the
 		// bone of each in dataByte (key count, frame indices, min and size in dataInt, keys of 3 bytes or 3 shorts:
 		// min + key * size), then the constant ones and the still ones. A bone that the animation names in no part keeps
 		// its bind pose.

@@ -8642,7 +8642,7 @@ void AddVfxAtlas(const PreparedFxElement &source, iw8::vfx::State &state)
 
 // Replay plays bullet-impact effects with Z along the surface normal: the impact
 // player (0x1733E10) copies the normal into axis row 2 and derives rows 0 and 1
-// from it (sub_1413DBBE0) before spawning the effect. IW3 plays them with X along
+// from it (AxisRandomAroundForward 0x1413DBBE0) before spawning the effect. IW3 plays them with X along
 // the normal, so every IW3 element thrown out of the surface went sideways across
 // it (owner tests 2026-10-14, zt-28..zt-30). Rotate the element's local frame
 // X -> Z, Z -> -X (Y stays): velocities, spawn offsets, model spin and collision
