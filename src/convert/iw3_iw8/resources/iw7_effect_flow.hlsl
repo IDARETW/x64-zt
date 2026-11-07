@@ -8,7 +8,7 @@
 // and d241aa2a without the feather) bind a white mask. FLOW_UVD: IW7's lit UV distortion (c258449e, 5d9b9a5b, and the
 // twins without the dissolve 684ca3a1, 69656d4c) on the same bindings, its noise map in the flow map's slot.
 // FLOW_ATEST: IW7's alpha-tested lit effects (c4e82cfb, c4b7c455; with FLOW_UVD 5e767f2f) on the same bindings, cut at
-// 0.501961 and drawn opaque.
+// 0.501961 and drawn opaque. FLOW_UVD_CELL: the zfeather uvd twins' noise per atlas cell (8d6f8ca6, 971dbac6).
 cbuffer Stable : register(b2) { float4 stable[9]; }
 #ifdef FLOW_LIT
 cbuffer Material : register(b3) { float4 material[5]; }
@@ -74,6 +74,25 @@ struct Output
     float4 opacity : SV_TARGET1;
 };
 
+#ifdef FLOW_FEATHER
+// b0ec5d88 with feature flag 16 and its plain fade (+116 = 0, flags 32/64/128/1024 clear, as the converter writes them):
+// the value times saturate((scene depth - particle depth) * +96.x), +96.x = IW7 featherParms.x; unchanged without the
+// flag. IW7 d384b91e, 8d6f8ca6 and 971dbac6 take min(|...|, 1), which is the same wherever the particle lies in front of
+// the scene.
+float Feathered(Input input, float value)
+{
+    ParticleMaterialData data = particleMaterialData[input.particle.x];
+    if ((asuint(data.rows[11].w) & 16) != 0)
+    {
+        const uint level = asuint(stable[7].z);
+        const uint2 pixel = (uint2)(input.position.xy * stable[7].x) >> level;
+        const float depth = abs(sceneDepth.Load(int3(pixel, level)).r * 6);
+        value *= saturate((depth - input.position.w) * data.rows[6].x);
+    }
+    return value;
+}
+#endif
+
 Output main(Input input)
 {
 #ifdef FLOW_UVD
@@ -82,12 +101,23 @@ Output main(Input input)
     // 3: scroll xy, scale zw; row 4: strength, atlas yz, dissolve K w); the vertex alpha dissolves the alpha instead of
     // scaling it, alpha = saturate((texel.a + vertex alpha) * K - K). Their twins without the dissolve (K 0: 684ca3a1,
     // eq_effect_blend_lin_ndw_shl_uvd_nocast_norm_spec; 69656d4c, eq_effect_blend_lin_ndw_uvd_nocast) scale it,
-    // alpha = texel.a * vertex alpha.
+    // alpha = texel.a * vertex alpha. The zfeather twins (8d6f8ca6, eq_effect_zfeather_blend_lin_ct_ndw_shl_uvd_ad_*;
+    // 971dbac6, eq_effect_zfeather_atest_lin_shl_uvd_ad_*) take the noise per atlas cell, at frac(uv * atlas) (FLOW_UVD_CELL),
+    // and feather the texel's alpha inside the dissolve, saturate((texel.a * fade + vertex alpha) * K - K).
+#ifdef FLOW_UVD_CELL
+    float2 noiseUV = frac(input.uv * material[4].yz) * material[3].zw + stable[8].w * material[3].xy;
+#else
     float2 noiseUV = input.uv * material[3].zw + stable[8].w * material[3].xy;
+#endif
     float2 offset = (flowMap.Sample(colorSampler, noiseUV).xy * 2 - 1) * material[4].x / material[4].yz;
     float4 texel = colorMap.SampleBias(colorSampler, input.uv + offset, stable[7].y);
-    float alpha = material[4].w > 0 ? saturate((texel.a + input.color.a) * material[4].w - material[4].w)
-                                    : texel.a * input.color.a;
+#ifdef FLOW_FEATHER
+    float coverage = Feathered(input, texel.a);
+#else
+    float coverage = texel.a;
+#endif
+    float alpha = material[4].w > 0 ? saturate((coverage + input.color.a) * material[4].w - material[4].w)
+                                    : coverage * input.color.a;
 #elif defined(FLOW_ATEST)
     // IW7 c4e82cfb / c4b7c455 (eq_effect_atest_lin_nocast, eq/el_effect_atest_lin_shl_nocast_norm_spec): the plain
     // texel, no flow; its alpha times the particle's is cut below.
@@ -124,18 +154,9 @@ Output main(Input input)
     if (material[3].z != 0)
         alpha = saturate((texel.a * surface.r + input.color.a) * material[3].y - material[3].y);
 #endif
-#ifdef FLOW_FEATHER
-    // b0ec5d88 with feature flag 16 and its plain fade (+116 = 0, flags 32/64/128/1024 clear, as the converter writes
-    // them): alpha *= saturate((scene depth - particle depth) * +96.x), +96.x = IW7 featherParms.x. IW7 d384b91e takes
-    // min(|...|, 1), which is the same wherever the particle lies in front of the scene.
-    ParticleMaterialData data = particleMaterialData[input.particle.x];
-    if ((asuint(data.rows[11].w) & 16) != 0)
-    {
-        const uint level = asuint(stable[7].z);
-        const uint2 pixel = (uint2)(input.position.xy * stable[7].x) >> level;
-        const float depth = abs(sceneDepth.Load(int3(pixel, level)).r * 6);
-        alpha *= saturate((depth - input.position.w) * data.rows[6].x);
-    }
+#if defined(FLOW_FEATHER) && !defined(FLOW_UVD)
+    // The soft intersection with the scene (the UV distortion feathers inside its dissolve, above).
+    alpha = Feathered(input, alpha);
 #endif
 #ifndef FLOW_ADDITIVE
     if (alpha <= 0.000061)
