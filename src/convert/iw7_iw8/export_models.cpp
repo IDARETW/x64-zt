@@ -687,6 +687,42 @@ namespace zonetool::convert::iw7_iw8
 		{
 			ZONETOOL_INFO("iw7: %zu models carry reactive motion (e.g. %s)", reactive_models, reactive.data());
 		}
+
+		// The models with a PhysicsAsset of their own, which the conversion does not read: their physics comes from their
+		// geometry, as their physics LOD's collision mesh holds it. Nearly all hold one body (Breakneck 669 of 684); the
+		// hinged ones (cabinet doors, clocks, the ragdoll) hold several, joined by constraints, which a clutter prop of them
+		// loses (it moves as one body).
+		std::map<std::pair<int, int>, std::size_t> physics_shapes;
+		std::string hinged;
+		for (const auto& [name, model] : output.models)
+		{
+			const auto* resolved = model ? source.resolve(iw7::ASSET_TYPE_XMODEL, const_cast<iw7::XModel*>(model)) : nullptr;
+			const auto* asset = resolved && resolved->physicsAsset
+				? source.resolve(iw7::ASSET_TYPE_PHYSICSASSET, resolved->physicsAsset) : nullptr;
+			if (!asset)
+			{
+				continue;
+			}
+
+			physics_shapes[{asset->numRigidBodies, asset->numConstraints}]++;
+			if (asset->numRigidBodies > 1 || asset->numConstraints > 0)
+			{
+				hinged += std::format("{}{} ({} bodies, {} constraints)", hinged.empty() ? "" : ", ", name,
+					asset->numRigidBodies, asset->numConstraints);
+			}
+		}
+
+		std::string tally;
+		for (const auto& [shape, count] : physics_shapes)
+		{
+			tally += std::format("{}{} x {}/{}", tally.empty() ? "" : ", ", count, shape.first, shape.second);
+		}
+
+		if (!physics_shapes.empty())
+		{
+			ZONETOOL_INFO("iw7: PhysicsAssets by bodies/constraints: %s; the multi-body ones convert as one body: %s",
+				tally.data(), hinged.empty() ? "none" : hinged.data());
+		}
 	}
 
 	namespace
