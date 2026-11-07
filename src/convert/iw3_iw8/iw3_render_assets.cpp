@@ -255,6 +255,9 @@ struct SourceFxMaterial
         // IW7's lit UV distortion (iw7Uvd: PS c258449e, 5d9b9a5b) in place of the flow: map is its noise map, scale its
         // scroll (xy) and scale (zw), period the strength, the atlas (yz) and the dissolve K (w); no surface map.
         bool uvd{};
+        // IW7's alpha-tested lit effects (iw7AlphaTest: PSs c4e82cfb, c4b7c455, and 5e767f2f with the UV distortion):
+        // cut at 0.501961 and drawn opaque; without the distortion they read no flow image.
+        bool atest{};
     };
     std::optional<Flow> flow;
 };
@@ -2101,6 +2104,16 @@ SourceFxMaterial ReadFxMaterial(const std::filesystem::path &root,
             throw std::runtime_error("unsupported IW7 UV-distortion material contract: " + name);
         material.flow = std::move(flow);
     }
+    if (source.value("iw7AlphaTest", false))
+    {
+        // The owned lit effect PS cuts and draws it opaque (FLOW_ATEST), alone or with the UV distortion.
+        if (!material.flow)
+            material.flow.emplace();
+        if (!material.lit || material.frameBlend || material.family != FxMaterialFamily::alpha ||
+            (!material.flow->uvd && !material.flow->map.empty()) || material.flow->dissolve)
+            throw std::runtime_error("unsupported IW7 alpha-tested effect contract: " + name);
+        material.flow->atest = true;
+    }
     if (!material.rows || !material.columns || material.rows > 255 || material.columns > 255 ||
         !std::has_single_bit(material.columns) ||
         static_cast<std::uint64_t>(material.rows) * material.columns > 65535)
@@ -2183,8 +2196,9 @@ SourceFxMaterial ReadFxMaterial(const std::filesystem::path &root,
     material.image = texture.at("image").get<std::string>();
     if (!validImageName(material.image))
         throw std::runtime_error("IW3 FX material has an invalid image name: " + name);
-    if (material.flow && (!validImageName(material.flow->map) ||
-                          (!material.flow->uvd && !validImageName(material.flow->surface)) ||
+    // An alpha-tested effect without the distortion has no flow image; the UV distortion has no surface map.
+    if (material.flow && (((!material.flow->atest || material.flow->uvd) && !validImageName(material.flow->map)) ||
+                          (!material.flow->uvd && !material.flow->atest && !validImageName(material.flow->surface)) ||
                           (!material.flow->mask.empty() && !validImageName(material.flow->mask))))
         throw std::runtime_error("IW7 flow material has an invalid image name: " + name);
     const auto &sampler = texture.at("samplerState");
@@ -4713,7 +4727,7 @@ Json BuildFxMaterialDefinition(const SourceFxMaterial &source)
 // 14 stable and 5 never arguments), its mask at MaterialTextureID_opacityMap. uvd: IW7's lit UV distortion (PS c258449e,
 // 5d9b9a5b) on the lit set in place of the flow, with its tint in pixel row 0.
 Json BuildFlowFxTechset(const Json &stock, const std::string &name, const bool feather, const bool additive,
-                        const bool lit, const bool uvd = false)
+                        const bool lit, const bool uvd = false, const bool atest = false)
 {
     using NativeTechnique = zonetool::iw8::MaterialTechnique;
     using NativeArgument = zonetool::iw8::MaterialShaderArgument;
@@ -4730,13 +4744,14 @@ Json BuildFlowFxTechset(const Json &stock, const std::string &name, const bool f
     result["header"] = Hex(setHeader);
     if (lit && additive)
         throw std::runtime_error("Replay's lit effect set has no additive flow");
-    if (uvd && !lit)
-        throw std::runtime_error("the owned UV distortion is lit only");
+    if ((uvd || atest) && !lit)
+        throw std::runtime_error("the owned UV distortion and alpha test are lit only");
     const std::string variant = std::string(lit ? "_lit" : "") + (additive ? "_add" : "") + (feather ? "_feather" : "") +
-                                (uvd ? "_uvd" : "");
+                                (uvd ? "_uvd" : "") + (atest ? "_atest" : "");
     const std::string defines = std::string(lit ? "#define FLOW_LIT 1\n" : "") +
                                 (additive ? "#define FLOW_ADDITIVE 1\n" : "") +
-                                (feather ? "#define FLOW_FEATHER 1\n" : "") + (uvd ? "#define FLOW_UVD 1\n" : "");
+                                (feather ? "#define FLOW_FEATHER 1\n" : "") + (uvd ? "#define FLOW_UVD 1\n" : "") +
+                                (atest ? "#define FLOW_ATEST 1\n" : "");
     const auto pixel = Shader(17, "iw7_fx_flow" + variant, "iw7_effect_flow.hlsl",
         Compile(defines + ResourceText(IDR_IW3_EFFECT_FLOW_PIXEL_SHADER), "ps_5_0", "iw7_effect_flow.hlsl"));
     for (auto technique : stock.at("techniques"))
@@ -8337,7 +8352,7 @@ RenderPlan PrepareRenderAssets(const std::filesystem::path &exportRoot, const Js
                                   source.family == FxMaterialFamily::additiveFeather;
             WriteJson(mapDirectory / techsetFile,
                       BuildFlowFxTechset(stock, techsetName, source.feather.has_value(), additive, source.lit,
-                                         source.flow->uvd));
+                                         source.flow->uvd, source.flow->atest));
             direct = BuildFlowFxMaterialDefinition(source, techsetName);
             direct["techsetDefinition"] = techsetFile;
             const auto flowImage = [&](const std::string &input) -> const Image & {
@@ -8352,14 +8367,21 @@ RenderPlan PrepareRenderAssets(const std::filesystem::path &exportRoot, const Js
                 // maps and the mask: white for the lit flows without one (d29f9b4f / d241aa2a, a386c911 less its mask).
                 residentImage(direct, 0, flowImage(source.image), {1, 1, 1, 1}, "fxflow", false, nullptr, true);
                 residentImage(direct, 1, SolidImage({0, 0, 0, 255}), {1, 1, 1, 1}, "fxlit", false, nullptr, true);
-                residentImage(direct, 2, flowImage(source.flow->map), {1, 1, 1, 1}, "fxflow", false, nullptr, true);
-                // The UV distortion reads no surface map: white.
-                residentImage(direct, 3, source.flow->uvd ? SolidImage({255, 255, 255, 255}) : flowImage(source.flow->surface),
-                              {1, 1, 1, 1}, source.flow->uvd ? "fxlit" : "fxflow", false, nullptr, true);
+                // An alpha-tested effect without the distortion reads no flow map, the UV distortion no surface map:
+                // white.
+                const bool flowMap = !source.flow->atest || source.flow->uvd;
+                residentImage(direct, 2, flowMap ? flowImage(source.flow->map) : SolidImage({255, 255, 255, 255}),
+                              {1, 1, 1, 1}, flowMap ? "fxflow" : "fxlit", false, nullptr, true);
+                const bool surfaceMap = !source.flow->uvd && !source.flow->atest;
+                residentImage(direct, 3, surfaceMap ? flowImage(source.flow->surface) : SolidImage({255, 255, 255, 255}),
+                              {1, 1, 1, 1}, surfaceMap ? "fxflow" : "fxlit", false, nullptr, true);
                 const bool masked = !source.flow->mask.empty();
                 residentImage(direct, 4, masked ? flowImage(source.flow->mask) : SolidImage({255, 255, 255, 255}),
                               {1, 1, 1, 1}, masked ? "fxflow" : "fxlit", false, nullptr, true);
-                if (source.flow->uvd)
+                if (source.flow->atest)
+                    zt::info("iw7: FX material %s keeps its alpha test%s, lit by the scene", name.c_str(),
+                             source.flow->uvd ? " and native UV distortion" : "");
+                else if (source.flow->uvd)
                     zt::info("iw7: FX material %s keeps its native UV distortion%s, lit by the scene", name.c_str(),
                              source.flow->dissolve ? " and alpha dissolve" : "");
                 else

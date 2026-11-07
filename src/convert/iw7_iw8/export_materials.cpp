@@ -1274,12 +1274,36 @@ namespace zonetool::convert::iw7_iw8
 		// alone, as the owned lit PS lights them all).
 		bool uvd_effect_material(const iw7::Material* material)
 		{
-			static constexpr std::array<std::string_view, 4> names
+			static constexpr std::array<std::string_view, 6> names
 			{
 				"eq_effect_blend_lin_ndw_shl_uvd_ad_nocast_norm_spec",
 				"eq_effect_blend_lin_ct_ndw_shl_uvd_ad_nocast_norm_spec",
 				"eq_effect_blend_lin_ndw_shl_uvd_nocast_norm_spec",
 				"eq_effect_blend_lin_ndw_uvd_nocast",
+				// The alpha-tested twin (5e767f2f; atest_effect_material).
+				"eq_effect_atest_lin_uvd_nocast",
+				"el_effect_atest_lin_uvd_nocast",
+			};
+			return material && material->techniqueSet &&
+				std::ranges::find(names, std::string_view(asset_name(material->techniqueSet->name))) != names.end();
+		}
+
+		// IW7's alpha-tested lit effects, each name pinned to its disassembled PS: the particle (texel * vertex colour) is cut
+		// where its alpha falls below 0.501961 and draws opaque (o0.w = 1), squared and lit, then fogged and volumetrically
+		// attenuated. c4e82cfb (eq_effect_atest_lin_nocast) lights it by the per-particle lighting map; c4b7c455
+		// (eq/el_effect_atest_lin_shl_nocast_norm_spec, eq_effect_atest_lin_shl_nocast_evc_norm_spec: Breakneck's debris) by
+		// its normal map and the scene's lights, which the owned lit effect PS takes from the lighting map as for the lit
+		// flows; 5e767f2f (eq/el_effect_atest_lin_uvd_nocast) is c4e82cfb with the UV distortion.
+		bool atest_effect_material(const iw7::Material* material)
+		{
+			static constexpr std::array<std::string_view, 6> names
+			{
+				"eq_effect_atest_lin_nocast",
+				"eq_effect_atest_lin_shl_nocast_norm_spec",
+				"el_effect_atest_lin_shl_nocast_norm_spec",
+				"eq_effect_atest_lin_shl_nocast_evc_norm_spec",
+				"eq_effect_atest_lin_uvd_nocast",
+				"el_effect_atest_lin_uvd_nocast",
 			};
 			return material && material->techniqueSet &&
 				std::ranges::find(names, std::string_view(asset_name(material->techniqueSet->name))) != names.end();
@@ -1536,6 +1560,13 @@ namespace zonetool::convert::iw7_iw8
 
 				result["iw7Uvd"] = {{"map", *map}, {"scroll", *scroll},
 					{"parameters", {(*strength)[3], (*atlas_cells)[0], (*atlas_cells)[1], dissolves ? (*dissolve)[0] : 0.0f}}};
+			}
+
+			// An alpha-tested lit effect (atest_effect_material): the pipeline's owned lit effect PS cuts and draws it opaque
+			// (FLOW_ATEST). Frame-blended atlases keep Replay's frame-blend technique, blended.
+			if (atest_effect_material(material) && !frame_blend)
+			{
+				result["iw7AlphaTest"] = true;
 			}
 
 			return result;
