@@ -176,6 +176,9 @@ struct SourceStaticModel
     std::optional<SourceRootBone> rootBone;
     // Simulated clutter body from the IW3 physics preset (dynamic models).
     std::optional<iw8::havok::ClutterBody> clutter;
+    // Clutter that moves in pieces: its bodies (each on the bone of its name) and their hinges, from the source's
+    // physics asset; the clutter body gives their material and class.
+    std::optional<iw8::havok::PhysicsSystem> physicsSystem;
     // Reactive motion (IW7 foliage): the wind scales and parts of Replay's reactive-motion sim.
     std::optional<convert::xmodel::Iw8ReactiveMotion> reactiveMotion;
 };
@@ -3408,7 +3411,138 @@ std::optional<iw8::havok::ClutterBody> ReadPhysicsPreset(const std::filesystem::
     return iw8::havok::ClutterBody{mass, material, mass <= 2.0f};
 }
 
-SourceDynamicEntities ReadDynamicEntities(const Json &collision, const std::filesystem::path &root)
+// The bodies and hinges of clutter that moves in pieces: an extraction's physic/<name> (schema 1, game units).
+iw8::havok::PhysicsSystem ReadPhysicsSystem(const std::filesystem::path &root, const std::string &name)
+{
+    if (name.empty() || name.find_first_of("/\\") != std::string::npos)
+        throw std::runtime_error("invalid physics system name: " + name);
+    const Json source = ReadJson(SafeChild(root, std::filesystem::path("physic") / name));
+    if (source.value("schema", 0) != 1)
+        throw std::runtime_error("physics system " + name + " has an unknown schema");
+
+    iw8::havok::PhysicsSystem system;
+    for (const Json &entry : source.at("bodies"))
+    {
+        iw8::havok::PhysicsSystemBody body;
+        body.name = entry.at("name").get<std::string>();
+        body.position = ReadVector<3>(entry.at("position"));
+        body.orientation = ReadVector<4>(entry.at("orientation"));
+        body.mass = entry.at("mass").get<float>();
+        for (const Json &piece : entry.at("pieces"))
+        {
+            iw8::havok::PhysicsSystemBody::Piece converted;
+            for (const Json &point : piece.at("points"))
+                converted.points.push_back(ReadVector<3>(point));
+            converted.convexRadius = piece.at("convex_radius").get<float>();
+            body.pieces.push_back(std::move(converted));
+        }
+        system.bodies.push_back(std::move(body));
+    }
+
+    const auto frame = [](const Json &value) {
+        iw8::havok::PhysicsHinge::Frame result;
+        for (std::size_t column = 0; column < 3; ++column)
+            result.rotation[column] = ReadVector<3>(value.at("rotation").at(column));
+        result.translation = ReadVector<3>(value.at("translation"));
+        return result;
+    };
+    for (const Json &entry : source.at("hinges"))
+    {
+        iw8::havok::PhysicsHinge hinge;
+        hinge.name = entry.at("name").get<std::string>();
+        hinge.bodyA = entry.at("body_a").get<std::uint32_t>();
+        hinge.bodyB = entry.at("body_b").get<std::uint32_t>();
+        if (hinge.bodyA >= system.bodies.size() || hinge.bodyB >= system.bodies.size() || hinge.bodyA == hinge.bodyB)
+            throw std::runtime_error("physics system " + name + " has a hinge between bodies it does not have");
+        hinge.frameA = frame(entry.at("frame_a"));
+        hinge.frameB = frame(entry.at("frame_b"));
+        const Json &stabilization = entry.at("stabilization");
+        hinge.stabilization = stabilization.at("enabled").get<bool>();
+        hinge.maxLinearImpulse = stabilization.at("max_linear_impulse").get<float>();
+        hinge.maxAngularImpulse = stabilization.at("max_angular_impulse").get<float>();
+        hinge.maxAngle = stabilization.at("max_angle").get<float>();
+        hinge.freeAxis = entry.at("free_axis").get<std::uint8_t>();
+        const Json &ballSocket = entry.at("ball_socket");
+        hinge.solvingMethod = ballSocket.at("solving_method").get<std::uint8_t>();
+        hinge.bodiesToNotify = ballSocket.at("bodies_to_notify").get<std::uint8_t>();
+        hinge.velocityStabilization = ballSocket.at("velocity_stabilization").get<std::uint8_t>();
+        hinge.linearImpulseLimit = ballSocket.at("linear_impulse_limit").get<bool>();
+        hinge.breachImpulse = ballSocket.at("breach_impulse").get<float>();
+        hinge.inertiaStabilization = ballSocket.at("inertia_stabilization").get<float>();
+        hinge.limited = entry.at("limited").get<bool>();
+        if (hinge.limited)
+        {
+            const Json &friction = entry.at("friction");
+            hinge.friction = friction.at("enabled").get<bool>();
+            hinge.frictionAxis = friction.at("first_axis").get<std::uint8_t>();
+            hinge.frictionAxes = friction.at("axis_count").get<std::uint8_t>();
+            hinge.maxFrictionTorque = friction.at("max_torque").get<float>();
+            const Json &limit = entry.at("limit");
+            hinge.limit = limit.at("enabled").get<bool>();
+            hinge.limitAxis = limit.at("axis").get<std::uint8_t>();
+            hinge.cosineAxis = limit.at("cosine_axis").get<std::uint8_t>();
+            hinge.minAngle = limit.at("min_angle").get<float>();
+            hinge.maxLimitAngle = limit.at("max_angle").get<float>();
+            hinge.limitTau = limit.at("tau").get<float>();
+            hinge.limitDamping = limit.at("damping").get<float>();
+        }
+        system.hinges.push_back(std::move(hinge));
+    }
+    return system;
+}
+
+// The bodies of a system that the model's skeleton can show: the first (which carries the clutter) and each other one
+// that a bone has the name of (DynEntCL_ResolveBodyLodBoneIndex 0x1417F0D80 binds bodies to bones by name), with the
+// hinges between kept bodies. Nothing when fewer than two bodies stay.
+std::optional<iw8::havok::PhysicsSystem> KeepBoneBodies(const iw8::havok::PhysicsSystem &system,
+                                                         const SourceStaticModel &model)
+{
+    const auto lower = [](std::string text) {
+        std::ranges::transform(text, text.begin(), [](const unsigned char c) { return static_cast<char>(std::tolower(c)); });
+        return text;
+    };
+    std::vector<std::optional<std::uint32_t>> kept(system.bodies.size());
+    iw8::havok::PhysicsSystem result;
+    std::string dropped;
+    for (std::size_t index = 0; index < system.bodies.size(); ++index)
+    {
+        const auto &body = system.bodies[index];
+        const auto bone = std::ranges::find_if(model.bones, [&](const SourceBone &b) { return lower(b.name) == lower(body.name); });
+        if (index && bone == model.bones.end())
+        {
+            dropped += (dropped.empty() ? "" : ", ") + body.name;
+            continue;
+        }
+        if (index && bone != model.bones.end())
+        {
+            const Vec3 offset = Subtract(bone->origin, body.position);
+            if (std::sqrt(Dot(offset, offset)) > 0.5f)
+                zt::warn("iw3: clutter %s body %s lies %.2f units from its bone", model.name.c_str(), body.name.c_str(),
+                         std::sqrt(Dot(offset, offset)));
+        }
+        kept[index] = static_cast<std::uint32_t>(result.bodies.size());
+        result.bodies.push_back(body);
+    }
+
+    for (const auto &hinge : system.hinges)
+    {
+        if (!kept[hinge.bodyA] || !kept[hinge.bodyB])
+            continue;
+        auto converted = hinge;
+        converted.bodyA = *kept[hinge.bodyA];
+        converted.bodyB = *kept[hinge.bodyB];
+        result.hinges.push_back(std::move(converted));
+    }
+
+    if (!dropped.empty())
+        zt::info("iw3: clutter %s keeps no bone for its bodies %s; they are left out", model.name.c_str(), dropped.c_str());
+    if (result.bodies.size() < 2)
+        return std::nullopt;
+    return result;
+}
+
+SourceDynamicEntities ReadDynamicEntities(const Json &collision, const std::filesystem::path &root,
+                                          const std::filesystem::path &skeletonRoot)
 {
     SourceDynamicEntities result;
     const auto modelCount = collision.value("dynamic_model_count", std::size_t{});
@@ -3443,10 +3577,26 @@ SourceDynamicEntities ReadDynamicEntities(const Json &collision, const std::file
         if (found == modelCache.end())
         {
             const std::size_t modelIndex = result.models.models.size();
-            result.models.models.push_back(ReadSourceModel(root, modelName));
+            std::optional<iw8::havok::PhysicsSystem> system;
+            if (definition.contains("physics_system") && definition.at("physics_system").is_string())
+                system = ReadPhysicsSystem(root, definition.at("physics_system").get<std::string>());
+            // Clutter in pieces keeps its skeleton: its bodies move the bones of their names.
+            result.models.models.push_back(system ? ReadSourceModel(root, modelName, false, skeletonRoot)
+                                                  : ReadSourceModel(root, modelName));
+            auto *model = &result.models.models.back();
+            if (system && !(model->bones.size() > 1 && (system = KeepBoneBodies(*system, *model))))
+            {
+                system.reset();
+                *model = ReadSourceModel(root, modelName);
+            }
             if (definition.contains("physics_preset") && definition.at("physics_preset").is_string())
-                result.models.models.back().clutter =
-                    ReadPhysicsPreset(root, definition.at("physics_preset").get<std::string>());
+                model->clutter = ReadPhysicsPreset(root, definition.at("physics_preset").get<std::string>());
+            if (system && model->clutter)
+            {
+                zt::info("iw3: clutter %s moves in %zu bodies with %zu hinges", modelName.c_str(), system->bodies.size(),
+                         system->hinges.size());
+                model->physicsSystem = std::move(system);
+            }
             found = modelCache.emplace(modelName, modelIndex).first;
         }
 
@@ -4469,6 +4619,7 @@ void BuildPreparedStaticModels(const SourceStaticModels &source, const RenderPla
         const iw8::havok::ClutterBody *clutter;
         bool detail;
         std::optional<std::size_t> collisionModel;
+        const iw8::havok::PhysicsSystem *system;
     };
     std::vector<PhysicsBake> bakes;
     for (std::size_t modelIndex = 0; modelIndex < source.models.size(); ++modelIndex)
@@ -5023,7 +5174,8 @@ void BuildPreparedStaticModels(const SourceStaticModels &source, const RenderPla
                                                  : 1u,
                                  !collisionModels && !clutter && scriptModelPhysics,
                                  clutter ? &*sourceModel.clutter : nullptr,
-                                 collisionModels && iw8::havok::UsesDetailCollision(), std::nullopt});
+                                 collisionModels && iw8::havok::UsesDetailCollision(), std::nullopt,
+                                 clutter && sourceModel.physicsSystem ? &*sourceModel.physicsSystem : nullptr});
                 prepared.model.physicsAssetName = assetName;
             }
         }
@@ -5051,8 +5203,9 @@ void BuildPreparedStaticModels(const SourceStaticModels &source, const RenderPla
     using Baked = std::pair<iw8::havok::PhysicsAsset, iw8::havok::XModelDetailCollision>;
     const auto bake = [&](const std::size_t index) {
         const PhysicsBake &job = bakes[index];
-        Baked baked{iw8::havok::BakePhysicsAsset(job.name, job.mesh, job.useCategory, job.simulationCategory,
-                                                 job.keyframed, job.clutter),
+        Baked baked{job.system ? iw8::havok::BakePhysicsSystem(job.name, *job.system, job.mesh, *job.clutter)
+                               : iw8::havok::BakePhysicsAsset(job.name, job.mesh, job.useCategory,
+                                                              job.simulationCategory, job.keyframed, job.clutter),
                     {}};
         if (job.detail)
             baked.second = iw8::havok::BakeXModelDetailCollision(job.name, job.mesh);
@@ -10789,7 +10942,7 @@ PreparedMap PrepareFastfile(const ImportOptions &options)
         ReadBrushModels(world, worldSurfaces, exportRoot, visibility, sourceStaticModels);
     RespaceLadderRungs(sourceStaticModels);
     timing.lap("read brush and static models");
-    SourceDynamicEntities sourceDynamicEntities = ReadDynamicEntities(collision, exportRoot);
+    SourceDynamicEntities sourceDynamicEntities = ReadDynamicEntities(collision, exportRoot, skeletonRoot);
     timing.lap("read dynamic entities");
     // IW3 map scripts: translate them first so the entities they drive stay
     // entities, and so destroyed-state models can be converted and precached.
@@ -12332,7 +12485,8 @@ PreparedMap PrepareFastfile(const ImportOptions &options)
                                   sourceDynamicEntities.origins[index], noPhysics};
         if (clutter)
         {
-            entity.rigidBodies = 1;
+            // physicsAssetRigidBodiesCount: the bodies of its physics asset.
+            entity.rigidBodies = static_cast<std::uint8_t>(model.physicsSystem ? model.physicsSystem->bodies.size() : 1);
             entity.collisionFlags = 2;
         }
         result.dynamicEntities.push_back(std::move(entity));

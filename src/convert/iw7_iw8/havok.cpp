@@ -422,9 +422,26 @@ namespace zonetool::convert::iw7_iw8
 			}
 		}
 
+		// The vertices of an hknpConvexShape (2014) in its own space: m_vertices, an hkRelArray at +0x30 (the count, then
+		// the offset of the vertices from the array), of hkVector4 elements.
+		std::vector<vec3> convex_vertices(const packfile& file, const std::size_t shape)
+		{
+			const auto count = file.get<std::uint16_t>(shape + 0x30);
+			const auto vertices = shape + 0x30 + file.get<std::uint16_t>(shape + 0x32);
+			std::vector<vec3> points;
+			for (auto v = 0u; v < count; v++)
+			{
+				points.push_back({file.get<float>(vertices + v * std::size_t{16}), file.get<float>(vertices + v * std::size_t{16} + 4),
+					file.get<float>(vertices + v * std::size_t{16} + 8)});
+			}
+
+			return points;
+		}
+
 		// The convex pieces of an hknpDynamicCompoundShape (2014): its instances (128 bytes each) place convex shapes
 		// with a transform (rotation columns, translation), a scale and a shape tag.
-		void read_compound(const packfile& file, const std::size_t compound, havok_shape& shape, havok_shapes& shapes)
+		void read_compound(const packfile& file, const std::size_t compound, havok_shape& shape, havok_shapes& shapes,
+			std::vector<float>* convex_radii = nullptr)
 		{
 			const auto instances = file.array(compound + 0x60);
 			for (std::uint32_t i = 0; i < instances.count; i++)
@@ -483,6 +500,11 @@ namespace zonetool::convert::iw7_iw8
 				}
 
 				shape.convexes.push_back(std::move(convex));
+				if (convex_radii)
+				{
+					// hknpShape::m_convexRadius.
+					convex_radii->push_back(file.get<float>(*child + 0x14));
+				}
 			}
 		}
 	}
@@ -565,6 +587,253 @@ namespace zonetool::convert::iw7_iw8
 					}
 				}
 			}
+		}
+
+		return result;
+	}
+
+	havok_system read_havok_system(const char* data, const std::size_t size)
+	{
+		const packfile file(data, size);
+		const auto system = file.first("hknpPhysicsSystemData");
+		if (!system)
+		{
+			throw std::runtime_error("the Havok packfile has no physics system");
+		}
+
+		// The text that an hkStringPtr points at.
+		const auto string_at = [&](const std::size_t offset)
+		{
+			std::string text;
+			if (const auto target = file.target(offset))
+			{
+				for (auto at = *target; const auto c = file.get<char>(at); at++)
+				{
+					text.push_back(c);
+				}
+			}
+
+			return text;
+		};
+
+		const auto scaled = [](std::vector<vec3> points)
+		{
+			for (auto& point : points)
+			{
+				for (auto& value : point)
+				{
+					value *= havok_unit;
+				}
+			}
+
+			return points;
+		};
+
+		// hknpPhysicsSystemData (2014): its motion cinfos (+0x30, 96 bytes each, the inverse mass at +0x04), body cinfos
+		// (+0x40, 160 bytes each) and constraint cinfos (+0x50, 32 bytes each).
+		const auto motions = file.array(*system + 0x30);
+		const auto bodies = file.array(*system + 0x40);
+		const auto constraints = file.array(*system + 0x50);
+		havok_system result;
+		for (std::uint32_t i = 0; i < bodies.count; i++)
+		{
+			// hknpBodyCinfo (2014): its shape (+0x00), name (+0x20), position (+0x30) and orientation (+0x40) in the model,
+			// and the index of its motion cinfo (+0x88).
+			const auto base = bodies.data + i * std::size_t{0xA0};
+			havok_body body;
+			body.name = string_at(base + 0x20);
+			for (std::size_t axis = 0; axis < 3; axis++)
+			{
+				body.position[axis] = file.get<float>(base + 0x30 + axis * 4) * havok_unit;
+			}
+
+			for (std::size_t axis = 0; axis < 4; axis++)
+			{
+				body.orientation[axis] = file.get<float>(base + 0x40 + axis * 4);
+			}
+
+			const auto motion = file.get<std::uint32_t>(base + 0x88);
+			if (motion >= motions.count)
+			{
+				throw std::runtime_error(std::format("Havok body {} names motion {} of {}", body.name, motion, motions.count));
+			}
+
+			const auto inverse_mass = file.get<float>(motions.data + motion * std::size_t{0x60} + 4);
+			if (!std::isfinite(inverse_mass) || inverse_mass < 0.0f)
+			{
+				throw std::runtime_error(std::format("Havok body {} has an inverse mass of {}", body.name, inverse_mass));
+			}
+
+			body.mass = inverse_mass > 0.0f ? 1.0f / inverse_mass : 0.0f;
+			const auto shape = file.target(base);
+			const auto shape_class = shape ? file.class_of(*shape) : std::string_view{};
+			if (shape_class == "hknpConvexPolytopeShape" || shape_class == "hknpConvexShape")
+			{
+				// hknpShape::m_convexRadius.
+				body.pieces.push_back({scaled(convex_vertices(file, *shape)), file.get<float>(*shape + 0x14) * havok_unit});
+			}
+			else if (shape_class == "hknpDynamicCompoundShape")
+			{
+				havok_shape compound;
+				havok_shapes counts;
+				std::vector<float> radii;
+				read_compound(file, *shape, compound, counts, &radii);
+				for (std::size_t c = 0; c < compound.convexes.size(); c++)
+				{
+					body.pieces.push_back({scaled(compound.convexes[c].points), radii[c] * havok_unit});
+				}
+
+				if (counts.unknown)
+				{
+					result.unsupported.push_back(std::format("{} pieces of body {}", counts.unknown, body.name));
+				}
+			}
+			else if (shape_class == "hknpCompressedMeshShape")
+			{
+				// A moving body takes the hull of its mesh.
+				const auto mesh = file.target(*shape + 0x60);
+				if (!mesh || file.class_of(*mesh) != "hknpCompressedMeshShapeData")
+				{
+					throw std::runtime_error("a Havok compressed mesh has no data");
+				}
+
+				havok_shape triangles;
+				havok_shapes counts;
+				read_compressed_mesh(file, *mesh, triangles, counts);
+				havok_piece piece;
+				for (const auto& triangle : triangles.triangles)
+				{
+					piece.points.insert(piece.points.end(), triangle.corners.begin(), triangle.corners.end());
+				}
+
+				for (const auto& convex : triangles.convexes)
+				{
+					piece.points.insert(piece.points.end(), convex.points.begin(), convex.points.end());
+				}
+
+				body.pieces.push_back({scaled(std::move(piece.points)), 0.0f});
+			}
+			else
+			{
+				result.unsupported.push_back(std::format("body {} has a shape of class {}", body.name,
+					shape_class.empty() ? "none" : shape_class));
+			}
+
+			result.bodies.push_back(std::move(body));
+		}
+
+		for (std::uint32_t i = 0; i < constraints.count; i++)
+		{
+			// hknpConstraintCinfo (2014): its constraint data (+0x00), body A (+0x08) and B (+0x0C) by index, and its name
+			// (+0x18).
+			const auto base = constraints.data + i * std::size_t{0x20};
+			havok_hinge hinge;
+			hinge.name = string_at(base + 0x18);
+			const auto constraint = file.target(base);
+			const auto kind = constraint ? file.class_of(*constraint) : std::string_view{};
+			hinge.limited = kind == "hkpLimitedHingeConstraintData";
+			if (kind != "hkpHingeConstraintData" && !hinge.limited)
+			{
+				result.unsupported.push_back(std::format("constraint {} of class {}", hinge.name, kind.empty() ? "none" : kind));
+				continue;
+			}
+
+			hinge.body_a = file.get<std::uint32_t>(base + 0x08);
+			const auto body_b = file.get<std::uint32_t>(base + 0x0C);
+			if (hinge.body_a >= bodies.count || body_b >= bodies.count || hinge.body_a == body_b)
+			{
+				result.unsupported.push_back(std::format("constraint {} between bodies {} and {} of {}", hinge.name, hinge.body_a,
+					body_b, bodies.count));
+				continue;
+			}
+
+			hinge.body_b = body_b;
+
+			// The atoms follow hkpConstraintData (+0x20), each led by its type: the local transforms (2), stabilization
+			// (23), for a limited hinge an angular motor (18), friction (17) and limit (14), then the 2D angular (12) and
+			// ball and socket (5) atoms. These are Replay's offsets; IW7's 2D angular and ball and socket atoms lack the
+			// tau and damping factors that Havok 2018 added.
+			const auto atoms = *constraint + 0x20;
+			const std::size_t angular_2d = hinge.limited ? 0xF0 : 0xA0;
+			const std::size_t ball_socket = hinge.limited ? 0x100 : 0xB0;
+			std::vector<std::pair<std::size_t, std::uint16_t>> layout{{0x00, 2}, {0x90, 23}, {angular_2d, 12}, {ball_socket, 5}};
+			if (hinge.limited)
+			{
+				layout.insert(layout.end(), {{0xA0, 18}, {0xC0, 17}, {0xD0, 14}});
+			}
+
+			if (std::ranges::any_of(layout, [&](const auto& atom) { return file.get<std::uint16_t>(atoms + atom.first) != atom.second; }))
+			{
+				result.unsupported.push_back(std::format("constraint {}: {} atoms of another layout", hinge.name, kind));
+				continue;
+			}
+
+			// hkpSetLocalTransformsConstraintAtom: transform A (+0x10) in body A and B (+0x50) in body B, each its rotation
+			// columns and translation.
+			const auto frame_at = [&](const std::size_t at)
+			{
+				havok_frame frame;
+				for (std::size_t column = 0; column < 3; column++)
+				{
+					for (std::size_t axis = 0; axis < 3; axis++)
+					{
+						frame.rotation[column][axis] = file.get<float>(at + column * 16 + axis * 4);
+					}
+				}
+
+				for (std::size_t axis = 0; axis < 3; axis++)
+				{
+					frame.translation[axis] = file.get<float>(at + 0x30 + axis * 4) * havok_unit;
+				}
+
+				return frame;
+			};
+
+			hinge.frame_a = frame_at(atoms + 0x10);
+			hinge.frame_b = frame_at(atoms + 0x50);
+			hinge.stabilization = file.get<std::uint8_t>(atoms + 0x92) != 0;
+			hinge.max_linear_impulse = file.get<float>(atoms + 0x94);
+			hinge.max_angular_impulse = file.get<float>(atoms + 0x98);
+			hinge.max_angle = file.get<float>(atoms + 0x9C);
+			hinge.free_axis = file.get<std::uint8_t>(atoms + angular_2d + 2);
+			hinge.solving_method = file.get<std::uint8_t>(atoms + ball_socket + 2);
+			hinge.bodies_to_notify = file.get<std::uint8_t>(atoms + ball_socket + 3);
+			hinge.velocity_stabilization = file.get<std::uint8_t>(atoms + ball_socket + 4);
+			hinge.linear_impulse_limit = file.get<std::uint8_t>(atoms + ball_socket + 5) != 0;
+			hinge.breach_impulse = file.get<float>(atoms + ball_socket + 8);
+			hinge.inertia_stabilization = file.get<float>(atoms + ball_socket + 12);
+			if (hinge.limited)
+			{
+				// The angular motor converts only when it is off and has no motor.
+				for (std::size_t at = 2; at < 0x20; at++)
+				{
+					if (file.get<std::uint8_t>(atoms + 0xA0 + at) != 0 || file.target(atoms + 0xA0 + at))
+					{
+						hinge.limited = false;
+						break;
+					}
+				}
+
+				if (!hinge.limited)
+				{
+					result.unsupported.push_back(std::format("constraint {}: an angular motor", hinge.name));
+					continue;
+				}
+
+				hinge.friction = file.get<std::uint8_t>(atoms + 0xC2) != 0;
+				hinge.friction_axis = file.get<std::uint8_t>(atoms + 0xC3);
+				hinge.friction_axes = file.get<std::uint8_t>(atoms + 0xC4);
+				hinge.max_friction_torque = file.get<float>(atoms + 0xC8);
+				hinge.limit = file.get<std::uint8_t>(atoms + 0xD2) != 0;
+				hinge.limit_axis = file.get<std::uint8_t>(atoms + 0xD3);
+				hinge.cosine_axis = file.get<std::uint8_t>(atoms + 0xD4);
+				hinge.min_angle = file.get<float>(atoms + 0xD8);
+				hinge.max_limit_angle = file.get<float>(atoms + 0xDC);
+				hinge.limit_tau = file.get<float>(atoms + 0xE0);
+				hinge.limit_damping = file.get<float>(atoms + 0xE4);
+			}
+
+			result.hinges.push_back(std::move(hinge));
 		}
 
 		return result;

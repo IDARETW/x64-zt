@@ -41,6 +41,9 @@ namespace zonetool::iw8::havok
 		float mass = -1.0f;
 		std::uint16_t motion_properties_id{};
 		std::int8_t activation_priority{};
+		// The frame of the body in the model (Havok units): a point (w 1) and a quaternion.
+		std::array<float, 4> position{0.0f, 0.0f, 0.0f, 1.0f};
+		std::array<float, 4> orientation{0.0f, 0.0f, 0.0f, 1.0f};
 	};
 
 	// A HavokPhysicsAsset with one body, as the Replay tools make them for models.
@@ -60,6 +63,63 @@ namespace zonetool::iw8::havok
 
 	// Returns the asset item.
 	std::uint32_t add_physics_asset(object_builder& builder, const physics_asset& asset);
+
+	// A hinge between two bodies of a physics asset: hkpHingeConstraintData, or hkpLimitedHingeConstraintData with its
+	// friction and angle range, by the values of its atoms (Havok units). The atoms that the source keeps no value of
+	// take those of shipped Replay hinges.
+	struct hinge_constraint
+	{
+		std::string name;
+		std::uint32_t body_a{};
+		std::uint32_t body_b{};
+		// hkTransform: the rotation columns, then the translation (w 0); A in body A, B in body B.
+		std::array<float, 16> transform_a{};
+		std::array<float, 16> transform_b{};
+		bool stabilization = true;
+		float max_linear_impulse{};
+		float max_angular_impulse{};
+		float max_angle{};
+		std::uint8_t free_axis{};
+		std::uint8_t solving_method{};
+		std::uint8_t bodies_to_notify{};
+		std::uint8_t velocity_stabilization{};
+		bool linear_impulse_limit{};
+		float breach_impulse{};
+		float inertia_stabilization{};
+		bool limited{};
+		bool friction{};
+		std::uint8_t friction_axis{};
+		std::uint8_t friction_axes{};
+		float max_friction_torque{};
+		bool limit{};
+		std::uint8_t limit_axis{};
+		std::uint8_t cosine_axis{};
+		float min_angle{};
+		float max_limit_angle{};
+		float limit_tau{};
+		float limit_damping{};
+	};
+
+	// A HavokPhysicsAsset of several bodies joined by hinges, as the Replay tools make them for clutter that moves in pieces
+	// (doors on their boxes): each body with its lookups, no materials or motion properties of its own.
+	struct physics_system_asset
+	{
+		struct body
+		{
+			physics_body body;
+			std::uint32_t body_quality_crc{};
+			std::uint32_t material_crc{};
+			std::uint32_t motion_properties_crc{};
+			std::int32_t simulation_category{};
+		};
+
+		std::int32_t use_category{};
+		std::vector<body> bodies;
+		std::vector<hinge_constraint> hinges;
+	};
+
+	// Returns the asset item.
+	std::uint32_t add_physics_system(object_builder& builder, const physics_system_asset& asset);
 
 	// A HavokPhysicsXModelLOD with one body, the Havok data of an XModelDetailCollision: the shape that bullets and melee
 	// hit, in the detail world.

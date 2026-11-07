@@ -1563,9 +1563,46 @@ namespace zonetool::convert::iw7_iw8
 		}
 	}
 
-	// IW7 keeps no mass for its clutter (a model's physics LOD holds only its collision mesh): the mass of the convex hull of
-	// its first LOD at the density that gives Replay's own clutter its mass (stock buckets: 1.5 kg in 0.054 cubic Havok
-	// units, 28 kg per cubic Havok unit, a Havok unit being 32 game units), within Replay's clutter range.
+	namespace
+	{
+		// The mass of a model's bodies as its IW7 PhysicsAsset keeps them (each motion's inverse mass); nothing for a model
+		// without one, or with a body that does not move or does not read.
+		std::optional<float> physics_asset_mass(const source_map& source, const iw7::XModel& model)
+		{
+			const auto* resolved = source.resolve(iw7::ASSET_TYPE_XMODEL, const_cast<iw7::XModel*>(&model));
+			const auto* asset = resolved && resolved->physicsAsset
+				? source.resolve(iw7::ASSET_TYPE_PHYSICSASSET, resolved->physicsAsset) : nullptr;
+			if (!asset || !asset->havokData || !asset->havokDataSize)
+			{
+				return std::nullopt;
+			}
+
+			try
+			{
+				const auto system = read_havok_system(asset->havokData, asset->havokDataSize);
+				float mass{};
+				for (const auto& body : system.bodies)
+				{
+					if (!(body.mass > 0.0f) || !std::isfinite(body.mass))
+					{
+						return std::nullopt;
+					}
+
+					mass += body.mass;
+				}
+
+				return system.bodies.empty() ? std::nullopt : std::optional(mass);
+			}
+			catch (const std::exception&)
+			{
+				return std::nullopt;
+			}
+		}
+	}
+
+	// The mass of IW7 clutter is that of the bodies of its PhysicsAsset. A model without one takes the mass of the convex
+	// hull of its first LOD at the density that gives Replay's own clutter its mass (stock buckets: 1.5 kg in 0.054 cubic
+	// Havok units, 28 kg per cubic Havok unit, a Havok unit being 32 game units). Both stay within Replay's clutter range.
 	std::optional<clutter_body> clutter_physics(const source_map& source, const iw7::XModel& model)
 	{
 		std::vector<std::array<float, 3>> points;
@@ -1606,8 +1643,9 @@ namespace zonetool::convert::iw7_iw8
 		}
 
 		constexpr auto density = 28.0f / (32.0f * 32.0f * 32.0f);
+		const auto mass = physics_asset_mass(source, model).value_or(volume * density);
 		const auto surface = std::ranges::max_element(areas, {}, [](const auto& entry) { return entry.second; });
-		return clutter_body{std::clamp(volume * density, 0.1f, 200.0f), surface != areas.end() ? std::string(surface->first) : "default"};
+		return clutter_body{std::clamp(mass, 0.1f, 200.0f), surface != areas.end() ? std::string(surface->first) : "default"};
 	}
 
 	std::string write_physics_preset(const extraction& output, const std::string& model, const clutter_body& body)
@@ -1616,6 +1654,112 @@ namespace zonetool::convert::iw7_iw8
 		std::filesystem::create_directories(output.extracted / "physic");
 		std::ofstream(output.extracted / "physic" / name, std::ios::binary | std::ios::trunc)
 			<< std::format("PHYSIC\\mass\\{:.3f}\\sndAliasPrefix\\{}", body.mass, body.surface);
+		return name;
+	}
+
+	std::optional<std::string> write_physics_system(const source_map& source, const extraction& output, const std::string& model)
+	{
+		const auto found = output.models.find(model);
+		const auto* resolved = found != output.models.end() && found->second
+			? source.resolve(iw7::ASSET_TYPE_XMODEL, const_cast<iw7::XModel*>(found->second)) : nullptr;
+		const auto* asset = resolved && resolved->physicsAsset
+			? source.resolve(iw7::ASSET_TYPE_PHYSICSASSET, resolved->physicsAsset) : nullptr;
+		if (!asset || asset->numRigidBodies < 2 || !asset->havokData || !asset->havokDataSize)
+		{
+			return std::nullopt;
+		}
+
+		havok_system system;
+		try
+		{
+			system = read_havok_system(asset->havokData, asset->havokDataSize);
+		}
+		catch (const std::exception& e)
+		{
+			ZONETOOL_WARNING("iw7: the physics system of clutter model %s does not read (%s); it moves as one body", model.data(), e.what());
+			return std::nullopt;
+		}
+
+		const auto finite = [](const auto& values) { return std::ranges::all_of(values, [](const float v) { return std::isfinite(v); }); };
+		for (const auto& body : system.bodies)
+		{
+			if (!finite(body.position) || !finite(body.orientation) || !std::isfinite(body.mass) || body.pieces.empty() ||
+				std::ranges::any_of(body.pieces, [&](const havok_piece& piece) { return piece.points.empty() || !std::isfinite(piece.convex_radius) ||
+					!std::ranges::all_of(piece.points, finite); }))
+			{
+				system.unsupported.push_back(std::format("body {} has no shape or values that do not convert", body.name));
+			}
+			else if (!(body.mass > 0.0f))
+			{
+				// A fixed body (IW7's inverse mass 0): the system writer makes moving bodies only.
+				system.unsupported.push_back(std::format("body {} does not move", body.name));
+			}
+		}
+
+		if (system.bodies.size() < 2 || !system.unsupported.empty())
+		{
+			std::string reasons;
+			for (const auto& reason : system.unsupported)
+			{
+				reasons += (reasons.empty() ? "" : "; ") + reason;
+			}
+
+			ZONETOOL_WARNING("iw7: the physics system of clutter model %s does not convert (%zu bodies%s%s); it moves as one body",
+				model.data(), system.bodies.size(), reasons.empty() ? "" : ": ", reasons.data());
+			return std::nullopt;
+		}
+
+		const auto frame_json = [&](const havok_frame& frame)
+		{
+			return json{{"rotation", {vector_json(frame.rotation[0].data(), 3), vector_json(frame.rotation[1].data(), 3),
+				vector_json(frame.rotation[2].data(), 3)}}, {"translation", vector_json(frame.translation.data(), 3)}};
+		};
+
+		auto bodies = json::array();
+		for (const auto& body : system.bodies)
+		{
+			auto pieces = json::array();
+			for (const auto& piece : body.pieces)
+			{
+				auto points = json::array();
+				for (const auto& point : piece.points)
+				{
+					points.push_back(vector_json(point.data(), 3));
+				}
+
+				pieces.push_back({{"points", std::move(points)}, {"convex_radius", piece.convex_radius}});
+			}
+
+			bodies.push_back({{"name", body.name}, {"position", vector_json(body.position.data(), 3)},
+				{"orientation", vector_json(body.orientation.data(), 4)}, {"mass", body.mass}, {"pieces", std::move(pieces)}});
+		}
+
+		auto hinges = json::array();
+		for (const auto& hinge : system.hinges)
+		{
+			auto entry = json{{"name", hinge.name}, {"body_a", hinge.body_a}, {"body_b", *hinge.body_b}, {"limited", hinge.limited},
+				{"frame_a", frame_json(hinge.frame_a)}, {"frame_b", frame_json(hinge.frame_b)},
+				{"stabilization", {{"enabled", hinge.stabilization}, {"max_linear_impulse", hinge.max_linear_impulse},
+					{"max_angular_impulse", hinge.max_angular_impulse}, {"max_angle", hinge.max_angle}}},
+				{"free_axis", hinge.free_axis},
+				{"ball_socket", {{"solving_method", hinge.solving_method}, {"bodies_to_notify", hinge.bodies_to_notify},
+					{"velocity_stabilization", hinge.velocity_stabilization}, {"linear_impulse_limit", hinge.linear_impulse_limit},
+					{"breach_impulse", hinge.breach_impulse}, {"inertia_stabilization", hinge.inertia_stabilization}}}};
+			if (hinge.limited)
+			{
+				entry["friction"] = {{"enabled", hinge.friction}, {"first_axis", hinge.friction_axis}, {"axis_count", hinge.friction_axes},
+					{"max_torque", hinge.max_friction_torque}};
+				entry["limit"] = {{"enabled", hinge.limit}, {"axis", hinge.limit_axis}, {"cosine_axis", hinge.cosine_axis},
+					{"min_angle", hinge.min_angle}, {"max_angle", hinge.max_limit_angle}, {"tau", hinge.limit_tau}, {"damping", hinge.limit_damping}};
+			}
+
+			hinges.push_back(std::move(entry));
+		}
+
+		const auto name = "iw7_" + model + ".system.json";
+		std::filesystem::create_directories(output.extracted / "physic");
+		write_json(output.extracted / "physic" / name, {{"schema", 1}, {"asset", asset->name ? asset->name : ""},
+			{"bodies", std::move(bodies)}, {"hinges", std::move(hinges)}});
 		return name;
 	}
 

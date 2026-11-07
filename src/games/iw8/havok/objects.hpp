@@ -101,6 +101,8 @@ namespace zonetool::iw8::havok
 
 	// The mass properties of a convex polytope of uniform density. The Replay tools scale the inertia by 1.5.
 	mass_properties convex_mass_properties(const polytope& shape, float mass, float inertia_factor = 1.5f);
+	// The mass properties of convex pieces of one uniform density together (the shape of a compound body), scaled as above.
+	mass_properties compound_mass_properties(std::span<const polytope> shapes, float mass, float inertia_factor = 1.5f);
 
 	// Gives the shape its mass properties (hkRefCountedProperties with an hknpShapeMassProperties).
 	void add_mass_properties(object_builder& builder, std::uint32_t shape, const mass_properties& properties);
