@@ -4,6 +4,7 @@
 
 #include <bit>
 #include <numeric>
+#include <xmmintrin.h>
 
 namespace zonetool::iw8::havok
 {
@@ -20,6 +21,395 @@ namespace zonetool::iw8::havok
 		constexpr std::size_t section_entries = 256;
 		constexpr std::array<std::uint32_t, 3> packed_bits{11, 11, 10};
 		constexpr std::array<std::uint32_t, 3> shared_bits{21, 21, 22};
+
+		// One section of a compressed mesh as hknpCompressedMeshShape::flagInteriorTriangles reads it: each local vertex
+		// entry with its decoded position and its connectivity identity, and the four index bytes of each primitive.
+		struct interior_section
+		{
+			std::vector<vector3> positions;
+			std::vector<std::uint32_t> ids;
+			std::vector<std::array<std::uint8_t, 4>> primitives;
+		};
+
+		// The interior flags that the Havok 2018 builder gives a compressed mesh (hknpCompressedMeshShapeCinfo
+		// m_flagInteriorTriangles defaults to true): Replay's own copy of the code, hknpCompressedMeshShape::
+		// flagInteriorTriangles 0x141E28A00 with hkcdStaticMeshTree_buildConnectivityLists 0x141E0D810, ported here. A
+		// primitive whose every edge meets a neighbour, and whose convex edges each meet an unflagged neighbour within
+		// 70 degrees, is interior: Havok then leaves out the collisions with its edges, where bodies would catch on the
+		// seams between coplanar or concave faces. Keys are section << 8 | primitive << 1 | triangle of a quad.
+		namespace interior
+		{
+			using vec = std::array<float, 3>;
+			constexpr float epsilon = 1.1920929e-07f; // k_hk_floatEpsilonVec4
+			constexpr std::uint32_t none = 0xFFFFFFFF;
+
+			vec sub(const vec& a, const vec& b)
+			{
+				return {a[0] - b[0], a[1] - b[1], a[2] - b[2]};
+			}
+
+			vec cross(const vec& a, const vec& b)
+			{
+				return {a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2], a[0] * b[1] - a[1] * b[0]};
+			}
+
+			float dot(const vec& a, const vec& b)
+			{
+				return a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
+			}
+
+			// Havok's reciprocal square root: the SSE estimate and one Newton step, (3 - r x r) (r / 2), in its order of
+			// operations. Edges at the epsilon (coplanar neighbours) take their side from these bits.
+			float reciprocal_sqrt(const float x)
+			{
+				const auto r = _mm_cvtss_f32(_mm_rsqrt_ss(_mm_set_ss(x)));
+				return (3.0f - (r * x) * r) * (r * 0.5f);
+			}
+
+			// A normal as Havok normalises it: a zero vector stays zero.
+			vec normalized(const vec& v)
+			{
+				const auto length2 = dot(v, v);
+				const auto scale = length2 <= 0.0f ? 0.0f : reciprocal_sqrt(length2);
+				return {scale * v[0], scale * v[1], scale * v[2]};
+			}
+
+			// An edge direction as Havok normalises it (without the zero test).
+			vec direction(const vec& v)
+			{
+				const auto scale = reciprocal_sqrt(dot(v, v));
+				return {scale * v[0], scale * v[1], scale * v[2]};
+			}
+
+			// A length as Havok takes it, x times its reciprocal square root (zero for zero).
+			float length(const vec& v)
+			{
+				const auto length2 = dot(v, v);
+				return length2 <= 0.0f ? 0.0f : reciprocal_sqrt(length2) * length2;
+			}
+
+			// hkMath::quadCos 0x141C8F080, one lane: Cody-Waite reduction by pi / 4 and its minimax polynomials.
+			float quad_cos(const float angle)
+			{
+				const auto x = std::abs(angle);
+				const auto j = (static_cast<std::int32_t>(x * 1.27323954f) + 1) & ~1;
+				const auto y = static_cast<float>(j);
+				const auto j2 = j - 2;
+				const auto flip = (~j2 & 4) != 0;
+				const auto z = ((x + y * -0.78515625f) + y * -2.41875648e-4f) + y * -3.77489497e-8f;
+				const auto zz = z * z;
+				const auto cosine = (((2.44331568e-5f * zz + -1.38873165e-3f) * zz + 4.16666456e-2f) * zz) * zz - 0.5f * zz + 1.0f;
+				const auto sine = (((-1.95152959e-4f * zz + 8.33216087e-3f) * zz + -1.66666546e-1f) * zz) * z + z;
+				const auto value = std::min((j2 & 2) == 0 ? sine : cosine, 1.0f);
+				return flip ? -value : value;
+			}
+
+			std::vector<std::uint32_t> flag(const std::vector<interior_section>& sections, const std::uint32_t bits)
+			{
+				enum class kind
+				{
+					other,
+					triangle,
+					quad,
+				};
+
+				const auto kind_of = [](const std::array<std::uint8_t, 4>& p)
+				{
+					if (p[1] == p[3])
+					{
+						return kind::other;
+					}
+
+					return p[2] == p[3] ? kind::triangle : kind::quad;
+				};
+
+				// A quad whose second index is above its fourth is one flat convex primitive (primitiveStoresIsFlatConvex
+				// 0xFF): its key covers both triangles. Other quads are two triangles.
+				const auto flat = [&](const std::array<std::uint8_t, 4>& p)
+				{
+					return kind_of(p) == kind::quad && p[1] > p[3];
+				};
+
+				const auto section_of = [](const std::uint32_t key) { return key >> 8; };
+				const auto primitive_of = [](const std::uint32_t key) { return (key >> 1) & 0x7F; };
+
+				// A triangle of a primitive (b0, b1, b2, b3): (b0, b1, b2), and (b0, b2, b3) for the second of a quad.
+				const auto triangle = [&](const std::uint32_t key)
+				{
+					const auto& section = sections[section_of(key)];
+					const auto& p = section.primitives[primitive_of(key)];
+					return (key & 1) != 0 ? std::array<std::uint8_t, 3>{p[0], p[2], p[3]} : std::array<std::uint8_t, 3>{p[0], p[1], p[2]};
+				};
+
+				const auto normal = [&](const std::uint32_t key)
+				{
+					const auto& positions = sections[section_of(key)].positions;
+					const auto t = triangle(key);
+					return cross(sub(positions[t[1]], positions[t[0]]), sub(positions[t[2]], positions[t[0]]));
+				};
+
+				// Connectivity (hkcdStaticMeshTree_buildConnectivityLists): edge (a, b) of a triangle pairs with the most
+				// recent unpaired (b, a), by vertex identity, in 64 buckets; the two triangles of a quad share their diagonal.
+				// A reference is key << 2 | edge.
+				std::unordered_map<std::uint32_t, std::uint32_t> link;
+				struct open_edge
+				{
+					std::uint32_t a;
+					std::uint32_t b;
+					std::uint32_t ref;
+				};
+
+				std::array<std::vector<open_edge>, 64> buckets;
+				for (std::uint32_t s = 0; s < sections.size(); s++)
+				{
+					const auto& section = sections[s];
+					for (std::uint32_t k = 0; k < section.primitives.size(); k++)
+					{
+						const auto& p = section.primitives[k];
+						const auto type = kind_of(p);
+						if (type == kind::other)
+						{
+							continue;
+						}
+
+						const auto key = s << 8 | k << 1;
+						const auto halves = type == kind::quad ? 2u : 1u;
+						if (halves == 2)
+						{
+							link[key << 2 | 2] = (key | 1) << 2;
+							link[(key | 1) << 2] = key << 2 | 2;
+						}
+
+						for (std::uint32_t half = 0; half < halves; half++)
+						{
+							const auto t = triangle(key | half);
+							for (std::uint32_t e = 0; e < 3; e++)
+							{
+								if (halves == 2 && e == (half == 0 ? 2u : 0u))
+								{
+									continue;
+								}
+
+								const auto a = section.ids[t[e]];
+								const auto b = section.ids[t[(e + 1) % 3]];
+								const auto ref = (key | half) << 2 | e;
+								auto& bucket = buckets[(static_cast<std::uint32_t>(static_cast<std::uint8_t>(a) ^ static_cast<std::uint8_t>(b)) *
+									static_cast<std::uint32_t>(-27)) & 0x3F];
+								auto found = bucket.size();
+								for (auto index = bucket.size(); index-- > 0;)
+								{
+									if (bucket[index].a == b && bucket[index].b == a)
+									{
+										found = index;
+										break;
+									}
+								}
+
+								if (found == bucket.size())
+								{
+									bucket.push_back({a, b, ref});
+									continue;
+								}
+
+								link[ref] = bucket[found].ref;
+								link[bucket[found].ref] = ref;
+								bucket[found] = bucket.back();
+								bucket.pop_back();
+							}
+						}
+					}
+				}
+
+				const auto linked = [&](const std::uint32_t ref)
+				{
+					const auto found = link.find(ref);
+					return found == link.end() ? none : found->second;
+				};
+
+				// The polygon of a candidate: its triangle, or the four corners of a flat quad.
+				struct polygon
+				{
+					std::array<vec, 4> corners{};
+					std::uint32_t count{};
+				};
+
+				const auto polygon_of = [&](const std::uint32_t key, const bool whole_quad)
+				{
+					const auto& section = sections[section_of(key)];
+					const auto& p = section.primitives[primitive_of(key)];
+					polygon result;
+					if (whole_quad)
+					{
+						for (std::size_t c = 0; c < 4; c++)
+						{
+							result.corners[c] = section.positions[p[c]];
+						}
+
+						result.count = 4;
+						return result;
+					}
+
+					const auto t = triangle(key);
+					for (std::size_t c = 0; c < 3; c++)
+					{
+						result.corners[c] = section.positions[t[c]];
+					}
+
+					result.count = 3;
+					return result;
+				};
+
+				// Edge i of a candidate: of its own triangle, or for a flat quad edges 0 and 1 of the first triangle and
+				// 1 and 2 of the second.
+				const auto edge_ref = [](const std::uint32_t key, const std::uint32_t count, const std::uint32_t i)
+				{
+					return count == 4 && i >= 2 ? (key + 1) << 2 | (i - 1) : key << 2 | i;
+				};
+
+				struct candidate
+				{
+					std::uint32_t key;
+					float value;
+				};
+
+				// Candidates: primitives whose every edge meets a neighbour, by twice their area and ten per convex edge.
+				std::vector<candidate> candidates;
+				for (std::uint32_t s = 0; s < sections.size(); s++)
+				{
+					const auto& section = sections[s];
+					for (std::uint32_t k = 0; k < section.primitives.size(); k++)
+					{
+						const auto& p = section.primitives[k];
+						const auto type = kind_of(p);
+						if (type == kind::other)
+						{
+							continue;
+						}
+
+						const auto whole = flat(p);
+						const auto halves = type == kind::quad && !whole ? 2u : 1u;
+						for (std::uint32_t half = 0; half < halves; half++)
+						{
+							const auto key = s << 8 | k << 1 | half;
+							const auto shape = polygon_of(key, whole);
+							const auto n = normal(key);
+							auto convex = 0;
+							auto complete = true;
+							for (std::uint32_t i = 0; i < shape.count && complete; i++)
+							{
+								const auto neighbour = linked(edge_ref(key, shape.count, i));
+								if (neighbour == none)
+								{
+									complete = false;
+									break;
+								}
+
+								const auto m = normalized(normal(neighbour >> 2));
+								const auto e = direction(sub(shape.corners[(i + 1) % shape.count], shape.corners[i]));
+								if (dot(e, cross(n, m)) > epsilon)
+								{
+									convex++;
+								}
+							}
+
+							if (complete)
+							{
+								candidates.push_back({key, length(n) + static_cast<float>(convex) * 10.0f});
+							}
+						}
+					}
+				}
+
+				// hkAlgorithm::quickSortRecursive 0x141E11DF0, so that equal values keep Havok's order.
+				const std::function<void(int, int)> sort = [&](int first, const int last)
+				{
+					for (;;)
+					{
+						auto i = first;
+						auto j = last;
+						const auto pivot = candidates[static_cast<std::size_t>((first + last) >> 1)].value;
+						do
+						{
+							while (pivot > candidates[static_cast<std::size_t>(i)].value)
+							{
+								i++;
+							}
+
+							while (pivot < candidates[static_cast<std::size_t>(j)].value)
+							{
+								j--;
+							}
+
+							if (j < i)
+							{
+								break;
+							}
+
+							if (j != i)
+							{
+								std::swap(candidates[static_cast<std::size_t>(i)], candidates[static_cast<std::size_t>(j)]);
+							}
+
+							j--;
+							i++;
+						} while (i <= j);
+
+						if (first < j)
+						{
+							sort(first, j);
+						}
+
+						if (i >= last)
+						{
+							break;
+						}
+
+						first = i;
+					}
+				};
+
+				if (candidates.size() > 1)
+				{
+					sort(0, static_cast<int>(candidates.size()) - 1);
+				}
+
+				std::vector<std::uint32_t> words((bits + 31) / 32);
+				const auto is_set = [&](const std::uint32_t key) { return (words[key >> 5] >> (key & 31) & 1) != 0; };
+				const auto threshold = quad_cos(1.22173047f); // the constructor's (70 / 180) * pi, 0x3F9C61AA
+				for (const auto& item : candidates)
+				{
+					const auto& p = sections[section_of(item.key)].primitives[primitive_of(item.key)];
+					const auto shape = polygon_of(item.key, flat(p));
+					const auto n = normalized(normal(item.key));
+					auto interior_primitive = true;
+					for (std::uint32_t i = 0; i < shape.count && interior_primitive; i++)
+					{
+						const auto neighbour = linked(edge_ref(item.key, shape.count, i)) >> 2;
+						const auto m = normalized(normal(neighbour));
+						const auto e = direction(sub(shape.corners[(i + 1) % shape.count], shape.corners[i]));
+						if (dot(e, cross(n, m)) <= epsilon)
+						{
+							continue;
+						}
+
+						// A convex edge: the neighbour must be unflagged (a flat quad by its first key) and within the angle.
+						const auto& q = sections[section_of(neighbour)].primitives[primitive_of(neighbour)];
+						const auto neighbour_key = flat(q) ? neighbour & ~1u : neighbour;
+						if (is_set(neighbour_key) || threshold > dot(m, n))
+						{
+							interior_primitive = false;
+						}
+					}
+
+					if (interior_primitive && item.key < bits)
+					{
+						words[item.key >> 5] |= 1u << (item.key & 31);
+					}
+				}
+
+				return words;
+			}
+		}
 
 		std::uint32_t offset_of(const type_table& types, const std::uint32_t type, const std::string_view name)
 		{
@@ -894,13 +1284,19 @@ namespace zonetool::iw8::havok
 		std::uint32_t max_key{};
 		std::size_t keys{};
 		std::size_t runs{};
+		// What hknpCompressedMeshShape::flagInteriorTriangles reads of each section (interior::flag): a packed entry is
+		// section << 16 | index, a shared one section_count << 16 | shared index.
+		std::vector<interior_section> interior_sections(section_count);
 		for (std::uint32_t s = 0; s < section_count; s++)
 		{
 			auto& section = data[s];
+			auto& interior_section = interior_sections[s];
 			std::unordered_map<std::uint32_t, std::uint32_t> entry;
 			for (std::uint32_t k = 0; k < section.packed.size(); k++)
 			{
 				entry[section.packed[k]] = k;
+				interior_section.positions.push_back(decoded[section.packed[k]]);
+				interior_section.ids.push_back(s << 16 | k);
 				std::uint32_t word{};
 				for (std::size_t axis = 0; axis < 3; axis++)
 				{
@@ -938,6 +1334,10 @@ namespace zonetool::iw8::havok
 					table.push_back(static_cast<std::uint16_t>(primitives[p].index & 0xFFFF));
 					table.push_back(static_cast<std::uint16_t>(primitives[p].index >> 16));
 					primitive_bytes.insert(primitive_bytes.end(), {at, at, 4, at});
+					// The record's four entries are no vertices; no triangle uses them.
+					interior_section.positions.resize(interior_section.positions.size() + 4);
+					interior_section.ids.resize(interior_section.ids.size() + 4, interior::none);
+					interior_section.primitives.push_back({at, at, 4, at});
 					continue;
 				}
 
@@ -950,24 +1350,30 @@ namespace zonetool::iw8::havok
 					{
 						found = entry.emplace(corners[corner], table_entry()).first;
 						table.push_back(static_cast<std::uint16_t>(shared_index.at(corners[corner])));
+						interior_section.positions.push_back(decoded[corners[corner]]);
+						interior_section.ids.push_back(section_count << 16 | shared_index.at(corners[corner]));
 					}
 
 					local[corner] = static_cast<std::uint8_t>(found->second);
 				}
 
 				// A triangle repeats its last corner. A flat convex quad keeps b above d: (c, d, a, b) holds the same triangles.
+				std::array<std::uint8_t, 4> bytes{};
 				if (corners.size() == 3)
 				{
-					primitive_bytes.insert(primitive_bytes.end(), {local[0], local[1], local[2], local[2]});
+					bytes = {local[0], local[1], local[2], local[2]};
 				}
 				else if (local[1] > local[3])
 				{
-					primitive_bytes.insert(primitive_bytes.end(), {local[0], local[1], local[2], local[3]});
+					bytes = {local[0], local[1], local[2], local[3]};
 				}
 				else
 				{
-					primitive_bytes.insert(primitive_bytes.end(), {local[2], local[3], local[0], local[1]});
+					bytes = {local[2], local[3], local[0], local[1]};
 				}
+
+				primitive_bytes.insert(primitive_bytes.end(), bytes.begin(), bytes.end());
+				interior_section.primitives.push_back(bytes);
 			}
 
 			if (table_entry() > section_entries)
@@ -1079,9 +1485,12 @@ namespace zonetool::iw8::havok
 		const auto tree = builder.object("hknpCompressedMeshShapeData");
 		builder.point(object, "data", tree);
 
-		// No triangle is marked interior.
-		const auto words = (interior_bits + 31) / 32;
-		builder.point(object, "triangleIsInterior.storage.words", builder.array("hkUint32", words, std::vector<std::uint8_t>(words * 4)));
+		// The interior triangles, as the Havok builder flags them (interior::flag).
+		const auto interior_words = interior::flag(interior_sections, interior_bits);
+		std::vector<std::uint8_t> interior_bytes(interior_words.size() * 4);
+		std::memcpy(interior_bytes.data(), interior_words.data(), interior_bytes.size());
+		builder.point(object, "triangleIsInterior.storage.words",
+			builder.array("hkUint32", static_cast<std::uint32_t>(interior_words.size()), std::move(interior_bytes)));
 		builder.set(object, "triangleIsInterior.storage.numBits", static_cast<std::int32_t>(interior_bits));
 
 		if (!mesh.convex_shapes.empty())
@@ -1240,6 +1649,7 @@ namespace zonetool::iw8::havok
 		}
 
 		auto shared_grid = make_grid(domain, shared_bits);
+		std::vector<interior_section> interior_sections(sections.count);
 		std::vector<bounds> section_geometry(sections.count, empty_bounds);
 		// The bounds of each primitive key, without the convex radius, for the SIMD tree.
 		std::unordered_map<std::uint32_t, bounds> key_bounds;
@@ -1295,6 +1705,38 @@ namespace zonetool::iw8::havok
 					static_cast<std::uint32_t>(word >> 42)};
 				return {shared_grid.decode(0, q[0]), shared_grid.decode(1, q[1]), shared_grid.decode(2, q[2])};
 			};
+
+			// The section as the interior rule reads it: packed vertices are the section's own, shared vertices are one
+			// identity across sections; table entries that name no shared vertex (convex records) have no identity.
+			auto& interior_section = interior_sections[s];
+			const auto table_end = s + 1 < sections.count
+				? get<std::uint32_t>(sections.data, base + section_size + section_member("firstSharedVertexIndex"))
+				: table.count;
+			const auto local_count = packed_count + (table_end > first_shared ? table_end - first_shared : 0u);
+			for (std::uint32_t local = 0; local < local_count && local < section_entries; local++)
+			{
+				const auto shared_at = local < packed_count ? 0u : get<std::uint16_t>(table.data, (first_shared + local - packed_count) * 2);
+				if (local >= packed_count && shared_at >= shared.count)
+				{
+					interior_section.positions.push_back({});
+					interior_section.ids.push_back(interior::none);
+					continue;
+				}
+
+				interior_section.positions.push_back(vertex(local));
+				interior_section.ids.push_back(local < packed_count ? s << 16 | local : sections.count << 16 | shared_at);
+			}
+
+			for (std::uint32_t k = 0; k < primitive_count; k++)
+			{
+				std::array<std::uint8_t, 4> indices{};
+				for (std::size_t i = 0; i < 4; i++)
+				{
+					indices[i] = get<std::uint8_t>(primitives.data, (first_primitive + k) * 4 + i);
+				}
+
+				interior_section.primitives.push_back(indices);
+			}
 
 			// Havok finds the shape tag of a primitive by the run that holds it, and reads a null run when none does
 			// (0xC0000005 in Replay's compressed mesh queries, 0x141E30200): every primitive needs exactly one run.
@@ -1426,6 +1868,28 @@ namespace zonetool::iw8::havok
 			{
 				throw std::runtime_error("a compressed mesh section tree does not hold each primitive once");
 			}
+		}
+
+		// The stored interior flags, and the flags of the builder's rule over the same sections.
+		result.interior_bits = get<std::int32_t>(shape.data, offset_of(types, shape.type, "triangleIsInterior.storage.numBits"));
+		if (const auto* words = target_of(file, shape, offset_of(types, shape.type, "triangleIsInterior.storage.words")))
+		{
+			for (std::uint32_t w = 0; w < words->count; w++)
+			{
+				result.interior_words.push_back(get<std::uint32_t>(words->data, w * 4));
+			}
+		}
+
+		const auto indexable = std::ranges::all_of(interior_sections, [](const interior_section& section)
+		{
+			return std::ranges::all_of(section.primitives, [&](const std::array<std::uint8_t, 4>& p)
+			{
+				return p[1] == p[3] || std::ranges::all_of(p, [&](const std::uint8_t i) { return i < section.positions.size(); });
+			});
+		});
+		if (indexable && result.interior_bits > 0)
+		{
+			result.derived_interior_words = interior::flag(interior_sections, static_cast<std::uint32_t>(result.interior_bits));
 		}
 
 		// The top tree: 0x8000 marks an inner node with the count of left leaves, a leaf holds a section.
