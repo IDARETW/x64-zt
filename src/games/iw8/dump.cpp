@@ -3136,9 +3136,79 @@ namespace zonetool::iw8
 		// map_ents) and each one-body HavokPhysicsAsset, with their shapes. Lists must keep their entries and tags, assets the
 		// bytes of their objects, and shapes their geometry. The assets with constraints are listed by their bodies and
 		// constraint kinds; with IW8_DUMP_DEBUG, the first asset of each kind is written there (<name>.hkx).
+		// IW8_REWRITE=physicscounts (and the start of IW8_REWRITE=physics): each PhysicsAsset's numRigidBodies and
+		// numConstraints must count the bodies and constraints of its Havok data, as the game sizes the asset's per-body
+		// arrays (simulation categories, contents, event slots) by them.
+		void verify_physics_asset_counts(const loaded_zone& zone, const havok::type_table& types)
+		{
+			const auto asset_type = *types.find("HavokPhysicsAsset");
+			std::size_t checked{};
+			std::set<asset_key> seen;
+			for (const auto& asset : zone.assets)
+			{
+				const asset_key key{asset.type, asset_name(asset.type, asset.header)};
+				if (asset.type != ASSET_TYPE_PHYSICSASSET || asset.referenced || !seen.emplace(key).second)
+				{
+					continue;
+				}
+
+				// The records view the dump, which must outlive the loop.
+				const auto* header = static_cast<const PhysicsAsset*>(asset.header);
+				const auto dump = dump_asset_data(asset.type, asset.header);
+				for (const auto record : tagfile_records(dump))
+				{
+					const std::span bytes(reinterpret_cast<const std::uint8_t*>(record.data()), record.size());
+					if (const auto reference = havok::compendium_reference(bytes); reference && *reference != havok::replay_compendium_signature)
+					{
+						continue;
+					}
+
+					havok::tagfile file;
+					try
+					{
+						file = havok::read_tagfile(bytes, &types);
+					}
+					catch (const havok::unknown_type&)
+					{
+						continue;
+					}
+
+					if (file.items.size() < 2 || file.items[1].type != asset_type)
+					{
+						continue;
+					}
+
+					const auto& root = file.items[1];
+					const auto system = item_target(root, member_offset(types, root.type, "physicsSystemData"));
+					if (!system)
+					{
+						continue;
+					}
+
+					const auto& data = file.items.at(system);
+					const auto count = [&](const std::string_view name)
+					{
+						const auto target = item_target(data, member_offset(types, data.type, name));
+						return target ? static_cast<std::int32_t>(file.items.at(target).count) : 0;
+					};
+
+					if (header->numRigidBodies != count("bodyCinfos") || header->numConstraints != count("constraintCinfos"))
+					{
+						throw std::runtime_error(std::format("physicsasset \"{}\": {} bodies and {} constraints in its header, {} and {} in its Havok data",
+							key.second, header->numRigidBodies, header->numConstraints, count("bodyCinfos"), count("constraintCinfos")));
+					}
+
+					checked++;
+				}
+			}
+
+			ZONETOOL_INFO("%s: %zu physics assets count the bodies and constraints of their Havok data", zone.name.data(), checked);
+		}
+
 		void verify_physics(const std::filesystem::path& zone_folder, const loaded_zone& zone)
 		{
 			const auto& compendium = replay_compendium(zone_folder);
+			verify_physics_asset_counts(zone, compendium);
 			const auto list_type = *compendium.find("HavokPhysicsShapeList");
 			const auto asset_type = *compendium.find("HavokPhysicsAsset");
 			const auto lod_type = *compendium.find("HavokPhysicsXModelLOD");
@@ -3814,6 +3884,10 @@ namespace zonetool::iw8
 			else if (std::string_view(rewrite) == "physics")
 			{
 				verify_physics(zone_folder, *zone);
+			}
+			else if (std::string_view(rewrite) == "physicscounts")
+			{
+				verify_physics_asset_counts(*zone, replay_compendium(zone_folder));
 			}
 			else if (std::string_view(rewrite) == "compare")
 			{

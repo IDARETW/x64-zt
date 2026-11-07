@@ -2328,6 +2328,8 @@ PhysicsAsset BakePhysicsSystem(std::string name, const PhysicsSystem &system, co
     result.contents = mesh.contents;
     result.useCategory = 3;
     result.simulationCategory = clutter.debris ? 5 : 4;
+    result.bodies = static_cast<std::uint32_t>(system.bodies.size());
+    result.constraints = static_cast<std::uint32_t>(system.hinges.size());
     result.havokData = hk::write_compact_tagfile(
         builder.finish("20180200", hk::replay_compendium_signature, root), *g_nativeCompendium);
     zt::info("collision: built native PhysicsAsset '%s' of %zu bodies and %zu hinges (%zu bytes)", result.name.c_str(),

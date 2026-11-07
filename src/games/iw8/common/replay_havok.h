@@ -106,6 +106,10 @@ struct PhysicsAsset
     std::uint32_t contents{1};
     std::uint32_t useCategory{3};
     std::uint32_t simulationCategory{1};
+    // The bodies of the Havok data, each of the contents and simulation category above, and its constraints: the
+    // asset's numRigidBodies and numConstraints (shipped clutter in pieces: 2 and 1).
+    std::uint32_t bodies{1};
+    std::uint32_t constraints{};
 };
 
 // Bakes without the Replay executable from here on: the shapes and physics objects are built

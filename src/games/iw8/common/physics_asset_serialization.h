@@ -26,6 +26,9 @@ void emitPhysicsAssetBody(Writer &writer, const havok::PhysicsAsset &asset)
           (asset.useCategory == 3 &&
            (asset.simulationCategory == 4 || asset.simulationCategory == 5))))
         throw std::runtime_error("emitPhysicsAssetBody: invalid native physics asset");
+    // Several bodies only as simulated clutter in pieces (shipped mp_emporium container_electrical_box_01_small).
+    if (!asset.bodies || (asset.bodies > 1 && asset.useCategory != 3) || (asset.constraints && asset.bodies < 2))
+        throw std::runtime_error("emitPhysicsAssetBody: invalid native physics asset bodies");
 
     std::array<std::uint8_t, iw8sz::PHYSICSASSET> body{};
     const auto put = [&](const std::size_t offset, const auto value) {
@@ -37,11 +40,14 @@ void emitPhysicsAssetBody(Writer &writer, const havok::PhysicsAsset &asset)
     put(0x08, PTR_FOLLOWS);
     put(0x10, static_cast<std::uint32_t>(asset.havokData.size()));
     put(0x14, asset.useCategory);
-    put(0x18, std::uint32_t{1});
+    // numRigidBodies, numConstraints; per body a simulation category, contents and an SFX and VFX event slot (shipped
+    // assets leave the slots empty).
+    put(0x18, asset.bodies);
+    put(0x1C, asset.constraints);
     put(0x20, PTR_FOLLOWS);
     put(0x28, PTR_FOLLOWS);
-    put(0x30, std::uint32_t{1});
-    put(0x34, std::uint32_t{1});
+    put(0x30, asset.bodies);
+    put(0x34, asset.bodies);
     put(0x38, PTR_FOLLOWS);
     put(0x40, PTR_FOLLOWS);
     put(0x54, std::uint32_t{asset.useCategory == 0 ? 0u : 1u});
@@ -54,13 +60,17 @@ void emitPhysicsAssetBody(Writer &writer, const havok::PhysicsAsset &asset)
     writer.align(15);
     writer.write(asset.havokData.data(), asset.havokData.size());
     writer.align(3);
-    writer.writeT(asset.simulationCategory);
+    for (std::uint32_t index = 0; index < asset.bodies; ++index)
+        writer.writeT(asset.simulationCategory);
     writer.align(3);
-    writer.writeT(asset.contents);
+    for (std::uint32_t index = 0; index < asset.bodies; ++index)
+        writer.writeT(asset.contents);
     writer.align(7);
-    writer.writeT(std::uint64_t{0});
+    for (std::uint32_t index = 0; index < asset.bodies; ++index)
+        writer.writeT(std::uint64_t{0});
     writer.align(7);
-    writer.writeT(std::uint64_t{0});
+    for (std::uint32_t index = 0; index < asset.bodies; ++index)
+        writer.writeT(std::uint64_t{0});
     writer.popStream();
     writer.popStream();
 }
