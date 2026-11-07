@@ -71,8 +71,10 @@ Output main(Input input)
         alpha *= saturate((depth - input.position.w) * data.rows[6].x);
     }
 #endif
+#ifndef FLOW_ADDITIVE
     if (alpha <= 0.000061)
         discard;
+#endif
     // Replay supplies the particle RGB squared. IW7 squares (texel * particleColour) before mkhdr.
     float3 linearColor = texel.rgb * texel.rgb * input.color.rgb;
     float3 hdr = material[3].x != 0 ? -log2(1 - min(linearColor, 0.99)) : linearColor;
@@ -93,13 +95,25 @@ Output main(Input input)
     uint packedSlice = (uint)(packed * 255 + 0.5);
     float limit = ((float)packedSlice - 0.500061) / 128;
     color *= volumetricVisibility.SampleLevel(screenSampler, float3(screenUV, min(slice, limit)), 0).r;
+#ifdef FLOW_ADDITIVE
+    // IW7 40967ff1 / 6a577499 / 8ce146ac (and their zfeather twins 4622c9c5 / a6efe634): no alpha cutoff; the fogged
+    // colour is cut at 0.000061 and drawn times alpha with no coverage, as Replay's stock additive effect PS b0ec5d88
+    // ends (o0.w = o1 = 0).
+    if (max(color.r, max(color.g, color.b)) <= 0.000061)
+        discard;
+#endif
     color *= scene[42].x;
     bool thermal = asint(scene[13].x) == 1 ||
         (asint(scene[13].x) == 2 && scopeBuffer.SampleLevel(screenSampler, screenUV, 0).r > 0);
     if (thermal)
         color = float3(dot(color, float3(0.2126, 0.7152, 0.0722)), 0, 0);
     Output output;
+#ifdef FLOW_ADDITIVE
+    output.color = float4(min(color * max(alpha, 0), 32255), 0);
+    output.opacity = 0;
+#else
     output.color = min(float4(color * alpha, alpha), 32255);
     output.opacity = alpha.xxxx;
+#endif
     return output;
 }

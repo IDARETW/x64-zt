@@ -1132,17 +1132,23 @@ namespace zonetool::convert::iw7_iw8
 		{
 			// Each name is pinned to its disassembled source PS, all one flow with alpha blending: bfc071e2 (colour tint,
 			// mkhdr), 39e31a06 (mkhdr, no tint; Proto), 2241e5f5 (neither; Scorch), 6d8b8710 (neither; Hawkwar) and
-			// d384b91e (6d8b8710 with the zfeather soft intersection; Breakneck). The evc ones also multiply by IW7's
-			// tonemap code constant 222; the owned PS takes Replay's effect exposure (scene[42].x) for all, as the stock
-			// effect PS b0ec5d88 does for every converted effect. The additive and lit flow permutations restructure
-			// their fog and output and remain separate adapters.
-			static constexpr std::array<std::string_view, 5> names
+			// d384b91e (6d8b8710 with the zfeather soft intersection; Breakneck); additively 40967ff1 (Scorch), 6a577499
+			// (mkhdr; Scorch), 8ce146ac (tint; Proto) and the zfeather twins of the first two (4622c9c5, a6efe634). The evc
+			// ones also multiply by IW7's tonemap code constant 222; the owned PS takes Replay's effect exposure
+			// (scene[42].x) for all, as the stock effect PS b0ec5d88 does for every converted effect. The dissolve (ad)
+			// and lit flow permutations remain separate adapters.
+			static constexpr std::array<std::string_view, 10> names
 			{
 				"eq_effectunlit_blend_lin_ct_ndw_flow_nocast_mkhdr_evc",
 				"eq_effectunlit_blend_lin_ndw_flow_nocast_mkhdr_evc",
 				"eq_effectunlit_blend_lin_ndw_flow_nocast_evc",
 				"eq_effectunlit_blend_lin_ndw_flow_nocast",
 				"eq_effectunlit_zfeather_blend_lin_ndw_flow_nocast",
+				"eq_effectunlit_add_lin_ndw_flow_nocast_evc",
+				"eq_effectunlit_add_lin_ndw_flow_nocast_mkhdr_evc",
+				"eq_effectunlit_add_lin_ct_ndw_flow_nocast",
+				"eq_effectunlit_zfeather_add_lin_ndw_flow_nocast_evc",
+				"eq_effectunlit_zfeather_add_lin_ndw_flow_nocast_mkhdr_evc",
 			};
 			return material && material->techniqueSet &&
 				std::ranges::find(names, std::string_view(asset_name(material->techniqueSet->name))) != names.end();
