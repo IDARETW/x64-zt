@@ -2315,12 +2315,13 @@ namespace zonetool::convert::iw7_iw8
 				exported["skyObject"] = true;
 			}
 
-			// An additive material that IW7 dims by the volumetric extinction before it (reads_volumetric_extinction: the
-			// god-ray cards): the pipeline's shader reads Replay's (MAP_VOLUMETRIC_EXTINCTION), as Replay's blended world
-			// shaders read theirs (lit_3_lit_bad_*). Nearly every IW7 forward shader reads it (Breakneck 2978 materials);
-			// Replay's opaque ones do not (world PS a3f48686), as the volumetric pass covers them afterwards, and its blended
-			// ones also add the in-scatter (t110), which the pipeline's shader does not yet.
-			if (!layer && kind.kind == surface_kind::additive && reads_volumetric_extinction(source, material))
+			// A blended or additive material that IW7 dims by the volumetric extinction before it (reads_volumetric_extinction:
+			// the god-ray cards, glass, smoke cards): the pipeline's shader reads Replay's extinction and, for blended ones, its
+			// in-scatter (MAP_VOLUMETRIC_EXTINCTION), as Replay's blended world shaders do (lit_3_lit_bad_*, PS 077107f8).
+			// Nearly every IW7 forward shader reads it (Breakneck 2978 materials); Replay's opaque ones do not (world PS
+			// a3f48686), as the volumetric pass covers them afterwards.
+			if (!layer && (kind.kind == surface_kind::blend || kind.kind == surface_kind::additive) &&
+				reads_volumetric_extinction(source, material))
 			{
 				exported["iw7VolumetricExtinction"] = true;
 				volumetric_extinction++;

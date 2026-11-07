@@ -28,6 +28,12 @@
 #undef MAP_LIGHTING_ROWS
 #define MAP_LIGHTING_ROWS 187
 #endif
+// The volumetric in-scatter's texel count and size (cb7[187..188]); the stock blended world shaders declare 213 rows (PS
+// 077107f8).
+#if defined(MAP_VOLUMETRIC_EXTINCTION) && MAP_LIGHTING_ROWS < 189
+#undef MAP_LIGHTING_ROWS
+#define MAP_LIGHTING_ROWS 189
+#endif
 #ifndef MAP_MAX_ANISO
 #define MAP_MAX_ANISO 8
 #endif
@@ -124,13 +130,35 @@ cbuffer ReplayLighting : register(b7) {
 // (tw/twc lit_3_lit_bad_*, PS 077107f8): at the screen position and the depth slice of the view depth less 4 through the
 // four segments of cb7[48] and their scales cb7[49] (the far end past 0.984375 of depth). IW7's god-ray PS a9891c63
 // reads its own the same way (t1, code texture 52).
+Texture3D<float4> volumetricScatter : register(t110);
 Texture3D<float4> volumetricExtinction : register(t111);
-float VolumetricExtinction(float4 position, float2 screenUV) {
+float VolumetricSlice(float4 position) {
     float depth = position.z > 0.984375 ? -4 : position.w - 4;
     float3 ends = float3(replayLighting[48].x, replayLighting[48].x + replayLighting[48].y,
                          replayLighting[48].x + replayLighting[48].y + replayLighting[48].z);
-    float slice = dot(saturate((depth - float4(0, ends)) * replayLighting[49]), .25);
+    return dot(saturate((depth - float4(0, ends)) * replayLighting[49]), .25);
+}
+float VolumetricExtinction(float2 screenUV, float slice) {
     return volumetricExtinction.SampleLevel(gtaoSampler, float3(screenUV, slice), 0).x;
+}
+// The in-scatter before a pixel (code texture 25: t110), filtered as PS 077107f8 filters it: a cubic B-spline over the
+// screen in four bilinear taps, on the volume's texels (cb7[188].xy of them, each cb7[187].yz of the screen).
+float3 VolumetricScatter(float2 screenUV, float slice) {
+    float2 f = frac(screenUV * replayLighting[188].xy - .5);
+    float2 f2 = f * f, f3 = f2 * f;
+    float2 w0 = (1 - 3 * f + 3 * f2 - f3) / 6;
+    float2 w1 = (3 * f3 - 6 * f2 + 4) / 6;
+    float2 w2 = (-3 * f3 + 3 * f2 + 3 * f + 1) / 6;
+    float2 w3 = f3 / 6;
+    float2 g1 = w2 + w3;
+    float2 texel = replayLighting[187].yz;
+    float2 near = screenUV - (f + 1 - w1 / (w0 + w1)) * texel;
+    float2 far = screenUV + (1 - f + w3 / g1) * texel;
+    float3 a = volumetricScatter.SampleLevel(gtaoSampler, float3(near.x, near.y, slice), 0).rgb;
+    float3 b = volumetricScatter.SampleLevel(gtaoSampler, float3(far.x, near.y, slice), 0).rgb;
+    float3 c = volumetricScatter.SampleLevel(gtaoSampler, float3(near.x, far.y, slice), 0).rgb;
+    float3 d = volumetricScatter.SampleLevel(gtaoSampler, float3(far.x, far.y, slice), 0).rgb;
+    return lerp(lerp(a, c, g1.y), lerp(b, d, g1.y), g1.x);
 }
 #endif
 
@@ -1673,9 +1701,18 @@ float4 main(Input input) : SV_TARGET0 {
 #endif
 #endif
 #if defined(MAP_VOLUMETRIC_EXTINCTION) && !defined(MAP_COVERAGE) && MAP_DEBUG_MODE == 0
-    // IW7's additive surfaces (god-ray cards) dim by the volumetric extinction before them (row 2.w).
+    // IW7's blended and additive surfaces that read its volumetric extinction (row 2.w): Replay's volumetric pass covers
+    // what lies behind them, so they dim by the extinction before them and blended ones add the in-scatter over their
+    // coverage, as Replay's blended world shaders do (PS 077107f8).
+    float volumetricTransmittance = 1;
+    float3 volumetricInScatter = 0;
     if (materialConstants[2].w != 0 && !skyPlaced)
-        color *= VolumetricExtinction(input.position, screenUV);
+    {
+        float slice = VolumetricSlice(input.position);
+        volumetricTransmittance = VolumetricExtinction(screenUV, slice);
+        if (kind == 2)
+            volumetricInScatter = VolumetricScatter(screenUV, slice) * replayLighting[42].y / MAP_LIGHT_UNIT_SCALE;
+    }
 #endif
     // IW3 falloff (1024; vertcol_simple_fog_foa, zfeather_foa_nf_eo):
     // f = saturate((N.V)^2 * parms.x + parms.y), colour *= f *
@@ -1701,6 +1738,9 @@ float4 main(Input input) : SV_TARGET0 {
     // fade along their length through vertex alpha, and drew as uniform
     // hard-ended sheets without it (Gulag, owner test 2026-10-16). Additive
     // layers blend ONE/ONE, srcalpha-additive ones included.
+#if defined(MAP_VOLUMETRIC_EXTINCTION) && !defined(MAP_COVERAGE) && MAP_DEBUG_MODE == 0
+    color *= (flags & 256) != 0 ? volumetricTransmittance : 1;
+#endif
     if ((flags & 256) != 0)
         return float4(min(color * alpha * fogFactor * MAP_LIGHT_UNIT_SCALE * replayLighting[42].x, 32255.0),
                       alpha);
@@ -1722,5 +1762,8 @@ float4 main(Input input) : SV_TARGET0 {
         reflection += specular;
     if (kind == 2)
         color = color * alpha + reflection * fogFactor;
+#if defined(MAP_VOLUMETRIC_EXTINCTION) && !defined(MAP_COVERAGE) && MAP_DEBUG_MODE == 0
+    color = color * volumetricTransmittance + volumetricInScatter * alpha;
+#endif
     return float4(min(color * MAP_LIGHT_UNIT_SCALE * replayLighting[42].x, 32255.0), alpha);
 }
