@@ -575,6 +575,22 @@ namespace zonetool::convert::iw7_iw8
 		return result;
 	}
 
+	json iw7_volumetrics(const source_map& source)
+	{
+		// Their values carry no light unit: densities per unit of distance, distances, colours and the brightness
+		// factors that scale the converted lights' in-scattering.
+		auto result = json::object();
+		for (const auto& [key, value] : vision_settings(source))
+		{
+			if (key.starts_with("volumetric") || key.starts_with("r_volumeLightScatter") || key == "veilStrength")
+			{
+				result[key] = value;
+			}
+		}
+
+		return result;
+	}
+
 	std::map<std::string, std::string> vision_settings(const source_map& source)
 	{
 		std::map<std::string, std::string> result;

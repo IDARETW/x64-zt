@@ -10590,9 +10590,12 @@ PreparedMap PrepareFastfile(const ImportOptions &options)
                  value.skyIntensity);
     }
     {
+        // An IW7 extraction's own volumetric air, veil and light scatter (iw7_volumetrics).
+        const auto volumetrics = world.find("iw7_volumetrics");
         const std::string vision = BuildReplayVision(expFog, result.gradingClutName, options.style,
                                                      SunDirection(world, entities), lightingMatch.exposure,
-                                                     lightingMatch.lightUnitScale, nativeFog, iw7Tonemap);
+                                                     lightingMatch.lightUnitScale, nativeFog, iw7Tonemap,
+                                                     volumetrics != world.end() ? &*volumetrics : nullptr);
         result.rawFiles.push_back(
             {"vision/" + options.map + ".vision",
              std::vector<std::uint8_t>(vision.begin(), vision.end())});

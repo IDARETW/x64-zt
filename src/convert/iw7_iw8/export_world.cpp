@@ -2146,6 +2146,8 @@ namespace zonetool::convert::iw7_iw8
 			{"lightmap_encoding", {{"log_scale", lightmap_log_scale}, {"maximum", lightmap_maximum}, {"constant_ambient", true}}},
 			// IW7's tonemap exposure fields (iw7_exposure), which Replay's vision shares.
 			{"iw7_tonemap", iw7_exposure() ? iw7_tonemap(source) : json::object()},
+			// IW7's volumetric air, veil and light scatter fields, which Replay's vision shares.
+			{"iw7_volumetrics", iw7_volumetrics(source)},
 			// The world draws with Replay's stock world technique sets (MW120R_STOCK_WORLD, AGENTS.md plan 1.4).
 			{"replay_stock_world", replay_stock_world()},
 			{"light_regions", json::array()},

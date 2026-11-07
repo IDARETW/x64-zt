@@ -615,7 +615,8 @@ std::vector<std::uint8_t> BuildGradingClutPixels(const std::vector<std::uint8_t>
 std::string BuildReplayVision(const std::optional<ExpFog> &fog, const std::string &gradingClut,
                               const MapStyle style, const std::array<float, 3> &sunDirection,
                               const Iw8LightingReference *exposure, const float lightUnitScale,
-                              const std::optional<NativeFog> &nativeFog, const nlohmann::json *iw7Tonemap)
+                              const std::optional<NativeFog> &nativeFog, const nlohmann::json *iw7Tonemap,
+                              const nlohmann::json *iw7Volumetrics)
 {
     std::map<std::string_view, std::string> overrides;
     if (style == MapStyle::iw8)
@@ -701,6 +702,48 @@ std::string BuildReplayVision(const std::optional<ExpFog> &fog, const std::strin
         }
         // Fog: IW3's own, baked by the surface shader exactly as --style iw3
         // does it (below); the native fog pass stays off.
+    }
+    // An IW7 map keeps its own volumetric air, veil and light scatter: Replay's vision fields of the same names,
+    // named by their offsets in Replay's field table (0x14462A110) against the game-test PDB's vision struct
+    // (volumetricAirDensity +0x54 .. volumetricHeightFogHalfPlaneDistance +0x80, r_volumeLightScatter +0x2C ..
+    // r_volumeLightScatterColor +0x48, at the PDB's offsets; veilStrength +0x2F4, 4 bytes below the PDB's, as
+    // toneWhitePoint). Replay composites the volumetric pass over every pixel, the converted surfaces included
+    // (the stock world PS a3f48686 applies none itself). The ranges agree: IW7 maps hold air densities of .0002 to
+    // 1 and veils of .01 to .15, stock Shipment, King, Speed and Fork .002 to .03 and .05 to .09.
+    if (iw7Volumetrics)
+    {
+        static constexpr std::pair<std::string_view, std::string_view> kVolumetricFields[] = {
+            {"r_volumeLightScatter", "NKSQTPNOOK"},
+            {"r_volumeLightScatterLinearAtten", "LTQQSMPMKN"},
+            {"r_volumeLightScatterQuadraticAtten", "LSNRTORRKM"},
+            {"r_volumeLightScatterAngularAtten", "NLLMLNPMPM"},
+            {"r_volumeLightScatterDepthAttenNear", "MNQPPKSLMR"},
+            {"r_volumeLightScatterDepthAttenFar", "MRQKRNTMRK"},
+            {"r_volumeLightScatterBackgroundDistance", "LQLPRTOQKP"},
+            {"r_volumeLightScatterColor", "SLLNNNQSP"},
+            {"veilStrength", "MMQLTMKTPK"},
+            {"volumetricAirDensity", "NSKNLMKQSR"},
+            {"volumetricAbsorption", "MQMPKLKK"},
+            {"volumetricAlbedo", "NKKRQROOQK"},
+            {"volumetricSunBrightness", "LKNNNKTPTM"},
+            {"volumetricSpotBrightness", "MQSQOLLMRM"},
+            {"volumetricOmniBrightness", "RRKMLNPKP"},
+            {"volumetricAmbientBrightness", "MQRSTPRORQ"},
+            {"volumetricSunAnisotropy", "MTNSRNMTKN"},
+            {"volumetricHeightFogBaseHeight", "NPKPLTKRNS"},
+            {"volumetricHeightFogHalfPlaneDistance", "MLPOMNQPPK"},
+        };
+        std::size_t kept{};
+        for (const auto &[name, token] : kVolumetricFields)
+        {
+            if (const auto found = iw7Volumetrics->find(std::string(name)); found != iw7Volumetrics->end())
+            {
+                overrides[token] = found->get<std::string>();
+                kept++;
+            }
+        }
+        zt::info("iw3: vision keeps %zu IW7 volumetric, veil and light scatter fields (air density %s)", kept,
+                 iw7Volumetrics->value("volumetricAirDensity", std::string("0")).c_str());
     }
     if (!fog)
     {

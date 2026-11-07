@@ -1194,9 +1194,15 @@ namespace zonetool::convert::iw7_iw8
 				{
 					// Replay's spot (game-test PDB layout): the cone, bulb and intensities of IW7's, the collimation and
 					// light definition of stock spots (light_fx_default, collimation pi/2, near plane 8). The spot points
-					// along the effect's X axis (sub_141BA6670, like IW7's). IW7's layout is that of x64-zt's IW7
-					// structs (Breakneck's vfx_rivet_spotlight_orange: cone 60/50 degrees, bulb 4 by 1, brightness 16, UV
-					// 100, near plane 0.5, no shadow values); values outside their range take the stock spots' values.
+					// along the effect's X axis (ParticleEmitter_DrawTrailState 0x141BA6670, like IW7's). IW7's layout is
+					// that of x64-zt's IW7 structs (Breakneck's vfx_rivet_spotlight_orange: cone 60/50 degrees, bulb 4 by
+					// 1, brightness 16, UV 100, near plane 0.5, no shadow values); values outside their range take the
+					// stock spots' values. Replay lights the particle in the hue of its colour squared (luminance 1), with
+					// the radius of its size x and the intensity size y * brightness * 493.38132 (curve of its emitter;
+					// R_AddParticleTrailLightInstance 0x141971D50), the factor that GScr_SetLightIntensity applies to
+					// world lights: particle and world lights share one unit, as IW7's (Neon's world lights hold 42000 to
+					// 305000, an authored 85 to 617 times it). The brightness therefore takes the light unit that the
+					// world lights' colours take (export_com_world).
 					const auto& source = data.initLightSpot;
 					const auto value = [](const float v, const float low, const float high, const float fallback)
 					{
@@ -1210,7 +1216,7 @@ namespace zonetool::convert::iw7_iw8
 					light.bulbLength = value(source.m_bulbLength, 0.0f, 1000.0f, 1.0f / 255.0f);
 					light.distanceFalloff = 1.0f;
 					light.fovCollimation = 1.5707964f;
-					light.brightness = value(source.m_brightness, 0.0f, 1000.0f, 1.0f);
+					light.brightness = value(source.m_brightness, 0.0f, 1000.0f, 1.0f) * this->light_unit_;
 					light.intensityUV = value(source.m_intensityUV, 0.0f, 1000.0f, 0.0f);
 					light.intensityIR = value(source.m_intensityIR, 0.0f, 1000.0f, 0.0f);
 					light.shadowSoftness = value(source.m_shadowSoftness, 0.01f, 10.0f, 0.55f);
@@ -1222,11 +1228,6 @@ namespace zonetool::convert::iw7_iw8
 					light.disableShadowMap = source.m_disableShadowMap ? 1 : 0;
 					light.disableDynamicShadows = source.m_disableDynamicShadows ? 1 : 0;
 					light.scriptScale = 1;
-					{
-						const auto* bytes = reinterpret_cast<const std::uint8_t*>(&source);
-						ZONETOOL_INFO("iw7: effect \"%s\" spot light module %s", this->current_.data(), hex(bytes, 64).data());
-					}
-
 					result.set(0, light);
 					base();
 					result.list(offsetof(focus::ParticleModuleInitLightSpot, linkedAssets),
@@ -1236,14 +1237,16 @@ namespace zonetool::convert::iw7_iw8
 				case iw7::PARTICLE_MODULE_INIT_LIGHT_OMNI:
 				{
 					// Replay's omni lights carry their own light shape; IW7's keep the light definition's. The shape is that
-					// of converted IW3 lights (stock values), the rest IW7's.
+					// of converted IW3 lights (stock values), the rest IW7's. IW7's omni has no brightness: Replay's intensity
+					// size y * brightness * 493.38132 (R_AddParticleBeamLightInstance 0x141971940) takes the light unit
+					// as the spot's.
 					focus::ParticleModuleInitLightOmni light{};
 					const auto& source = data.initLightOmni;
 					light.fovOuter = 0.7853981852531433f;
 					light.bulbRadius = 2.0f;
 					light.bulbLength = 1.0f / 255.0f;
 					light.distanceFalloff = 1.0f;
-					light.brightness = 1.0f;
+					light.brightness = this->light_unit_;
 					light.intensityIR = source.m_intensityIR;
 					light.shadowSoftness = source.m_shadowSoftness;
 					light.shadowBias = source.m_shadowBias;
