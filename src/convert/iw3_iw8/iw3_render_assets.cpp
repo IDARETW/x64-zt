@@ -242,6 +242,9 @@ struct SourceFxMaterial
         std::optional<float> dissolve;
         // The lit flow's alpha mask (PS a386c911: its alpha times the flow's), empty for none.
         std::string mask;
+        // IW7's lit UV distortion (iw7Uvd: PS c258449e, 5d9b9a5b) in place of the flow: map is its noise map, scale its
+        // scroll (xy) and scale (zw), period the strength, the atlas (yz) and the dissolve K (w); no surface map.
+        bool uvd{};
     };
     std::optional<Flow> flow;
 };
@@ -2072,6 +2075,20 @@ SourceFxMaterial ReadFxMaterial(const std::filesystem::path &root,
             (material.flow->dissolve && !(std::isfinite(*material.flow->dissolve) && *material.flow->dissolve > 0)))
             throw std::runtime_error("unsupported IW7 flow material contract: " + name);
     }
+    if (source.contains("iw7Uvd"))
+    {
+        const auto &uvd = source.at("iw7Uvd");
+        SourceFxMaterial::Flow flow{uvd.at("map").get<std::string>(), {}, FxLiteral(uvd.at("scroll"), "uv distortion"),
+                                    FxLiteral(uvd.at("parameters"), "uv distortion parameters"), false};
+        flow.uvd = true;
+        flow.dissolve = flow.period[3];
+        // The owned lit effect PS takes the blended family, with or without the zfeather intersection.
+        if (material.flow || !material.lit || material.frameBlend ||
+            (material.family != FxMaterialFamily::alpha && material.family != FxMaterialFamily::alphaFeather) ||
+            !(flow.period[1] > 0) || !(flow.period[2] > 0) || !(flow.period[3] > 0))
+            throw std::runtime_error("unsupported IW7 UV-distortion material contract: " + name);
+        material.flow = std::move(flow);
+    }
     if (!material.rows || !material.columns || material.rows > 255 || material.columns > 255 ||
         !std::has_single_bit(material.columns) ||
         static_cast<std::uint64_t>(material.rows) * material.columns > 65535)
@@ -2154,7 +2171,8 @@ SourceFxMaterial ReadFxMaterial(const std::filesystem::path &root,
     material.image = texture.at("image").get<std::string>();
     if (!validImageName(material.image))
         throw std::runtime_error("IW3 FX material has an invalid image name: " + name);
-    if (material.flow && (!validImageName(material.flow->map) || !validImageName(material.flow->surface) ||
+    if (material.flow && (!validImageName(material.flow->map) ||
+                          (!material.flow->uvd && !validImageName(material.flow->surface)) ||
                           (!material.flow->mask.empty() && !validImageName(material.flow->mask))))
         throw std::runtime_error("IW7 flow material has an invalid image name: " + name);
     const auto &sampler = texture.at("samplerState");
@@ -4661,9 +4679,10 @@ Json BuildFxMaterialDefinition(const SourceFxMaterial &source)
 // feather: the zfeather flow twins (IW7 PS d384b91e, 4622c9c5, a6efe634), which also read the template's scene depth and
 // Particle_MaterialData. additive: the additive flow (IW7 PS 40967ff1, 6a577499, 8ce146ac), which cuts and outputs as
 // Replay's additive effects do. lit: IW7's lit flow (PS a386c911) on Replay's lit effect set (VS 372e0e1a / PS a9864c07,
-// 14 stable and 5 never arguments), its mask at MaterialTextureID_opacityMap.
+// 14 stable and 5 never arguments), its mask at MaterialTextureID_opacityMap. uvd: IW7's lit UV distortion (PS c258449e,
+// 5d9b9a5b) on the lit set in place of the flow, with its tint in pixel row 0.
 Json BuildFlowFxTechset(const Json &stock, const std::string &name, const bool feather, const bool additive,
-                        const bool lit)
+                        const bool lit, const bool uvd = false)
 {
     using NativeTechnique = zonetool::iw8::MaterialTechnique;
     using NativeArgument = zonetool::iw8::MaterialShaderArgument;
@@ -4680,10 +4699,13 @@ Json BuildFlowFxTechset(const Json &stock, const std::string &name, const bool f
     result["header"] = Hex(setHeader);
     if (lit && additive)
         throw std::runtime_error("Replay's lit effect set has no additive flow");
-    const std::string variant = std::string(lit ? "_lit" : "") + (additive ? "_add" : "") + (feather ? "_feather" : "");
+    if (uvd && !lit)
+        throw std::runtime_error("the owned UV distortion is lit only");
+    const std::string variant = std::string(lit ? "_lit" : "") + (additive ? "_add" : "") + (feather ? "_feather" : "") +
+                                (uvd ? "_uvd" : "");
     const std::string defines = std::string(lit ? "#define FLOW_LIT 1\n" : "") +
                                 (additive ? "#define FLOW_ADDITIVE 1\n" : "") +
-                                (feather ? "#define FLOW_FEATHER 1\n" : "");
+                                (feather ? "#define FLOW_FEATHER 1\n" : "") + (uvd ? "#define FLOW_UVD 1\n" : "");
     const auto pixel = Shader(17, "iw7_fx_flow" + variant, "iw7_effect_flow.hlsl",
         Compile(defines + ResourceText(IDR_IW3_EFFECT_FLOW_PIXEL_SHADER), "ps_5_0", "iw7_effect_flow.hlsl"));
     for (auto technique : stock.at("techniques"))
@@ -4725,7 +4747,9 @@ Json BuildFlowFxTechset(const Json &stock, const std::string &name, const bool f
         if (lit)
         {
             // The lit set's pixel rows (1 layerData1, 2 absorptionScale, 9 atlas) and vertex atlas rows 9-10 stay; the
-            // flow constants take rows 3 and 4.
+            // flow constants take rows 3 and 4, the UV distortion's tint row 0.
+            if (uvd)
+                argument(MTL_ARG_MATERIAL_CONST, 16, 0, 36); // emissiveParams0: source tint
             argument(MTL_ARG_MATERIAL_CONST, 16, 1, 9);
             argument(MTL_ARG_MATERIAL_CONST, 16, 2, 18);
             argument(MTL_ARG_MATERIAL_CONST, 16, 3, 90); // flowMapConsts
@@ -4734,7 +4758,7 @@ Json BuildFlowFxTechset(const Json &stock, const std::string &name, const bool f
             argument(MTL_ARG_MATERIAL_CONST, 16, 9, 94);
             argument(MTL_ARG_MATERIAL_CONST, 2, 10, 95);
             native.stableArgCount = 18;
-            native.neverArgCount = 7;
+            native.neverArgCount = uvd ? 8 : 7;
         }
         else
         {
@@ -4777,7 +4801,8 @@ Json BuildFlowFxMaterialDefinition(const SourceFxMaterial &source, const std::st
         throw std::runtime_error("Replay flow material has an unexpected metadata layout");
     std::memcpy(&native.contents, info.data(), info.size());
     native.textureCount = source.lit ? 5 : 3;
-    native.constantCount = 6;
+    // The UV distortion also keeps its tint (constant 36).
+    native.constantCount = source.flow->uvd ? 7 : 6;
     native.constantBufferCount = 1;
     std::memcpy(info.data(), &native.contents, info.size());
     const std::array<float, 4> atlas{static_cast<float>(source.columns), static_cast<float>(source.rows),
@@ -4808,12 +4833,16 @@ Json BuildFlowFxMaterialDefinition(const SourceFxMaterial &source, const std::st
         };
         append(9, layerData);
         append(18, absorption);
+        if (source.flow->uvd)
+            append(36, source.tint);
         append(37, source.flow->period);
         append(90, source.flow->scale);
         append(94, atlas);
         append(95, atlasBits);
         std::memcpy(vertex.data() + 144, atlas.data(), 16);
         std::memcpy(vertex.data() + 160, atlasBits.data(), 16);
+        if (source.flow->uvd)
+            std::memcpy(pixel.data(), source.tint.data(), 16);
         std::memcpy(pixel.data() + 16, layerData.data(), 16);
         std::memcpy(pixel.data() + 32, absorption.data(), 16);
         std::memcpy(pixel.data() + 48, source.flow->scale.data(), 16);
@@ -8225,7 +8254,8 @@ RenderPlan PrepareRenderAssets(const std::filesystem::path &exportRoot, const Js
             const bool additive = source.family == FxMaterialFamily::additive ||
                                   source.family == FxMaterialFamily::additiveFeather;
             WriteJson(mapDirectory / techsetFile,
-                      BuildFlowFxTechset(stock, techsetName, source.feather.has_value(), additive, source.lit));
+                      BuildFlowFxTechset(stock, techsetName, source.feather.has_value(), additive, source.lit,
+                                         source.flow->uvd));
             direct = BuildFlowFxMaterialDefinition(source, techsetName);
             direct["techsetDefinition"] = techsetFile;
             const auto flowImage = [&](const std::string &input) -> const Image & {
@@ -8241,12 +8271,18 @@ RenderPlan PrepareRenderAssets(const std::filesystem::path &exportRoot, const Js
                 residentImage(direct, 0, flowImage(source.image), {1, 1, 1, 1}, "fxflow", false, nullptr, true);
                 residentImage(direct, 1, SolidImage({0, 0, 0, 255}), {1, 1, 1, 1}, "fxlit", false, nullptr, true);
                 residentImage(direct, 2, flowImage(source.flow->map), {1, 1, 1, 1}, "fxflow", false, nullptr, true);
-                residentImage(direct, 3, flowImage(source.flow->surface), {1, 1, 1, 1}, "fxflow", false, nullptr, true);
+                // The UV distortion reads no surface map: white.
+                residentImage(direct, 3, source.flow->uvd ? SolidImage({255, 255, 255, 255}) : flowImage(source.flow->surface),
+                              {1, 1, 1, 1}, source.flow->uvd ? "fxlit" : "fxflow", false, nullptr, true);
                 const bool masked = !source.flow->mask.empty();
                 residentImage(direct, 4, masked ? flowImage(source.flow->mask) : SolidImage({255, 255, 255, 255}),
                               {1, 1, 1, 1}, masked ? "fxflow" : "fxlit", false, nullptr, true);
-                zt::info("iw7: FX material %s keeps native animated flow, lit by the scene, %s", name.c_str(),
-                         masked ? "with its mask" : "without a mask");
+                if (source.flow->uvd)
+                    zt::info("iw7: FX material %s keeps its native UV distortion and alpha dissolve, lit by the scene",
+                             name.c_str());
+                else
+                    zt::info("iw7: FX material %s keeps native animated flow, lit by the scene, %s", name.c_str(),
+                             masked ? "with its mask" : "without a mask");
             }
             else
             {
