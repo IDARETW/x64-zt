@@ -729,6 +729,17 @@ namespace zonetool::convert::iw7_iw8
 						result.push_back({{"t", "collision"}, {"collmap", data.collision.collmapName ? data.collision.collmapName : ""},
 							{"cmodel", data.collision.clipmapCModelIndex}, {"ai_obstacle", data.collision.aiObstacle}});
 						break;
+					case iw7::Scriptable_EventType_Rumble:
+					{
+						// The rumble asset converts natively (export_rumbles); whether it plays per client or at a position
+						// follows its broadcast flag.
+						const auto* rumble = data.rumble.rumbleAsset ? source.resolve(iw7::ASSET_TYPE_RUMBLE, data.rumble.rumbleAsset) :
+							nullptr;
+						result.push_back({{"t", "rumble"}, {"rumble", rumble && rumble->name ? std::string(asset_name(rumble->name)) :
+							std::string(data.rumble.rumble ? data.rumble.rumble : "")}, {"broadcast", rumble && rumble->broadcast},
+							{"tag", data.rumble.tagName ? data.rumble.tagName : ""}, {"stateful", data.rumble.stateful}});
+						break;
+					}
 					default:
 						result.push_back({{"t", std::format("e{}", static_cast<int>(event.type))}});
 						break;
