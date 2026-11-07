@@ -2360,6 +2360,133 @@ namespace zonetool::iw8
 				first_interior_mismatch ? "; first: " : "", first_interior_mismatch ? first_interior_mismatch->data() : "");
 		}
 
+		// IW8_REWRITE=smodel checks the static-model tables of each world against their models, as Replay's GPU path
+		// reads them (cs_gpu_expansion smodel_surf_gen_pass / smodel_surf_data_gen_pass): the expansion record of a model
+		// holds its first surface, its LOD distances and per-LOD surface ranges (the GPU chooses the LOD from these and
+		// draws it only when the CPU mask from the XModel's own distances holds it), each surface record names its model,
+		// LOD and index, and each surface's material indirection names the material that the XModel gives that surface;
+		// material indices stay within a 16384-entry page of the per-frame entry table.
+		void verify_static_models(const loaded_zone& zone)
+		{
+			std::size_t worlds{};
+			std::size_t models{};
+			std::size_t surfaces{};
+			std::vector<std::string> problems;
+			const auto problem = [&](std::string text)
+			{
+				if (problems.size() < 40)
+				{
+					problems.push_back(std::move(text));
+				}
+				else if (problems.size() == 40)
+				{
+					problems.emplace_back("...");
+				}
+			};
+
+			for (const auto& asset : zone.assets)
+			{
+				if (asset.type != ASSET_TYPE_GFXWORLD || asset.referenced)
+				{
+					continue;
+				}
+
+				worlds++;
+				const auto& sm = static_cast<const GfxWorld*>(asset.header)->smodels;
+				if (sm.materialCount > 0x4000)
+				{
+					problem(std::format("{} static-model materials exceed one 16384-entry page", sm.materialCount));
+				}
+
+				for (std::uint32_t m = 0; m < sm.modelCount; m++)
+				{
+					const auto& placed = sm.models[m];
+					const auto* model = placed.model;
+					const auto& expansion = sm.smodelExpansionData[m];
+					const auto name = model && model->name ? std::string(model->name) : std::string("?");
+					models++;
+					if (!model)
+					{
+						problem(std::format("model {} has no XModel", m));
+						continue;
+					}
+
+					if (expansion.firstStaticModelSurfaceIndex != placed.firstStaticModelSurfaceIndex)
+					{
+						problem(std::format("{}: expansion first surface {} != model first surface {}", name,
+							expansion.firstStaticModelSurfaceIndex, placed.firstStaticModelSurfaceIndex));
+					}
+
+					if (expansion.numLods != model->numLods)
+					{
+						problem(std::format("{}: expansion has {} LODs, the XModel {}", name, expansion.numLods, model->numLods));
+					}
+
+					const auto lods = std::min<std::uint32_t>(std::min<std::uint32_t>(expansion.numLods, model->numLods), 6);
+					std::uint32_t expected_offset{};
+					for (std::uint32_t l = 0; l < lods; l++)
+					{
+						const auto& range = expansion.lodInfo[l];
+						const auto& lod = model->lodInfo[l];
+						if (expansion.lodDist[l] != lod.dist)
+						{
+							problem(std::format("{} LOD {}: expansion distance {} != XModel distance {}", name, l, expansion.lodDist[l], lod.dist));
+						}
+
+						if (range.surfCount != lod.numsurfs || range.surfOffset != expected_offset)
+						{
+							problem(std::format("{} LOD {}: expansion surfaces {}+{} != XModel {} at {}", name, l, range.surfOffset,
+								range.surfCount, lod.numsurfs, expected_offset));
+						}
+
+						for (std::uint32_t i = 0; i < range.surfCount; i++)
+						{
+							const auto index = static_cast<std::uint32_t>(expansion.firstStaticModelSurfaceIndex) + range.surfOffset + i;
+							surfaces++;
+							if (index >= sm.surfaceCount)
+							{
+								problem(std::format("{} LOD {} surface {}: index {} outside {} surfaces", name, l, i, index, sm.surfaceCount));
+								continue;
+							}
+
+							const auto& surface = sm.surfaces[index];
+							if (surface.smodelIndex != m || surface.lodIndex != l || surface.surfIndex != i)
+							{
+								problem(std::format("{} LOD {} surface {}: record says model {} LOD {} surface {}", name, l, i,
+									surface.smodelIndex, surface.lodIndex, surface.surfIndex));
+							}
+
+							const auto material_index = sm.smodelSurfMatIndirection[index].smodelMaterialIndex;
+							const auto* bound = material_index < sm.materialCount ? sm.materials[material_index] : nullptr;
+							const auto* own = model->materialHandles && lod.surfIndex + i < model->numsurfs ?
+								model->materialHandles[lod.surfIndex + i] : nullptr;
+							const auto bound_name = bound && bound->name ? std::string_view(bound->name) : std::string_view("?");
+							const auto own_name = own && own->name ? std::string_view(own->name) : std::string_view("?");
+							if (material_index >= sm.materialCount || bound_name != own_name)
+							{
+								problem(std::format("{} LOD {} surface {}: world material {} ({}) != XModel material {}", name, l, i,
+									material_index, bound_name, own_name));
+							}
+						}
+
+						expected_offset += lod.numsurfs;
+					}
+				}
+			}
+
+			ZONETOOL_INFO("%s: static models: %zu worlds, %zu models, %zu surfaces checked, %zu problems", zone.name.data(), worlds, models,
+				surfaces, problems.size());
+			for (const auto& text : problems)
+			{
+				ZONETOOL_INFO("  %s", text.data());
+			}
+
+			if (!problems.empty())
+			{
+				throw std::runtime_error(std::format("{}: the static-model tables disagree with their models", zone.name));
+			}
+		}
+
 		std::uint32_t member_offset(const havok::type_table& types, const std::uint32_t type, const std::string_view name)
 		{
 			const auto found = types.member(type, name);
@@ -3639,6 +3766,10 @@ namespace zonetool::iw8
 			else if (std::string_view(rewrite) == "mesh")
 			{
 				verify_mesh(zone_folder, *zone);
+			}
+			else if (std::string_view(rewrite) == "smodel")
+			{
+				verify_static_models(*zone);
 			}
 			else if (std::string_view(rewrite) == "physics")
 			{
