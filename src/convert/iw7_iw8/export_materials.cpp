@@ -63,6 +63,9 @@ namespace zonetool::convert::iw7_iw8
 			bool opaque_alpha{};
 			// The colour of an effect drawn in high dynamic range (mkhdr techsets): stored expanded (expand_hdr).
 			bool hdr_expand{};
+			// The colour of an unlit world or model material drawn in high dynamic range (mkhdr): stored expanded for its
+			// sRGB format (expand_hdr_srgb).
+			bool hdr_srgb{};
 			// Material images keep their source dimensions and authored levels, including linked alpha/gloss inputs.
 			std::size_t limit{source_image_size};
 			bool source_mips{true};
@@ -536,6 +539,26 @@ namespace zonetool::convert::iw7_iw8
 			}
 		}
 
+		// IW7's unlit world and model mkhdr pixel shaders (mo_unlit_add_lin_ct_ndw_mkhdr: PS b1b9baa5, disassembled) expand
+		// the same way: -log2(1 - min(c^2, 0.99)) x tint. The pipeline reads their colour maps as sRGB and adds the tint as
+		// IW3's unlit materials take it, so the expansion divided by log2(100) is stored sRGB-encoded (the exporter scales
+		// the tint by it).
+		void expand_hdr_srgb(DirectX::ScratchImage& pixels)
+		{
+			for (std::size_t i = 0; i < pixels.GetPixelsSize() / 4; i++)
+			{
+				auto* pixel = pixels.GetPixels() + i * 4;
+				for (auto c = 0; c < 3; c++)
+				{
+					const auto linear = std::min(pixel[c] * pixel[c] / (255.0f * 255.0f), 0.99f);
+					const auto expanded = std::min(-std::log2(1.0f - linear) / hdr_expansion, 1.0f);
+					const auto encoded = expanded <= 0.0031308f ? expanded * 12.92f
+						: 1.055f * std::pow(expanded, 1.0f / 2.4f) - 0.055f;
+					pixel[c] = static_cast<std::uint8_t>(std::lround(std::clamp(encoded, 0.0f, 1.0f) * 255.0f));
+				}
+			}
+		}
+
 		// Replaces the alpha of a colour image: with the channel of an alpha texture (at the colour's size), or opaque.
 		// The alpha of an image from a channel of another (none: opaque), times a second channel of it when one is given.
 		bool replace_alpha(DirectX::ScratchImage& pixels, const iw7::GfxImage* alpha, const std::size_t channel,
@@ -657,6 +680,11 @@ namespace zonetool::convert::iw7_iw8
 				if (file.hdr_expand)
 				{
 					expand_hdr(pixels);
+				}
+
+				if (file.hdr_srgb)
+				{
+					expand_hdr_srgb(pixels);
 				}
 
 				if ((file.alpha || file.opaque) && !replace_alpha(pixels, file.alpha, file.alpha_channel,
@@ -872,6 +900,15 @@ namespace zonetool::convert::iw7_iw8
 				});
 		}
 
+		// An unlit world or model material that expands its colour into high dynamic range (mkhdr; IW7 PS b1b9baa5): its
+		// colour map is stored expanded (expand_hdr_srgb) and its tint takes log2(100). The model flows expand in the
+		// pipeline's shader instead (MAP_FLOW_HDR).
+		bool unlit_hdr_material(const iw7::Material* material)
+		{
+			return techset_has_token(material, "mkhdr") && !techset_has_token(material, "flow") &&
+				classify_material(material).unlit;
+		}
+
 		// The axes along which a layer's colour sampler clamps: bit 0 U, bit 1 V. IW7's sampler state byte keeps the
 		// filter and mip mode below bit 5 and clamps U, V and W in bits 5 to 7 (0x13 wraps, 0x53 clamps V, 0xF3 all: the
 		// blood hand prints and wall_stain5).
@@ -939,7 +976,15 @@ namespace zonetool::convert::iw7_iw8
 			auto constants = json::array({{{"name", "colorTint"}, {"literal", material_tint(material, layer, kind)}}});
 			if (kind.unlit)
 			{
-				const auto tint = material_color_tint(material);
+				auto tint = material_color_tint(material);
+				if (unlit_hdr_material(material))
+				{
+					for (std::size_t c = 0; c < 3; c++)
+					{
+						tint[c] *= hdr_expansion;
+					}
+				}
+
 				const auto peak = std::max({tint[0], tint[1], tint[2], 0.0f});
 				const auto emission = peak * light_scale;
 				std::array<float, 4> color{1.0f, 1.0f, 1.0f, 1.0f};
@@ -1897,6 +1942,11 @@ namespace zonetool::convert::iw7_iw8
 					entry.hdr_expand = true;
 					file += "_hdr";
 				}
+				else if (*role == image_role::color && !output.effect_materials.contains(name) && unlit_hdr_material(material))
+				{
+					entry.hdr_srgb = true;
+					file += "_hdrs";
+				}
 
 				const auto [slot, inserted] = files.try_emplace(file, entry);
 				slot->second.limit = std::max(slot->second.limit, entry.limit);
@@ -2260,8 +2310,11 @@ namespace zonetool::convert::iw7_iw8
 			// native lightmap keeps): what a stock emissive material of it emits.
 			if (replay_stock_world() && !layer && output.world_materials.contains(name) && kind.unlit)
 			{
+				// An mkhdr one's colour map holds its expansion over log2(100) (expand_hdr_srgb).
+				const auto scale = unlit_hdr_material(material) ? hdr_expansion : 1.0f;
 				const auto tint = material_color_tint(material);
-				exported["replayEmission"] = {std::max(tint[0], 0.0f), std::max(tint[1], 0.0f), std::max(tint[2], 0.0f)};
+				exported["replayEmission"] = {std::max(tint[0] * scale, 0.0f), std::max(tint[1] * scale, 0.0f),
+					std::max(tint[2] * scale, 0.0f)};
 			}
 
 			// A blended material's own reveal ramp (v0) and alpha: what a stock decal of it blends by.
