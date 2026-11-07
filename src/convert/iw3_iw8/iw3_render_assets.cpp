@@ -143,6 +143,16 @@ struct SourceMaterial
     // An extraction's IW7 reactive foliage (iw7ReactiveMotion): static models bend by Replay's reactive-motion sim
     // (MAP_REACTIVE_MOTION).
     bool reactiveMotion{};
+    // An extraction's IW7 model flow (iw7Flow: mcopw_effectunlit_*_flow_*): its flow map and surface parameters,
+    // flowMapConst.x, flowMapPeriod.xz and whether it expands its colour (mkhdr), drawn by a MAP_FLOW variant.
+    struct Flow
+    {
+        std::string map, surface;
+        float scale{};
+        std::array<float, 2> period{};
+        bool hdr{};
+    };
+    std::optional<Flow> flow;
     // IW3 wc_water (waterMap water_t, exported by OAT): the M x N wave spectrum
     // H0 (re, im pairs) with each wave vector's wTerm, and the water_l_sun
     // constants envMapParms and waterColor.
@@ -2520,6 +2530,21 @@ SourceMaterial ReadMaterial(const std::filesystem::path &root,
         material.flagWave = true;
     }
     material.reactiveMotion = source.value("iw7ReactiveMotion", false);
+    if (source.contains("iw7Flow"))
+    {
+        const auto &flow = source.at("iw7Flow");
+        SourceMaterial::Flow value;
+        value.map = flow.at("map").get<std::string>();
+        value.surface = flow.at("surface").get<std::string>();
+        value.scale = flow.at("scale").at(0).get<float>();
+        value.period = {flow.at("period").at(0).get<float>(), flow.at("period").at(2).get<float>()};
+        value.hdr = flow.at("hdr").get<bool>();
+        if (value.map.empty() || value.surface.empty() || value.map.find("..") != std::string::npos ||
+            value.surface.find("..") != std::string::npos || !std::isfinite(value.scale) ||
+            !(value.period[0] > 0) || !(value.period[1] > 0))
+            throw std::runtime_error("unsupported IW7 model flow contract: " + name);
+        material.flow = std::move(value);
+    }
     // caulk_shadow (Greenband's gnbr_caulk_shadow, an mc_unlit material) is
     // invisible geometry that only casts sun shadow, as shadowcaster is.
     const bool caulkShadow = name.find("caulk_shadow") != std::string::npos;
@@ -3418,6 +3443,8 @@ Json BuildTechset(const std::string &map, const unsigned columns, const unsigned
     // Native world surfaces bind their material's own images (kNativeWorldDefines), their detail map at slot 0x3D.
     const bool nativeWorld = !model && pixelDefines.find(kNativeWorldDefines) != std::string::npos;
     const bool nativeDetailTexture = nativeWorld && detailDefines.find("#define MAP_DETAIL ") != std::string::npos;
+    // IW7's model flow (MAP_FLOW): the flow map and its surface parameters at slots 0x39 / 0x3A.
+    const bool flowTextures = model && pixelDefines.find("#define MAP_FLOW ") != std::string::npos;
     pixelSource += detailDefines;
     pixelSource += pixelDefines;
     pixelSource += ResourceText(IDR_IW3_PIXEL_SHADER);
@@ -3474,6 +3501,11 @@ Json BuildTechset(const std::string &map, const unsigned columns, const unsigned
         AppendTextureArgument(lit, "05100a003d00"); // t10, slot 0x3D: the native world material's detail map
     if (nativeWorld)
         AppendTextureArgument(lit, "05100b004000"); // t11, slot 0x40: lightmap primary-light mask
+    if (flowTextures)
+    {
+        AppendTextureArgument(lit, "05100c003900"); // t12, slot 0x39: MaterialTextureID_flowMap
+        AppendTextureArgument(lit, "05100d003a00"); // t13, slot 0x3A: MaterialTextureID_flowSurfaceParamsMap
+    }
     PatchStateIdentity(lit, pixel);
 
     const auto depthProgram =
@@ -7849,7 +7881,48 @@ RenderPlan PrepareRenderAssets(const std::filesystem::path &exportRoot, const Js
             }
             return found->second;
         };
-        std::map<std::tuple<unsigned, unsigned, int, int, int>, std::pair<std::string, std::string>>
+        // IW7 model flow (MAP_FLOW): one variant per flow setting, emission gain and surface kind, whose pixel shader
+        // pulls the colour map along the flow map (its constants baked in) and binds the flow images at t12/t13.
+        std::map<std::tuple<float, float, float, bool, float, unsigned>, std::pair<unsigned, Json>> flowTechsets;
+        const auto flowVariant = [&](const SourceMaterial &source, const unsigned kind, const bool emissive)
+            -> const std::pair<unsigned, Json> & {
+            const auto &flow = *source.flow;
+            const float emission = emissive ? source.emission : 1.0f;
+            const std::tuple key{flow.scale, flow.period[0], flow.period[1], flow.hdr, emission, kind};
+            auto found = flowTechsets.find(key);
+            if (found == flowTechsets.end())
+            {
+                char defines[256];
+                std::snprintf(defines, sizeof(defines),
+                              "#define MAP_FLOW 1\n#define MAP_FLOW_SCALE %.9g\n#define MAP_FLOW_PERIOD float2(%.9g, %.9g)\n",
+                              flow.scale, flow.period[0], flow.period[1]);
+                std::string pixel = defines;
+                if (flow.hdr)
+                    pixel += "#define MAP_FLOW_HDR 1\n";
+                if (emissive)
+                {
+                    std::snprintf(defines, sizeof(defines), "#define MAP_MODEL_EMISSION %.9g\n", source.emission);
+                    pixel += defines;
+                }
+                Json opaque = BuildTechset(
+                    map, columns, plan.atlasSize, geometry, plan.glassEnvironment,
+                    instanceLighting, volumeLighting ? entityLightVolume->defines : std::string{},
+                    {}, true, plan.modelFalloffDefines, {}, pixel);
+                const unsigned index = static_cast<unsigned>(flowTechsets.size());
+                Json techset =
+                    kind == static_cast<unsigned>(SurfaceKind::opaque)
+                        ? std::move(opaque)
+                        : std::move(CreateVariant(opaque, modelMaterialTemplate, stem, map,
+                                                  usage + "_flow" + std::to_string(index) +
+                                                      (kind == static_cast<unsigned>(SurfaceKind::cutout)
+                                                           ? "_foliage"
+                                                           : "_glass"))
+                                        .at("techset"));
+                found = flowTechsets.emplace(key, std::pair{index, std::move(techset)}).first;
+            }
+            return found->second;
+        };
+        std::map<std::tuple<unsigned, unsigned, int, int, int, int>, std::pair<std::string, std::string>>
             techsetFiles;
         for (const SourceMaterial &source : materials)
         {
@@ -7876,16 +7949,19 @@ RenderPlan PrepareRenderAssets(const std::filesystem::path &exportRoot, const Js
             if (moving && !flag && geometry == TechniqueGeometry::staticModel)
                 zt::warn("iw3: flag or reactive material %s keeps a static surface", source.name.c_str());
             const int wave = flag ? static_cast<int>(waveOf(source).first) : -1;
+            const bool flowing = source.flow.has_value() && !detailed && !flag;
             const bool emissive = (source.flags & kEmissionFlag) != 0 && !detailed && !flag;
+            const int flowIndex = flowing ? static_cast<int>(flowVariant(source, kind, emissive).first) : -1;
             const int emissionIndex =
-                emissive ? static_cast<int>(emissionVariant(source, kind).first) : -1;
+                emissive && !flowing ? static_cast<int>(emissionVariant(source, kind).first) : -1;
             auto [techsetEntry, inserted] = techsetFiles.try_emplace(
                 {kind, source.cullMode | (source.depthBias ? 4u : 0u) | (blend << 3), detailIndex,
-                 wave, emissionIndex});
+                 wave, emissionIndex, flowIndex});
             if (inserted)
             {
                 Json variant = detailed   ? detailVariant(source).second
                                : flag     ? flagVariant(source, kind)
+                               : flowing  ? flowVariant(source, kind, emissive).second
                                : emissive ? emissionVariant(source, kind).second
                                           : modelTechsets[kind];
                 const std::string suffix =
@@ -7893,7 +7969,8 @@ RenderPlan PrepareRenderAssets(const std::filesystem::path &exportRoot, const Js
                     (blend ? "_b" + std::to_string(blend) : "") +
                     (detailed ? "_d" + std::to_string(detailIndex) : "") +
                     (flag ? flagSuffix(static_cast<unsigned>(wave)) : "") +
-                    (emissive ? "_e" + std::to_string(emissionIndex) : "");
+                    (emissionIndex >= 0 ? "_e" + std::to_string(emissionIndex) : "") +
+                    (flowing ? "_f" + std::to_string(flowIndex) : "");
                 variant["name"] = variant.at("name").get<std::string>() + suffix;
                 for (auto &technique : variant.at("techniques"))
                 {
@@ -7937,6 +8014,22 @@ RenderPlan PrepareRenderAssets(const std::filesystem::path &exportRoot, const Js
             direct["techset"] = techsetEntry->second.first;
             direct["techsetDefinition"] = techsetEntry->second.second;
             direct["imageDefinitions"] = Json::array();
+            // A flowing material's flow images (slots 0x39 and 0x3A) follow the normal map (9) and precede the
+            // response (0x3B): the texture table stays slot-sorted, as the technique's ascending arguments require.
+            unsigned responseChannel = 2;
+            if (flowing)
+            {
+                auto &textures = direct["textures"];
+                if (textures.size() < 3 || Unhex(textures[1].at("header").get<std::string>()).at(0) != 9 ||
+                    Unhex(textures[2].at("header").get<std::string>()).at(0) != 0x3B)
+                    throw std::runtime_error("model material template has an unexpected texture table");
+                textures.insert(textures.begin() + 2, Json{{"header", "3900000000000000"}, {"image", ""}});
+                textures.insert(textures.begin() + 3, Json{{"header", "3a00000000000000"}, {"image", ""}});
+                auto info = Unhex(direct.at("info").get<std::string>());
+                info[0x14] = static_cast<std::uint8_t>(textures.size());
+                direct["info"] = Hex(info);
+                responseChannel = 4;
+            }
             // IW3 "ge128" cutouts (flags 8/16 select gt0/lt128) clip at alpha 0.5.
             const bool alphaCoverage =
                 source.kind == SurfaceKind::cutout && !(source.flags & 24u) &&
@@ -7948,10 +8041,16 @@ RenderPlan PrepareRenderAssets(const std::filesystem::path &exportRoot, const Js
                                    "model");
             else
                 residentImageAsync(direct, 1, image(source.normal).front(), {1, 1, 1, 1}, "model");
+            if (flowing)
+            {
+                residentImageAsync(direct, 2, image(source.flow->map).front(), {1, 1, 1, 1}, "model_flow");
+                residentImageAsync(direct, 3, image(source.flow->surface).front(), {1, 1, 1, 1}, "model_flow");
+            }
             if (source.response.empty())
-                residentImageOwned(direct, 2, Image{1, 1, std::vector<std::uint8_t>{0, 0, 0, 0}}, {1, 1, 1, 1}, "model");
+                residentImageOwned(direct, responseChannel, Image{1, 1, std::vector<std::uint8_t>{0, 0, 0, 0}},
+                                   {1, 1, 1, 1}, "model");
             else
-                residentImageAsync(direct, 2, image(source.response).front(), {1, 1, 1, 1}, "model");
+                residentImageAsync(direct, responseChannel, image(source.response).front(), {1, 1, 1, 1}, "model");
             direct["imageDefinitions"].push_back(sunDepthDefinition);
             if (instanceLighting)
                 direct["imageDefinitions"].push_back(

@@ -1146,6 +1146,20 @@ namespace zonetool::convert::iw7_iw8
 
 	namespace
 	{
+		// IW7's model flow techsets (PSs e5f8f3b4: additive, x the scriptable base-pass colour, Afghan and Codphish;
+		// f4daf89a: blended mkhdr, Proto): the effect flow of the colour map on a model's surfaces, tinted (ct), with
+		// IW7's fog and volumetric extinction, which the pipeline's model shader draws (MAP_FLOW).
+		bool model_flow_material(const iw7::Material* material)
+		{
+			static constexpr std::array<std::string_view, 2> names
+			{
+				"mcopw_effectunlit_add_lin_ct_ndw_flow_nocast_colscr_evc",
+				"mcopw_effectunlit_blend_lin_ct_ndw_flow_nocast_mkhdr_evc",
+			};
+			return material && material->techniqueSet &&
+				std::ranges::find(names, std::string_view(asset_name(material->techniqueSet->name))) != names.end();
+		}
+
 		bool flow_effect_material(const iw7::Material* material)
 		{
 			// Each name is pinned to its disassembled source PS, all one flow with alpha blending: bfc071e2 (colour tint,
@@ -1786,7 +1800,8 @@ namespace zonetool::convert::iw7_iw8
 		for (const auto& [name, material] : output.materials)
 		{
 			auto& roles = candidates[name];
-			const auto flow = output.effect_materials.contains(name) && flow_effect_material(material);
+			const auto flow = (output.effect_materials.contains(name) && flow_effect_material(material)) ||
+				model_flow_material(material);
 			const auto layer = layer_of(name);
 			// A layer of a stock layered surface (material_stock_layered), or a lit blended or alpha-tested world material
 			// that draws as a stock decal or cut-out: their alpha, reveal and thickness maps go to Replay's shaders as IW7
@@ -2220,6 +2235,25 @@ namespace zonetool::convert::iw7_iw8
 			if (output.sky_object_materials.contains(name))
 			{
 				exported["skyObject"] = true;
+			}
+
+			// A model flow material (model_flow_material): the pipeline's model shader pulls its colour along the flow map.
+			if (model_flow_material(material) && !layer)
+			{
+				const auto& map = images[static_cast<std::size_t>(image_role::flow)];
+				const auto& surface = images[static_cast<std::size_t>(image_role::flow_surface)];
+				const auto scale = material_constant(material, "flowMapConst");
+				const auto period = material_constant(material, "flowMapPeriod");
+				if (map && surface && scale && period)
+				{
+					exported["iw7Flow"] = {{"map", *map}, {"surface", *surface}, {"scale", *scale}, {"period", *period},
+						{"hdr", techset_has_token(material, "mkhdr")}};
+				}
+				else
+				{
+					ZONETOOL_WARNING("iw7: model flow material %s lacks a flow image or constant; it draws without its flow",
+						material->name);
+				}
 			}
 
 			// An unlit world material's emission as IW7 keeps it (its colorTint, in the units of its lightmaps, which the
