@@ -2619,6 +2619,43 @@ iw7_scriptable_run( part, events )
 			self notify( e.a, e.b );
 		else if ( e.t == "collision" )
 			self iw7_scriptable_collision( part, e.a, e.b );
+		else if ( e.t == "rumble" )
+			self iw7_scriptable_rumble( e.a, e.b, e.c, e.d );
+	}
+}
+
+// Replay's native Scriptable rumble event: each client that has the instance active (ScriptableCl_Spatial_Update: the
+// nearest 256 within 3000 units of the client) plays a per-client rumble on its own player (CG_Rumble_PlayDeferred with
+// the local client's entity), and a broadcast rumble at the tag the event names, else at the instance's origin. When
+// the model lacks the tag (ScriptableCl_GetBonePosition fails), the broadcast plays at the origin with
+// useRootOnMissingTag and not at all without it. playrumbleonentity on a player and playrumbleonposition reach the same
+// client paths (events 148 and 149).
+iw7_scriptable_rumble( name, broadcast, tag, root_on_missing_tag )
+{
+	if ( broadcast )
+	{
+		origin = self.origin;
+		if ( tag != "" )
+		{
+			origin = self gettagorigin( tag, 1 );
+			if ( !isdefined( origin ) )
+			{
+				if ( !root_on_missing_tag )
+					return;
+				origin = self.origin;
+			}
+		}
+
+		playrumbleonposition( name, origin );
+		return;
+	}
+
+	if ( !isdefined( level.players ) )
+		return;
+	foreach ( player in level.players )
+	{
+		if ( isdefined( player ) && distancesquared( player.origin, self.origin ) <= 9000000 )
+			player playrumbleonentity( name );
 	}
 }
 
@@ -2737,7 +2774,9 @@ iw7_scriptable_attach( tag, model )
 	self.iw7_attached[tag] = model;
 }
 
-// The effects play as effect entities at their tags, which every client receives (also one that connects later, as the
+)gsc"
+			// MSVC limits one string literal to 16380 characters: the runtime continues in a second literal.
+			R"gsc(// The effects play as effect entities at their tags, which every client receives (also one that connects later, as the
 // host's own client does after the first states at the start): playfxontag is an entity event that reaches only the
 // clients in the game at the time. An effect that IW7 kills on exit is deleted when its part leaves the state.
 iw7_scriptable_fx( part, effect, tag, loop, kill, use_tag_angles )
@@ -4078,13 +4117,24 @@ iw7_destructible_think( model, effect, sound, health )
 						}
 						else if (t == "rumble")
 						{
-							// Replay's native rumble event (17) queues a per-client rumble unless the RumbleInfo broadcasts;
-							// which client a Scriptable's per-client rumble reaches is not established, so no script call
-							// stands in for it (every captured IW7 Scriptable rumble, damage_light / damage_heavy, is
-							// per-client).
-							omitted(event.value("broadcast", false) ? "broadcast rumble without a converted handler"
-								: "per-client rumble: its recipient is not established");
-							continue;
+							// Replay's native rumble event (17, ScriptableCl_RunStateEvents_Specific) runs on each client that
+							// has the instance active: a per-client RumbleInfo plays on that client's own player, a broadcast
+							// one at the instance's origin or tag (the machine's helper). The rumble plays under the name
+							// export_rumbles delivers it by, which only exists when the event's asset resolved.
+							if (!event.value("delivered", false))
+							{
+								omitted("rumble asset not delivered");
+								continue;
+							}
+
+							if (event.value("stateful", false))
+							{
+								omitted("stateful rumble: its exit cleanup is not converted");
+								continue;
+							}
+
+							args = std::format("{}, {}, {}, {}", quote(converted_rumble_name(source, event.at("rumble").get<std::string>())),
+								num("broadcast"), str("tag"), num("root_on_missing_tag"));
 						}
 						else
 						{

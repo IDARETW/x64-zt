@@ -885,13 +885,15 @@ namespace zonetool::convert::iw7_iw8
 						break;
 					case iw7::Scriptable_EventType_Rumble:
 					{
-						// The rumble asset converts natively (export_rumbles); whether it plays per client or at a position
-						// follows its broadcast flag.
+						// The rumble asset converts natively (export_rumbles, which follows the same asset pointer: delivered
+						// says the converted asset exists); whether it plays per client or at a position follows its broadcast
+						// flag.
 						const auto* rumble = data.rumble.rumbleAsset ? source.resolve(iw7::ASSET_TYPE_RUMBLE, data.rumble.rumbleAsset) :
 							nullptr;
 						result.push_back({{"t", "rumble"}, {"rumble", rumble && rumble->name ? std::string(asset_name(rumble->name)) :
-							std::string(data.rumble.rumble ? data.rumble.rumble : "")}, {"broadcast", rumble && rumble->broadcast},
-							{"tag", data.rumble.tagName ? data.rumble.tagName : ""}, {"stateful", data.rumble.stateful}});
+							std::string(data.rumble.rumble ? data.rumble.rumble : "")}, {"delivered", rumble && rumble->name},
+							{"broadcast", rumble && rumble->broadcast}, {"tag", data.rumble.tagName ? data.rumble.tagName : ""},
+							{"root_on_missing_tag", data.rumble.useRootOnMissingTag}, {"stateful", data.rumble.stateful}});
 						break;
 					}
 					default:
@@ -2189,6 +2191,15 @@ namespace zonetool::convert::iw7_iw8
 		ZONETOOL_INFO("iw7: exported %zu bytes of entities with %u spawn points", entities.size(), spawns.spawnsCount);
 	}
 
+	std::string converted_rumble_name(const source_map& source, const std::string_view original, const bool graph)
+	{
+		if (original.empty())
+		{
+			throw std::runtime_error("IW7 rumble asset has no name");
+		}
+		return std::format("mw120r/iw7/{}/{}/{}", source.name(), graph ? "rumblegraph" : "rumble", original);
+	}
+
 	void export_rumbles(const source_map& source, const std::filesystem::path& extracted)
 	{
 		const auto map = source.map_ents();
@@ -2209,12 +2220,7 @@ namespace zonetool::convert::iw7_iw8
 		// Common Replay rumbles use these source names with different curves and trigger channels.
 		const auto semantic_name = [&](const iw7::XAssetType type, const char* name)
 		{
-			const auto original = asset_name(name);
-			if (original.empty())
-			{
-				throw std::runtime_error("IW7 rumble asset has no name");
-			}
-			return std::format("mw120r/iw7/{}/{}/{}", source.name(), type == iw7::ASSET_TYPE_RUMBLE ? "rumble" : "rumblegraph", original);
+			return converted_rumble_name(source, asset_name(name), type != iw7::ASSET_TYPE_RUMBLE);
 		};
 		const auto bytes = [](const void* header, const std::size_t count)
 		{
