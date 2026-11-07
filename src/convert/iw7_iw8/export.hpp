@@ -64,6 +64,14 @@ namespace zonetool::convert::iw7_iw8
 		std::set<std::string> decal_materials;
 		// The materials (and material layers) of world surfaces, whose colour maps keep more texels (world_color_size).
 		std::set<std::string> world_materials;
+		// The vertex red and green ranges of each world distortion material's surfaces (IW7's per-vertex distortion
+		// strength along the tangent and the binormal), which the material folds into its scale.
+		struct distortion_strength_range
+		{
+			std::array<int, 2> low{255, 255};
+			std::array<int, 2> high{0, 0};
+		};
+		std::map<std::string, distortion_strength_range> distortion_strength;
 		// The materials of world surfaces that IW7 draws in its lit decal range (GfxWorldDpvsStatic litDecalSurfsBegin to
 		// litDecalSurfsEnd), after the opaque surfaces they lie on: they take the decal depth bias.
 		std::set<std::string> decal_range_materials;

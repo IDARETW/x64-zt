@@ -97,6 +97,11 @@ struct SourceMaterial
     // Every surface of the material is lightmapped (replayStockOnly): with a stock world material it needs no converted
     // one.
     bool replayStockOnly{};
+    // An IW7 world distortion (iw7Distortion): its distortion map (raw: offset in red/green, strength in blue), UV
+    // animation (scroll x/y, rotation) and scale, drawn by Replay's stock world distortion material.
+    std::string distortionMap;
+    std::array<float, 4> distortionUvAnimation{};
+    std::array<float, 2> distortionScale{};
     // A stock layer's alpha, reveal and thickness map (replayRevealMap: red alpha, green reveal).
     std::string replayReveal;
     // The layers of a stock layered surface's material (replayLayers): each a material of its own, blending by its
@@ -2690,6 +2695,15 @@ SourceMaterial ReadMaterial(const std::filesystem::path &root,
     material.replaySpecularAlpha = source.value("replaySpecularAlpha", false);
     material.replayGloss = source.value("replayGloss", false);
     material.replayStockOnly = source.value("replayStockOnly", false);
+    if (source.contains("iw7Distortion"))
+    {
+        const Json &distortion = source.at("iw7Distortion");
+        material.distortionMap = distortion.at("map").get<std::string>();
+        material.distortionUvAnimation = distortion.at("uvAnimation").get<std::array<float, 4>>();
+        material.distortionScale = distortion.at("scale").get<std::array<float, 2>>();
+        if (material.distortionMap.empty() || !material.replayStockOnly)
+            throw std::runtime_error("unsupported IW7 world distortion contract: " + name);
+    }
     if (source.contains("replayRevealSharpness"))
         material.replayRevealSharpness = source.at("replayRevealSharpness").get<float>();
     material.replayAlpha = source.value("replayAlpha", false);
@@ -7162,8 +7176,10 @@ RenderPlan PrepareRenderAssets(const std::filesystem::path &exportRoot, const Js
     // and material of their layer count, read from the game install (iw8::stock::Library). Decal, blended and cut-out
     // surfaces keep the generated materials.
     std::optional<iw8::stock::Library> stockLibrary;
-    const bool shadowWorld = std::ranges::any_of(materials, [&](const SourceMaterial &source) {
-        return source.shadowOnly && source.castsShadow && worldSurfaceMaterials.contains(source.name);
+    // Shadow-only and distortion world materials have no converted equivalent: their stock ones build in every route.
+    const bool stockOnlyWorld = std::ranges::any_of(materials, [&](const SourceMaterial &source) {
+        return ((source.shadowOnly && source.castsShadow) || !source.distortionMap.empty()) &&
+               worldSurfaceMaterials.contains(source.name);
     });
     const auto buildStockWorldMaterials = [&](const std::set<std::string> &neededWorldMaterials,
                                               const bool visibleMaterials) {
@@ -7320,7 +7336,7 @@ RenderPlan PrepareRenderAssets(const std::filesystem::path &exportRoot, const Js
                 layered.insert(name.substr(0, at));
         const Json singleTechset = Json::parse(ResourceText(IDR_IW3_TECHSET_TEMPLATE));
         std::size_t count = 0, layeredCount = 0, decalCount = 0, cutoutCount = 0, emissiveCount = 0,
-                    shadowCount = 0;
+                    shadowCount = 0, distortionCount = 0;
         for (const SourceMaterial &source : materials)
         {
             if (!neededWorldMaterials.contains(source.name))
@@ -7349,6 +7365,54 @@ RenderPlan PrepareRenderAssets(const std::filesystem::path &exportRoot, const Js
                 addMaterial(std::move(direct), source.name, planned);
                 planned.worldMaterialIndex = planned.stockWorldMaterialIndex;
                 ++shadowCount;
+                continue;
+            }
+            // An IW7 world distortion draws as Replay's stock world distortion material (twc/dub_water_wall_waves_dist:
+            // technique set twc/dist_10_distortion_rpl_ta0_8000_3_0_0_0, sort 24 = GfxWorld sortKeyDistortion, camera
+            // region 3), IW7's distortion map in its slot 0x9D, its UV animation in constant 0x3F (vertex row 0) and its
+            // scale in constant 0x7F (pixel row 1). The stock VS (893b6231) turns the UV about its middle and scrolls it
+            // as IW7's VS (aa277930) does; the stock PS (bd3434da) offsets the scene by the map as IW7's PS (89c34e12).
+            if (!source.distortionMap.empty())
+            {
+                if (replayZones.empty())
+                    throw std::runtime_error("world distortion materials need the Replay install (--replay)");
+                if (!stockLibrary)
+                    stockLibrary.emplace(replayZones);
+                Json direct = stockLibrary->Material("twc/dub_water_wall_waves_dist");
+                const auto &[techsetName, techsetFile] =
+                    stockTechset(stockLibrary->TechniqueSet(direct.at("techset").get<std::string>()), "tw",
+                                 "_distortion", source);
+                direct["source"] = source.name;
+                direct["techset"] = techsetName;
+                direct["techsetDefinition"] = techsetFile;
+                direct["imageDefinitions"] = Json::array();
+                const std::array<float, 4> scale{source.distortionScale[0], source.distortionScale[1], 0.0f, 0.0f};
+                auto constants = Unhex(direct.at("constants").get<std::string>());
+                std::size_t found = 0;
+                for (std::size_t offset = 0; offset + 20 <= constants.size(); offset += 20)
+                {
+                    const auto hash = At<std::uint32_t>(constants, offset);
+                    const auto &value = hash == 0x3Fu ? source.distortionUvAnimation : scale;
+                    if (hash != 0x3Fu && hash != 0x7Fu)
+                        continue;
+                    std::memcpy(constants.data() + offset + 4, value.data(), 16);
+                    ++found;
+                }
+                auto &stages = direct.at("buffers").at(0);
+                auto vertexRows = Unhex(stages.at(0).get<std::string>());
+                auto pixelRows = Unhex(stages.at(3).get<std::string>());
+                if (found != 2 || vertexRows.size() < 16 || pixelRows.size() < 32)
+                    throw std::runtime_error("stock world distortion material layout changed");
+                std::memcpy(vertexRows.data(), source.distortionUvAnimation.data(), 16);
+                std::memcpy(pixelRows.data() + 16, scale.data(), 16);
+                direct["constants"] = Hex(constants);
+                stages[0] = Hex(vertexRows);
+                stages[3] = Hex(pixelRows);
+                residentImage(direct, 0, image(source.distortionMap).front(), {1, 1, 1, 1}, "world_distortion", false,
+                              nullptr, true);
+                addMaterial(std::move(direct), source.name, planned);
+                planned.worldMaterialIndex = planned.stockWorldMaterialIndex;
+                ++distortionCount;
                 continue;
             }
             if (!visibleMaterials || source.replayColor.empty() ||
@@ -7626,9 +7690,10 @@ RenderPlan PrepareRenderAssets(const std::filesystem::path &exportRoot, const Js
             ++layeredCount;
         }
         zt::info("iw3: %zu stock Replay world materials, %zu stock layered ones, %zu stock decals, %zu stock cut-outs and "
-                 "%zu stock emissive ones and %zu shadow-only ones in %zu technique sets",
-                 count, layeredCount, decalCount, cutoutCount, emissiveCount, shadowCount, techsets.size());
-        return count + layeredCount + decalCount + cutoutCount + emissiveCount + shadowCount;
+                 "%zu stock emissive ones, %zu shadow-only ones and %zu distortion ones in %zu technique sets",
+                 count, layeredCount, decalCount, cutoutCount, emissiveCount, shadowCount, distortionCount,
+                 techsets.size());
+        return count + layeredCount + decalCount + cutoutCount + emissiveCount + shadowCount + distortionCount;
     };
     if (nativeWorld)
     {
@@ -7648,7 +7713,7 @@ RenderPlan PrepareRenderAssets(const std::filesystem::path &exportRoot, const Js
         const std::set<std::string> neededWorldMaterials(worldMaterials.begin(), worldMaterials.end());
         // Stock world materials first: a material whose surfaces they all draw needs no converted one.
         std::size_t nativeMaterials =
-            world.value("replay_stock_world", false) || shadowWorld
+            world.value("replay_stock_world", false) || stockOnlyWorld
                 ? buildStockWorldMaterials(neededWorldMaterials, world.value("replay_stock_world", false))
                 : 0;
         for (const SourceMaterial &source : materials)
@@ -7695,7 +7760,7 @@ RenderPlan PrepareRenderAssets(const std::filesystem::path &exportRoot, const Js
         zt::info("iw3: %zu native world materials and 6 sky faces in %zu technique sets", nativeMaterials,
                  nativeVariants.size());
     }
-    else if (shadowWorld)
+    else if (stockOnlyWorld)
         buildStockWorldMaterials(worldSurfaceMaterials, false);
     timing.lap("native world materials");
 

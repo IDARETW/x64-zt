@@ -111,12 +111,8 @@ namespace zonetool::convert::iw7_iw8
 				throw std::runtime_error(std::format("surface transient zone {} is out of range", surface.transientZone));
 			}
 
-			// Replay maps have no refraction layers.
+			// Distortion surfaces stay: Replay draws world refraction itself (export_materials: distortion_world).
 			const auto* resolved = source.resolve(iw7::ASSET_TYPE_MATERIAL, surface.material);
-			if (classify_material(resolved).kind == surface_kind::distortion)
-			{
-				return {};
-			}
 
 			const auto layers = material_layer_count(resolved);
 
@@ -299,6 +295,24 @@ namespace zonetool::convert::iw7_iw8
 
 			const auto material_name = output.add_material(source, surface.material);
 			output.world_materials.insert(material_name);
+			if (classify_material(resolved).kind == surface_kind::distortion)
+			{
+				// IW7's distortion VS (aa277930) scales the offset along the tangent by the vertex red and along the binormal
+				// by its green, and tints the refracted scene by its blue; Replay's stock world distortion tints by the vertex
+				// colour. The vertex keeps blue as its colour, and the material folds red and green into its scale
+				// (export_materials, distortion_strength).
+				auto& strength = output.distortion_strength[material_name];
+				for (auto& corner : vertices)
+				{
+					for (auto axis = 0; axis < 2; axis++)
+					{
+						strength.low[axis] = std::min(strength.low[axis], corner.color[axis]);
+						strength.high[axis] = std::max(strength.high[axis], corner.color[axis]);
+					}
+
+					corner.color = {corner.color[2], corner.color[2], corner.color[2], corner.color[3]};
+				}
+			}
 			for (auto& value : center)
 			{
 				value /= static_cast<float>(vertices.size());
