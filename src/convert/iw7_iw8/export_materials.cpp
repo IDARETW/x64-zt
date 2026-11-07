@@ -1253,17 +1253,33 @@ namespace zonetool::convert::iw7_iw8
 				std::ranges::find(names, std::string_view(asset_name(material->techniqueSet->name))) != names.end();
 		}
 
+		// IW7's unlit additive model UV distortion, pinned to its disassembled PS 5e1809e2
+		// (mopw_effectunlit_add_lin_ct_ndw_uvd_nocast_evc: Breakneck's destroyed-prop fire card): the colour map at
+		// uv + (noise.xy * 2 - 1) * strength / textureAtlas.xy, the noise (texture 0x38436E1C) at uv * uvDistortParms.zw +
+		// time * uvDistortParms.xy (pixel rows 1-3: 0x2B8BA1BC, the w of 0x9CFFD90E, textureAtlas), then squared, tinted,
+		// fogged and volumetrically attenuated as the unlit additive model shader draws it (MAP_UVD).
+		bool model_uvd_material(const iw7::Material* material)
+		{
+			return material && material->techniqueSet &&
+				asset_name(material->techniqueSet->name) == "mopw_effectunlit_add_lin_ct_ndw_uvd_nocast_evc";
+		}
+
 		// The lit UV-distortion effects, each name pinned to its disassembled PS: c258449e (Breakneck's blood drips and oil
 		// tendrils) and its colour-tint twin 5d9b9a5b (techsets_common; the same rows one later and the albedo times
 		// colorTint). The UVs move by a scrolling noise map (the texture of hash 0x38436E1C): uv + (noise.xy * 2 - 1) *
 		// strength / textureAtlas.xy, the noise at uv * uvDistortParms.zw + time * uvDistortParms.xy (constant 0x2B8BA1BC;
-		// strength the w of 0x9CFFD90E), and the alpha dissolves by the vertex alpha (alphaDissolveParms.x).
+		// strength the w of 0x9CFFD90E), and the alpha dissolves by the vertex alpha (alphaDissolveParms.x). Their twins
+		// without the dissolve scale the alpha by the vertex alpha instead, with the same rows less the dissolve's:
+		// 684ca3a1 (Geneva, Nova, Renaissance) and 69656d4c (Mars Oasis, Turista; lit by the per-particle lighting map
+		// alone, as the owned lit PS lights them all).
 		bool uvd_effect_material(const iw7::Material* material)
 		{
-			static constexpr std::array<std::string_view, 2> names
+			static constexpr std::array<std::string_view, 4> names
 			{
 				"eq_effect_blend_lin_ndw_shl_uvd_ad_nocast_norm_spec",
 				"eq_effect_blend_lin_ct_ndw_shl_uvd_ad_nocast_norm_spec",
+				"eq_effect_blend_lin_ndw_shl_uvd_nocast_norm_spec",
+				"eq_effect_blend_lin_ndw_uvd_nocast",
 			};
 			return material && material->techniqueSet &&
 				std::ranges::find(names, std::string_view(asset_name(material->techniqueSet->name))) != names.end();
@@ -1502,22 +1518,24 @@ namespace zonetool::convert::iw7_iw8
 			}
 
 			// The UV distortion (uvd_effect_material): the noise map, its scroll and scale, and the strength, the atlas and
-			// the dissolve K; the pipeline's owned lit effect PS distorts the UVs (FLOW_UVD).
+			// the dissolve K (0 without the dissolve: the techsets without "ad"); the pipeline's owned lit effect PS distorts
+			// the UVs (FLOW_UVD).
 			if (uvd_effect_material(material))
 			{
 				const auto& map = images[static_cast<std::size_t>(image_role::flow)];
 				const auto scroll = material_constant(material, 0x2B8BA1BCu);
 				const auto strength = material_constant(material, 0x9CFFD90Eu);
 				const auto atlas_cells = material_constant(material, "textureAtlas");
-				const auto dissolve = material_constant(material, "alphaDissolveParms");
-				if (!color || !map || !scroll || !strength || !atlas_cells || !dissolve || !((*atlas_cells)[0] > 0.0f) ||
-					!((*atlas_cells)[1] > 0.0f) || !((*dissolve)[0] > 0.0f))
+				const auto dissolves = techset_has_token(material, "ad");
+				const auto dissolve = dissolves ? material_constant(material, "alphaDissolveParms") : std::nullopt;
+				if (!color || !map || !scroll || !strength || !atlas_cells || !((*atlas_cells)[0] > 0.0f) ||
+					!((*atlas_cells)[1] > 0.0f) || (dissolves && (!dissolve || !((*dissolve)[0] > 0.0f))))
 				{
 					throw std::runtime_error(std::format("IW7 UV-distortion material {} lacks an image or its constants", material->name));
 				}
 
 				result["iw7Uvd"] = {{"map", *map}, {"scroll", *scroll},
-					{"parameters", {(*strength)[3], (*atlas_cells)[0], (*atlas_cells)[1], (*dissolve)[0]}}};
+					{"parameters", {(*strength)[3], (*atlas_cells)[0], (*atlas_cells)[1], dissolves ? (*dissolve)[0] : 0.0f}}};
 			}
 
 			return result;
@@ -1932,8 +1950,10 @@ namespace zonetool::convert::iw7_iw8
 			auto& roles = candidates[name];
 			const auto flow = (output.effect_materials.contains(name) && flow_effect_material(material)) ||
 				model_flow_material(material);
-			// A UV-distortion effect's noise map takes the flow map's role (uvd_effect_material).
-			const auto uvd = output.effect_materials.contains(name) && uvd_effect_material(material);
+			// A UV-distortion effect's or model's noise map takes the flow map's role (uvd_effect_material,
+			// model_uvd_material).
+			const auto uvd = (output.effect_materials.contains(name) && uvd_effect_material(material)) ||
+				model_uvd_material(material);
 			const auto layer = layer_of(name);
 			// A layer of a stock layered surface (material_stock_layered), or a lit blended or alpha-tested world material
 			// that draws as a stock decal or cut-out: their alpha, reveal and thickness maps go to Replay's shaders as IW7
@@ -2405,6 +2425,27 @@ namespace zonetool::convert::iw7_iw8
 				{
 					ZONETOOL_WARNING("iw7: model flow material %s lacks a flow image or constant; it draws without its flow",
 						material->name);
+				}
+			}
+
+			// A model UV-distortion material (model_uvd_material): the pipeline's model shader moves its colour map's UVs by
+			// the noise map.
+			if (model_uvd_material(material) && !layer)
+			{
+				const auto& map = images[static_cast<std::size_t>(image_role::flow)];
+				const auto scroll = material_constant(material, 0x2B8BA1BCu);
+				const auto strength = material_constant(material, 0x9CFFD90Eu);
+				const auto atlas_cells = material_constant(material, "textureAtlas");
+				if (map && scroll && strength && atlas_cells && (*atlas_cells)[0] > 0.0f && (*atlas_cells)[1] > 0.0f)
+				{
+					exported["iw7ModelUvd"] = {{"map", *map}, {"scroll", *scroll},
+						{"strength", {(*strength)[3] / (*atlas_cells)[0], (*strength)[3] / (*atlas_cells)[1]}}};
+					ZONETOOL_INFO("iw7: model material %s keeps its UV distortion", material->name);
+				}
+				else
+				{
+					ZONETOOL_WARNING("iw7: model UV-distortion material %s lacks its noise map or a constant; it draws without its "
+						"distortion", material->name);
 				}
 			}
 

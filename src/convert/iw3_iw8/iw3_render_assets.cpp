@@ -155,6 +155,16 @@ struct SourceMaterial
         bool hdr{};
     };
     std::optional<Flow> flow;
+    // An extraction's IW7 model UV distortion (iw7ModelUvd: mopw_effectunlit_add_lin_ct_ndw_uvd_nocast_evc, PS 5e1809e2):
+    // its noise map, uvDistortParms (scroll xy, scale zw) and the strength over textureAtlas.xy, drawn by a MAP_UVD
+    // variant.
+    struct Uvd
+    {
+        std::string map;
+        std::array<float, 4> scroll{};
+        std::array<float, 2> strength{};
+    };
+    std::optional<Uvd> uvd;
     // IW3 wc_water (waterMap water_t, exported by OAT): the M x N wave spectrum
     // H0 (re, im pairs) with each wave vector's wTerm, and the water_l_sun
     // constants envMapParms and waterColor.
@@ -2081,11 +2091,13 @@ SourceFxMaterial ReadFxMaterial(const std::filesystem::path &root,
         SourceFxMaterial::Flow flow{uvd.at("map").get<std::string>(), {}, FxLiteral(uvd.at("scroll"), "uv distortion"),
                                     FxLiteral(uvd.at("parameters"), "uv distortion parameters"), false};
         flow.uvd = true;
-        flow.dissolve = flow.period[3];
+        // A dissolve K of 0: the twin without the dissolve (684ca3a1), whose alpha is the texel's times the particle's.
+        if (flow.period[3] > 0)
+            flow.dissolve = flow.period[3];
         // The owned lit effect PS takes the blended family, with or without the zfeather intersection.
         if (material.flow || !material.lit || material.frameBlend ||
             (material.family != FxMaterialFamily::alpha && material.family != FxMaterialFamily::alphaFeather) ||
-            !(flow.period[1] > 0) || !(flow.period[2] > 0) || !(flow.period[3] > 0))
+            !(flow.period[1] > 0) || !(flow.period[2] > 0) || !(flow.period[3] >= 0))
             throw std::runtime_error("unsupported IW7 UV-distortion material contract: " + name);
         material.flow = std::move(flow);
     }
@@ -2564,6 +2576,21 @@ SourceMaterial ReadMaterial(const std::filesystem::path &root,
             !(value.period[0] > 0) || !(value.period[1] > 0))
             throw std::runtime_error("unsupported IW7 model flow contract: " + name);
         material.flow = std::move(value);
+    }
+    if (source.contains("iw7ModelUvd"))
+    {
+        const auto &uvd = source.at("iw7ModelUvd");
+        SourceMaterial::Uvd value;
+        value.map = uvd.at("map").get<std::string>();
+        value.scroll = uvd.at("scroll").get<std::array<float, 4>>();
+        value.strength = uvd.at("strength").get<std::array<float, 2>>();
+        const auto finite = [](const auto &values) {
+            return std::ranges::all_of(values, [](const float v) { return std::isfinite(v); });
+        };
+        if (value.map.empty() || value.map.find("..") != std::string::npos || !finite(value.scroll) ||
+            !finite(value.strength) || material.flow)
+            throw std::runtime_error("unsupported IW7 model UV-distortion contract: " + name);
+        material.uvd = std::move(value);
     }
     // caulk_shadow (Greenband's gnbr_caulk_shadow, an mc_unlit material) is
     // invisible geometry that only casts sun shadow, as shadowcaster is.
@@ -3470,6 +3497,8 @@ Json BuildTechset(const std::string &map, const unsigned columns, const unsigned
     const bool nativeDetailTexture = nativeWorld && detailDefines.find("#define MAP_DETAIL ") != std::string::npos;
     // IW7's model flow (MAP_FLOW): the flow map and its surface parameters at slots 0x39 / 0x3A.
     const bool flowTextures = model && pixelDefines.find("#define MAP_FLOW ") != std::string::npos;
+    // IW7's model UV distortion (MAP_UVD): its noise map at slot 0x39.
+    const bool uvdTexture = model && pixelDefines.find("#define MAP_UVD ") != std::string::npos;
     pixelSource += detailDefines;
     pixelSource += pixelDefines;
     pixelSource += ResourceText(IDR_IW3_PIXEL_SHADER);
@@ -3531,6 +3560,8 @@ Json BuildTechset(const std::string &map, const unsigned columns, const unsigned
         AppendTextureArgument(lit, "05100c003900"); // t12, slot 0x39: MaterialTextureID_flowMap
         AppendTextureArgument(lit, "05100d003a00"); // t13, slot 0x3A: MaterialTextureID_flowSurfaceParamsMap
     }
+    if (uvdTexture)
+        AppendTextureArgument(lit, "05100c003900"); // t12, slot 0x39: the noise map, in MaterialTextureID_flowMap
     PatchStateIdentity(lit, pixel);
 
     const auto depthProgram =
@@ -7964,7 +7995,50 @@ RenderPlan PrepareRenderAssets(const std::filesystem::path &exportRoot, const Js
             }
             return found->second;
         };
-        std::map<std::tuple<unsigned, unsigned, int, int, int, int>, std::pair<std::string, std::string>>
+        // IW7 model UV distortion (MAP_UVD): one variant per distortion setting, emission gain and surface kind, whose
+        // pixel shader samples the colour map at UVs moved by the noise map (its constants baked in), bound at t12.
+        std::map<std::tuple<float, float, float, float, float, float, float, unsigned>, std::pair<unsigned, Json>>
+            uvdTechsets;
+        const auto uvdVariant = [&](const SourceMaterial &source, const unsigned kind, const bool emissive)
+            -> const std::pair<unsigned, Json> & {
+            const auto &uvd = *source.uvd;
+            const float emission = emissive ? source.emission : 1.0f;
+            const std::tuple key{uvd.scroll[0], uvd.scroll[1], uvd.scroll[2], uvd.scroll[3],
+                                 uvd.strength[0], uvd.strength[1], emission, kind};
+            auto found = uvdTechsets.find(key);
+            if (found == uvdTechsets.end())
+            {
+                char defines[256];
+                std::snprintf(defines, sizeof(defines),
+                              "#define MAP_UVD 1\n#define MAP_UVD_SCROLL float4(%.9g, %.9g, %.9g, %.9g)\n"
+                              "#define MAP_UVD_STRENGTH float2(%.9g, %.9g)\n",
+                              uvd.scroll[0], uvd.scroll[1], uvd.scroll[2], uvd.scroll[3], uvd.strength[0],
+                              uvd.strength[1]);
+                std::string pixel = defines;
+                if (emissive)
+                {
+                    std::snprintf(defines, sizeof(defines), "#define MAP_MODEL_EMISSION %.9g\n", source.emission);
+                    pixel += defines;
+                }
+                Json opaque = BuildTechset(
+                    map, columns, plan.atlasSize, geometry, plan.glassEnvironment,
+                    instanceLighting, volumeLighting ? entityLightVolume->defines : std::string{},
+                    {}, true, plan.modelFalloffDefines, {}, pixel);
+                const unsigned index = static_cast<unsigned>(uvdTechsets.size());
+                Json techset =
+                    kind == static_cast<unsigned>(SurfaceKind::opaque)
+                        ? std::move(opaque)
+                        : std::move(CreateVariant(opaque, modelMaterialTemplate, stem, map,
+                                                  usage + "_uvd" + std::to_string(index) +
+                                                      (kind == static_cast<unsigned>(SurfaceKind::cutout)
+                                                           ? "_foliage"
+                                                           : "_glass"))
+                                        .at("techset"));
+                found = uvdTechsets.emplace(key, std::pair{index, std::move(techset)}).first;
+            }
+            return found->second;
+        };
+        std::map<std::tuple<unsigned, unsigned, int, int, int, int, int>, std::pair<std::string, std::string>>
             techsetFiles;
         for (const SourceMaterial &source : materials)
         {
@@ -7992,27 +8066,31 @@ RenderPlan PrepareRenderAssets(const std::filesystem::path &exportRoot, const Js
                 zt::warn("iw3: flag or reactive material %s keeps a static surface", source.name.c_str());
             const int wave = flag ? static_cast<int>(waveOf(source).first) : -1;
             const bool flowing = source.flow.has_value() && !detailed && !flag;
+            const bool distorted = source.uvd.has_value() && !detailed && !flag;
             const bool emissive = (source.flags & kEmissionFlag) != 0 && !detailed && !flag;
             const int flowIndex = flowing ? static_cast<int>(flowVariant(source, kind, emissive).first) : -1;
+            const int uvdIndex = distorted ? static_cast<int>(uvdVariant(source, kind, emissive).first) : -1;
             const int emissionIndex =
-                emissive && !flowing ? static_cast<int>(emissionVariant(source, kind).first) : -1;
+                emissive && !flowing && !distorted ? static_cast<int>(emissionVariant(source, kind).first) : -1;
             auto [techsetEntry, inserted] = techsetFiles.try_emplace(
                 {kind, source.cullMode | (source.depthBias ? 4u : 0u) | (blend << 3), detailIndex,
-                 wave, emissionIndex, flowIndex});
+                 wave, emissionIndex, flowIndex, uvdIndex});
             if (inserted)
             {
-                Json variant = detailed   ? detailVariant(source).second
-                               : flag     ? flagVariant(source, kind)
-                               : flowing  ? flowVariant(source, kind, emissive).second
-                               : emissive ? emissionVariant(source, kind).second
-                                          : modelTechsets[kind];
+                Json variant = detailed    ? detailVariant(source).second
+                               : flag      ? flagVariant(source, kind)
+                               : flowing   ? flowVariant(source, kind, emissive).second
+                               : distorted ? uvdVariant(source, kind, emissive).second
+                               : emissive  ? emissionVariant(source, kind).second
+                                           : modelTechsets[kind];
                 const std::string suffix =
                     "_cull" + std::to_string(source.cullMode) + (source.depthBias ? "_bias" : "") +
                     (blend ? "_b" + std::to_string(blend) : "") +
                     (detailed ? "_d" + std::to_string(detailIndex) : "") +
                     (flag ? flagSuffix(static_cast<unsigned>(wave)) : "") +
                     (emissionIndex >= 0 ? "_e" + std::to_string(emissionIndex) : "") +
-                    (flowing ? "_f" + std::to_string(flowIndex) : "");
+                    (flowing ? "_f" + std::to_string(flowIndex) : "") +
+                    (distorted ? "_u" + std::to_string(uvdIndex) : "");
                 variant["name"] = variant.at("name").get<std::string>() + suffix;
                 for (auto &technique : variant.at("techniques"))
                 {
@@ -8056,21 +8134,23 @@ RenderPlan PrepareRenderAssets(const std::filesystem::path &exportRoot, const Js
             direct["techset"] = techsetEntry->second.first;
             direct["techsetDefinition"] = techsetEntry->second.second;
             direct["imageDefinitions"] = Json::array();
-            // A flowing material's flow images (slots 0x39 and 0x3A) follow the normal map (9) and precede the
-            // response (0x3B): the texture table stays slot-sorted, as the technique's ascending arguments require.
+            // A flowing material's flow images (slots 0x39 and 0x3A), or a distorted one's noise map (0x39), follow the
+            // normal map (9) and precede the response (0x3B): the texture table stays slot-sorted, as the technique's
+            // ascending arguments require.
             unsigned responseChannel = 2;
-            if (flowing)
+            if (flowing || distorted)
             {
                 auto &textures = direct["textures"];
                 if (textures.size() < 3 || Unhex(textures[1].at("header").get<std::string>()).at(0) != 9 ||
                     Unhex(textures[2].at("header").get<std::string>()).at(0) != 0x3B)
                     throw std::runtime_error("model material template has an unexpected texture table");
                 textures.insert(textures.begin() + 2, Json{{"header", "3900000000000000"}, {"image", ""}});
-                textures.insert(textures.begin() + 3, Json{{"header", "3a00000000000000"}, {"image", ""}});
+                if (flowing)
+                    textures.insert(textures.begin() + 3, Json{{"header", "3a00000000000000"}, {"image", ""}});
                 auto info = Unhex(direct.at("info").get<std::string>());
                 info[0x14] = static_cast<std::uint8_t>(textures.size());
                 direct["info"] = Hex(info);
-                responseChannel = 4;
+                responseChannel = flowing ? 4 : 3;
             }
             // IW3 "ge128" cutouts (flags 8/16 select gt0/lt128) clip at alpha 0.5.
             const bool alphaCoverage =
@@ -8088,6 +8168,8 @@ RenderPlan PrepareRenderAssets(const std::filesystem::path &exportRoot, const Js
                 residentImageAsync(direct, 2, image(source.flow->map).front(), {1, 1, 1, 1}, "model_flow");
                 residentImageAsync(direct, 3, image(source.flow->surface).front(), {1, 1, 1, 1}, "model_flow");
             }
+            if (distorted)
+                residentImageAsync(direct, 2, image(source.uvd->map).front(), {1, 1, 1, 1}, "model_uvd");
             if (source.response.empty())
                 residentImageOwned(direct, responseChannel, Image{1, 1, std::vector<std::uint8_t>{0, 0, 0, 0}},
                                    {1, 1, 1, 1}, "model");
@@ -8278,8 +8360,8 @@ RenderPlan PrepareRenderAssets(const std::filesystem::path &exportRoot, const Js
                 residentImage(direct, 4, masked ? flowImage(source.flow->mask) : SolidImage({255, 255, 255, 255}),
                               {1, 1, 1, 1}, masked ? "fxflow" : "fxlit", false, nullptr, true);
                 if (source.flow->uvd)
-                    zt::info("iw7: FX material %s keeps its native UV distortion and alpha dissolve, lit by the scene",
-                             name.c_str());
+                    zt::info("iw7: FX material %s keeps its native UV distortion%s, lit by the scene", name.c_str(),
+                             source.flow->dissolve ? " and alpha dissolve" : "");
                 else
                     zt::info("iw7: FX material %s keeps native animated flow, lit by the scene, %s", name.c_str(),
                              masked ? "with its mask" : "without a mask");
