@@ -126,11 +126,14 @@ std::vector<std::uint8_t> BuildGradingClutPixels(const std::vector<std::uint8_t>
                                               float exposureAdjust = 0.0f);
 
 // Replay-format vision file (all 218 fields, engine defaults unless converted).
-// sunDirection points toward the sun (iw8 atmospheric scattering).
+// sunDirection points toward the sun (iw8 atmospheric scattering). iw7Tonemap and
+// iw7Volumetrics hold an IW7 vision's fields by name (values as the vision file
+// writes them).
 std::string BuildReplayVision(const std::optional<ExpFog> &fog, const std::string &gradingClut,
                               MapStyle style, const std::array<float, 3> &sunDirection,
                               const Iw8LightingReference *exposure = nullptr,
                               float lightUnitScale = 1.0f,
                               const std::optional<NativeFog> &nativeFog = std::nullopt,
-                              const nlohmann::json *iw7Tonemap = nullptr);
+                              const nlohmann::json *iw7Tonemap = nullptr,
+                              const nlohmann::json *iw7Volumetrics = nullptr);
 } // namespace iw3

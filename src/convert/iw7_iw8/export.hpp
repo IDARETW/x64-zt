@@ -528,6 +528,9 @@ namespace zonetool::convert::iw7_iw8
 	std::string export_sky(const source_map& source, extraction& output);
 	// The tonemap fields of the map's vision file (tonemap*, toneWhitePoint) as it keeps them.
 	json iw7_tonemap(const source_map& source);
+	// The volumetric air, veil and light scatter fields of the map's vision file (volumetric*, veilStrength,
+	// r_volumeLightScatter*) as it keeps them: Replay's vision has them under the same names.
+	json iw7_volumetrics(const source_map& source);
 	// The settings of the map's vision file (vision/<map>.vision, a raw file of the map zone) by name, values unquoted.
 	std::map<std::string, std::string> vision_settings(const source_map& source);
 	// The map's fog for the pipeline's world export: IW7's vision fog fields, which Replay's vision has under the same
