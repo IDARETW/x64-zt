@@ -225,6 +225,9 @@ struct SourceFxMaterial
         std::string map, surface;
         std::array<float, 4> scale{}, period{};
         bool hdr{};
+        // IW7's dissolve flow (PS 39eb46cf, d2bc120f): alphaDissolveParms.x, the K of
+        // alpha = saturate((texel.a * mask + vertex alpha) * K - K).
+        std::optional<float> dissolve;
     };
     std::optional<Flow> flow;
 };
@@ -2040,8 +2043,16 @@ SourceFxMaterial ReadFxMaterial(const std::filesystem::path &root,
                                               FxLiteral(flow.at("scale"), "flow scale"),
                                               FxLiteral(flow.at("period"), "flow period"),
                                               flow.at("hdr").get<bool>()};
-        if (material.lit || material.frameBlend || material.family != FxMaterialFamily::alpha ||
-            !(material.flow->period[0] > 0) || !(material.flow->period[2] > 0))
+        if (flow.contains("dissolve"))
+            material.flow->dissolve = flow.at("dissolve").get<float>();
+        // The owned flow PS covers the blended and additive families, either with the zfeather intersection.
+        const bool flowFamily = material.family == FxMaterialFamily::alpha ||
+                                material.family == FxMaterialFamily::alphaFeather ||
+                                material.family == FxMaterialFamily::additive ||
+                                material.family == FxMaterialFamily::additiveFeather;
+        if (material.lit || material.frameBlend || !flowFamily || !(material.flow->period[0] > 0) ||
+            !(material.flow->period[2] > 0) ||
+            (material.flow->dissolve && !(std::isfinite(*material.flow->dissolve) && *material.flow->dissolve > 0)))
             throw std::runtime_error("unsupported IW7 flow material contract: " + name);
     }
     if (!material.rows || !material.columns || material.rows > 255 || material.columns > 255 ||
@@ -4700,7 +4711,9 @@ Json BuildFlowFxMaterialDefinition(const SourceFxMaterial &source, const std::st
                                     1.0f / source.columns, 1.0f / source.rows};
     const std::array<std::uint32_t, 4> atlasBits{source.rows * source.columns, source.columns - 1,
                                                static_cast<unsigned>(std::countr_zero(source.columns)), 0};
-    const std::array<float, 4> hdr{source.flow->hdr ? 1.0f : 0.0f, 0, 0, 0};
+    // Pixel row 3: x = mkhdr, y = dissolve K, z = 1 with a dissolve.
+    const std::array<float, 4> hdr{source.flow->hdr ? 1.0f : 0.0f, source.flow->dissolve.value_or(0.0f),
+                                   source.flow->dissolve ? 1.0f : 0.0f, 0};
     std::vector<std::uint8_t> constants, vertex(160), pixel(64), indices(zonetool::iw8::TECHNIQUE_COUNT, 0xFF);
     const auto append = [&](const std::uint8_t id, const auto &value) {
         const auto offset = constants.size();
