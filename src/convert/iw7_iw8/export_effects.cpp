@@ -2525,7 +2525,7 @@ iw7_scriptable_run( part, events )
 		else if ( e.t == "fx" )
 			self thread iw7_scriptable_fx( part, e.a, e.b, e.c, e.d, e.use_tag_angles );
 		else if ( e.t == "sound" )
-			self iw7_scriptable_sound( part, e.a );
+			self iw7_scriptable_sound( part, e.a, e.b );
 		else if ( e.t == "anim" )
 			self scriptmodelplayanim( e.a );
 		else if ( e.t == "hide" )
@@ -2665,10 +2665,27 @@ iw7_scriptable_fx_stop( part, fx )
 }
 
 // The compatibility layer plays each alias as its kind (playsound a one-shot, playloopsound a loop): one of the two plays.
-iw7_scriptable_sound( part, alias )
+// A sound at a tag (IW7's Sound event tagName): Replay's script sounds take no tag (ScrCmd_PlaySound 0x14125F210,
+// ScrCmd_PlayLoopSound 0x141260440), so a one-shot plays at the tag's position and a loop plays from a script_origin
+// linked to the tag, deleted when the part leaves the state or the model goes.
+iw7_scriptable_sound( part, alias, tag )
 {
 	if ( alias == "" )
 		return;
+	if ( isdefined( tag ) && tag != "" && isdefined( self gettagorigin( tag, 1 ) ) )
+	{
+		if ( iw3compat_sound_kind( alias ) == 2 )
+		{
+			source = spawn( "script_origin", self gettagorigin( tag ) );
+			source linkto( self, tag );
+			source playloopsound( alias );
+			source thread iw7_scriptable_sound_release( self, "death" );
+			source thread iw7_scriptable_sound_release( self, "iw7_part_" + part );
+		}
+		else
+			playsoundatpos( self gettagorigin( tag ), alias );
+		return;
+	}
 	self playsound( alias );
 	self playloopsound( alias );
 	if ( iw3compat_sound_kind( alias ) == 2 )
@@ -2680,6 +2697,15 @@ iw7_scriptable_sound_stop( part )
 	self endon( "death" );
 	self waittill( "iw7_part_" + part );
 	self stoploopsound();
+}
+
+// self: the loop source of a tagged sound; it goes on the first of its owner's messages.
+iw7_scriptable_sound_release( owner, message )
+{
+	self endon( "death" );
+	owner waittill( message );
+	self stoploopsound();
+	self delete();
 }
 
 // Damage over time (IW7's burning barrels and cars) while the part that started it keeps its state.
@@ -3859,7 +3885,8 @@ iw7_destructible_think( model, effect, sound, health )
 								continue;
 							}
 
-							args = str("alias");
+							// The tag, empty without one: the machine plays a tagged sound at its tag.
+							args = std::format("{}, {}", str("alias"), str("tag"));
 						}
 						else if (t == "anim")
 						{
