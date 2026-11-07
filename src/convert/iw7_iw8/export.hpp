@@ -49,6 +49,11 @@ namespace zonetool::convert::iw7_iw8
 		// draws the whole texture: Scorch's sun body and glow are single images in materials of a 4x2 atlas. Replay's atlas
 		// techniques cut every particle to an atlas cell, so the other effect materials convert without an atlas.
 		std::set<std::string> atlas_materials;
+		// The effect materials of IW7's glares (flares at their source, export_effects), and of every other particle. IW7
+		// draws a flare in screen space over the world, faded by its occlusion query; its billboard draws without a depth
+		// test so that it does not cut into the wall behind its source. A material of both keeps its depth test.
+		std::set<std::string> glare_materials;
+		std::set<std::string> sprite_materials;
 		// The world materials of particle decals, which convert as the pipeline's decal materials (Replay decal volumes).
 		std::set<std::string> decal_materials;
 		// The materials (and material layers) of world surfaces, whose colour maps keep more texels (world_color_size).

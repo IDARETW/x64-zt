@@ -1168,7 +1168,7 @@ namespace zonetool::convert::iw7_iw8
 		// flicker). A lit one's tint (smoke, steam: 1) is a colour, which the pipeline treats as IW3's.
 		json export_effect_material(const iw7::Material* material,
 			const std::array<std::optional<std::string>, image_role_count>& images, const float light_scale,
-			const bool atlas)
+			const bool atlas, const bool glare)
 		{
 			const auto& color = images[static_cast<std::size_t>(image_role::color)];
 			const auto flow = flow_effect_material(material);
@@ -1272,7 +1272,7 @@ namespace zonetool::convert::iw7_iw8
 				{"colorWriteAlpha", false},
 				{"colorWriteRgb", true},
 				{"cullFace", "none"},
-				{"depthTest", iw7_depthless(material) ? "always" : "less_equal"},
+				{"depthTest", iw7_depthless(material) || glare ? "always" : "less_equal"},
 				{"depthWrite", false},
 				{"dstBlendAlpha", destination},
 				{"dstBlendRgb", destination},
@@ -2108,8 +2108,14 @@ namespace zonetool::convert::iw7_iw8
 					ZONETOOL_WARNING("iw7: effect material \"%s\" has no colour map and adds nothing", name.data());
 				}
 
+				const auto glare = output.glare_materials.contains(name);
+				if (glare && output.sprite_materials.contains(name))
+				{
+					ZONETOOL_INFO("iw7: effect material \"%s\" draws glares and other particles; it keeps its depth test", name.data());
+				}
+
 				write_json_async(output.extracted / "materials" / (name + ".json"), export_effect_material(material, images,
-					light_unit_scale(source), output.atlas_materials.contains(name)), 16);
+					light_unit_scale(source), output.atlas_materials.contains(name), glare && !output.sprite_materials.contains(name)), 16);
 				continue;
 			}
 

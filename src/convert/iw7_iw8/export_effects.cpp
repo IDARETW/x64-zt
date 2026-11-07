@@ -403,6 +403,7 @@ namespace zonetool::convert::iw7_iw8
 				{
 					const auto material_name = this->output_.add_material(this->source_, sim.material);
 					this->output_.effect_materials.insert(material_name);
+					this->output_.sprite_materials.insert(material_name);
 					// Baked particles keep their cells (the animation's index data).
 					this->output_.atlas_materials.insert(material_name);
 					const auto count = header.particleDataCount;
@@ -1068,6 +1069,7 @@ namespace zonetool::convert::iw7_iw8
 						{
 							const auto name = this->output_.add_material(this->source_, const_cast<iw7::Material*>(material));
 							this->output_.effect_materials.insert(name);
+							(this->glare_state_ ? this->output_.glare_materials : this->output_.sprite_materials).insert(name);
 							if (this->atlas_state_)
 							{
 								this->output_.atlas_materials.insert(name);
