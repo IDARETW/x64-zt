@@ -1257,11 +1257,18 @@ namespace zonetool::convert::iw7_iw8
 		// (mopw_effectunlit_add_lin_ct_ndw_uvd_nocast_evc: Breakneck's destroyed-prop fire card): the colour map at
 		// uv + (noise.xy * 2 - 1) * strength / textureAtlas.xy, the noise (texture 0x38436E1C) at uv * uvDistortParms.zw +
 		// time * uvDistortParms.xy (pixel rows 1-3: 0x2B8BA1BC, the w of 0x9CFFD90E, textureAtlas), then squared, tinted,
-		// fogged and volumetrically attenuated as the unlit additive model shader draws it (MAP_UVD).
+		// fogged and volumetrically attenuated as the unlit additive model shader draws it (MAP_UVD). Its masked twin 5654ad3f
+		// (mopw_effectunlit_add_lin_ct_ndw_uvd_nocast_mask_mra_mua_colscr_evc, Neon) takes the same rows; its alpha is the mask's
+		// at the mask's animated UV (mask_mra, MAP_UNLIT_MASKS), times the scriptable colour (white unless a script sets it).
 		bool model_uvd_material(const iw7::Material* material)
 		{
+			static constexpr std::array<std::string_view, 2> names
+			{
+				"mopw_effectunlit_add_lin_ct_ndw_uvd_nocast_evc",
+				"mopw_effectunlit_add_lin_ct_ndw_uvd_nocast_mask_mra_mua_colscr_evc",
+			};
 			return material && material->techniqueSet &&
-				asset_name(material->techniqueSet->name) == "mopw_effectunlit_add_lin_ct_ndw_uvd_nocast_evc";
+				std::ranges::find(names, std::string_view(asset_name(material->techniqueSet->name))) != names.end();
 		}
 
 		// The lit UV-distortion effects, each name pinned to its disassembled PS: c258449e (Breakneck's blood drips and oil
@@ -1995,6 +2002,16 @@ namespace zonetool::convert::iw7_iw8
 			const auto uvd = (output.effect_materials.contains(name) && uvd_effect_material(material)) ||
 				model_uvd_material(material);
 			const auto layer = layer_of(name);
+			// mask_mra: the mask replaces the colour's alpha (IW7 PSs e6f6218b, 5654ad3f read only the colour's rgb). An
+			// unlit world or model material with a mask draws through the pipeline's MAP_UNLIT_MASKS, which multiplies the
+			// colour's alpha by the mask's, so its colour exports opaque and the product is the mask's. Effects keep the
+			// colour's alpha: their path applies no unlit mask.
+			const auto mask_replaces_alpha = material && !layer && !output.effect_materials.contains(name) &&
+				classify_material(material).unlit && techset_has_token(material, "mra") &&
+				std::ranges::any_of(std::span(material->textureTable, material->textureCount), [](const auto& texture)
+				{
+					return texture_role(texture) == image_role::mask && !texture_layer(texture);
+				});
 			// A layer of a stock layered surface (material_stock_layered), or a lit blended or alpha-tested world material
 			// that draws as a stock decal or cut-out: their alpha, reveal and thickness maps go to Replay's shaders as IW7
 			// keeps them.
@@ -2067,7 +2084,12 @@ namespace zonetool::convert::iw7_iw8
 					entry.source_mips = true;
 					file += "_flow_raw";
 				}
-				if (*role == image_role::color && texture.semantic == iw7::TS_COLOR_SPECULAR_MAP)
+				if (*role == image_role::color && mask_replaces_alpha)
+				{
+					entry.opaque = true;
+					file += "_o";
+				}
+				else if (*role == image_role::color && texture.semantic == iw7::TS_COLOR_SPECULAR_MAP)
 				{
 					// The colour of each alpha (or reveal) is a file of its own; without one, the colour is opaque.
 					entry.alpha = alpha;
