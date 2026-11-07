@@ -250,6 +250,9 @@ struct PreparedMap
     std::unordered_map<std::string, std::array<std::uint8_t, 192>> fxParticleMaterialData;
     std::vector<iw8::vfx::Effect> vfxEffects;
     std::string vfxLightDef;
+    // The light definitions the map registers from its source's IES profiles (IW7): a native effect's light that
+    // names one keeps it; the others take vfxLightDef.
+    std::set<std::string> iesLightDefs;
     // Debris shapes of native effects (IW7 physics-light modules) built as
     // Replay PhysicsFXShape Havok data, and the common-zone assets (pipelines,
     // the default particle shape) that native effects name.

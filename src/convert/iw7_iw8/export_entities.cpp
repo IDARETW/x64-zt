@@ -1299,6 +1299,23 @@ namespace zonetool::convert::iw7_iw8
 			lights.push_back(std::move(entry));
 		}
 
+		// The light definitions that effect lights link (export_effects): those with an IES profile convert like the spots'
+		// own, and the pipeline keeps them by name.
+		std::size_t effect_ies{};
+		for (const auto& name : output.particle_light_defs)
+		{
+			if (!ies_definition(name.data()).empty())
+			{
+				effect_ies++;
+			}
+		}
+
+		if (!output.particle_light_defs.empty())
+		{
+			ZONETOOL_INFO("iw7: effect lights link %zu light definitions of their own, %zu with an IES profile",
+				output.particle_light_defs.size(), effect_ies);
+		}
+
 		if (narrowed_spots || leaning_ups || large_bulbs)
 		{
 			ZONETOOL_INFO("iw7: lights: %zu shadowed spots narrowed to 75 degrees, %zu ups made perpendicular to their direction, "

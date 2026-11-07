@@ -9162,7 +9162,7 @@ iw8::vfx::Effect ResolveNativeFx(const NativeFx &fx, const PreparedMap &map,
                                 }
                                 else if (asset.first == ASSET_TYPE_VFX)
                                     asset.second = effectAliases.at(asset.second);
-                                else if (asset.first == ASSET_TYPE_LIGHTDEF)
+                                else if (asset.first == ASSET_TYPE_LIGHTDEF && !map.iesLightDefs.contains(asset.second))
                                     asset.second = map.vfxLightDef;
                                 else if (asset.first == ASSET_TYPE_PHYSICSFXSHAPE)
                                     asset.second = shapeAliases.at(asset.second);
@@ -9653,6 +9653,7 @@ PreparedMap::PreparedMap(PreparedMap &&other) noexcept
     , fxParticleMaterialData(std::move(other.fxParticleMaterialData))
     , vfxEffects(std::move(other.vfxEffects))
     , vfxLightDef(std::move(other.vfxLightDef))
+    , iesLightDefs(std::move(other.iesLightDefs))
     , vfxShapes(std::move(other.vfxShapes))
     , vfxParticleSims(std::move(other.vfxParticleSims))
     , vfxReferences(std::move(other.vfxReferences))
@@ -9699,6 +9700,7 @@ PreparedMap &PreparedMap::operator=(PreparedMap &&other) noexcept
         fxParticleMaterialData = std::move(other.fxParticleMaterialData);
         vfxEffects = std::move(other.vfxEffects);
         vfxLightDef = std::move(other.vfxLightDef);
+        iesLightDefs = std::move(other.iesLightDefs);
         vfxShapes = std::move(other.vfxShapes);
         vfxParticleSims = std::move(other.vfxParticleSims);
         vfxReferences = std::move(other.vfxReferences);
@@ -10357,6 +10359,10 @@ PreparedMap PrepareFastfile(const ImportOptions &options)
         }
     }
     const auto &sourceLights = commonWorld.at("primary_lights");
+    // convert.cpp registers a light definition for each of these profiles (iw8::ies::Register), under its name.
+    if (const auto profiles = commonWorld.find("ies_profiles"); profiles != commonWorld.end())
+        for (const auto &profile : *profiles)
+            result.iesLightDefs.insert(profile.at("definition").get<std::string>());
     const auto primaryLightCount = world.at("primary_light_count").get<std::size_t>();
     const auto sunPrimaryLightIndex = world.at("sun_primary_light_index").get<std::size_t>();
     if (!sourceLights.is_array() || sourceLights.size() != primaryLightCount ||
