@@ -1135,10 +1135,13 @@ namespace zonetool::convert::iw7_iw8
 			// d384b91e (6d8b8710 with the zfeather soft intersection; Breakneck); additively 40967ff1 (Scorch), 6a577499
 			// (mkhdr; Scorch), 8ce146ac (tint; Proto) and the zfeather twins of the first two (4622c9c5, a6efe634). The evc
 			// ones also multiply by IW7's tonemap code constant 222; the owned PS takes Replay's effect exposure
-			// (scene[42].x) for all, as the stock effect PS b0ec5d88 does for every converted effect. The dissolve (ad)
-			// and lit flow permutations remain separate adapters.
-			static constexpr std::array<std::string_view, 10> names
+			// (scene[42].x) for all, as the stock effect PS b0ec5d88 does for every converted effect. The dissolve ones,
+			// 39eb46cf and d2bc120f, are 40967ff1 and 6a577499 with an alpha dissolve (alphaDissolveParms). The lit
+			// flow permutations remain separate adapters.
+			static constexpr std::array<std::string_view, 12> names
 			{
+				"eq_effectunlit_add_lin_ndw_flow_ad_nocast_evc",
+				"eq_effectunlit_add_lin_ndw_flow_ad_nocast_mkhdr_evc",
 				"eq_effectunlit_blend_lin_ct_ndw_flow_nocast_mkhdr_evc",
 				"eq_effectunlit_blend_lin_ndw_flow_nocast_mkhdr_evc",
 				"eq_effectunlit_blend_lin_ndw_flow_nocast_evc",
@@ -1331,6 +1334,16 @@ namespace zonetool::convert::iw7_iw8
 					throw std::runtime_error(std::format("IW7 flow material {} lacks an image or its flow constants", material->name));
 				result["iw7Flow"] = {{"map", *map}, {"surface", *surface}, {"scale", *scale}, {"period", *period},
 					{"hdr", has("mkhdr")}};
+				// The dissolve flow (ad: PS 39eb46cf, d2bc120f) takes its threshold scale from alphaDissolveParms.x (Scorch's
+				// eq/vfx_space_sun_flareup_atl_nofog: 1).
+				if (has("ad"))
+				{
+					const auto dissolve = material_constant(material, "alphaDissolveParms");
+					if (!dissolve || !((*dissolve)[0] > 0.0f))
+						throw std::runtime_error(std::format("IW7 dissolve flow material {} lacks a positive alphaDissolveParms",
+							material->name));
+					result["iw7Flow"]["dissolve"] = (*dissolve)[0];
+				}
 			}
 			return result;
 		}

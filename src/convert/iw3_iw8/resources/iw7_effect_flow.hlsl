@@ -58,6 +58,10 @@ Output main(Input input)
     float4 b = colorMap.SampleBias(colorSampler, input.uv - velocity * phaseB, stable[7].y);
     float4 texel = lerp(a, b, weight);
     float alpha = texel.a * input.color.a * surface.r;
+    // IW7 39eb46cf / d2bc120f (the additive flow with alpha dissolve): the vertex alpha moves a threshold instead,
+    // alpha = saturate((texel.a * mask + vertex alpha) * K - K), K = alphaDissolveParms.x (material row 3 .y).
+    if (material[3].z != 0)
+        alpha = saturate((texel.a * surface.r + input.color.a) * material[3].y - material[3].y);
 #ifdef FLOW_FEATHER
     // b0ec5d88 with feature flag 16 and its plain fade (+116 = 0, flags 32/64/128/1024 clear, as the converter writes
     // them): alpha *= saturate((scene depth - particle depth) * +96.x), +96.x = IW7 featherParms.x. IW7 d384b91e takes
