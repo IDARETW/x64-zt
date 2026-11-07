@@ -327,7 +327,7 @@ void validateGeneratedTextureBindings(const Material &material, const bool stati
                                          resourceName + " in " + technique.name);
             }
         }
-        if (litForwardPlus &&
+        if (litForwardPlus && !technique.unlitForward &&
             (gtaoImageCount != 1 || gtaoSamplerCount != 1 || sunVisibilityCount != 1 ||
              lightingTilesCount != 1))
         {
@@ -623,6 +623,7 @@ Material LoadMaterial(const std::string &path, const nlohmann::json &j, TechsetF
                 t.rootsig = unhex(te.at("rootsig"));
                 t.statebits = unhex(te.at("statebits"));
                 t.args = unhex(te.at("args"));
+                t.unlitForward = te.value("unlitForward", false);
                 if (t.header.size() != 184 || t.name.size() > 128 ||
                     t.states.size() != t.header[0x83] * t.header[0xE] * 16 ||
                     t.rootsig.size() != 16 || t.statebits.size() != t.header[0x83] * 5 ||

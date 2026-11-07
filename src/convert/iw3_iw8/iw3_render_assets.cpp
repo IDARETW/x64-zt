@@ -102,6 +102,15 @@ struct SourceMaterial
     std::string distortionMap;
     std::array<float, 4> distortionUvAnimation{};
     std::array<float, 2> distortionScale{};
+    // An IW7 model distortion (iw7ModelDistortion: PS 89c34e12 of mo_distortion_scale): its raw distortion map, scale and
+    // UV animation, drawn by a MAP_DISTORTION model variant.
+    struct ModelDistortion
+    {
+        std::string map;
+        std::array<float, 2> scale{};
+        std::array<float, 3> uvAnimation{};
+    };
+    std::optional<ModelDistortion> modelDistortion;
     // A stock layer's alpha, reveal and thickness map (replayRevealMap: red alpha, green reveal).
     std::string replayReveal;
     // The layers of a stock layered surface's material (replayLayers): each a material of its own, blending by its
@@ -2704,6 +2713,18 @@ SourceMaterial ReadMaterial(const std::filesystem::path &root,
         if (material.distortionMap.empty() || !material.replayStockOnly)
             throw std::runtime_error("unsupported IW7 world distortion contract: " + name);
     }
+    if (source.contains("iw7ModelDistortion"))
+    {
+        const Json &distortion = source.at("iw7ModelDistortion");
+        SourceMaterial::ModelDistortion value;
+        value.map = distortion.at("map").get<std::string>();
+        value.scale = distortion.at("scale").get<std::array<float, 2>>();
+        const auto animation = distortion.at("uvAnimation").get<std::array<float, 4>>();
+        value.uvAnimation = {animation[0], animation[1], animation[2]};
+        if (value.map.empty() || !material.distortionMap.empty())
+            throw std::runtime_error("unsupported IW7 model distortion contract: " + name);
+        material.modelDistortion = std::move(value);
+    }
     if (source.contains("replayRevealSharpness"))
         material.replayRevealSharpness = source.at("replayRevealSharpness").get<float>();
     material.replayAlpha = source.value("replayAlpha", false);
@@ -3357,9 +3378,15 @@ void AppendTextureArgument(Json &technique, const std::string_view hex)
     const auto slotOf = [](const std::vector<std::uint8_t> &bytes, const std::size_t offset) {
         return bytes[offset + 4] | (bytes[offset + 5] << 8);
     };
+    // Code constants (type 0) and code textures (type 1) ascend by destination, as the shipped records keep them.
+    const auto destOf = [](const std::vector<std::uint8_t> &bytes, const std::size_t offset) {
+        return bytes[offset + 2] | (bytes[offset + 3] << 8);
+    };
     while (at < end && (args[at] < argument[0] ||
                         (args[at] == argument[0] &&
-                         (argument[0] != 5 || slotOf(args, at) <= slotOf(argument, 0)))))
+                         (argument[0] == 5   ? slotOf(args, at) <= slotOf(argument, 0)
+                          : argument[0] <= 1 ? destOf(args, at) <= destOf(argument, 0)
+                                             : true))))
         at += 6;
     args.insert(args.begin() + static_cast<std::ptrdiff_t>(at), argument.begin(), argument.end());
     ++header[0x7A];
@@ -3533,6 +3560,9 @@ Json BuildTechset(const std::string &map, const unsigned columns, const unsigned
     const bool flowTextures = model && pixelDefines.find("#define MAP_FLOW ") != std::string::npos;
     // IW7's model UV distortion (MAP_UVD): its noise map at slot 0x39.
     const bool uvdTexture = model && pixelDefines.find("#define MAP_UVD ") != std::string::npos;
+    // IW7's model distortion (MAP_DISTORTION): its map at slot 0x39, the resolved scene and the stock world distortion's
+    // projection constants.
+    const bool distortionInputs = model && pixelDefines.find("#define MAP_DISTORTION ") != std::string::npos;
     pixelSource += detailDefines;
     pixelSource += pixelDefines;
     pixelSource += ResourceText(IDR_IW3_PIXEL_SHADER);
@@ -3596,6 +3626,14 @@ Json BuildTechset(const std::string &map, const unsigned columns, const unsigned
     }
     if (uvdTexture)
         AppendTextureArgument(lit, "05100c003900"); // t12, slot 0x39: the noise map, in MaterialTextureID_flowMap
+    if (distortionInputs)
+    {
+        lit["unlitForward"] = true; // it refracts the scene and lights nothing
+        AppendTextureArgument(lit, "05100c003900"); // t12, slot 0x39: the distortion map
+        AppendTextureArgument(lit, "01100e000600"); // t14, code texture 6: resolvedSceneTexture
+        AppendTextureArgument(lit, "00100000a400"); // pixel rows 0-3, code 164: the camera-relative view-projection
+        AppendTextureArgument(lit, "001005000d00"); // pixel row 5, code 13: its scale
+    }
     PatchStateIdentity(lit, pixel);
 
     const auto depthProgram =
@@ -8125,7 +8163,40 @@ RenderPlan PrepareRenderAssets(const std::filesystem::path &exportRoot, const Js
             }
             return found->second;
         };
-        std::map<std::tuple<unsigned, unsigned, int, int, int, int, int>, std::pair<std::string, std::string>>
+        // IW7 model distortion (MAP_DISTORTION): one variant per scale and UV animation, whose pixel shader refracts the
+        // resolved scene by the distortion map at t12 (its constants baked in); it draws blended.
+        std::map<std::tuple<float, float, float, float, float, unsigned>, std::pair<unsigned, Json>> distortionTechsets;
+        const auto distortionVariant = [&](const SourceMaterial &source, const unsigned kind)
+            -> const std::pair<unsigned, Json> & {
+            const auto &distortion = *source.modelDistortion;
+            const std::tuple key{distortion.scale[0], distortion.scale[1], distortion.uvAnimation[0],
+                                 distortion.uvAnimation[1], distortion.uvAnimation[2], kind};
+            auto found = distortionTechsets.find(key);
+            if (found == distortionTechsets.end())
+            {
+                char defines[256];
+                std::snprintf(defines, sizeof(defines), "#define MAP_DISTORTION 1\n#define MAP_DISTORTION_SCALE float2(%.9g, %.9g)\n",
+                              distortion.scale[0], distortion.scale[1]);
+                std::string pixel = defines;
+                if (distortion.uvAnimation != std::array<float, 3>{})
+                {
+                    std::snprintf(defines, sizeof(defines), "#define MAP_DISTORTION_ANIMATION float3(%.9g, %.9g, %.9g)\n",
+                                  distortion.uvAnimation[0], distortion.uvAnimation[1], distortion.uvAnimation[2]);
+                    pixel += defines;
+                }
+                Json opaque = BuildTechset(
+                    map, columns, plan.atlasSize, geometry, plan.glassEnvironment,
+                    instanceLighting, volumeLighting ? entityLightVolume->defines : std::string{},
+                    {}, true, plan.modelFalloffDefines, {}, pixel);
+                const unsigned index = static_cast<unsigned>(distortionTechsets.size());
+                Json techset = std::move(CreateVariant(opaque, modelMaterialTemplate, stem, map,
+                                                       usage + "_distortion" + std::to_string(index) + "_glass")
+                                             .at("techset"));
+                found = distortionTechsets.emplace(key, std::pair{index, std::move(techset)}).first;
+            }
+            return found->second;
+        };
+        std::map<std::tuple<unsigned, unsigned, int, int, int, int, int, int>, std::pair<std::string, std::string>>
             techsetFiles;
         for (const SourceMaterial &source : materials)
         {
@@ -8154,20 +8225,23 @@ RenderPlan PrepareRenderAssets(const std::filesystem::path &exportRoot, const Js
             const int wave = flag ? static_cast<int>(waveOf(source).first) : -1;
             const bool flowing = source.flow.has_value() && !detailed && !flag;
             const bool distorted = source.uvd.has_value() && !detailed && !flag;
+            const bool refracting = source.modelDistortion.has_value() && !detailed && !flag;
             const bool emissive = (source.flags & kEmissionFlag) != 0 && !detailed && !flag;
             const int flowIndex = flowing ? static_cast<int>(flowVariant(source, kind, emissive).first) : -1;
             const int uvdIndex = distorted ? static_cast<int>(uvdVariant(source, kind, emissive).first) : -1;
+            const int distortionIndex = refracting ? static_cast<int>(distortionVariant(source, kind).first) : -1;
             const int emissionIndex =
-                emissive && !flowing && !distorted ? static_cast<int>(emissionVariant(source, kind).first) : -1;
+                emissive && !flowing && !distorted && !refracting ? static_cast<int>(emissionVariant(source, kind).first) : -1;
             auto [techsetEntry, inserted] = techsetFiles.try_emplace(
                 {kind, source.cullMode | (source.depthBias ? 4u : 0u) | (blend << 3), detailIndex,
-                 wave, emissionIndex, flowIndex, uvdIndex});
+                 wave, emissionIndex, flowIndex, uvdIndex, distortionIndex});
             if (inserted)
             {
                 Json variant = detailed    ? detailVariant(source).second
                                : flag      ? flagVariant(source, kind)
                                : flowing   ? flowVariant(source, kind, emissive).second
                                : distorted ? uvdVariant(source, kind, emissive).second
+                               : refracting ? distortionVariant(source, kind).second
                                : emissive  ? emissionVariant(source, kind).second
                                            : modelTechsets[kind];
                 const std::string suffix =
@@ -8177,7 +8251,8 @@ RenderPlan PrepareRenderAssets(const std::filesystem::path &exportRoot, const Js
                     (flag ? flagSuffix(static_cast<unsigned>(wave)) : "") +
                     (emissionIndex >= 0 ? "_e" + std::to_string(emissionIndex) : "") +
                     (flowing ? "_f" + std::to_string(flowIndex) : "") +
-                    (distorted ? "_u" + std::to_string(uvdIndex) : "");
+                    (distorted ? "_u" + std::to_string(uvdIndex) : "") +
+                    (refracting ? "_r" + std::to_string(distortionIndex) : "");
                 variant["name"] = variant.at("name").get<std::string>() + suffix;
                 for (auto &technique : variant.at("techniques"))
                 {
@@ -8257,6 +8332,8 @@ RenderPlan PrepareRenderAssets(const std::filesystem::path &exportRoot, const Js
             }
             if (distorted)
                 residentImageAsync(direct, 2, image(source.uvd->map).front(), {1, 1, 1, 1}, "model_uvd");
+            if (refracting)
+                residentImageAsync(direct, 2, image(source.modelDistortion->map).front(), {1, 1, 1, 1}, "model_distortion");
             if (source.response.empty())
                 residentImageOwned(direct, responseChannel, Image{1, 1, std::vector<std::uint8_t>{0, 0, 0, 0}},
                                    {1, 1, 1, 1}, "model");
