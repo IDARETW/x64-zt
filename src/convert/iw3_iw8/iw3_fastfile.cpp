@@ -5154,6 +5154,10 @@ void BuildShadowScene(const std::vector<BrushModel> &brushModels,
         throw std::runtime_error("IW3 shadow scene has no fixed world brush model");
     for (const Surface &surface : brushModels.front().surfaces)
     {
+        // A surface of the sky (an extraction's runtime sky) holds directions scaled into range, not positions: it
+        // draws at infinity and casts no sun shadow.
+        if (surface.skyObject)
+            continue;
         const auto found = plan.worldShadowMaterials.find(surface.material);
         if (found != plan.worldShadowMaterials.end())
             append(surface, found->second, nullptr, nullptr);

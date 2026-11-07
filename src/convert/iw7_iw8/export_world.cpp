@@ -457,9 +457,20 @@ namespace zonetool::convert::iw7_iw8
 				center = {((*play)[0] + (*play)[3]) * 0.5, ((*play)[1] + (*play)[4]) * 0.5, ((*play)[2] + (*play)[5]) * 0.5};
 			}
 
-			std::vector<world_geometry_surface> result;
-			const auto add = [&](const mesh_surface& mesh, const std::vector<std::array<double, 3>>& directions,
-				const std::vector<std::array<double, 3>>& normals)
+			// Every surface takes one scale, so that the sky's pieces keep the order of their distances: the world vertex
+			// shader gives them the depth of their distance (in front of the sky box), and Breakneck's black hole, its
+			// accretion disc and the debris around it no longer share one depth (they flickered against each other in shards
+			// as the GPU's draw order changed).
+			struct pending_surface
+			{
+				const mesh_surface* mesh;
+				std::vector<std::array<double, 3>> directions;
+				std::vector<std::array<double, 3>> normals;
+			};
+
+			std::vector<pending_surface> pending;
+			const auto collect = [&](const mesh_surface& mesh, std::vector<std::array<double, 3>> directions,
+				std::vector<std::array<double, 3>> normals)
 			{
 				const auto kind = classify_material(mesh.material).kind;
 				if (!mesh.material || kind == surface_kind::sky || kind == surface_kind::distortion || mesh.triangles.empty())
@@ -467,13 +478,13 @@ namespace zonetool::convert::iw7_iw8
 					return;
 				}
 
-				auto farthest = 1.0;
-				for (const auto& direction : directions)
-				{
-					farthest = std::max(farthest, std::sqrt(direction[0] * direction[0] + direction[1] * direction[1] + direction[2] * direction[2]));
-				}
+				pending.push_back({&mesh, std::move(directions), std::move(normals)});
+			};
 
-				const auto scale = sky_object_range / farthest;
+			std::vector<world_geometry_surface> result;
+			const auto add = [&](const mesh_surface& mesh, const std::vector<std::array<double, 3>>& directions,
+				const std::vector<std::array<double, 3>>& normals, const double scale)
+			{
 				auto& surface = result.emplace_back();
 				surface.material = output.add_material(source, const_cast<iw7::Material*>(mesh.material));
 				surface.lightmap = -1;
@@ -548,7 +559,7 @@ namespace zonetool::convert::iw7_iw8
 							: std::array{0.0, 0.0, 1.0});
 					}
 
-					add(surface, directions, normals);
+					collect(surface, std::move(directions), std::move(normals));
 				}
 			}
 
@@ -561,10 +572,30 @@ namespace zonetool::convert::iw7_iw8
 					normals.push_back({vertex.normal[0], vertex.normal[1], vertex.normal[2]});
 				}
 
-				add(surface, directions, normals);
+				collect(surface, std::move(directions), std::move(normals));
 			}
 
-			ZONETOOL_INFO("iw7: %zu sky surfaces draw at run time (distant models and world surfaces)", result.size());
+			auto farthest = 1.0;
+			auto nearest = std::numeric_limits<double>::infinity();
+			for (const auto& surface : pending)
+			{
+				for (const auto& direction : surface.directions)
+				{
+					const auto distance = std::sqrt(direction[0] * direction[0] + direction[1] * direction[1] + direction[2] * direction[2]);
+					farthest = std::max(farthest, distance);
+					nearest = std::min(nearest, distance);
+				}
+			}
+
+			const auto scale = sky_object_range / farthest;
+			for (const auto& surface : pending)
+			{
+				add(*surface.mesh, surface.directions, surface.normals, scale);
+			}
+
+			ZONETOOL_INFO("iw7: %zu sky surfaces draw at run time (distant models and world surfaces), %.0f to %.0f units from the play "
+				"space (%.0f to %.0f as drawn)", result.size(), pending.empty() ? 0.0 : nearest, pending.empty() ? 0.0 : farthest,
+				pending.empty() ? 0.0 : nearest * scale, pending.empty() ? 0.0 : sky_object_range);
 			return result;
 		}
 
