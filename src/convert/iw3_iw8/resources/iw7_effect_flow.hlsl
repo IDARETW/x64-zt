@@ -4,7 +4,8 @@
 // FLOW_LIT: IW7 PS a386c911 (eq_effect_zfeather_blend_lin_ndw_flow_nocast_mask, the lit flow: the same flow and
 // feather, an alpha mask, the particle lit by the scene) on the bindings of Replay's lit effect set (VS 372e0e1a,
 // PS a9864c07): its per-particle lighting map at t0, the albedo at t2, the scene depth at t4, the scope buffer at t5
-// and the Particle_MaterialData at t6; the flow maps and the mask follow at t7-t9.
+// and the Particle_MaterialData at t6; the flow maps and the mask follow at t7-t9. The unmasked lit flows (d29f9b4f,
+// and d241aa2a without the feather) bind a white mask.
 cbuffer Stable : register(b2) { float4 stable[9]; }
 #ifdef FLOW_LIT
 cbuffer Material : register(b3) { float4 material[5]; }
