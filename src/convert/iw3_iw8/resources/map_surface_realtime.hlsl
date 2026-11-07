@@ -151,6 +151,34 @@ float3 DecodeSrgb(float3 value) {
 // for their lightmaps).
 Texture2D<float4> detailMap : register(t10);
 #endif
+#if defined(MAP_FLOW) && !defined(MAP_COVERAGE)
+// IW7's model flow (mcopw_effectunlit_*_flow_*: PSs e5f8f3b4, f4daf89a): the flow map (MaterialTextureID_flowMap, slot
+// 0x39) and the flow surface parameters (flowSurfaceParamsMap, 0x3A); MAP_FLOW_SCALE is flowMapConst.x and
+// MAP_FLOW_PERIOD flowMapPeriod.xz.
+Texture2D<float4> flowMap : register(t12);
+Texture2D<float4> flowSurfaceMap : register(t13);
+// Two phases of the colour map pulled along the flow, crossfaded (the effect flow of iw7_effect_flow.hlsl): the
+// phases wrap with the period and the surface map's alpha offsets them; its red scales the alpha.
+float4 FlowTexel(float2 uv, float time) {
+    float4 flow = flowMap.SampleLevel(colorSampler, uv, 0);
+    float4 surface = flowSurfaceMap.SampleLevel(colorSampler, uv, 0);
+    float2 velocity = (flow.xy * 2 - 1) * flow.z * MAP_FLOW_SCALE;
+    float period = MAP_FLOW_PERIOD.x;
+    float halfPeriod = MAP_FLOW_PERIOD.y;
+    float phaseA = fmod(fmod(time, period) + surface.a, 2 * halfPeriod);
+    float phaseB = fmod(fmod(time + halfPeriod, period) + surface.a, 2 * halfPeriod);
+    float weight = saturate(abs(halfPeriod - phaseA) / halfPeriod);
+    float4 a = sourceAtlas.SampleBias(colorSampler, uv - velocity * phaseA, MAP_MIP_BIAS);
+    float4 b = sourceAtlas.SampleBias(colorSampler, uv - velocity * phaseB, MAP_MIP_BIAS);
+    float4 texel = lerp(a, b, weight);
+    texel.a *= surface.r;
+#ifdef MAP_FLOW_HDR
+    // mkhdr: IW7 expands the flowed colour (linear, as the sRGB image decodes it) by -log2(1 - min(c, .99)).
+    texel.rgb = -log2(1 - min(texel.rgb, .99));
+#endif
+    return texel;
+}
+#endif
 #ifndef MAP_TILE_SPAN_BITS
 #define MAP_TILE_SPAN_WORDS 1
 #define MAP_TILE_SPAN_BITS {0u}
@@ -1092,6 +1120,10 @@ float4 main(Input input) : SV_TARGET0 {
                        : sourceAtlas.SampleBias(colorSampler, sampleUV, MAP_MIP_BIAS);
 #else
     float4 texel = sourceAtlas.SampleBias(colorSampler, sampleUV, MAP_MIP_BIAS);
+#endif
+#if defined(MAP_FLOW) && !defined(MAP_COVERAGE)
+    // The game time: pixel view row 4 .w in both the static-model and the entity techniques (code constant 0).
+    texel = FlowTexel(sampleUV, replayView[4].w);
 #endif
 #if defined(MAP_UNLIT_MASKS) && !defined(MAP_COVERAGE)
     // An unlit surface's mask (IW7's mask / mask_mua techsets: effect quads, glows, light cards, sky discs) rides in the
