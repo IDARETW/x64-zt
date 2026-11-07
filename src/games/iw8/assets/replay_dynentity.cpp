@@ -176,6 +176,12 @@ DynamicEntityCounts CountDynamicEntities(const std::vector<DynamicEntity> &entit
         if (*count == std::numeric_limits<std::uint16_t>::max())
             throw std::runtime_error("Replay dynamic-entity basis exceeds MapEnts limits");
         ++*count;
+        // The pose parts of the entry as DynEntCL_IsEntryUsable counts them (a clutter entry: type 1).
+        const std::uint8_t parts =
+            entity.basis == DynamicEntityBasis::model && !entity.noPhysics ? entity.rigidBodies : 1;
+        counts.maxPoseParts = std::max(counts.maxPoseParts, parts);
+        if (parts > 1)
+            ++counts.entriesWithExtraPoseParts;
     }
     if (!counts.models)
     {

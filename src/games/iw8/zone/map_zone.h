@@ -56,7 +56,7 @@ static constexpr size_t kME_havokEntsShapeDataSize = 0x148, kME_havokEntsShapeDa
                         kME_dynEntCount = 0x190, kME_dynEntCountTotal = 0x198,
                         kME_dynEntityListsCount = 0x19C, kME_dynEntListIds = 0x1A0,
                         kME_dynEntNoSpatialCount = 0x1B8, kME_dynEntMaxClientHistoryCount = 0x1BC,
-                        kME_dynEntMaxPosePartCount = 0x1BE;
+                        kME_dynEntMaxPosePartCount = 0x1BE, kME_dynEntsWithExtraPosePartsCount = 0x1C0;
 // ComWorld field offsets (com_map(24)=0xA8) — pinned: name@0, isInUse@8, primaryLightCount@0x30.
 static constexpr size_t kCW_name = 0x00, kCW_isInUse = 0x08, kCW_primaryLightCount = 0x30;
 static_assert(offsetof(iw8::maps::ComWorld, name) == kCW_name, "ComWorld.name off");
@@ -891,7 +891,11 @@ inline void emitMapEntsBody(ZoneBuffer &zb, const char *assetName, const std::st
         stamp16(me, kME_dynEntNoSpatialCount + sizeof(uint16_t),
                 static_cast<uint16_t>(dynamicBrushCount));
         stamp16(me, kME_dynEntMaxClientHistoryCount, 10000);
-        me[kME_dynEntMaxPosePartCount] = 1;
+        // Replay sizes the client pool of extra pose parts (multi-body clutter) from these two
+        // (DynEntCL_AllocateClientMemory 0x1417F0410); without it, adding a multi-body entry pops
+        // block -1 (DynEntCL_AddEntity 0x1417ED580).
+        me[kME_dynEntMaxPosePartCount] = dynamic.maxPoseParts;
+        stamp32(me, kME_dynEntsWithExtraPosePartsCount, dynamic.entriesWithExtraPoseParts);
     }
     // Both DynEnt spatial populations are queried on the first client frame,
     // even with no dynamic entities. Replay DDFC10/DDFAE0: two inline 56-byte
