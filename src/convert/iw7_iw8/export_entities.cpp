@@ -303,12 +303,127 @@ namespace zonetool::convert::iw7_iw8
 			return result;
 		}
 
+		// The targetname of the brush models that stand for a scriptable collision map (collmap_scriptable): one per instance
+		// that uses the map, which the instance's state machine claims by its origin (iw7_scriptable_collision).
+		std::string collmap_target(const std::string_view collmap)
+		{
+			std::string name("mw120r_collmap_");
+			for (const unsigned char c : collmap)
+			{
+				name += std::isalnum(c) ? static_cast<char>(std::tolower(c)) : '_';
+			}
+
+			return name;
+		}
+
+		// IW7's scriptable collision maps: each collmap_scriptable record names a map and owns one brush model, authored in the
+		// space of the scriptable that uses it (one map serves every instance of a kind: Neon's hovden cars, intact, destroyed
+		// and as an AI obstacle). Replay's own Scriptables resolve the same map to the clip map's brush model (collision event,
+		// ScriptableSv_PrecacheAssetEventDef 0x1413108F8 -> CM_BrushModelIsValid).
+		std::map<std::string, std::uint32_t> collmap_models(const std::string& entities)
+		{
+			std::map<std::string, std::uint32_t> result;
+			static const std::regex block(R"re(\{([^{}]*)\})re");
+			static const std::regex pair(R"re("([^"]+)"\s+"([^"]*)")re");
+			for (auto it = std::sregex_iterator(entities.begin(), entities.end(), block); it != std::sregex_iterator(); ++it)
+			{
+				const auto text = (*it)[1].str();
+				std::string classname, name, model;
+				for (auto kv = std::sregex_iterator(text.begin(), text.end(), pair); kv != std::sregex_iterator(); ++kv)
+				{
+					const auto key = (*kv)[1].str();
+					if (key == "classname")
+					{
+						classname = (*kv)[2].str();
+					}
+					else if (key == "targetname")
+					{
+						name = (*kv)[2].str();
+					}
+					else if (key == "model")
+					{
+						model = (*kv)[2].str();
+					}
+				}
+
+				std::uint32_t index{};
+				if (classname != "collmap_scriptable" || name.empty() || model.size() < 2 || model.front() != '*' ||
+					std::from_chars(model.data() + 1, model.data() + model.size(), index).ptr != model.data() + model.size() || !index)
+				{
+					continue;
+				}
+
+				result.emplace(name, index);
+			}
+
+			return result;
+		}
+
+		// The collision maps that a scriptable's states turn on (Scriptable_EventType_Collision), and whether a part's first
+		// state does (the collision that an instance has before any state changes). AI obstacle maps (aiObstacle) only block
+		// IW7's bots; Replay's bot obstacles do not convert, so they are counted apart.
+		struct scriptable_collisions
+		{
+			std::map<std::string, bool> collmaps;
+			std::size_t ai_obstacles{};
+		};
+
+		scriptable_collisions collisions_of(const iw7::ScriptableDef& def)
+		{
+			scriptable_collisions result;
+			const std::function<void(const iw7::ScriptableEventDef*, unsigned, bool)> events = [&](const iw7::ScriptableEventDef* list,
+				const unsigned count, const bool initial)
+			{
+				for (auto e = 0u; list && e < count; e++)
+				{
+					const auto& event = list[e];
+					if (event.type == iw7::Scriptable_EventType_Random)
+					{
+						events(event.data.random.eventsA, event.data.random.eventACount, initial);
+						events(event.data.random.eventsB, event.data.random.eventBCount, initial);
+					}
+					else if (event.type == iw7::Scriptable_EventType_Collision && event.data.collision.collmapName &&
+						*event.data.collision.collmapName)
+					{
+						if (event.data.collision.aiObstacle)
+						{
+							result.ai_obstacles++;
+							continue;
+						}
+
+						auto& first = result.collmaps[event.data.collision.collmapName];
+						first = first || initial;
+					}
+				}
+			};
+
+			const std::function<void(const iw7::ScriptablePartDef*, unsigned)> parts = [&](const iw7::ScriptablePartDef* list,
+				const unsigned count)
+			{
+				for (auto p = 0u; list && p < count; p++)
+				{
+					const auto& part = list[p];
+					for (auto s = 0u; part.states && s < part.numStates; s++)
+					{
+						events(part.states[s].base.events, part.states[s].base.numEvents, s == 0);
+					}
+
+					parts(part.childParts, part.numChildParts);
+				}
+			};
+
+			parts(def.parts, def.numParts);
+			return result;
+		}
+
 		// A scriptable that breaks: one part whose first state takes damage (a health state) and whose second and last state
-		// swaps the model, plays effects or a sound. Other kinds (multi-stage, several parts, debris) run as state machines.
+		// swaps the model, plays effects or a sound. Other kinds (multi-stage, several parts, debris, collision maps that the
+		// states change) run as state machines.
 		std::optional<extraction::scriptable_destructible> destructible_of(const source_map& source, const iw7::ScriptableDef& def,
 			extraction& output)
 		{
-			if (!def.parts || def.numParts != 1 || def.parts[0].numChildParts != 0 || !def.parts[0].states || def.parts[0].numStates != 2)
+			if (!def.parts || def.numParts != 1 || def.parts[0].numChildParts != 0 || !def.parts[0].states || def.parts[0].numStates != 2 ||
+				!collisions_of(def).collmaps.empty())
 			{
 				return std::nullopt;
 			}
@@ -727,7 +842,9 @@ namespace zonetool::convert::iw7_iw8
 					}
 					case iw7::Scriptable_EventType_Collision:
 						result.push_back({{"t", "collision"}, {"collmap", data.collision.collmapName ? data.collision.collmapName : ""},
-							{"cmodel", data.collision.clipmapCModelIndex}, {"ai_obstacle", data.collision.aiObstacle}});
+							{"target", collmap_target(data.collision.collmapName ? data.collision.collmapName : "")},
+							{"cmodel", data.collision.clipmapCModelIndex}, {"ai_obstacle", data.collision.aiObstacle},
+							{"destroy", data.collision.destroyOnExit}});
 						break;
 					case iw7::Scriptable_EventType_Rumble:
 					{
@@ -1454,6 +1571,11 @@ namespace zonetool::convert::iw7_iw8
 		std::set<const iw7::ScriptableDef*> dumped_machines;
 		std::size_t placed{};
 		std::size_t destructibles{};
+		const auto collmaps = collmap_models(entities);
+		std::size_t collmap_brushes{};
+		std::size_t collmap_static{};
+		std::size_t collmap_missing{};
+		std::size_t collmap_obstacles{};
 		for (auto i = 0u; scriptables.instances && i < scriptables.totalInstanceCount; i++)
 		{
 			const auto& context = scriptables.instances[i].contextHeader.context;
@@ -1640,6 +1762,45 @@ namespace zonetool::convert::iw7_iw8
 			entities += "}\n";
 			output.models.try_emplace(file_name(name), model);
 			placed++;
+
+			// The collision maps of the instance's states: a brush model of each at the instance's placement. A state machine
+			// turns them on and off as IW7's collision events do (they start off); an instance that never changes state keeps
+			// the maps of its parts' first states.
+			if (def)
+			{
+				const auto collisions = collisions_of(*def);
+				collmap_obstacles += collisions.ai_obstacles;
+				for (const auto& [collmap, initial] : collisions.collmaps)
+				{
+					const auto brush = collmaps.find(collmap);
+					if (brush == collmaps.end())
+					{
+						collmap_missing++;
+						continue;
+					}
+
+					if (!machine && !initial)
+					{
+						continue;
+					}
+
+					entities += "{\n\"classname\" \"script_brushmodel\"\n";
+					entities += std::format("\"model\" \"*{}\"\n", brush->second);
+					entities += std::format("\"origin\" \"{}\"\n", vector_text(context.initialOrigin));
+					entities += std::format("\"angles\" \"{}\"\n", vector_text(context.initialAngles));
+					if (machine)
+					{
+						entities += std::format("\"targetname\" \"{}\"\n", collmap_target(collmap));
+						collmap_brushes++;
+					}
+					else
+					{
+						collmap_static++;
+					}
+
+					entities += "}\n";
+				}
+			}
 			// The state machines play the effects of their first states themselves (as effect entities, iw7_scriptable_fx).
 			if (def && !machine)
 			{
@@ -1652,6 +1813,12 @@ namespace zonetool::convert::iw7_iw8
 			output.scriptable_effects.size());
 		ZONETOOL_INFO("iw7: %zu of them break (%zu kinds: a health state, then the broken model, its effects and sound)", destructibles,
 			output.scriptable_destructibles.size());
+		if (!collmaps.empty() || collmap_missing || collmap_obstacles)
+		{
+			ZONETOOL_INFO("iw7: scriptable collision maps: %zu defined, %zu brush models that state machines switch, %zu that stay "
+				"solid, %zu references to maps the map lacks, %zu AI obstacle maps left out (Replay's bot obstacles do not convert)",
+				collmaps.size(), collmap_brushes, collmap_static, collmap_missing, collmap_obstacles);
+		}
 		ZONETOOL_INFO("iw7: %zu kinds of them animate (%zu instances)", output.scriptable_animations.size(),
 			output.scriptable_placements.size());
 

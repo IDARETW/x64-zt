@@ -2492,6 +2492,7 @@ iw7_scriptable_think( parts )
 		{
 			if ( s.kind == "health" )
 				health = 1;
+			self iw7_scriptable_collision_off( s.events );
 		}
 	}
 
@@ -2580,7 +2581,65 @@ iw7_scriptable_run( part, events )
 			self iw7_scriptable_debris( e.a, e.b, e.c, e.d );
 		else if ( e.t == "script" )
 			self notify( e.a, e.b );
+		else if ( e.t == "collision" )
+			self iw7_scriptable_collision( part, e.a, e.b );
 	}
+}
+
+// IW7's collision events: the instance's brush model of a collision map (one at its placement, by the map's
+// targetname) collides from the event on; with IW7's destroyOnExit, until the part leaves the state. Every map of
+// the machine starts off, as IW7's collision exists only once an event turns it on.
+iw7_scriptable_collmap( name )
+{
+	if ( !isdefined( self.iw7_collmaps ) )
+		self.iw7_collmaps = [];
+	if ( isdefined( self.iw7_collmaps[name] ) )
+		return self.iw7_collmaps[name];
+	foreach ( brush in getentarray( name, "targetname" ) )
+	{
+		if ( !isdefined( brush.iw7_owner ) && distancesquared( brush.origin, self.origin ) < 4 )
+		{
+			brush.iw7_owner = self;
+			self.iw7_collmaps[name] = brush;
+			return brush;
+		}
+	}
+
+	return undefined;
+}
+
+iw7_scriptable_collision_off( events )
+{
+	foreach ( e in events )
+	{
+		if ( e.t == "collision" )
+		{
+			brush = self iw7_scriptable_collmap( e.a );
+			if ( isdefined( brush ) )
+				brush notsolid();
+		}
+		else if ( e.t == "random" )
+		{
+			self iw7_scriptable_collision_off( e.b );
+			self iw7_scriptable_collision_off( e.c );
+		}
+	}
+}
+
+iw7_scriptable_collision( part, name, destroy )
+{
+	brush = self iw7_scriptable_collmap( name );
+	if ( !isdefined( brush ) )
+		return;
+	brush solid();
+	if ( destroy )
+		self thread iw7_scriptable_collision_exit( part, brush );
+}
+
+iw7_scriptable_collision_exit( part, brush )
+{
+	self waittill( "iw7_part_" + part );
+	brush notsolid();
 }
 
 iw7_scriptable_origin( tag )
@@ -3961,6 +4020,25 @@ iw7_destructible_think( model, effect, sound, health )
 							}
 
 							args = std::format("{}, {}", str("notify"), num("param"));
+						}
+						else if (t == "collision")
+						{
+							// The instance's brush model of the collision map (export_entities places one with each instance
+							// that runs a machine) collides from this state on, until the part leaves it when IW7 destroys
+							// the collision on exit.
+							if (event.value("ai_obstacle", false))
+							{
+								omitted("AI obstacle collision map (Replay's bot obstacles do not convert)");
+								continue;
+							}
+
+							if (event.value("collmap", std::string{}).empty())
+							{
+								omitted("collision without its collision map");
+								continue;
+							}
+
+							args = std::format("{}, {}", str("target"), num("destroy"));
 						}
 						else if (t == "rumble")
 						{
