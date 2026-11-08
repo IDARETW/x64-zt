@@ -1277,7 +1277,9 @@ namespace zonetool::convert::iw7_iw8
 					}
 				}
 
-				first_lod = first_lod ? first_lod : frames.size();
+				// The first LOD's lead only: a LOD0 with no resolvable vertices must not hand its lighting to LOD1's count.
+				if (l == 0)
+					first_lod = frames.size();
 			}
 
 			if (frames.size() > info.numLightingValues || info.numLightingValues - frames.size() >= 64 || !first_lod)
