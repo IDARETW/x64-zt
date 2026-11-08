@@ -1121,65 +1121,7 @@ void LocalLighting(float2 screenPixel, float viewDepth, float3 relativePosition,
     }
 }
 
-#if defined(MAP_DISTORTION) && !defined(MAP_COVERAGE)
-// IW7's model distortion (PS 89c34e12 of mo_distortion_scale; Replay's stock world distortion PS bd3434da runs the same
-// steps): the scene behind the surface (resolvedSceneTexture, code texture 6, a technique argument at t14) at the pixel
-// moved by the distortion map's offset along the projected tangent and binormal. The technique binds the camera-relative
-// view-projection (code 164) to rows 0-3 and its scale (code 13) to row 5, as the stock world distortion does. IW7 scales
-// the offset by the authored vertex red and green and tints by its blue: Replay decodes model RGB from sRGB, so they are
-// encoded back.
-Texture2D<float4> distortionMap : register(t12);
-Texture2D<float4> resolvedScene : register(t14);
-#ifdef MAP_DISTORTION_FEATHER
-// The zfeather twin (PS 22ce2b91 of mcopw_distortion_shade_ua_zfeather) refracts only where the scene behind lies beyond
-// the surface. Replay's floatZTexture (code texture 0, a technique argument at t15) holds the view depth over 6, as its
-// effect PSs read it (0cf327fa: the loaded depth times 6 against SV_Position.w).
-Texture2D<float4> sceneDepth : register(t15);
-#endif
-float4 DistortionColor(Input input) {
-    float2 uv = input.uv.xy;
-#ifdef MAP_DISTORTION_ANIMATION
-    {
-        float3 animation = MAP_DISTORTION_ANIMATION;
-        float t = replayView[4].w, turn = t * animation.z;
-        float2 centred = uv - .5;
-        uv = float2(cos(turn) * centred.x - sin(turn) * centred.y, sin(turn) * centred.x + cos(turn) * centred.y) + .5 +
-             animation.xy * t;
-    }
-#endif
-    float3 vertexColor = SourceData(input.color.rgb);
-    float3 map = distortionMap.Sample(colorSampler, uv).xyz;
-    float strength = saturate(input.color.a * map.z - .25) * 1.333333;
-    float2 offset = (map.xy * 2 - 1) * strength;
-#ifdef MAP_DISTORTION_FEATHER
-    float2 scale = MAP_DISTORTION_SCALE; // the zfeather twin's VS takes no per-vertex strength
-#else
-    float2 scale = MAP_DISTORTION_SCALE * vertexColor.rg;
-#endif
-    float3 tangent = normalize(input.tangent.xyz), normal = normalize(input.normal);
-    float3 binormal = cross(tangent, normal);
-    float3 projectedTangent = float3(dot(tangent, replayView[0].xyz), dot(tangent, replayView[1].xyz),
-                                     dot(tangent, replayView[3].xyz));
-    float3 projectedBinormal = float3(dot(binormal, replayView[0].xyz), dot(binormal, replayView[1].xyz),
-                                      dot(binormal, replayView[3].xyz));
-    float3 screen = float3(input.position.xy * replayView[7].x * replayView[6].zw, 1) * input.position.w;
-    screen += offset.x * scale.x * float3(replayView[5].x, -replayView[5].y, 1) * projectedTangent;
-    screen += offset.y * scale.y * float3(-replayView[5].x, replayView[5].y, -1) * projectedBinormal;
-    float4 bounds = screen.z * replayLighting[156];
-    float2 sampleUV = clamp(screen.xy, bounds.xy, bounds.zw) / screen.z;
-    float3 scene = resolvedScene.SampleLevel(gtaoSampler, sampleUV, 0).rgb;
-#ifdef MAP_DISTORTION_FEATHER
-    float behind = 6 * abs(sceneDepth.SampleLevel(gtaoSampler, sampleUV, 0).x) >= input.position.w ? 1 : 0;
-    return float4(scene * vertexColor, behind * saturate(map.z * input.color.a * 4));
-#else
-    return float4(scene * vertexColor.b, saturate(map.z * input.color.a * 4));
-#endif
-}
-#endif
 float4 main(Input input) : SV_TARGET0 {
-#if defined(MAP_DISTORTION) && !defined(MAP_COVERAGE)
-    return DistortionColor(input);
-#endif
     // World surfaces: atlas tile in bits 0-15, IW3 reflection probe slot + 1
     // above (0: none).
     uint tileWord = (uint)input.metadata.x;
