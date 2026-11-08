@@ -5,6 +5,7 @@
 #include <array>
 #include <cstdint>
 #include <filesystem>
+#include <optional>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -22,6 +23,9 @@ struct Sample
     uint32_t rate{};
     uint8_t channels{};
     bool looping{};
+    // The authored IW7 loudness envelope (SAB entry bytes +35..+42, export_sounds.cpp iw7.envelope_bytes). Empty: the
+    // writer derives it from the PCM (Envelope in replay_sound.cpp).
+    std::optional<std::array<uint8_t, 8>> envelope;
     std::vector<int16_t> pcm; // interleaved frames
 };
 
