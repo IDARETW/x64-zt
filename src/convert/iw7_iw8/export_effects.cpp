@@ -3991,6 +3991,9 @@ iw7_destructible_think( name, model, removes, health, mindamage, causes )
 // ScriptableBg_IsSplashDamage), melee (bit 4: MOD_MELEE) and crush (bit 8: MOD_CRUSH), as ScriptableBg_DispatchDamage sets them.
 // Causes 0 (all) and every other value of Scriptable_DamageCause: 1 splash, 2 no splash, 3 no melee, 4 none, 5 melee, 6 melee or
 // splash, 7 crush, 8 crush or splash. A value past the enum matches nothing (the consumer's default).
+// Not modelled: the class bit 0x40 passes every cause in MatchesDamageClassFilter's first test. ScriptableBg_ClassifyHitRegion
+// (0x1412F52F0) returns 64 for a damage part whose type is not 1, 12 or 14 when its callback answers 0. Which parts the
+// cause-restricted kinds have is unmeasured (MEASURE), so such a kind may break on hits this filter drops.
 iw7_destructible_cause( causes, means )
 {
     if ( causes == 0 )
