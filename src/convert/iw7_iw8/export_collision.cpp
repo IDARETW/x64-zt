@@ -716,63 +716,63 @@ namespace zonetool::convert::iw7_iw8
 			submodels.push_back(submodel_json(trigger_bounds(triggers, t), writer.add_leaf(std::move(leaf))));
 		}
 
-		// The glass panes: the brush model of each holds IW7's collision of its piece (the piece whose centre is the
-		// pane's), which the pipeline makes the hull of its breakable glass. Without one, the pipeline gives a pane the
-		// box of its bounds, which are as deep as the glass is thick in Replay's units.
+		// The glass panes: the brush model of each holds IW7's collision of its piece. IW7 gives each glass convex the
+		// one-based glass id of its tag, which is the FxGlassInitPieceState index + 1 of the pane that holds it (Frontier: its
+		// 27 convexes carry ids 1..27, each names one of its 27 panes, and each convex centre lies in that pane's bounds).
+		// The pipeline makes the hull of the piece into the breakable glass of its pane. Without one, the pipeline gives a
+		// pane the box of its bounds, which are as deep as the glass is thick in Replay's units.
 		const auto panes = glass_panes(source);
-		std::size_t glass_hulls{};
-		// The farthest centre match among the panes that found a piece, and the panes that took the box fallback.
-		float farthest_match = 0.0f;
-		std::size_t unmatched_panes{};
+		std::map<std::uint32_t, const havok_convex*> piece_of_id;
+		std::size_t repeated_ids{};
+		for (const auto* convex : glass)
+		{
+			const auto id = static_cast<std::uint32_t>(world_shapes->tags[convex->tag].glass_id);
+			repeated_ids += !piece_of_id.emplace(id, convex).second;
+		}
+
 		const auto centre_of = [](const std::array<float, 3>& mins, const std::array<float, 3>& maxs)
 		{
 			return std::array<float, 3>{(mins[0] + maxs[0]) / 2.0f, (mins[1] + maxs[1]) / 2.0f, (mins[2] + maxs[2]) / 2.0f};
 		};
+		const auto convex_centre = [&](const havok_convex& convex)
+		{
+			std::array<float, 3> mins{FLT_MAX, FLT_MAX, FLT_MAX};
+			std::array<float, 3> maxs{-FLT_MAX, -FLT_MAX, -FLT_MAX};
+			for (const auto& point : convex.points)
+			{
+				for (std::size_t axis = 0; axis < 3; axis++)
+				{
+					mins[axis] = std::min(mins[axis], point[axis]);
+					maxs[axis] = std::max(maxs[axis], point[axis]);
+				}
+			}
 
+			return centre_of(mins, maxs);
+		};
+
+		std::size_t glass_hulls{};
+		// The farthest centre distance among the panes that found their piece, the panes that took the box fallback, and the
+		// pieces whose centre lies outside their pane's bounds (none is expected).
+		float farthest_match = 0.0f;
+		std::size_t unmatched_panes{};
+		std::size_t outside_pieces{};
 		for (const auto& pane : panes)
 		{
-			const auto centre = centre_of(pane.mins, pane.maxs);
-			const havok_convex* piece{};
-			// The piece is the nearest one whose centre lies within the pane's bounds (with a unit of margin). A pane's
-			// piece can sit more than a unit from the centre of its brush model, so no pane is left to the box fallback
-			// for that reason alone.
-			auto nearest = FLT_MAX;
-			for (const auto* convex : glass)
+			const auto found = piece_of_id.find(pane.piece + 1);
+			const havok_convex* piece = found != piece_of_id.end() ? found->second : nullptr;
+			if (piece)
 			{
-				std::array<float, 3> mins{FLT_MAX, FLT_MAX, FLT_MAX};
-				std::array<float, 3> maxs{-FLT_MAX, -FLT_MAX, -FLT_MAX};
-				for (const auto& point : convex->points)
-				{
-					for (std::size_t axis = 0; axis < 3; axis++)
-					{
-						mins[axis] = std::min(mins[axis], point[axis]);
-						maxs[axis] = std::max(maxs[axis], point[axis]);
-					}
-				}
-
-				const auto other = centre_of(mins, maxs);
+				const auto other = convex_centre(*piece);
 				bool inside = true;
 				for (std::size_t axis = 0; axis < 3; axis++)
 				{
 					inside = inside && other[axis] >= pane.mins[axis] - 1.0f && other[axis] <= pane.maxs[axis] + 1.0f;
 				}
 
-				if (!inside)
-				{
-					continue;
-				}
-
+				const auto centre = centre_of(pane.mins, pane.maxs);
 				const auto distance = std::max({std::abs(other[0] - centre[0]), std::abs(other[1] - centre[1]), std::abs(other[2] - centre[2])});
-				if (distance < nearest)
-				{
-					nearest = distance;
-					piece = convex;
-				}
-			}
-
-			if (piece)
-			{
-				farthest_match = std::max(farthest_match, nearest);
+				farthest_match = std::max(farthest_match, distance);
+				outside_pieces += !inside;
 			}
 			else
 			{
@@ -784,50 +784,14 @@ namespace zonetool::convert::iw7_iw8
 			submodels.push_back(submodel_json({pane.mins, pane.maxs}, brush ? writer.add_leaf(json::array({*brush})) : 0));
 		}
 
-		// Measurement for the matching above: IW7 gives each glass convex the one-based glass id of its tag, which may name
-		// the piece (FxGlassInitPieceState index + 1) of the pane that holds it. The count says whether the id could match
-		// the geometric rule instead; it is logged, not used.
-		if (world_shapes && !glass.empty())
+		if (repeated_ids)
 		{
-			std::size_t named{};
-			std::size_t inside{};
-			std::uint32_t lowest = std::numeric_limits<std::uint32_t>::max();
-			std::uint32_t highest{};
-			for (const auto* convex : glass)
-			{
-				const auto id = static_cast<std::uint32_t>(world_shapes->tags[convex->tag].glass_id);
-				lowest = std::min(lowest, id);
-				highest = std::max(highest, id);
-				const auto pane = std::ranges::find_if(panes, [&](const glass_pane& candidate) { return candidate.piece + 1 == id; });
-				if (pane == panes.end())
-				{
-					continue;
-				}
+			ZONETOOL_WARNING("iw7: %zu glass convex(es) repeat the glass id of another; the first of each id is its pane's piece", repeated_ids);
+		}
 
-				named++;
-				std::array<float, 3> mins{FLT_MAX, FLT_MAX, FLT_MAX};
-				std::array<float, 3> maxs{-FLT_MAX, -FLT_MAX, -FLT_MAX};
-				for (const auto& point : convex->points)
-				{
-					for (std::size_t axis = 0; axis < 3; axis++)
-					{
-						mins[axis] = std::min(mins[axis], point[axis]);
-						maxs[axis] = std::max(maxs[axis], point[axis]);
-					}
-				}
-
-				const auto centre = centre_of(mins, maxs);
-				bool holds = true;
-				for (std::size_t axis = 0; axis < 3; axis++)
-				{
-					holds = holds && centre[axis] >= pane->mins[axis] - 1.0f && centre[axis] <= pane->maxs[axis] + 1.0f;
-				}
-
-				inside += holds;
-			}
-
-			ZONETOOL_INFO("iw7: %zu glass convexes carry glass ids %u..%u; %zu name a pane of this map (of %zu) and %zu of those panes hold their centre",
-				glass.size(), lowest, highest, named, panes.size(), inside);
+		if (outside_pieces)
+		{
+			ZONETOOL_WARNING("iw7: %zu glass pane(s) hold a piece whose centre lies outside their bounds", outside_pieces);
 		}
 
 		auto static_models = json::array();
