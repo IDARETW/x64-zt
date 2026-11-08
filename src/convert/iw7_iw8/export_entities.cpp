@@ -1833,6 +1833,9 @@ namespace zonetool::convert::iw7_iw8
 		std::set<const iw7::ScriptableDef*> dumped_machines;
 		std::size_t placed{};
 		std::size_t destructibles{};
+		// Scriptables the placement leaves out, by definition name: game-mode chevrons (hardpoint) and kinds without a model or pose.
+		std::map<std::string, std::size_t> hardpoints_left;
+		std::map<std::string, std::size_t> modelless_left;
 		const auto collmaps = collmap_models(entities);
 		std::size_t collmap_brushes{};
 		std::size_t collmap_static{};
@@ -1929,8 +1932,13 @@ namespace zonetool::convert::iw7_iw8
 			// The game modes' scriptables (Hardpoint's zone chevrons) show only while their mode runs them. The ops table's
 			// scriptable is its solar system (opsmap_solar_system_large), which shows without a script.
 			const std::string_view def_name = def && def->name ? asset_name(def->name) : std::string_view{};
-			if (name.empty() || !finite || def_name.find("hardpoint") != std::string_view::npos)
+			const auto hardpoint = def_name.find("hardpoint") != std::string_view::npos;
+			if (name.empty() || !finite || hardpoint)
 			{
+				if (hardpoint)
+					hardpoints_left[std::string(def_name)]++;
+				else
+					modelless_left[std::string(def_name)]++;
 				continue;
 			}
 
@@ -2073,6 +2081,11 @@ namespace zonetool::convert::iw7_iw8
 		ZONETOOL_INFO("iw7: placed %zu of %u scriptables (%u runtime, %u reserved) as script models, with %zu effects of their first states",
 			placed, scriptables.totalInstanceCount, scriptables.runtimeInstanceCount, scriptables.reservedInstanceCount,
 			output.scriptable_effects.size());
+		for (const auto& [kind, count] : hardpoints_left)
+			ZONETOOL_INFO("iw7: %zu scriptables of kind %s left out by their hardpoint name (game-mode zone chevrons)", count, kind.data());
+		for (const auto& [kind, count] : modelless_left)
+			ZONETOOL_WARNING("iw7: %zu scriptables of kind %s have no model or pose and are left out: their state machines and first-state "
+				"effects do not run", count, kind.data());
 		ZONETOOL_INFO("iw7: %zu of them break (%zu kinds: a health state, then the broken model, its effects and sound)", destructibles,
 			output.scriptable_destructibles.size());
 		if (!collmaps.empty() || collmap_missing || collmap_obstacles)
