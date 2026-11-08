@@ -286,9 +286,15 @@ iw3compat_remove_gameobjects()
 // ---------------------------------------------------------------------------
 iw3compat_exploders_init()
 {
+    // IW3 _load setupExploders hides an exploder brush with hide() and
+    // notsolid() until its exploder runs. Exploder chunks are not handled yet
+    // (no brush_throw port).
     level.mw120r_exploders = getentarray( "mw120r_exploder", "targetname" );
     foreach ( piece in level.mw120r_exploders )
+    {
         piece hide();
+        piece notsolid();
+    }
 
     // IW3 _load: a trigger with a script_exploder runs its exploder when it
     // triggers (exploder_load).
@@ -337,10 +343,14 @@ iw3compat_exploder( number )
     if ( !isdefined( level.mw120r_exploders ) )
         return;
 
+    // IW3 _utility brush_show: show() and solid() for the exploder's own pieces.
     foreach ( piece in level.mw120r_exploders )
     {
         if ( isdefined( piece.script_exploder ) && ( "" + piece.script_exploder ) == number )
+        {
             piece show();
+            piece solid();
+        }
     }
 
     models = getentarray( "script_model", "classname" );
