@@ -453,6 +453,24 @@ namespace zonetool::convert::iw7_iw8
 			return result;
 		}
 
+		// Two definitions whose names sanitize to one kind name would share a targetname: the second kind's shortcut was dropped
+		// by try_emplace, and its instances broke with the first kind's model. The later kind takes _2, _3, ... unless its break
+		// equals the kept one, which then shares it.
+		extraction::scriptable_destructible unique_destructible(const extraction& output, const extraction::scriptable_destructible& kind)
+		{
+			auto candidate = kind;
+			for (auto n = 2u;; n++)
+			{
+				const auto found = output.scriptable_destructibles.find(candidate.targetname);
+				if (found == output.scriptable_destructibles.end() || found->second == candidate)
+				{
+					return candidate;
+				}
+
+				candidate.targetname = kind.targetname + "_" + std::to_string(n);
+			}
+		}
+
 		// A scriptable that breaks: one part whose first state takes damage (a health state) and whose second and last state
 		// swaps the model, plays effects or a sound. Other kinds (multi-stage, several parts, debris, collision maps that the
 		// states change) run as state machines.
@@ -1989,8 +2007,9 @@ namespace zonetool::convert::iw7_iw8
 			}
 			else if (const auto destructible = def ? destructible_of(source, *def, output) : std::nullopt)
 			{
-				entities += std::format("\"targetname\" \"{}\"\n", destructible->targetname);
-				output.scriptable_destructibles.try_emplace(destructible->targetname, *destructible);
+				const auto kind = unique_destructible(output, *destructible);
+				entities += std::format("\"targetname\" \"{}\"\n", kind.targetname);
+				output.scriptable_destructibles.try_emplace(kind.targetname, kind);
 				destructibles++;
 			}
 			else if (animation)
