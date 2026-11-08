@@ -358,10 +358,14 @@ namespace zonetool::convert::iw7_iw8
 						// boxes of Frontier, Mansion and Parkour). The sections of these pieces have no packed vertices and no
 						// codec (FLT_MAX, -inf). Verified from the sky pieces, whose points are the corners of their sections;
 						// the scale between the corners is inferred.
+						// The header byte is type (bits 0-3), compression (bits 4-5) and tag count (bits 6-7): Havok's custom
+						// primitive layout (hkcdStaticMeshTree.h, "First index : Num vertices : 8 | Num tags : 2 | Compression : 2 |
+						// Type : 4"). The tags follow the shared vertex entry and do not change the piece's points. Breakneck's
+						// one unconverted piece (type 82 = 0x52: convex type 2, 32-bit vertices, one tag) reads like an untagged one.
 						const auto header = table_entry(indices[0]);
 						const auto type = header & 0xFF;
 						const auto format = type & 0x30;
-						if ((type & 0xCF) != 2 || format == 0x30)
+						if ((type & 0x0F) != 2 || format == 0x30)
 						{
 							report_unknown(std::format("compressed mesh primitive of type {}", type));
 							shapes.unknown++;
