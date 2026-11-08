@@ -274,9 +274,13 @@ namespace zonetool::convert::iw7_iw8
 					extent = std::max(extent, largest);
 				}
 
-				// IW7 LOD distances need not grow (650, 419.8, 2500); Replay takes a strictly growing sequence.
+				// IW7 LOD distances need not grow (650, 419.8, 2500). Keep each distance as authored: a LOD no
+				// farther than the one before it never shows (XModelSelectLod takes the first LOD whose distance
+				// exceeds the view distance), and the converter leaves such LODs out (iw3_fastfile.cpp
+				// ReadSourceModel). Raising them to previous + 1 made them show in a 1-unit band.
+				const float authored = std::isfinite(info.dist) ? info.dist : 0.0f;
 				previous_distance = lod + 1 == model->numLods ? std::max(1000000.0f, previous_distance + 1.0f)
-					: std::max(previous_distance + 1.0f, std::isfinite(info.dist) ? info.dist : 0.0f);
+					: std::max(1.0f, authored);
 				planned.distance = previous_distance;
 			}
 
