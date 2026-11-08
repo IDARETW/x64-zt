@@ -721,6 +721,9 @@ namespace zonetool::convert::iw7_iw8
 		// box of its bounds, which are as deep as the glass is thick in Replay's units.
 		const auto panes = glass_panes(source);
 		std::size_t glass_hulls{};
+		// The farthest centre match among the panes that found a piece, and the panes that took the box fallback.
+		float farthest_match = 0.0f;
+		std::size_t unmatched_panes{};
 		const auto centre_of = [](const std::array<float, 3>& mins, const std::array<float, 3>& maxs)
 		{
 			return std::array<float, 3>{(mins[0] + maxs[0]) / 2.0f, (mins[1] + maxs[1]) / 2.0f, (mins[2] + maxs[2]) / 2.0f};
@@ -765,6 +768,15 @@ namespace zonetool::convert::iw7_iw8
 					nearest = distance;
 					piece = convex;
 				}
+			}
+
+			if (piece)
+			{
+				farthest_match = std::max(farthest_match, nearest);
+			}
+			else
+			{
+				unmatched_panes++;
 			}
 
 			const auto brush = piece ? writer.add_brush(*piece, world_shapes->tags[piece->tag]) : std::nullopt;
@@ -832,6 +844,11 @@ namespace zonetool::convert::iw7_iw8
 		ZONETOOL_INFO("iw7: exported the collision of %zu brush models (%zu of their triangles do not convert), %u trigger models "
 			"and %zu of %zu glass panes; %zu glass pieces outside the panes, %zu flat pieces and %zu pieces without a tag left out",
 			solid_models, model_triangles, triggers.count, glass_hulls, panes.size(), glass_pieces, writer.flat, untagged);
+		if (!panes.empty())
+		{
+			ZONETOOL_INFO("iw7: glass panes: the farthest matched piece centre is %.3f units from its pane centre (Chebyshev), "
+				"%zu of %zu panes found no piece and take the box of their bounds", farthest_match, unmatched_panes, panes.size());
+		}
 
 		// IW7's clutter as the pipeline's dynamic models, each model with its physics preset, and the bodies and hinges of
 		// its PhysicsAsset when it holds several.
