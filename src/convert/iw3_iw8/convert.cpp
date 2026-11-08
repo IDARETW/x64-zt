@@ -88,6 +88,9 @@ struct Args
     std::string gscTool;
     std::string actsExecutable;
     std::string stockCache;
+    // --render_cache: the encoded image, probe, shader, sun-shadow and sound cache, shared by conversions in other
+    // output folders (default: .iw3-render-cache beside the output folder).
+    std::string renderCache;
     // An extraction that another front end wrote (iw3::ImportOptions::extraction).
     std::string extraction;
 };
@@ -2493,8 +2496,10 @@ int buildIw3(const Args &args)
                                            (map + "_iw8")
                                      : std::filesystem::path(args.outputDirectory);
     options.scratchRoot = std::filesystem::absolute(requestedOutput).parent_path();
-    replaysunshadow::SetCacheDirectory(options.scratchRoot / ".iw3-render-cache");
-    iw8::sound::SetCacheDirectory(options.scratchRoot / ".iw3-render-cache");
+    options.renderCache = args.renderCache.empty() ? options.scratchRoot / ".iw3-render-cache"
+                                                   : std::filesystem::absolute(args.renderCache);
+    replaysunshadow::SetCacheDirectory(options.renderCache);
+    iw8::sound::SetCacheDirectory(options.renderCache);
     for (const std::string &path : args.searchPaths)
     {
         options.searchPaths.emplace_back(path);
@@ -2648,6 +2653,7 @@ namespace zonetool::convert::iw3_iw8
 		}
 		args.actsExecutable = option("acts");
 		args.stockCache = option("stock_cache");
+		args.renderCache = option("render_cache");
 		if (const auto search = option("search_path"); !search.empty())
 		{
 			args.searchPaths.push_back(search);

@@ -39,6 +39,8 @@ struct ImportOptions
     std::string map;
     std::filesystem::path unlinker;
     std::filesystem::path scratchRoot;
+    // The encoded image, probe and shader cache (content-addressed, safe to share between conversions).
+    std::filesystem::path renderCache;
     std::vector<std::filesystem::path> searchPaths;
     // Convert IW3 gametype visuals (flag props, headquarters radios).
     bool iw3ModeAssets{true};

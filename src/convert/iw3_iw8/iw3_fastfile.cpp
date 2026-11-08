@@ -11740,7 +11740,7 @@ PreparedMap PrepareFastfile(const ImportOptions &options)
         PrepareRenderAssets(exportRoot, world, materialNames, worldMaterialNames,
                             modelMaterialNames, entityMaterialNames, fxMaterials, shadowWorldMaterialNames,
                             shadowModelMaterialNames, options.searchPaths, mapDirectory,
-                            options.map, options.scratchRoot / ".iw3-render-cache",
+                            options.map, options.renderCache,
                             FogShaderDefines(expFog, options.style, ReadMapSun(exportRoot, sourceMap),
                                              lightingMatch.lightUnitScale, nativeFog),
                             static_cast<unsigned>(sourceStaticModels.instances.size()),
