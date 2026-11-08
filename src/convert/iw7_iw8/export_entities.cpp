@@ -820,7 +820,15 @@ namespace zonetool::convert::iw7_iw8
 						const auto state = reinterpret_cast<std::uintptr_t>(data.stateChange.part);
 						const auto states = part >= 0 && parts[part]->states ? parts[part]->numStates : 0u;
 						// The raw field is read as a state index (its source layout is unverified, ledger d42f680): an index past the
-						// part's states drops the change, which is logged so the loss is visible.
+						// part's states drops the change, which is logged so the loss is visible. Every change logs its raw value and the
+						// reference's name, so a field that reads 0 everywhere (every change to state 0) shows in the conversion log.
+						if (convert)
+						{
+							ZONETOOL_INFO("iw7 scriptable %s: state change of part %d reads %#zx as its target state (%u states, reference \"%s\")",
+								def.name ? def.name : "<unnamed>", part, state, states,
+								data.stateChange.partReference.base.name ? data.stateChange.partReference.base.name : "");
+						}
+
 						if (convert && state >= states)
 						{
 							ZONETOOL_WARNING("iw7 scriptable %s: a state change to %zx of part %d (%u states) is left out", def.name ? def.name : "<unnamed>",
@@ -902,6 +910,7 @@ namespace zonetool::convert::iw7_iw8
 					case iw7::Scriptable_EventType_PartDamage:
 					{
 						const auto& damage = data.partDamage;
+						// Byte 60 sits right after amount (IW7 structs.hpp ScriptableEventPartDamageDef: amount 56, unknown60 60, amountDoT 64).
 						// The byte-60 interpretation is retained until its source meaning is verified.
 						const auto destroy = damage.unknown60[0] != 0;
 						if (convert && destroy)
