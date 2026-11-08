@@ -1712,6 +1712,11 @@ namespace zonetool::convert::iw7_iw8
 			auto items = json::array();
 			std::size_t audio{};
 			std::size_t cleared{};
+			// Census of the roles the mask above does not keep: 0x80 (CG_MarkClientSideAudioTrigger's propagation mark), and
+			// 0x40 without 0x2 (CG_StartClientSideTriggers takes its audio path for any 0x40 type; the name is kept only for 0x2).
+			std::size_t marked{};
+			std::size_t audio_40_only{};
+			std::size_t audio_40_named{};
 			for (auto i = 0u; i < count; i++)
 			{
 				const auto& model = triggers.trigger.models[i];
@@ -1720,6 +1725,13 @@ namespace zonetool::convert::iw7_iw8
 				const auto kept = static_cast<std::uint16_t>(type & audio_roles);
 				cleared += kept != type;
 				audio += (kept & 0x2) != 0;
+				marked += (type & 0x80) != 0;
+				if ((type & 0x42) == 0x40)
+				{
+					audio_40_only++;
+					const auto audio_name = trigger_string(triggers, triggers.audioTriggers ? triggers.audioTriggers[i] : -1);
+					audio_40_named += !audio_name.empty();
+				}
 
 				auto hull_items = json::array();
 				for (auto h = 0u; h < model.hullCount && model.firstHull + h < triggers.trigger.hullCount; h++)
@@ -1853,6 +1865,11 @@ namespace zonetool::convert::iw7_iw8
 
 			ZONETOOL_INFO("iw7: exported %u client triggers (%zu audio zones%s; %zu lose their vision or occluder roles) and %zu of %u blend nodes",
 				count, audio, map_zone ? ", with the map-wide map zone" : "", cleared, node_count, blend.numClientTriggerBlendNodes);
+			if (marked || audio_40_only)
+			{
+				ZONETOOL_INFO("iw7: client trigger roles: %zu carry the 0x80 mark (dropped), %zu carry 0x40 without 0x2 (%zu of them name an audio zone that is dropped)",
+					marked, audio_40_only, audio_40_named);
+			}
 		}
 	}
 
