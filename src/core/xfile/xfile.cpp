@@ -548,6 +548,8 @@ namespace zonetool::xfile
 		constexpr std::size_t iw8_signed_chunk_size = 0x800000;
 		constexpr std::size_t iw8_rsa_block_size = 0x4000;
 		constexpr std::uint32_t iw8_patch_version = 6;
+		constexpr std::uint32_t iw8_patch_diff_version = 4;
+		constexpr std::uint32_t iw8_header_version = 11;
 
 #pragma pack(push, 1)
 		struct iw8_file_header
@@ -578,7 +580,12 @@ namespace zonetool::xfile
 		{
 			char magic[8];
 			std::uint32_t version;
-			std::uint8_t unknown[0x1C];
+			// Replay's XFILE_DIFF_VERSION: DB_ReadFastfileHeaderData 0x1411A7D30 rejects any value but 4 (error 6040).
+			std::uint32_t diff_version;
+			// BDiff window buffer sizes: the largest target window, the largest source segment end and the largest window
+			// record (DB_BinaryPatch_GetBDiffWindowSizeAlloc 0x140D892A0 rounds them up and sums them for allocation).
+			// The reader does not need them; writers set them so Replay's temporary buffers hold every window.
+			std::uint64_t window_sizes[3];
 			std::uint64_t data_size;
 			std::uint64_t delta_size;
 			iw8_file_header base;
@@ -1135,8 +1142,36 @@ namespace zonetool::xfile
 			return target;
 		}
 
+		// The zone header check of Replay's DB_ReadFastfileHeaderData (q_DB_CheckFastfileHeaderVersionAndMagic, errors
+		// 6032/6033): an IW8 zone is a signed or unsigned v11 header.
+		void check_iw8_zone_header(const iw8_file_header& header, const std::filesystem::path& patch_path)
+		{
+			const auto magic = std::string_view(header.magic, sizeof(header.magic));
+			if (magic != "IWffa100" && magic != "IWffc100")
+			{
+				throw std::runtime_error(std::format("{} has a zone header with magic {}", patch_path.filename().string(), magic));
+			}
+
+			if (header.version != iw8_header_version)
+			{
+				throw std::runtime_error(std::format("{} has a zone header version {}, not {}", patch_path.filename().string(),
+					header.version, iw8_header_version));
+			}
+		}
+
 		std::string apply_iw8_patch(const std::filesystem::path& zone_path, iw8_file_header& header, std::string payload)
 		{
+			// Replay loads the zone's chain of patches in suffix order (off_142458E18 = {".fp", ".fc"}). A second patch
+			// is applied to the first one's output, which this reader does not model: refuse it rather than output a
+			// different zone than the game loads.
+			auto chain_path = zone_path;
+			chain_path.replace_extension(".fc");
+			std::error_code exists_error;
+			if (std::filesystem::exists(chain_path, exists_error))
+			{
+				throw std::runtime_error(std::format("{} is a chained patch, which is not supported", chain_path.filename().string()));
+			}
+
 			auto patch_path = zone_path;
 			patch_path.replace_extension(".fp");
 
@@ -1153,6 +1188,14 @@ namespace zonetool::xfile
 				throw std::runtime_error(std::format("{} is not a Replay patch", patch_path.filename().string()));
 			}
 
+			if (patch.diff_version != iw8_patch_diff_version)
+			{
+				throw std::runtime_error(std::format("{} has diff version {}, not {}", patch_path.filename().string(),
+					patch.diff_version, iw8_patch_diff_version));
+			}
+
+			check_iw8_zone_header(patch.base, patch_path);
+			check_iw8_zone_header(patch.patched, patch_path);
 			if (std::memcmp(&patch.base, &header, sizeof(header)))
 			{
 				throw std::runtime_error(std::format("{} patches another version of the zone", patch_path.filename().string()));
