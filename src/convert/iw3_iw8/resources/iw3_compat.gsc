@@ -206,11 +206,19 @@ iw3compat_soundexists( alias )
 // 2500) is Replay's MKPRSSNNRO; in MP GScr_SetDvar_Internal sets it without a
 // script error (the read-only check is SP-only, game-mode feature 0xBC). Every
 // other IW3 map dvar is a renderer setting the converter owns (vision, glow,
-// specular scale) and is ignored.
+// specular scale) and is ignored. IW7 map scripts reach this function too (the IW3 translator renames their setdvar):
+// Breakneck's main sets the sun shadow cascade sizes, which Replay registers under the same names, so they pass through.
 iw3compat_setdvar( name, value )
 {
-    if ( tolower( name ) == "compassmaxrange" )
+    name = tolower( name );
+    if ( name == "compassmaxrange" )
         setdvar( "MKPRSSNNRO", value );
+    // IW7 main (mp_breakneck.gsc:14-22): sm_sunCascadeSizeMultiplier1 3 and sm_sunCascadeSizeMultiplier2 2. IW3 maps never set
+    // them. The Umbra and round-robin dvars of the same main stay ignored until an owner A/B measures their effect.
+    else if ( name == "sm_suncascadesizemultiplier1" )
+        setdvar( "sm_sunCascadeSizeMultiplier1", value );
+    else if ( name == "sm_suncascadesizemultiplier2" )
+        setdvar( "sm_sunCascadeSizeMultiplier2", value );
 }
 
 // IW3 ambientPlay is a 2D loop for everyone. Each player carries the converted
