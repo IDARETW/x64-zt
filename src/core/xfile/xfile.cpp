@@ -654,6 +654,54 @@ namespace zonetool::xfile
 			throw std::runtime_error("the zone needs Oodle: no oo2core_*_win64.dll in the game folder");
 		}
 
+		// Oodle 2.7 (oo2core_7_win64.dll of the Replay install): OodleLZ_Compress(compressor, raw, rawLen, out, level,
+		// options, dictionaryBase, lrm, scratch, scratchSize).
+		using oodle_compress_t = std::intptr_t(*)(int, const void*, std::intptr_t, void*, int, const void*, const void*,
+			const void*, void*, std::intptr_t);
+		constexpr int oodle_compressor_kraken = 8;
+		constexpr int oodle_level_normal = 4;
+
+		std::mutex oodle_compress_mutex;
+		std::filesystem::path oodle_compress_directory;
+		oodle_compress_t oodle_compress{};
+		bool oodle_compress_searched{};
+
+		oodle_compress_t load_oodle_compress()
+		{
+			std::lock_guard _(oodle_compress_mutex);
+			if (oodle_compress_searched)
+			{
+				return oodle_compress;
+			}
+
+			oodle_compress_searched = true;
+			std::error_code error;
+			if (oodle_compress_directory.empty())
+			{
+				return nullptr;
+			}
+
+			for (const auto& entry : std::filesystem::directory_iterator(oodle_compress_directory, error))
+			{
+				const auto name = entry.path().filename().string();
+				if (!name.starts_with("oo2core_") || !name.ends_with("_win64.dll"))
+				{
+					continue;
+				}
+
+				if (const auto library = LoadLibraryW(entry.path().c_str()))
+				{
+					oodle_compress = reinterpret_cast<oodle_compress_t>(GetProcAddress(library, "OodleLZ_Compress"));
+					if (oodle_compress)
+					{
+						return oodle_compress;
+					}
+				}
+			}
+
+			return nullptr;
+		}
+
 		void decompress_iw8_block(const std::filesystem::path& zone_path, const std::uint8_t codec, const std::string_view block,
 			char* destination, const std::size_t size)
 		{
@@ -1168,8 +1216,9 @@ namespace zonetool::xfile
 			file.preload_walk_size = header.preload_walk_size;
 		}
 
-		// The header and the stored frame that come before the payload.
-		std::string write_iw8_header(const format& format, const fastfile& file)
+		// The header and, for a stored zone, the stored frame that come before the payload. A compressed zone's frame
+		// (compress_iw8_frame) follows the header instead of the payload.
+		std::string write_iw8_header(const format& format, const fastfile& file, const std::size_t compressed_frame_size)
 		{
 			if (format.block_count != iw8_block_count || file.block_sizes.size() != iw8_block_count)
 			{
@@ -1178,7 +1227,9 @@ namespace zonetool::xfile
 
 			// A stored frame: the compressor type 1 and "IWC", then the payload.
 			constexpr std::string_view stored_frame = "\x01IWC";
-			if (file.payload.size() > std::numeric_limits<std::uint32_t>::max() - stored_frame.size())
+			const auto resident = compressed_frame_size ? compressed_frame_size : stored_frame.size() + file.payload.size();
+			if (resident > std::numeric_limits<std::uint32_t>::max() ||
+				file.payload.size() > std::numeric_limits<std::uint32_t>::max())
 			{
 				throw std::runtime_error("the zone is too large for an IW8 fastfile");
 			}
@@ -1187,8 +1238,10 @@ namespace zonetool::xfile
 			std::memcpy(header.magic, format.unsigned_magic.data(), sizeof(header.magic));
 			header.version = format.version;
 			header.xfile_version = file.xfile_version ? file.xfile_version : iw8_xfile_versions.back();
+			// Stock compressed zones set the build's compression flag (techsets_mp_shipment: 1).
+			header.compressed = compressed_frame_size ? 1 : 0;
 			header.transient = file.transient ? 1 : 0;
-			header.resident_size = static_cast<std::uint32_t>(stored_frame.size() + file.payload.size());
+			header.resident_size = static_cast<std::uint32_t>(resident);
 			header.always_loaded_size = static_cast<std::uint32_t>(file.payload.size());
 			header.size = file.payload.size();
 			header.preload_walk_size = file.preload_walk_size;
@@ -1196,9 +1249,105 @@ namespace zonetool::xfile
 
 			std::string data;
 			data.append(reinterpret_cast<const char*>(&header), sizeof(header));
-			data.append(stored_frame);
+			if (!compressed_frame_size)
+			{
+				data.append(stored_frame);
+			}
 			return data;
 		}
+	}
+
+	void set_oodle_directory(const std::filesystem::path& directory)
+	{
+		std::lock_guard _(oodle_compress_mutex);
+		oodle_compress_directory = directory;
+		oodle_compress_searched = false;
+		oodle_compress = nullptr;
+	}
+
+	// Replay's compressed frame (DB_Block_TryNewBlock 0x140D89B90): "\x02IWC", a segment header (the u32 size of the
+	// payload it decompresses to, three zero bytes, the codec: 6 = Oodle Kraken), then blocks of {compressed size,
+	// decompressed size, CTR counter} and their bytes, each padded to 4. Replay decodes every block on its own
+	// (DB_Block_DecompressOodle 0x140D89940: no dictionary base, 442552 bytes of decoder scratch); stock blocks hold
+	// 64 KiB, which compress in parallel here.
+	std::string compress_iw8_frame(const std::string_view payload)
+	{
+		constexpr std::size_t block_size = 0x10000;
+		const char* stored = std::getenv("MW120R_FF_STORED");
+		const auto compress = (stored && *stored && *stored != '0') ? nullptr : load_oodle_compress();
+		if (!compress || payload.size() > std::numeric_limits<std::uint32_t>::max())
+		{
+			return {};
+		}
+
+		const auto block_count = (payload.size() + block_size - 1) / block_size;
+		std::vector<std::string> blocks(block_count);
+		std::atomic<std::size_t> next{0};
+		std::atomic<bool> failed{false};
+		const auto worker = [&]()
+		{
+			std::string scratch(block_size * 2 + 0x1000, '\0');
+			for (auto index = next++; index < block_count && !failed; index = next++)
+			{
+				const auto offset = index * block_size;
+				const auto size = std::min(block_size, payload.size() - offset);
+				const auto written = compress(oodle_compressor_kraken, payload.data() + offset, static_cast<std::intptr_t>(size),
+					scratch.data(), oodle_level_normal, nullptr, nullptr, nullptr, nullptr, 0);
+				if (written <= 0 || static_cast<std::size_t>(written) > scratch.size())
+				{
+					failed = true;
+					return;
+				}
+
+				blocks[index].assign(scratch.data(), static_cast<std::size_t>(written));
+			}
+		};
+
+		std::vector<std::thread> threads;
+		const auto count = std::max<std::size_t>(1, std::min<std::size_t>({std::thread::hardware_concurrency(), 32, block_count}));
+		for (std::size_t thread = 0; thread < count; thread++)
+		{
+			threads.emplace_back(worker);
+		}
+
+		for (auto& thread : threads)
+		{
+			thread.join();
+		}
+
+		if (failed)
+		{
+			throw std::runtime_error("Oodle could not compress the zone");
+		}
+
+		std::size_t frame_size = 12;
+		for (const auto& block : blocks)
+		{
+			frame_size += sizeof(iw8_compressed_block) + ((block.size() + 3) & ~std::size_t(3));
+		}
+
+		std::string frame;
+		frame.reserve(frame_size);
+		const auto put32 = [&](const std::uint32_t value)
+		{
+			frame.append(reinterpret_cast<const char*>(&value), sizeof(value));
+		};
+
+		frame.append("\x02IWC", 4);
+		put32(static_cast<std::uint32_t>(payload.size()));
+		frame.append(std::string_view("\0\0\0", 3));
+		frame.push_back(static_cast<char>(iw8_codec_kraken_size));
+		for (std::size_t index = 0; index < block_count; index++)
+		{
+			const auto& block = blocks[index];
+			put32(static_cast<std::uint32_t>(block.size()));
+			put32(static_cast<std::uint32_t>(std::min(block_size, payload.size() - index * block_size)));
+			put32(0);
+			frame.append(block);
+			frame.resize((frame.size() + 3) & ~std::size_t(3), '\0');
+		}
+
+		return frame;
 	}
 
 	void write(const std::filesystem::path& path, const format& format, const fastfile& file)
@@ -1208,7 +1357,9 @@ namespace zonetool::xfile
 			throw std::runtime_error(std::format("the {} container has no v2 writer", format.unsigned_magic));
 		}
 
-		const auto header = write_iw8_header(format, file);
+		const auto frame = compress_iw8_frame(file.payload);
+		const auto header = write_iw8_header(format, file, frame.size());
+		const std::string_view body = frame.empty() ? std::string_view(file.payload) : std::string_view(frame);
 		if (path.has_parent_path())
 		{
 			std::filesystem::create_directories(path.parent_path());
@@ -1220,7 +1371,7 @@ namespace zonetool::xfile
 		{
 			std::ofstream stream(partial, std::ios::binary | std::ios::trunc);
 			stream.write(header.data(), static_cast<std::streamsize>(header.size()));
-			stream.write(file.payload.data(), static_cast<std::streamsize>(file.payload.size()));
+			stream.write(body.data(), static_cast<std::streamsize>(body.size()));
 			stream.close();
 			if (!stream)
 			{
@@ -1231,7 +1382,7 @@ namespace zonetool::xfile
 				std::filesystem::remove(partial, ignored);
 				const auto space = std::filesystem::space(partial.parent_path(), ignored);
 				throw std::runtime_error(std::format("cannot write {} ({} bytes: {}; {} MB free)", partial.string(),
-					header.size() + file.payload.size(), cause, ignored ? 0 : space.available >> 20));
+					header.size() + body.size(), cause, ignored ? 0 : space.available >> 20));
 			}
 		}
 

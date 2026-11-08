@@ -2,6 +2,7 @@
 #include "ff_io.h"
 
 #include "iw8_ffheader.h"
+#include <xfile/xfile.hpp>
 #include "../common/fs_util.h"
 #include "../common/log.h"
 
@@ -15,6 +16,11 @@
 
 namespace zt
 {
+void iw8_set_oodle_directory(const std::string &directory)
+{
+    zonetool::xfile::set_oodle_directory(directory);
+}
+
 bool iw8_write(const std::string &outputPath, const std::vector<uint8_t> &zoneBody,
                const Iw8WriteParams &params)
 {
@@ -29,13 +35,17 @@ bool iw8_write(const std::string &outputPath, const std::vector<uint8_t> &zoneBo
     }
 
     constexpr unsigned char storedFrame[] = {0x01, 0x49, 0x57, 0x43};
-    const size_t residentSize = sizeof(storedFrame) + zoneBody.size();
+    // Oodle Kraken in Replay's IWC frame, as the core container writes it (empty: stored).
+    const std::string compressedFrame = zonetool::xfile::compress_iw8_frame(
+        std::string_view(reinterpret_cast<const char *>(zoneBody.data()), zoneBody.size()));
+    const bool compressed = !compressedFrame.empty();
+    const size_t residentSize = compressed ? compressedFrame.size() : sizeof(storedFrame) + zoneBody.size();
 
     IW8_DB_FFHeader header{};
     std::memcpy(header.magic, kMagicUnsec, sizeof(header.magic));
     header.headerVersion = kHeaderVersion;
     header.xfileVersion = params.xfileVersion;
-    header.dashCompressBuild = 0;
+    header.dashCompressBuild = compressed ? 1 : 0;
     header.dashEncryptBuild = 0;
     header.transientFileType = params.transientFileType;
     header.residentPartSize = static_cast<uint32_t>(residentSize);
@@ -80,8 +90,10 @@ bool iw8_write(const std::string &outputPath, const std::vector<uint8_t> &zoneBo
 
     const bool written =
         std::fwrite(&header, 1, headerSize, file) == headerSize &&
-        std::fwrite(storedFrame, 1, sizeof(storedFrame), file) == sizeof(storedFrame) &&
-        std::fwrite(zoneBody.data(), 1, zoneBody.size(), file) == zoneBody.size();
+        (compressed
+             ? std::fwrite(compressedFrame.data(), 1, compressedFrame.size(), file) == compressedFrame.size()
+             : std::fwrite(storedFrame, 1, sizeof(storedFrame), file) == sizeof(storedFrame) &&
+                   std::fwrite(zoneBody.data(), 1, zoneBody.size(), file) == zoneBody.size());
     const int writeError = written ? 0 : errno;
     const bool closed = std::fclose(file) == 0;
     const int closeError = closed ? 0 : errno;
@@ -106,7 +118,8 @@ bool iw8_write(const std::string &outputPath, const std::vector<uint8_t> &zoneBo
         return false;
     }
 
-    info("iw8: wrote %s (%zu bytes)", outputPath.c_str(), headerSize + residentSize);
+    info("iw8: wrote %s (%zu bytes%s)", outputPath.c_str(), headerSize + residentSize,
+         compressed ? ", Oodle Kraken" : ", stored");
     return true;
 }
 
