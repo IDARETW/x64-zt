@@ -1426,6 +1426,30 @@ Mesh Load(const std::string &path, const nlohmann::json &j)
             m.glassPanes.push_back(pane);
         }
     }
+    if (j.contains("glassNames"))
+    {
+        // G_GlassName: a script name and the indices of its panes (G_Glass_GetIndicesFromName 0x141212990).
+        const auto &names = j.at("glassNames");
+        if (!names.is_array() || names.size() > 65535)
+            throw std::runtime_error("Invalid Replay glass name table");
+        for (const auto &source : names)
+        {
+            GlassName name;
+            name.name = source.at("name").get<std::string>();
+            if (name.name.empty() || name.name.size() > 255 || name.name.find('\0') != std::string::npos)
+                throw std::runtime_error("Invalid Replay glass name");
+            for (const auto &index : source.at("panes"))
+            {
+                const auto pane = index.get<uint32_t>();
+                if (pane >= m.glassPanes.size())
+                    throw std::runtime_error("Replay glass name references a missing pane");
+                name.panes.push_back(pane);
+            }
+            if (name.panes.empty() || name.panes.size() > 65535)
+                throw std::runtime_error("Invalid Replay glass name piece count");
+            m.glassNames.push_back(std::move(name));
+        }
+    }
     if (j.contains("volumetrics"))
     {
         // R_VOL_AddVolumetric (0x1418B6EC0) divides by the falloff and gives the first 256 volumes a slot.

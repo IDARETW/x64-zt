@@ -173,4 +173,44 @@ namespace zonetool::convert::iw7_iw8
 
 		return result;
 	}
+
+	// IW7's named glass (G_GlassData.glassNames): each group's script name and the pieces of the group. Replay's G_InitGlass
+	// names the group by the script string, and G_Glass_GetIndicesFromName (0x141212990) returns the piece indices of a name.
+	std::vector<glass_name> glass_names(const source_map& source)
+	{
+		std::vector<glass_name> result;
+		const auto* glass_world = source.glass_world();
+		if (!glass_world || !glass_world->g_glassData || !glass_world->g_glassData->glassNameCount)
+		{
+			return result;
+		}
+
+		const auto& data = *glass_world->g_glassData;
+		if (!data.glassNames)
+		{
+			ZONETOOL_WARNING("iw7: the %u named glass group(s) of the world have no table; they are not converted", data.glassNameCount);
+			return result;
+		}
+
+		for (auto i = 0u; i < data.glassNameCount; i++)
+		{
+			const auto& group = data.glassNames[i];
+			glass_name name{};
+			name.name = group.nameStr ? group.nameStr : "";
+			for (auto k = 0u; group.pieceIndices && k < group.pieceCount; k++)
+			{
+				name.pieces.push_back(group.pieceIndices[k]);
+			}
+
+			if (name.name.empty() || name.pieces.empty())
+			{
+				ZONETOOL_WARNING("iw7: named glass group %u (\"%s\") has no name or no piece; it is left out", i, name.name.c_str());
+				continue;
+			}
+
+			result.push_back(std::move(name));
+		}
+
+		return result;
+	}
 }

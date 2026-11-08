@@ -440,7 +440,16 @@ namespace zonetool::convert::iw7_iw8
 		std::uint32_t piece{};
 	};
 
+	// A named group of IW7's breakable glass (G_GlassName): the script name and the IW7 piece indices of its panes.
+	struct glass_name
+	{
+		std::string name;
+		std::vector<std::uint32_t> pieces;
+	};
+
 	std::vector<glass_pane> glass_panes(const source_map& source);
+	// The named glass groups of the world (G_GlassData.glassNames); a group without a piece is left out.
+	std::vector<glass_name> glass_names(const source_map& source);
 	unsigned int glass_brush_model(const source_map& source, unsigned int pane);
 
 	struct mesh_vertex
