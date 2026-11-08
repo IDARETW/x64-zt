@@ -2817,7 +2817,10 @@ iw7_scriptable_fx_stop( part, fx )
 	fx delete();
 }
 
-// The compatibility layer plays each alias as its kind (playsound a one-shot, playloopsound a loop): one of the two plays.
+// The compatibility layer plays each alias as its kind: iw3compat_playsound plays a one-shot, iw3compat_playloopsound a
+// loop, and both ignore an alias of the other kind or an unknown one. The raw builtins raise script errors for those
+// (ScrCmd_PlaySoundAtPosInternal 0x14126FC20: Scr_Error 2998 for a looping alias, 2997 for an unknown one), which would
+// end this thread before the rest of the state's events. The compatibility names also apply the --style iw8 alias map.
 // A sound at a tag (IW7's Sound event tagName): Replay's script sounds take no tag (ScrCmd_PlaySound 0x14125F210,
 // ScrCmd_PlayLoopSound 0x141260440), so a one-shot plays at the tag's position and a loop plays from a script_origin
 // linked to the tag, deleted when the part leaves the state or the model goes.
@@ -2831,18 +2834,21 @@ iw7_scriptable_sound( part, alias, tag )
 		{
 			source = spawn( "script_origin", self gettagorigin( tag ) );
 			source linkto( self, tag );
-			source playloopsound( alias );
+			source iw3compat_playloopsound( alias, 0 );
 			source thread iw7_scriptable_sound_release( self, "death" );
 			source thread iw7_scriptable_sound_release( self, "iw7_part_" + part );
 		}
 		else
-			playsoundatpos( self gettagorigin( tag ), alias );
+			iw3compat_playsoundatpos( self gettagorigin( tag ), alias );
 		return;
 	}
-	self playsound( alias );
-	self playloopsound( alias );
 	if ( iw3compat_sound_kind( alias ) == 2 )
+	{
+		self iw3compat_playloopsound( alias, 0 );
 		self thread iw7_scriptable_sound_stop( part );
+		return;
+	}
+	self iw3compat_playsound( alias, 0, 0 );
 }
 
 iw7_scriptable_sound_stop( part )
