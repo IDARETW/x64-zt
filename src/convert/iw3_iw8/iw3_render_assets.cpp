@@ -7383,12 +7383,16 @@ RenderPlan PrepareRenderAssets(const std::filesystem::path &exportRoot, const Js
         for (const auto &name : neededWorldMaterials)
             if (const auto at = name.find("__layer"); at != std::string::npos)
                 layered.insert(name.substr(0, at));
-        // The sorts of the lit blended decals drawn below as stock decals (the same test as their branch), spread over
-        // the stock decal range by DecalSortKeys.
+        // The sorts of the lit blended decals drawn below as stock decals, spread over the stock decal range by
+        // DecalSortKeys. The guards are those of the earlier branches (shadow-only, distortion, visibility, layers) and of
+        // the decal branch, so a material that is not drawn as a decal adds no sort.
         std::set<unsigned> decalSorts;
         for (const SourceMaterial &source : materials)
         {
             if (!neededWorldMaterials.contains(source.name) || plan.materials.at(source.name).kind != SurfaceKind::glass)
+                continue;
+            if ((source.shadowOnly && source.castsShadow) || !source.distortionMap.empty() || !visibleMaterials ||
+                source.replayColor.empty() || source.name.find("__layer") != std::string::npos)
                 continue;
             if (!source.blend && (source.flags & 2048u) && !(source.flags & 128u) &&
                 !(source.flags & (kRevealLayerFlag | kEmissionFlag)) && source.emission == 1 && !layered.contains(source.name))
