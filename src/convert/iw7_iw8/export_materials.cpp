@@ -818,7 +818,8 @@ namespace zonetool::convert::iw7_iw8
 		}
 
 		// Whether IW7 draws a material with a depth bias over the surface beneath it: the polygon offset (1 or 2; 3 is the
-		// shadow maps') of the state of its emissive technique (8) or lit ones (13 to 26: the lprobe techniques). Breakneck:
+		// shadow maps') of the state of its unlit technique (TECHNIQUE_UNLIT 8) or lit ones (13 to 26: the lprobe techniques;
+		// TECHNIQUE_EMISSIVE 10 is not read here, see iw7_depthless). Breakneck:
 		// 258 of the decal camera region's 282 materials have it, and none of the other 5408.
 		bool iw7_decal_offset(const iw7::Material* material)
 		{
@@ -1206,6 +1207,13 @@ namespace zonetool::convert::iw7_iw8
 			if (shadow_only)
 			{
 				result["iw7ShadowOnly"] = true;
+			}
+
+			// The bias of an unlit decal: the IW3 reader takes its hardware bias from the lit state only (state 7), which an
+			// unlit material lacks, so the decal bias travels as a key (iw3_render_assets: depthBias).
+			if (decal_offset && kind.unlit)
+			{
+				result["iw7DecalBias"] = true;
 			}
 
 			// Flag cloth and foliage move by IW7's flag wave (the pipeline's MAP_IW7_FLAG_* variants of static models).
