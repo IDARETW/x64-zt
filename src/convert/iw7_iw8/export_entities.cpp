@@ -2007,9 +2007,9 @@ namespace zonetool::convert::iw7_iw8
 			}
 			else if (const auto destructible = def ? destructible_of(source, *def, output) : std::nullopt)
 			{
-				const auto kind = unique_destructible(output, *destructible);
-				entities += std::format("\"targetname\" \"{}\"\n", kind.targetname);
-				output.scriptable_destructibles.try_emplace(kind.targetname, kind);
+				const auto unique = unique_destructible(output, *destructible);
+				entities += std::format("\"targetname\" \"{}\"\n", unique.targetname);
+				output.scriptable_destructibles.try_emplace(unique.targetname, unique);
 				destructibles++;
 			}
 			else if (animation)
