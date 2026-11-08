@@ -7443,6 +7443,7 @@ RenderPlan PrepareRenderAssets(const std::filesystem::path &exportRoot, const Js
                               nullptr, true);
                 addMaterial(std::move(direct), source.name, planned);
                 planned.worldMaterialIndex = planned.stockWorldMaterialIndex;
+                planned.stockDistortion = true;
                 ++distortionCount;
                 continue;
             }
