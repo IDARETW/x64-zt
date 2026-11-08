@@ -5,8 +5,10 @@
 #pragma pack(push, 1)
 
 // EncryptionHeader (XFile + 0x68, file offset 0x88; size 20). It carries the secondary "IWffs100"
-// marker. Stock 1.20 files have nonzero trailing auth bytes. The converter emits the marker and
-// zeros until a live 1.20 test proves the exact trailing-auth rule.
+// marker. Only secured ('a') zones carry it, followed by the 0x8000-byte signature block
+// (xfile.cpp iw8_signature_size). Unsecured ('c') zones, as iw8_write and xfile::write emit them, have
+// no encryption block: the IWC frame starts at file offset 0x88 (DB_CheckFastfileHeaderVersionAndMagic
+// accepts magic 'c').
 struct IW8_EncryptionHeader
 {
     char magic[8];    // "IWffs100"
