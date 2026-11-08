@@ -151,6 +151,16 @@ float Distance(const Vec3 &a, const Vec3 &b)
 {
     return Length(Sub(a, b));
 }
+// Path node links are horizontal. IW7 Breakneck's authored aipaths (PathData) store fDist = hypot(dx, dy) on all
+// 5091 marker-to-marker links (3D length differs on 102 of them; the largest is exactly 256.0) and on all 78
+// negotiation links (3D differs on 74). The stock Replay census in the zonetool swarm reported the same for
+// mp_shipment and mp_m_speed generic links; that stock figure was not re-measured in this change. The 256-unit reach
+// uses this length too, so vertical links (jump up/down, stairs) are kept as the source keeps them. Zone-node links
+// stay 3D (stock: 25/25 3D).
+float HorizontalDistance(const Vec3 &a, const Vec3 &b)
+{
+    return std::hypot(a[0] - b[0], a[1] - b[1]);
+}
 
 struct Box
 {
@@ -1856,7 +1866,7 @@ Result Build(const Source &source)
         {
             if (a == b)
                 continue;
-            const float distance = Distance(nodes[a].origin, nodes[b].origin);
+            const float distance = HorizontalDistance(nodes[a].origin, nodes[b].origin);
             if (distance > kLinkDistance)
                 continue;
             if (WalkableLine(grid, nodes[a].cell, nodes[a].origin, nodes[b].cell,
@@ -1907,7 +1917,7 @@ Result Build(const Source &source)
         const auto walkLinks = [&](const std::size_t node) {
             for (std::size_t other = 0; other < generated; ++other)
             {
-                const float distance = Distance(nodes[node].origin, nodes[other].origin);
+                const float distance = HorizontalDistance(nodes[node].origin, nodes[other].origin);
                 if (distance > kLinkDistance ||
                     !WalkableLine(grid, nodes[node].cell, nodes[node].origin, nodes[other].cell,
                                   nodes[other].origin) ||
@@ -1949,7 +1959,7 @@ Result Build(const Source &source)
             animscripts.emplace_back();
             links.emplace_back();
             links.emplace_back();
-            links[begin].push_back({Distance(traversal.begin, traversal.end),
+            links[begin].push_back({HorizontalDistance(traversal.begin, traversal.end),
                                     static_cast<std::uint16_t>(begin + 1), true});
             walkLinks(begin);
             walkLinks(begin + 1);
