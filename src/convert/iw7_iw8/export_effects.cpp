@@ -3877,8 +3877,8 @@ iw7_first_state( name, part, state )
 			std::string calls;
 			for (const auto& [targetname, kind] : output.scriptable_destructibles)
 			{
-				calls += std::format("\tiw7_destructible( \"{}\", \"{}\", {}, {}, {} );\n", targetname, kind.dead_model,
-					kind.removes ? 1 : 0, kind.health, kind.mindamage);
+				calls += std::format("\tiw7_destructible( \"{}\", \"{}\", {}, {}, {}, {} );\n", targetname, kind.dead_model,
+					kind.removes ? 1 : 0, kind.health, kind.mindamage, kind.valid_causes);
 				for (const auto& effect : kind.effects)
 				{
 					effects.try_emplace(effect.effect, effect.effect);
@@ -3902,11 +3902,11 @@ iw7_first_state( name, part, state )
 			start_thread("iw7_destructibles");
 			map_script += "\n// The scriptables that break: IW7 swaps their model, plays their effects and sounds when their health runs out.\n"
 				"iw7_destructibles()\n{\n" + calls + "}\n" + std::string(R"gsc(
-iw7_destructible( name, model, removes, health, mindamage )
+iw7_destructible( name, model, removes, health, mindamage, causes )
 {
     pieces = getentarray( name, "targetname" );
     foreach ( piece in pieces )
-        piece thread iw7_destructible_think( name, model, removes, health, mindamage );
+        piece thread iw7_destructible_think( name, model, removes, health, mindamage, causes );
 }
 
 iw7_destructible_fx( name, effect, tags, use_tag_angles, loop )
@@ -3941,7 +3941,7 @@ iw7_destructible_sound( name, alias, tag )
     level.iw7_break_sounds[name] = list;
 }
 
-iw7_destructible_think( name, model, removes, health, mindamage )
+iw7_destructible_think( name, model, removes, health, mindamage, causes )
 {
     self endon( "death" );
     self.maxhealth = 1000000;
@@ -3950,9 +3950,9 @@ iw7_destructible_think( name, model, removes, health, mindamage )
     total = 0;
     while ( total < health )
     {
-        self waittill( "damage", amount );
+        self waittill( "damage", amount, attacker, direction, point, means );
         self.health = 1000000;
-        if ( amount >= mindamage )
+        if ( amount >= mindamage && iw7_destructible_cause( causes, means ) )
             total = total + amount;
     }
 
@@ -3985,6 +3985,34 @@ iw7_destructible_think( name, model, removes, health, mindamage )
         self hide();
         self notsolid();
     }
+}
+
+// Replay's ScriptableBg_MatchesDamageClassFilter (0x1412F5780) on the hit's class: splash (bit 2: the splash means of death,
+// ScriptableBg_IsSplashDamage), melee (bit 4: MOD_MELEE) and crush (bit 8: MOD_CRUSH), as ScriptableBg_DispatchDamage sets them.
+// Causes 0 (all) and every other value of Scriptable_DamageCause: 1 splash, 2 no splash, 3 no melee, 4 none, 5 melee, 6 melee or
+// splash, 7 crush, 8 crush or splash. A value past the enum matches nothing (the consumer's default).
+iw7_destructible_cause( causes, means )
+{
+    if ( causes == 0 )
+        return true;
+    splash = means == "MOD_EXPLOSIVE_BULLET" || means == "MOD_GRENADE_SPLASH" || means == "MOD_PROJECTILE_SPLASH" || means == "MOD_EXPLOSIVE";
+    melee = means == "MOD_MELEE";
+    crush = means == "MOD_CRUSH";
+    if ( causes == 1 )
+        return splash;
+    if ( causes == 2 )
+        return !splash;
+    if ( causes == 3 )
+        return !melee;
+    if ( causes == 5 )
+        return melee;
+    if ( causes == 6 )
+        return melee || splash;
+    if ( causes == 7 )
+        return crush;
+    if ( causes == 8 )
+        return crush || splash;
+    return false;
 }
 
 // An effect at one of its tags, with the tag's angles when the PFX takes them (the piece's origin otherwise; identity
