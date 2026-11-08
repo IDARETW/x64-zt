@@ -5499,6 +5499,164 @@ std::optional<GlassPaneFrame> TiltedGlassFrame(const BrushModel &model, const Re
     return frame;
 }
 
+// Reads a fixed-size vector of numbers from a JSON array.
+template <std::size_t N>
+std::array<float, N> ReadFloats(const Json &values)
+{
+    if (!values.is_array() || values.size() != N)
+        throw std::runtime_error("IW7 glass table holds a malformed vector");
+    std::array<float, N> result{};
+    for (std::size_t index = 0; index < N; ++index)
+        result[index] = values.at(index).get<float>();
+    return result;
+}
+
+// Rotates a vector by a quaternion (x, y, z, w), as export_glass.cpp's rotate does.
+Vec3 RotateByQuaternion(const Vec4 &q, const Vec3 &v)
+{
+    const Vec3 u{q[0], q[1], q[2]};
+    const float s = q[3];
+    const float dot = Dot(u, v);
+    const Vec3 cross = Cross(u, v);
+    const float uu = Dot(u, u);
+    Vec3 result{};
+    for (std::size_t axis = 0; axis < 3; ++axis)
+        result[axis] = 2.0f * dot * u[axis] + (s * s - uu) * v[axis] + 2.0f * s * cross[axis];
+    return result;
+}
+
+// IW7's breakable glass: the panes of the world's glass table (export_glass.cpp, from FxWorld.glassSys's initial pieces
+// and their FxGlassDef), each a native pane of its own fields. The brush model of a pane (its index in models) carries
+// the collision of its piece, which becomes the pane's hull; a pane without one gets a box of its outline. A pane beyond
+// Replay's glass size range stays an unbreakable brush model. IW3 panes keep BuildGlassPanes.
+Json BuildIw7GlassPanes(const Json &table, const std::vector<BrushModel> &models, CollisionData &collision,
+                        std::set<std::uint32_t> &glassModels)
+{
+    if (!table.is_array())
+        throw std::runtime_error("IW7 glass table is not an array");
+    Json panes = Json::array();
+    std::size_t boxHulls = 0;
+    std::size_t duplicateHulls = 0;
+    for (const Json &source : table)
+    {
+        const auto modelIndex = source.at("model").get<std::uint32_t>();
+        const auto piece = source.at("piece").get<std::uint32_t>();
+        if (modelIndex >= models.size())
+            throw std::runtime_error("IW7 glass pane references an invalid brush model");
+        const float halfWidth = source.at("half_width").get<float>();
+        const float halfHeight = source.at("half_height").get<float>();
+        const float halfThickness = source.at("half_thickness").get<float>();
+        // Replay's glass pane: half extents of 1/8 to 32767/32 units (16-bit Havok units of its pieces) and at least
+        // 1/8 of a unit of thickness (replay_render.cpp reads them the same way).
+        if (halfWidth < 0.125f || halfHeight < 0.125f || halfWidth * 32.0f > 32767.0f ||
+            halfHeight * 32.0f > 32767.0f)
+        {
+            zt::warn("iw7: glass piece %u (%.1f x %.1f units) is beyond the size range of Replay's glass; it stays an "
+                     "unbreakable brush model",
+                     piece, halfWidth * 2.0f, halfHeight * 2.0f);
+            continue;
+        }
+
+        Vec4 quaternion = ReadFloats<4>(source.at("quaternion"));
+        const Vec3 origin = ReadFloats<3>(source.at("origin"));
+        float quaternionSquared = 0.0f;
+        for (const float component : quaternion)
+            quaternionSquared += component * component;
+        if (!std::isfinite(quaternionSquared) || quaternionSquared < 0.5f)
+            throw std::runtime_error("IW7 glass pane has an invalid frame quaternion");
+        const float scale = 1.0f / std::sqrt(quaternionSquared);
+        for (float &component : quaternion)
+            component *= scale;
+
+        if (panes.size() >= std::numeric_limits<std::uint16_t>::max())
+            throw std::runtime_error("IW7 glass has too many native collision pieces");
+        const auto glassId = static_cast<std::uint16_t>(panes.size() + 1);
+        const std::size_t sourceHullCount = collision.hulls.size();
+        std::size_t matchedHulls = 0;
+        const auto samePaneHull = [](const CollisionHull &left, const CollisionHull &right) {
+            if (left.model != right.model || left.contents != right.contents ||
+                left.surfaceFlags != right.surfaceFlags || left.glassId != right.glassId ||
+                left.materialOverride != right.materialOverride ||
+                left.ladderPlanes != right.ladderPlanes ||
+                left.ladderModelTangents != right.ladderModelTangents ||
+                left.ladderRungOffset != right.ladderRungOffset || !left.slabs.empty() ||
+                !right.slabs.empty() || left.points.size() != right.points.size())
+                return false;
+            auto leftPoints = left.points;
+            auto rightPoints = right.points;
+            std::ranges::sort(leftPoints);
+            std::ranges::sort(rightPoints);
+            return leftPoints == rightPoints;
+        };
+        // The collision of the piece is already in world space (the brush model's own frame is the world's).
+        for (std::size_t hullIndex = 0; hullIndex < sourceHullCount; ++hullIndex)
+        {
+            auto &sourceHull = collision.hulls[hullIndex];
+            if (sourceHull.model != modelIndex)
+                continue;
+            CollisionHull paneHull = sourceHull;
+            paneHull.model = 0;
+            paneHull.contents = iw8::havok::kBreakableGlassContents;
+            paneHull.glassId = glassId;
+            paneHull.slabs.clear();
+            sourceHull.contents = iw8::havok::kBreakableGlassContents;
+            sourceHull.glassId = glassId;
+            const bool duplicate = std::any_of(
+                collision.hulls.begin() + sourceHullCount, collision.hulls.end(),
+                [&](const CollisionHull &previous) { return samePaneHull(previous, paneHull); });
+            if (duplicate)
+                ++duplicateHulls;
+            else
+                collision.hulls.push_back(std::move(paneHull));
+            ++matchedHulls;
+        }
+        if (!matchedHulls)
+        {
+            // Native glass still needs a world hull to break: the box of the outline, in the pane's own frame, at
+            // least half a unit deep (the brush of a pane is 16 half thicknesses deep, export_glass.cpp).
+            CollisionHull paneHull;
+            paneHull.contents = iw8::havok::kBreakableGlassContents;
+            paneHull.materialOverride = 9; // native surftype glass_pane
+            paneHull.glassId = glassId;
+            const Vec3 u = RotateByQuaternion(quaternion, {1.0f, 0.0f, 0.0f});
+            const Vec3 v = RotateByQuaternion(quaternion, {0.0f, 1.0f, 0.0f});
+            const Vec3 normal = RotateByQuaternion(quaternion, {0.0f, 0.0f, 1.0f});
+            const float halfDepth = std::max(halfThickness * 8.0f, 0.25f);
+            for (unsigned corner = 0; corner < 8; ++corner)
+            {
+                const Vec3 point = Add(Add(origin, Multiply(u, corner & 1 ? halfWidth : -halfWidth)),
+                                       Add(Multiply(v, corner & 2 ? halfHeight : -halfHeight),
+                                           Multiply(normal, corner & 4 ? halfDepth : -halfDepth)));
+                paneHull.points.push_back(point);
+            }
+            collision.hulls.push_back(std::move(paneHull));
+            ++boxHulls;
+            zt::info("iw7: glass pane %u has no collision brush; gave it a box hull", glassId);
+        }
+
+        glassModels.insert(modelIndex);
+        panes.push_back({{"material", source.at("material")},
+                         {"materialShattered", source.at("material_shattered")},
+                         {"texVecs", source.at("tex_vecs")},
+                         {"texCoordOrigin", source.at("tex_coord_origin")},
+                         {"origin", origin},
+                         {"quaternion", quaternion},
+                         {"halfWidth", halfWidth},
+                         {"halfHeight", halfHeight},
+                         {"halfThickness", halfThickness},
+                         {"color", source.at("color")},
+                         {"highMipRadiusInvSq", source.at("high_mip_radius_inv_sq")},
+                         {"shatteredHighMipRadiusInvSq", source.at("shattered_high_mip_radius_inv_sq")},
+                         {"numCrackRings", source.at("crack_rings")},
+                         {"supportMask", source.at("support_mask")}});
+    }
+    if (duplicateHulls)
+        zt::info("iw7: removed %zu exact duplicate native glass hull(s)", duplicateHulls);
+    zt::info("iw7: built %zu native glass pane(s) from %zu glass piece(s) (%zu with a box hull)", panes.size(),
+             table.size(), boxHulls);
+    return panes;
+}
+
 Json BuildGlassPanes(const std::vector<BrushModel> &models, const RenderPlan &plan,
                      const std::string &entityText, CollisionData &collision,
                      std::set<std::uint32_t> &glassModels,
@@ -6563,7 +6721,10 @@ Json BuildRender(const Json &world, const VisibilityGroups &visibility,
             source.contains("instances"))
             output["reflectionProbes"].back()["instances"] = source.at("instances");
     }
-    output["glassPanes"] = BuildGlassPanes(models, plan, entities, collision, glassModels,
+    // IW7 worlds carry their glass table (export_glass.cpp); IW3 worlds keep the brush-model rebuild.
+    output["glassPanes"] = world.contains("glass_panes")
+                               ? BuildIw7GlassPanes(world.at("glass_panes"), models, collision, glassModels)
+                               : BuildGlassPanes(models, plan, entities, collision, glassModels,
                                           glassTargets, entityModels);
     output["assetMaterials"] = plan.assetMaterials;
     output["stockMaterials"] = plan.stockMaterials;
