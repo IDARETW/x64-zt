@@ -730,13 +730,6 @@ namespace zonetool::convert::iw7_iw8
 					complete = false;
 				}
 
-				// IW7_NO_FLARES=1 leaves the flares out (a switch for testing their conversion).
-				if (record.elementType == flare_element && std::getenv("IW7_NO_FLARES"))
-				{
-					this->drop("flare");
-					complete = false;
-				}
-
 				return {{"state", hex(record)}, {"groups", std::move(groups)}};
 			}
 
@@ -1467,6 +1460,7 @@ namespace zonetool::convert::iw7_iw8
 					return this->convert_spawn_shape(module, result);
 				case iw7::PARTICLE_MODULE_INIT_CLOUD:
 					// Replay has no cloud element (IW7's clouds draw as sprites) and its cloud module no data.
+					this->drop("cloud module");
 					return std::nullopt;
 				case iw7::PARTICLE_MODULE_TEST_AGE:
 				case iw7::PARTICLE_MODULE_TEST_BIRTH:
