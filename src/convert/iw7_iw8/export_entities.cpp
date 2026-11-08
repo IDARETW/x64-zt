@@ -775,6 +775,13 @@ namespace zonetool::convert::iw7_iw8
 						const auto part = reference_part(data.stateChange.partReference, self);
 						const auto state = reinterpret_cast<std::uintptr_t>(data.stateChange.part);
 						const auto states = part >= 0 && parts[part]->states ? parts[part]->numStates : 0u;
+						// The raw field is read as a state index (its source layout is unverified, ledger d42f680): an index past the
+						// part's states drops the change, which is logged so the loss is visible.
+						if (convert && state >= states)
+						{
+							ZONETOOL_WARNING("iw7 scriptable %s: a state change to %zx of part %d (%u states) is left out", def.name ? def.name : "<unnamed>",
+								state, part, states);
+						}
 						result.push_back({{"t", "state"}, {"part", part}, {"index", state < states ? static_cast<int>(state) : -1}});
 						break;
 					}
