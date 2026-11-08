@@ -2495,6 +2495,13 @@ iw7_mev( t, a, b, c, d, use_tag_angles )
 	return e;
 }
 
+iw7_mev_fx( t, a, b, c, d, use_tag_angles, root_on_missing )
+{
+	e = iw7_mev( t, a, b, c, d, use_tag_angles );
+	e.root_on_missing = root_on_missing;
+	return e;
+}
+
 iw7_mstate( name, kind, health, mindamage, toparent, events )
 {
 	s = spawnstruct();
@@ -2627,7 +2634,7 @@ iw7_scriptable_run( part, events )
 		else if ( e.t == "addmodel" )
 			self iw7_scriptable_attach( e.a, e.b );
 		else if ( e.t == "fx" )
-			self thread iw7_scriptable_fx( part, e.a, e.b, e.c, e.d, e.use_tag_angles );
+			self thread iw7_scriptable_fx( part, e.a, e.b, e.c, e.d, e.use_tag_angles, e.root_on_missing );
 		else if ( e.t == "sound" )
 			self iw7_scriptable_sound( part, e.a, e.b );
 		else if ( e.t == "anim" )
@@ -2827,12 +2834,18 @@ iw7_scriptable_attach( tag, model )
 			R"gsc(// The effects play as effect entities at their tags, which every client receives (also one that connects later, as the
 // host's own client does after the first states at the start): playfxontag is an entity event that reaches only the
 // clients in the game at the time. An effect that IW7 kills on exit is deleted when its part leaves the state.
-iw7_scriptable_fx( part, effect, tag, loop, kill, use_tag_angles )
+iw7_scriptable_fx( part, effect, tags, loop, kill, use_tag_angles, root_on_missing )
 {
 	self endon( "iw7_part_" + part );
 	self endon( "death" );
 	if ( !isdefined( level._effect[effect] ) )
 		return;
+	// Replay's PFX takes one of its tags at random on every play (ScriptableCl_PlayParticleFX: BG_irand over the tag count). A
+	// tag the model lacks skips the play unless the event uses the root (ScriptableCl_GetBonePosition finds no position, and
+	// allowMissingTag only silences its warning).
+	tag = "";
+	if ( tags.size > 0 )
+		tag = tags[randomint( tags.size )];
 	origin = self.origin;
 	angles = ( 0, 0, 0 );
 	if ( use_tag_angles )
@@ -2843,6 +2856,8 @@ iw7_scriptable_fx( part, effect, tag, loop, kill, use_tag_angles )
 		if ( use_tag_angles )
 			angles = self gettagangles( tag );
 	}
+	else if ( tag != "" && !root_on_missing )
+		return;
 
 	fx = spawnfx( level._effect[effect], origin, anglestoforward( angles ), anglestoup( angles ) );
 	triggerfx( fx );
@@ -4230,6 +4245,8 @@ iw7_destructible_play_sound( sound )
 				{
 					std::string text;
 					std::vector<std::string> added;
+					// The tag lists of the PFX events in this list, set before the list (a PFX picks its tag on every play).
+					std::string prelude;
 					for (const auto& event : events)
 					{
 						const auto t = event.value("t", std::string{});
@@ -4280,10 +4297,17 @@ iw7_destructible_play_sound( sound )
 
 							effects.try_emplace(effect, effect);
 							placed.insert(effect);
-							const auto& tags = event.at("tags");
-							args = std::format("{}, {}, {}, {}, {}", quote(effect),
-								quote(tags.empty() ? std::string{} : tags.front().get<std::string>()), num("loop"), num("kill"),
-								num("use_tag_angles"));
+							// Every tag is kept: Replay's PFX picks one at random on each play (ScriptableCl_PlayParticleFX), and
+							// the machine's fx thread picks it the same way from this array (iw7_scriptable_fx).
+							const auto tags_name = std::format("fx_tags{}", temporary++);
+							prelude += std::format("\t{} = [];\n", tags_name);
+							for (const auto& tag : event.at("tags"))
+							{
+								prelude += std::format("\t{0}[{0}.size] = {1};\n", tags_name, quote(tag.get<std::string>()));
+							}
+
+							args = std::format("{}, {}, {}, {}, {}, {}", quote(effect), tags_name, num("loop"), num("kill"),
+								num("use_tag_angles"), num("root_on_missing_tag"));
 						}
 						else if (t == "sound")
 						{
@@ -4397,11 +4421,11 @@ iw7_destructible_play_sound( sound )
 							continue;
 						}
 
-						added.push_back(std::format("iw7_mev( \"{}\", {} )", t, args));
+						added.push_back(std::format("{}( \"{}\", {} )", t == "fx" ? "iw7_mev_fx" : "iw7_mev", t, args));
 					}
 
 					const auto name = std::format("e{}", temporary++);
-					text = std::format("\t{} = [];\n", name);
+					text = prelude + std::format("\t{} = [];\n", name);
 					for (const auto& event : added)
 					{
 						text += std::format("\t{0}[{0}.size] = {1};\n", name, event);

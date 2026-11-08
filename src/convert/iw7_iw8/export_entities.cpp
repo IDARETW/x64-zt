@@ -1113,8 +1113,8 @@ namespace zonetool::convert::iw7_iw8
 					{"states", states}});
 			}
 
-			// The fields the machine does not carry (missing-tag rules, the explosion's weapon, viewmodel and vehicle-velocity
-			// flags, the screen shake) are tallied per kind, so the conversion log shows how many events would play differently
+			// The fields the machine does not carry (the PFX viewmodel and vehicle-velocity flags, oneshot looping, the explosion's
+			// weapon, the hide children, the screen shake) are tallied per kind, so the conversion log shows how many events would play differently
 			// from the source; random thresholds outside [0, 1] are tallied too. The machine itself is unchanged by them.
 			if (convert)
 			{
@@ -1133,8 +1133,9 @@ namespace zonetool::convert::iw7_iw8
 						const auto t = event.value("t", std::string{});
 						if (t == "fx")
 						{
-							flag("PFX allow_missing_tag false", !event.value("allow_missing_tag", true));
-							flag("PFX root_on_missing_tag true", event.value("root_on_missing_tag", false));
+							// The missing-tag rule is carried: a missing tag skips the play unless the root is used (export_effects
+							// iw7_scriptable_fx). allowMissingTag is not tallied: Replay's ScriptableCl_GetBonePosition only uses it
+							// to silence the warning.
 							flag("PFX oneshot_looping true", event.value("oneshot_looping", false));
 							flag("PFX viewmodel true", event.value("viewmodel", false));
 							flag("PFX nearest_vehicle_velocity true", event.value("nearest_vehicle_velocity", false));
