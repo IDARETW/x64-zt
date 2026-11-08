@@ -664,6 +664,8 @@ struct Iw3Alias
     bool looping{};
     float center{};
     float envelopMin{}, envelopMax{}, envelopPercentage{};
+    // IW7's authored SAB envelope bytes (+35..+42 of the sound's entry, export_sounds.cpp iw7.envelope_bytes); IW3 has none.
+    std::optional<std::array<uint8_t, 8>> envelope;
     unsigned channel{1}; // IW3 entity channel (flags bits 8-13, soundaliases/channels.def order)
     std::string secondary;
     std::string curve; // IW3 volume falloff curve (soundaliases/<curve>.vfcurve)
@@ -746,6 +748,14 @@ std::map<std::string, std::vector<Iw3Alias>> ReadZoneAliases(const std::filesyst
             if (source.contains("iw7") && source.at("iw7").is_object())
             {
                 const Json &fields = source.at("iw7");
+                if (fields.contains("envelope_bytes") && fields.at("envelope_bytes").is_array() &&
+                    fields.at("envelope_bytes").size() == 8)
+                {
+                    std::array<uint8_t, 8> bytes{};
+                    for (size_t i = 0; i < bytes.size(); ++i)
+                        bytes[i] = static_cast<uint8_t>(std::clamp(fields.at("envelope_bytes")[i].get<int>(), 0, 255));
+                    alias.envelope = bytes;
+                }
                 Iw3Alias::Native native;
                 native.volmod = fields.value("volmod", std::string{});
                 native.channel = fields.value("channel", std::string{});
@@ -1762,10 +1772,13 @@ std::optional<ConvertedSounds> Convert(const std::filesystem::path &exportRoot,
     std::map<std::string, iw8::sound::Sample> samples; // by IW3 path
     std::map<std::string, bool> missing;
     const std::string prefix = "mw120r\\" + Lower(map) + "\\";
-    const auto sampleFor = [&](const std::string &path, const bool looping) -> const iw8::sound::Sample * {
+    const auto sampleFor = [&](const std::string &path, const bool looping,
+                               const std::optional<std::array<uint8_t, 8>> &envelope) -> const iw8::sound::Sample * {
         if (auto found = samples.find(path); found != samples.end())
         {
             found->second.looping = found->second.looping || looping;
+            if (envelope && !found->second.envelope)
+                found->second.envelope = envelope;
             return &found->second;
         }
         if (missing.contains(path))
@@ -1804,6 +1817,7 @@ std::optional<ConvertedSounds> Convert(const std::filesystem::path &exportRoot,
         sample.rate = pcm->rate;
         sample.channels = pcm->channels;
         sample.looping = looping;
+        sample.envelope = envelope;
         sample.pcm = std::move(pcm->samples);
         zt::info("iw3 sound: %s <- %s (%u Hz, %u ch, %.2f s)", sample.name.c_str(), source.c_str(), sample.rate,
                  static_cast<unsigned>(sample.channels),
@@ -1818,7 +1832,7 @@ std::optional<ConvertedSounds> Convert(const std::filesystem::path &exportRoot,
     {
         bool any = false;
         for (const auto &alias : *definition(name))
-            any = sampleFor(alias.file, alias.looping) != nullptr || any;
+            any = sampleFor(alias.file, alias.looping, alias.envelope) != nullptr || any;
         if (any)
             converted.insert(name);
         else
@@ -1893,7 +1907,7 @@ std::optional<ConvertedSounds> Convert(const std::filesystem::path &exportRoot,
         bool looping = false;
         for (const auto &source : *definition(name))
         {
-            const auto *sample = sampleFor(source.file, source.looping);
+            const auto *sample = sampleFor(source.file, source.looping, source.envelope);
             if (!sample)
                 continue;
             looping = looping || source.looping;

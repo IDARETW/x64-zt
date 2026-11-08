@@ -848,7 +848,13 @@ std::vector<uint8_t> BuildSab(const std::vector<Sample> &samples, const std::str
         sab[entry + 32] = sample.channels;
         sab[entry + 33] = sample.looping ? 1 : 0;
         sab[entry + 34] = 8; // FLAC
-        const auto tail = Envelope(sample);
+        // An authored envelope (IW7) is written as its source wrote it. Byte +43 (BlocksizeKB) stays 0: the source's
+        // stream block size does not describe this writer's FLAC blocks.
+        std::array<uint8_t, 9> tail{};
+        if (sample.envelope)
+            std::copy(sample.envelope->begin(), sample.envelope->end(), tail.begin());
+        else
+            tail = Envelope(sample);
         std::memcpy(sab.data() + entry + 35, tail.data(), tail.size());
         const auto digest = Md5(item.encoded.frames.data(), item.encoded.frames.size());
         std::memcpy(sab.data() + digestOffset + i * 16, digest.data(), 16);

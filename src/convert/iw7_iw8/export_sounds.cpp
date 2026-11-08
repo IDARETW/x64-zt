@@ -983,6 +983,12 @@ namespace zonetool::convert::iw7_iw8
 					pending.push_back(secondary);
 				}
 
+				// The entry's authored loudness envelope (SAB entry +35..+42; Replay reads it in SND_ComputeChannelMixLevel
+				// 0x1413975E0). An all-zero one is left out, so the converter's PCM envelope applies.
+				std::array<std::uint8_t, 8> envelope{};
+				std::memcpy(envelope.data(), reinterpret_cast<const std::uint8_t*>(entry) +
+					offsetof(iw7::SndAssetBankEntry, EnvelopeTime1), envelope.size());
+
 				// IW7's own mix fields: the importer (iw3_sound.cpp) takes them over the IW3 role templates. Channels and
 				// volmods by Replay name; curves by IW7 name (sound/curves.json holds their points).
 				variation["iw7"] =
@@ -1009,6 +1015,10 @@ namespace zonetool::convert::iw7_iw8
 					{"doppler_preset", doppler_preset(alias.dopplerPresetIndex)},
 					{"duck", alias.duck},
 				};
+				if (std::any_of(envelope.begin(), envelope.end(), [](const std::uint8_t byte) { return byte != 0; }))
+				{
+					variation["iw7"]["envelope_bytes"] = envelope;
+				}
 				if (alias.duck)
 				{
 					used_ducks.insert(alias.duck);
