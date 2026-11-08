@@ -1342,108 +1342,131 @@ namespace zonetool::xfile
 
 	// Replay's compressed frame (DB_Block_TryNewBlock 0x140D89B90): "\x02IWC", a segment header (the u32 size of the
 	// payload it decompresses to, three bytes the reader does not read (stock unsigned zones hold 00 00 01), the codec:
-	// 6 = Oodle Kraken), then blocks of {compressed size,
-	// decompressed size, CTR counter} and their bytes, each padded to 4. Replay decodes every block on its own
-	// (DB_Block_DecompressOodle 0x140D89940: no dictionary base, 442552 bytes of decoder scratch); stock blocks hold
-	// 64 KiB, which compress in parallel here.
-	std::string compress_iw8_frame(const std::string_view payload)
+	// 6 = Oodle Kraken), then blocks of {compressed size, decompressed size, CTR counter} and their bytes, each padded
+	// to 4. Replay decodes every block on its own (DB_Block_DecompressOodle 0x140D89940: no dictionary base, 442552
+	// bytes of decoder scratch); stock blocks hold 64 KiB, which compress in parallel here.
+	namespace
 	{
+		constexpr std::size_t iwc_block_size = 0x10000;
 		// The reader's window holds one decompressed block (0x10000) and one padded compressed block of at most 0x12800
 		// bytes (DB_Block_ReadData 0x140D89A50).
-		constexpr std::size_t block_size = 0x10000;
-		constexpr std::size_t max_padded_block = 0x12800;
-		static_assert(block_size <= 0x10000);
-		const char* stored = std::getenv("MW120R_FF_STORED");
-		if (stored && *stored && *stored != '0')
-		{
-			return {};
-		}
+		constexpr std::size_t iwc_max_padded_block = 0x12800;
+		// The blocks compressed before they are handed on: 32 MiB of payload, so a multi-GB zone never holds its whole
+		// compressed frame (Breakneck's 2.9 GB main zone ran out of memory with its payload, blocks and frame at once).
+		constexpr std::size_t iwc_batch_blocks = 512;
 
-		const auto compress = load_oodle_compress();
-		if (!compress)
+		// The compressor for a payload, or null when the zone is written stored (MW120R_FF_STORED, no Oodle in the
+		// configured install, or a payload the u32 segment size cannot hold).
+		oodle_compress_t iwc_frame_compressor(const std::string_view payload)
 		{
-			static std::once_flag warned;
-			std::call_once(warned, []()
+			const char* stored = std::getenv("MW120R_FF_STORED");
+			if (stored && *stored && *stored != '0')
 			{
-				ZONETOOL_WARNING("IW8 zones are written stored: no oo2core_*_win64.dll in \"%s\" (set the Replay install)",
-					oodle_compress_directory.string().data());
-			});
-			return {};
-		}
+				return nullptr;
+			}
 
-		if (payload.size() > std::numeric_limits<std::uint32_t>::max())
-		{
-			return {};
-		}
-
-		const auto block_count = (payload.size() + block_size - 1) / block_size;
-		std::vector<std::string> blocks(block_count);
-		std::atomic<std::size_t> next{0};
-		std::atomic<bool> failed{false};
-		const auto worker = [&]()
-		{
-			std::string scratch(block_size * 2 + 0x1000, '\0');
-			for (auto index = next++; index < block_count && !failed; index = next++)
+			const auto compress = load_oodle_compress();
+			if (!compress)
 			{
-				const auto offset = index * block_size;
-				const auto size = std::min(block_size, payload.size() - offset);
-				const auto written = compress(oodle_compressor_kraken, payload.data() + offset, static_cast<std::intptr_t>(size),
-					scratch.data(), oodle_level_normal, nullptr, nullptr, nullptr, nullptr, 0);
-				if (written <= 0 || static_cast<std::size_t>(written) > scratch.size() ||
-					((static_cast<std::size_t>(written) + 3) & ~std::size_t(3)) > max_padded_block)
+				static std::once_flag warned;
+				std::call_once(warned, []()
 				{
-					failed = true;
-					return;
+					ZONETOOL_WARNING("IW8 zones are written stored: no oo2core_*_win64.dll in \"%s\" (set the Replay install)",
+						oodle_compress_directory.string().data());
+				});
+				return nullptr;
+			}
+
+			return payload.size() > std::numeric_limits<std::uint32_t>::max() ? nullptr : compress;
+		}
+
+		// Compresses the payload and passes the frame to sink piece by piece: the segment header, then each block's
+		// record and padded bytes in order, one batch of iwc_batch_blocks blocks at a time.
+		void emit_iw8_frame(const std::string_view payload, const oodle_compress_t compress,
+			const std::function<void(std::string_view)>& sink)
+		{
+			const auto put32 = [&](const std::uint32_t value)
+			{
+				sink(std::string_view(reinterpret_cast<const char*>(&value), sizeof(value)));
+			};
+
+			sink(std::string_view("\x02IWC", 4));
+			put32(static_cast<std::uint32_t>(payload.size()));
+			sink(std::string_view("\0\0\0", 3));
+			const char codec = static_cast<char>(iw8_codec_kraken_size);
+			sink(std::string_view(&codec, 1));
+
+			const auto block_count = (payload.size() + iwc_block_size - 1) / iwc_block_size;
+			const auto batch_capacity = std::min(block_count, iwc_batch_blocks);
+			const auto thread_count = std::max<std::size_t>(1,
+				std::min<std::size_t>({std::thread::hardware_concurrency(), 32, batch_capacity}));
+			std::vector<std::string> blocks(batch_capacity);
+			for (std::size_t first = 0; first < block_count; first += iwc_batch_blocks)
+			{
+				const auto batch = std::min(iwc_batch_blocks, block_count - first);
+				std::atomic<std::size_t> next{0};
+				std::atomic<bool> failed{false};
+				const auto worker = [&]()
+				{
+					std::string scratch(iwc_block_size * 2 + 0x1000, '\0');
+					for (auto index = next++; index < batch && !failed; index = next++)
+					{
+						const auto offset = (first + index) * iwc_block_size;
+						const auto size = std::min(iwc_block_size, payload.size() - offset);
+						const auto written = compress(oodle_compressor_kraken, payload.data() + offset,
+							static_cast<std::intptr_t>(size), scratch.data(), oodle_level_normal, nullptr, nullptr, nullptr,
+							nullptr, 0);
+						if (written <= 0 || static_cast<std::size_t>(written) > scratch.size() ||
+							((static_cast<std::size_t>(written) + 3) & ~std::size_t(3)) > iwc_max_padded_block)
+						{
+							failed = true;
+							return;
+						}
+
+						blocks[index].assign(scratch.data(), static_cast<std::size_t>(written));
+					}
+				};
+
+				std::vector<std::thread> threads;
+				for (std::size_t thread = 0; thread < std::min(thread_count, batch); thread++)
+				{
+					threads.emplace_back(worker);
 				}
 
-				blocks[index].assign(scratch.data(), static_cast<std::size_t>(written));
+				for (auto& thread : threads)
+				{
+					thread.join();
+				}
+
+				if (failed)
+				{
+					throw std::runtime_error("Oodle could not compress the zone");
+				}
+
+				constexpr char padding[3]{};
+				for (std::size_t index = 0; index < batch; index++)
+				{
+					const auto& block = blocks[index];
+					put32(static_cast<std::uint32_t>(block.size()));
+					put32(static_cast<std::uint32_t>(std::min(iwc_block_size, payload.size() - (first + index) * iwc_block_size)));
+					put32(0);
+					sink(block);
+					sink(std::string_view(padding, ((block.size() + 3) & ~std::size_t(3)) - block.size()));
+				}
 			}
-		};
-
-		std::vector<std::thread> threads;
-		const auto count = std::max<std::size_t>(1, std::min<std::size_t>({std::thread::hardware_concurrency(), 32, block_count}));
-		for (std::size_t thread = 0; thread < count; thread++)
-		{
-			threads.emplace_back(worker);
 		}
+	}
 
-		for (auto& thread : threads)
+	std::string compress_iw8_frame(const std::string_view payload)
+	{
+		const auto compress = iwc_frame_compressor(payload);
+		if (!compress)
 		{
-			thread.join();
-		}
-
-		if (failed)
-		{
-			throw std::runtime_error("Oodle could not compress the zone");
-		}
-
-		std::size_t frame_size = 12;
-		for (const auto& block : blocks)
-		{
-			frame_size += sizeof(iw8_compressed_block) + ((block.size() + 3) & ~std::size_t(3));
+			return {};
 		}
 
 		std::string frame;
-		frame.reserve(frame_size);
-		const auto put32 = [&](const std::uint32_t value)
-		{
-			frame.append(reinterpret_cast<const char*>(&value), sizeof(value));
-		};
-
-		frame.append("\x02IWC", 4);
-		put32(static_cast<std::uint32_t>(payload.size()));
-		frame.append(std::string_view("\0\0\0", 3));
-		frame.push_back(static_cast<char>(iw8_codec_kraken_size));
-		for (std::size_t index = 0; index < block_count; index++)
-		{
-			const auto& block = blocks[index];
-			put32(static_cast<std::uint32_t>(block.size()));
-			put32(static_cast<std::uint32_t>(std::min(block_size, payload.size() - index * block_size)));
-			put32(0);
-			frame.append(block);
-			frame.resize((frame.size() + 3) & ~std::size_t(3), '\0');
-		}
-
+		emit_iw8_frame(payload, compress, [&](const std::string_view piece) { frame.append(piece); });
 		return frame;
 	}
 
@@ -1477,21 +1500,39 @@ namespace zonetool::xfile
 			throw std::runtime_error(std::format("the {} container has no v2 writer", format.unsigned_magic));
 		}
 
-		const auto frame = compress_iw8_frame(file.payload);
-		const auto header = write_iw8_header(format, file, frame.size());
-		const std::string_view body = frame.empty() ? std::string_view(file.payload) : std::string_view(frame);
+		const auto compress = iwc_frame_compressor(file.payload);
 		if (path.has_parent_path())
 		{
 			std::filesystem::create_directories(path.parent_path());
 		}
 
-		// Write beside the destination and replace it after the complete file is on disk.
+		// Write beside the destination and replace it after the complete file is on disk. A compressed frame streams
+		// to the file batch by batch (emit_iw8_frame) after a provisional header of the same length; the header that
+		// carries the frame's size replaces it at the end.
 		auto partial = path;
 		partial += ".partial";
+		std::size_t written = 0;
 		{
 			std::ofstream stream(partial, std::ios::binary | std::ios::trunc);
-			stream.write(header.data(), static_cast<std::streamsize>(header.size()));
-			stream.write(body.data(), static_cast<std::streamsize>(body.size()));
+			const auto write_piece = [&](const std::string_view piece)
+			{
+				stream.write(piece.data(), static_cast<std::streamsize>(piece.size()));
+				written += piece.size();
+			};
+			if (compress)
+			{
+				const auto provisional = write_iw8_header(format, file, 1);
+				write_piece(provisional);
+				emit_iw8_frame(file.payload, compress, write_piece);
+				const auto header = write_iw8_header(format, file, written - provisional.size());
+				stream.seekp(0);
+				stream.write(header.data(), static_cast<std::streamsize>(header.size()));
+			}
+			else
+			{
+				write_piece(write_iw8_header(format, file, 0));
+				write_piece(file.payload);
+			}
 			stream.close();
 			if (!stream)
 			{
@@ -1501,8 +1542,8 @@ namespace zonetool::xfile
 				std::error_code ignored;
 				std::filesystem::remove(partial, ignored);
 				const auto space = std::filesystem::space(partial.parent_path(), ignored);
-				throw std::runtime_error(std::format("cannot write {} ({} bytes: {}; {} MB free)", partial.string(),
-					header.size() + body.size(), cause, ignored ? 0 : space.available >> 20));
+				throw std::runtime_error(std::format("cannot write {} ({} bytes written: {}; {} MB free)", partial.string(),
+					written, cause, ignored ? 0 : space.available >> 20));
 			}
 		}
 
