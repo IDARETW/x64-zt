@@ -134,6 +134,9 @@ namespace zonetool::convert::iw7_iw8
 
 			std::string targetname;
 			std::string dead_model;
+			// The health state's minimumDamage (IW7's ScriptableStateHealthDef): a hit below it does not count
+			// toward its health (iw7_scriptable_hurt in the machine path).
+			int mindamage{};
 			// The broken state sets a model that is no model (IW7's empty Model event): the piece goes away, hidden and not
 			// solid, as iw7_scriptable_model does. A break without any Model event keeps the piece and its model.
 			bool removes{};
