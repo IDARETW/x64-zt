@@ -7,9 +7,11 @@ namespace zonetool::convert::iw7_iw8
 	{
 		// Glass vertices count in 1/32 units, as Replay's glass dimensions do.
 		constexpr float glass_unit = 1.0f / 32.0f;
-		// The pipeline gives a pane the half thickness of its brush model's depth / 16 (an IW3 pane 8 units deep has
-		// the 0.5 of IW7's glass).
+		// The brush model of a pane is as deep as 16 half thicknesses (the glass of an IW3 pane 8 units deep has the 0.5
+		// that Replay's FxGlassDef stores), so that its depth carries the thickness of the glass.
 		constexpr float pane_depth_scale = 16.0f;
+		// Replay's FxGlassDef.halfThickness is read as at least 1/8 of a unit (Load_FxGlassDef).
+		constexpr float min_half_thickness = 0.125f;
 
 		using vec3 = std::array<float, 3>;
 
@@ -36,8 +38,10 @@ namespace zonetool::convert::iw7_iw8
 		return trigger_brush_model(source, source.map_ents()->trigger.count) + pane;
 	}
 
-	// An IW7 glass piece holds its outline in the plane of its frame (x and y in 1/32 units); its definition gives its
-	// material and the texture coordinates per unit of the outline.
+	// An IW7 glass piece holds its outline in the plane of its frame (x and y in 1/32 units). Its definition gives its
+	// materials, its thickness, its colour and its high-mip and crack settings; the piece gives its origin, frame,
+	// texture coordinates and support mask (FxGlassInitPieceState). The pane is the rectangle of the outline, centred on
+	// its origin, as Replay's glass pieces are.
 	std::vector<glass_pane> glass_panes(const source_map& source)
 	{
 		std::vector<glass_pane> result;
@@ -72,6 +76,13 @@ namespace zonetool::convert::iw7_iw8
 			const auto& def = glass.defs[piece.defIndex];
 			glass_pane pane{};
 			pane.material = source.resolve(iw7::ASSET_TYPE_MATERIAL, def.material);
+			// The shards draw FxGlassDef.materialShattered; a definition without one keeps its intact material.
+			pane.material_shattered = source.resolve(iw7::ASSET_TYPE_MATERIAL, def.materialShattered);
+			if (!pane.material_shattered)
+			{
+				pane.material_shattered = pane.material;
+			}
+
 			pane.normal = rotate(piece.frame.quat, {0.0f, 0.0f, 1.0f});
 			pane.tangent = rotate(piece.frame.quat, {1.0f, 0.0f, 0.0f});
 			pane.mins = {FLT_MAX, FLT_MAX, FLT_MAX};
@@ -89,6 +100,44 @@ namespace zonetool::convert::iw7_iw8
 					piece.texCoordOrigin[1] + outline[k][0] * def.texVecs[0][1] + outline[k][1] * def.texVecs[1][1]};
 			}
 
+			// The native pane is centred on the middle of its outline. Its texture gradients are IW7's (per 1/32 unit, the
+			// same units as the outline): uv.u = o.u + x * texVecs[0][0] + y * texVecs[1][0] and uv.v likewise, which
+			// Replay's FxGlassDef.texVecs holds as the gradient of u followed by the gradient of v.
+			const std::array<float, 2> centre{(low[0] + high[0]) * 0.5f, (low[1] + high[1]) * 0.5f};
+			const auto centre_local = rotate(piece.frame.quat, {centre[0] * glass_unit, centre[1] * glass_unit, 0.0f});
+			for (auto axis = 0; axis < 3; axis++)
+			{
+				pane.origin[axis] = piece.frame.origin[axis] + centre_local[axis];
+			}
+
+			for (auto axis = 0; axis < 4; axis++)
+			{
+				pane.quaternion[axis] = piece.frame.quat[axis];
+			}
+
+			pane.half_width = (high[0] - low[0]) * 0.5f * glass_unit;
+			pane.half_height = (high[1] - low[1]) * 0.5f * glass_unit;
+			pane.tex_vecs = {def.texVecs[0][0], def.texVecs[1][0], def.texVecs[0][1], def.texVecs[1][1]};
+			pane.tex_coord_origin = {piece.texCoordOrigin[0] + centre[0] * def.texVecs[0][0] + centre[1] * def.texVecs[1][0],
+				piece.texCoordOrigin[1] + centre[0] * def.texVecs[0][1] + centre[1] * def.texVecs[1][1]};
+
+			// FxGlassDef.halfThickness is the pane's own thickness (not the depth of its brush model, which the pipeline
+			// used to derive it from for IW3 panes, and which is zero for a pane out of the axis planes).
+			pane.half_thickness = def.halfThickness;
+			if (pane.half_thickness < min_half_thickness)
+			{
+				ZONETOOL_WARNING("iw7: glass piece %u has a half thickness of %g; Replay's glass is at least %g thick",
+					i, def.halfThickness, min_half_thickness);
+				pane.half_thickness = min_half_thickness;
+			}
+
+			pane.color = def.color.packed;
+			pane.high_mip_radius_inv_sq = def.highMipRadiusInvSq;
+			pane.shattered_high_mip_radius_inv_sq = def.shatteredHighMipRadiusInvSq;
+			pane.crack_rings = def.numCrackRings;
+			pane.support_mask = piece.supportMask;
+			pane.piece = i;
+
 			// The depth of the brush model (along the normal) carries the thickness of the glass.
 			const auto depth = def.halfThickness * pane_depth_scale * 0.5f;
 			for (const auto& corner : pane.corners)
@@ -102,6 +151,14 @@ namespace zonetool::convert::iw7_iw8
 			}
 
 			result.push_back(pane);
+		}
+
+		// Replay's named glass (G_GlassData.glassNames) is not written: the names are kept nowhere in the converted map.
+		if (const auto* glass_world = source.glass_world(); glass_world && glass_world->g_glassData &&
+			glass_world->g_glassData->glassNameCount)
+		{
+			ZONETOOL_WARNING("iw7: %u named glass group(s) of the world are not converted; scripts that use them will not find their glass",
+				glass_world->g_glassData->glassNameCount);
 		}
 
 		return result;

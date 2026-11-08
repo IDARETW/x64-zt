@@ -370,9 +370,6 @@ namespace zonetool::convert::iw7_iw8
 	// of IW3 brush model bounds).
 	box trigger_bounds(const iw7::MapTriggers& triggers, unsigned int model);
 
-	// A piece of IW7's breakable glass: a rectangle in the world, which the extraction gives a brush model after the
-	// trigger models and an IW3 glass entity (a script_brushmodel of intact glass), which the pipeline turns into
-	// Replay's breakable glass.
 	// A vertex of the geometry files (models' .replay.json, the world's surfaces), written by glaze: the members are
 	// their keys and the values the doubles that json values held.
 	struct geometry_vertex
@@ -388,6 +385,9 @@ namespace zonetool::convert::iw7_iw8
 		std::optional<std::vector<std::uint32_t>> layer_transforms;
 	};
 
+	// A piece of IW7's breakable glass (FxGlassInitPieceState and its FxGlassDef): a rectangle in the world, whose
+	// brush model (glass_brush_model) carries its bounds and whose pipeline entry is the native pane built from the
+	// fields below, in Replay's FxGlassDef and piece-state units.
 	struct glass_pane
 	{
 		std::array<std::array<float, 3>, 4> corners{};
@@ -397,6 +397,28 @@ namespace zonetool::convert::iw7_iw8
 		std::array<float, 3> mins{};
 		std::array<float, 3> maxs{};
 		iw7::Material* material{};
+		// FxGlassDef.materialShattered (the intact material when the definition names none).
+		iw7::Material* material_shattered{};
+		// The rectangle's centre (the origin of the native pane), its frame and half extents in world units.
+		std::array<float, 3> origin{};
+		std::array<float, 4> quaternion{};
+		float half_width{};
+		float half_height{};
+		// FxGlassDef.halfThickness, as the definition authors it.
+		float half_thickness{};
+		// FxGlassDef.texVecs in Replay's layout (the gradients of u and v per 1/32 unit) and the texture coordinates at
+		// the centre of the pane.
+		std::array<float, 4> tex_vecs{};
+		std::array<float, 2> tex_coord_origin{};
+		// FxGlassDef.color (packed RGBA), FxGlassDef.highMipRadiusInvSq / shatteredHighMipRadiusInvSq / numCrackRings
+		// and the piece's supportMask.
+		std::uint32_t color{0xFFFFFFFFu};
+		float high_mip_radius_inv_sq{};
+		float shattered_high_mip_radius_inv_sq{};
+		std::int32_t crack_rings{};
+		std::uint32_t support_mask{};
+		// The piece's index in FxWorld.glassSys.initPieceStates.
+		std::uint32_t piece{};
 	};
 
 	std::vector<glass_pane> glass_panes(const source_map& source);

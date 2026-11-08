@@ -2236,7 +2236,9 @@ namespace zonetool::convert::iw7_iw8
 			brush_models.push_back({{"bounds", {bounds.mins, bounds.maxs}}, {"start", surfaces.size()}, {"count", 0}});
 		}
 
-		// A glass pane draws its rectangle, which Replay's breakable glass replaces.
+		// A glass pane draws its rectangle, which Replay's breakable glass replaces. The pipeline builds the native pane of
+		// each entry of glass_panes from its IW7 fields; the entry names the index of the pane's brush model.
+		auto glass_json = json::array();
 		for (const auto& pane : glass_panes(source))
 		{
 			std::vector<geometry_vertex> vertices;
@@ -2263,6 +2265,27 @@ namespace zonetool::convert::iw7_iw8
 
 			const auto material = output.add_material(source, pane.material);
 			output.glass_materials.insert(material);
+			// The shards of a broken pane draw their own material (FxGlassDef.materialShattered).
+			const auto shattered = output.add_material(source, pane.material_shattered);
+			output.glass_materials.insert(shattered);
+			glass_json.push_back({
+				{"model", brush_models.size()},
+				{"material", material},
+				{"material_shattered", shattered},
+				{"tex_vecs", pane.tex_vecs},
+				{"tex_coord_origin", pane.tex_coord_origin},
+				{"origin", pane.origin},
+				{"quaternion", pane.quaternion},
+				{"half_width", pane.half_width},
+				{"half_height", pane.half_height},
+				{"half_thickness", pane.half_thickness},
+				{"color", pane.color},
+				{"high_mip_radius_inv_sq", pane.high_mip_radius_inv_sq},
+				{"shattered_high_mip_radius_inv_sq", pane.shattered_high_mip_radius_inv_sq},
+				{"crack_rings", pane.crack_rings},
+				{"support_mask", pane.support_mask},
+				{"piece", pane.piece},
+			});
 			brush_models.push_back({{"bounds", {pane.mins, pane.maxs}}, {"start", surfaces.size()}, {"count", 1}});
 			surface_indices.push_back(surfaces.size());
 			surfaces.push_back({material, -1, static_cast<int>(probes.find(center)), std::move(vertices), {0, 1, 2, 0, 2, 3}});
@@ -2361,6 +2384,8 @@ namespace zonetool::convert::iw7_iw8
 			{"xanims", std::move(xanims)},
 			{"models", std::move(models)},
 			{"brush_models", std::move(brush_models)},
+			// IW7's breakable glass panes (their native fields), built by the pipeline in place of the IW3 brush-model rebuild.
+			{"glass_panes", std::move(glass_json)},
 			{"dpvs", {{"planes", json::array()}, {"nodes", json::array({1})},
 				{"cells", json::array({std::move(cell)})}}},
 			{"lightmaps", std::move(lightmaps.entries)},
