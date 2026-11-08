@@ -494,6 +494,7 @@ namespace zonetool::convert::iw7_iw8
 			extraction::scriptable_destructible result;
 			result.health = healthy.data.health.health;
 			auto changes = false;
+			auto model_event = false;
 			for (auto e = 0u; broken.base.events && e < broken.base.numEvents; e++)
 			{
 				const auto& event = broken.base.events[e];
@@ -514,11 +515,17 @@ namespace zonetool::convert::iw7_iw8
 				if (event.type == iw7::Scriptable_EventType_Model)
 				{
 					changes = true;
+					model_event = true;
 					const auto model = source.resolve(iw7::ASSET_TYPE_XMODEL, event.data.model.model);
 					if (model && result.dead_model.empty())
 					{
 						result.dead_model = asset_name(iw7::get_asset_name(iw7::ASSET_TYPE_XMODEL, model));
 						output.models.try_emplace(file_name(result.dead_model), model);
+					}
+					else if (!model && event.data.model.model)
+					{
+						// A model pointer that the loaded zones do not hold: the piece still goes away, as an empty model does.
+						ZONETOOL_WARNING("iw7: the broken model of %s is not in the loaded zones; its piece is removed", def.name ? def.name : "?");
 					}
 				}
 				else if (event.type == iw7::Scriptable_EventType_PFX)
@@ -559,6 +566,7 @@ namespace zonetool::convert::iw7_iw8
 				return std::nullopt;
 			}
 
+			result.removes = model_event && result.dead_model.empty();
 			std::string kind(def.name ? asset_name(def.name) : std::string_view{"scriptable"});
 			std::ranges::transform(kind, kind.begin(), [](const unsigned char c)
 			{
