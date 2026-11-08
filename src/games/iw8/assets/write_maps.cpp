@@ -87,11 +87,58 @@ void emitNativeLightmapTemp(ZoneWriter &zw, const replayrender::Mesh &mesh)
     }
 }
 
+// The outline of a glass pane as Replay's FxGlassInitPieceState stores it: its vertices, then its fan units (four bytes
+// each). An IW7 pane carries IW7's own outline; an IW3 pane is the rectangle of its half extents, with the area and
+// radius of that rectangle.
+struct GlassOutline
+{
+    std::vector<std::array<int16_t, 2>> units;
+    uint8_t vertexCount{};
+    uint8_t fanDataCount{};
+    float areaX2{};
+    float radius{};
+};
+
+GlassOutline OutlineOf(const replayrender::GlassPane &pane)
+{
+    GlassOutline outline;
+    if (!pane.geometry.empty())
+    {
+        outline.units = pane.geometry;
+        outline.vertexCount = static_cast<uint8_t>(pane.vertexCount);
+        outline.fanDataCount = static_cast<uint8_t>(pane.fanDataCount);
+        outline.areaX2 = pane.areaX2;
+        outline.radius = pane.radius;
+        return outline;
+    }
+
+    const int16_t width = static_cast<int16_t>(std::lround(pane.halfWidth * 32.0f));
+    const int16_t height = static_cast<int16_t>(std::lround(pane.halfHeight * 32.0f));
+    outline.units.push_back({width, static_cast<int16_t>(-height)});
+    outline.units.push_back({static_cast<int16_t>(-width), static_cast<int16_t>(-height)});
+    outline.units.push_back({static_cast<int16_t>(-width), height});
+    outline.units.push_back({width, height});
+    outline.vertexCount = 4;
+    outline.fanDataCount = 0;
+    outline.areaX2 = pane.halfWidth * pane.halfHeight * 8.0f;
+    outline.radius = std::sqrt(pane.halfWidth * pane.halfWidth + pane.halfHeight * pane.halfHeight);
+    return outline;
+}
+
 void emitFxMapBody(ZoneWriter &zw, const char *assetName, const replayrender::Mesh &mesh)
 {
     const uint32_t pieceCount = static_cast<uint32_t>(mesh.glassPanes.size());
     if (!pieceCount)
         return;
+
+    std::vector<GlassOutline> outlines;
+    outlines.reserve(pieceCount);
+    uint32_t initGeoDataCount = 0;
+    for (const auto &pane : mesh.glassPanes)
+    {
+        outlines.push_back(OutlineOf(pane));
+        initGeoDataCount += outlines.back().vertexCount + outlines.back().fanDataCount;
+    }
 
     std::vector<std::array<uint8_t, 120>> definitions;
     std::vector<uint8_t> definitionIndices;
@@ -132,8 +179,7 @@ void emitFxMapBody(ZoneWriter &zw, const char *assetName, const replayrender::Me
     const uint32_t pieceLimit = pieceCount + sparePieces;
     const uint32_t pieceWordCount = (pieceLimit + 31u) >> 5;
     const uint32_t cellCount = static_cast<uint32_t>(mesh.cells.size());
-    const uint32_t geoDataLimit = pieceLimit * 8;
-    const uint32_t initGeoDataCount = pieceCount * 4;
+    const uint32_t geoDataLimit = std::max(pieceLimit * 8, initGeoDataCount);
     constexpr size_t globals = 0x08;
     constexpr size_t system = 0x30;
 
@@ -186,33 +232,27 @@ void emitFxMapBody(ZoneWriter &zw, const char *assetName, const replayrender::Me
             zw.writeStr(sound);
     }
 
+    // Each pane's outline (FX_GlassPiece_EmitTransformedVerts reads vertCount vertices, then fanDataCount units).
     zw.align(1);
-    for (const auto &pane : mesh.glassPanes)
-    {
-        const int16_t width = static_cast<int16_t>(std::lround(pane.halfWidth * 32.0f));
-        const int16_t height = static_cast<int16_t>(std::lround(pane.halfHeight * 32.0f));
-        const int16_t vertices[4][2]{{width, static_cast<int16_t>(-height)},
-                                     {static_cast<int16_t>(-width), static_cast<int16_t>(-height)},
-                                     {static_cast<int16_t>(-width), height},
-                                     {width, height}};
-        zw.write(vertices, sizeof(vertices));
-    }
+    for (const auto &outline : outlines)
+        zw.write(outline.units.data(), outline.units.size() * sizeof(outline.units.front()));
 
     zw.align(3);
     for (size_t index = 0; index < mesh.glassPanes.size(); ++index)
     {
         const auto &pane = mesh.glassPanes[index];
+        const auto &outline = outlines[index];
         uint8_t state[52]{};
         std::memcpy(state, pane.quaternion.data(), sizeof(pane.quaternion));
         std::memcpy(state + 0x10, pane.origin.data(), sizeof(pane.origin));
-        stampf(state, 0x1C,
-               std::sqrt(pane.halfWidth * pane.halfWidth + pane.halfHeight * pane.halfHeight));
+        stampf(state, 0x1C, outline.radius);
         std::memcpy(state + 0x20, pane.texCoordOrigin.data(), sizeof(pane.texCoordOrigin));
         // FxGlassInitPieceState.supportMask (every pane of the IW3 panes).
         stamp32(state, 0x28, pane.supportMask);
-        stampf(state, 0x2C, pane.halfWidth * pane.halfHeight * 8.0f);
+        stampf(state, 0x2C, outline.areaX2);
         state[0x30] = definitionIndices[index];
-        state[0x31] = 4;
+        state[0x31] = outline.vertexCount;
+        state[0x32] = outline.fanDataCount;
         zw.write(state, sizeof(state));
     }
     zw.popStream();
@@ -270,6 +310,7 @@ void emitGlassMapBody(ZoneWriter &zw, const char *assetName, const replayrender:
     // (alignment 7), then Load_G_GlassData DFD220 (40 bytes). G_InitGlass
     // 1213500 always dereferences this object even with no breakable pieces.
     zw.align(7);
+    // Replay's G_GlassData: glassPieces +0, pieceCount +8, spatial tree +32.
     uint8_t glassData[40]{};
     if (pieceCount)
     {

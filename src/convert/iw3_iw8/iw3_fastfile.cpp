@@ -5535,7 +5535,7 @@ Vec3 RotateByQuaternion(const Vec4 &q, const Vec3 &v)
 // the collision of its piece, which becomes the pane's hull; a pane without one gets a box of its outline. A pane beyond
 // Replay's glass size range stays an unbreakable brush model. IW3 panes keep BuildGlassPanes.
 Json BuildIw7GlassPanes(const Json &table, const std::vector<BrushModel> &models, CollisionData &collision,
-                        std::set<std::uint32_t> &glassModels)
+                        std::set<std::uint32_t> &glassModels, std::map<std::uint32_t, std::uint32_t> &nativePanes)
 {
     if (!table.is_array())
         throw std::runtime_error("IW7 glass table is not an array");
@@ -5617,19 +5617,20 @@ Json BuildIw7GlassPanes(const Json &table, const std::vector<BrushModel> &models
         }
         if (!matchedHulls)
         {
-            // Native glass still needs a world hull to break: the box of the outline, in the pane's own frame, at
-            // least half a unit deep (the brush of a pane is 16 half thicknesses deep, export_glass.cpp).
+            // Native glass still needs a world hull to break: the box of the outline's bounding rectangle, in the pane's own
+            // frame, at least half a unit deep (the brush of a pane is 16 half thicknesses deep, export_glass.cpp).
             CollisionHull paneHull;
             paneHull.contents = iw8::havok::kBreakableGlassContents;
             paneHull.materialOverride = 9; // native surftype glass_pane
             paneHull.glassId = glassId;
+            const Vec3 centre = ReadFloats<3>(source.at("centre"));
             const Vec3 u = RotateByQuaternion(quaternion, {1.0f, 0.0f, 0.0f});
             const Vec3 v = RotateByQuaternion(quaternion, {0.0f, 1.0f, 0.0f});
             const Vec3 normal = RotateByQuaternion(quaternion, {0.0f, 0.0f, 1.0f});
             const float halfDepth = std::max(halfThickness * 8.0f, 0.25f);
             for (unsigned corner = 0; corner < 8; ++corner)
             {
-                const Vec3 point = Add(Add(origin, Multiply(u, corner & 1 ? halfWidth : -halfWidth)),
+                const Vec3 point = Add(Add(centre, Multiply(u, corner & 1 ? halfWidth : -halfWidth)),
                                        Add(Multiply(v, corner & 2 ? halfHeight : -halfHeight),
                                            Multiply(normal, corner & 4 ? halfDepth : -halfDepth)));
                 paneHull.points.push_back(point);
@@ -5640,6 +5641,7 @@ Json BuildIw7GlassPanes(const Json &table, const std::vector<BrushModel> &models
         }
 
         glassModels.insert(modelIndex);
+        nativePanes[piece] = static_cast<std::uint32_t>(panes.size());
         panes.push_back({{"material", source.at("material")},
                          {"materialShattered", source.at("material_shattered")},
                          {"texVecs", source.at("tex_vecs")},
@@ -5653,7 +5655,12 @@ Json BuildIw7GlassPanes(const Json &table, const std::vector<BrushModel> &models
                          {"highMipRadiusInvSq", source.at("high_mip_radius_inv_sq")},
                          {"shatteredHighMipRadiusInvSq", source.at("shattered_high_mip_radius_inv_sq")},
                          {"numCrackRings", source.at("crack_rings")},
-                         {"supportMask", source.at("support_mask")}});
+                         {"supportMask", source.at("support_mask")},
+                         {"geometry", source.at("geometry")},
+                         {"vertexCount", source.at("vertex_count")},
+                         {"fanDataCount", source.at("fan_count")},
+                         {"areaX2", source.at("area_x2")},
+                         {"radius", source.at("radius")}});
     }
     if (duplicateHulls)
         zt::info("iw7: removed %zu exact duplicate native glass hull(s)", duplicateHulls);
@@ -6734,8 +6741,9 @@ Json BuildRender(const Json &world, const VisibilityGroups &visibility,
             output["reflectionProbes"].back()["instances"] = source.at("instances");
     }
     // IW7 worlds carry their glass table (export_glass.cpp); IW3 worlds keep the brush-model rebuild.
+    std::map<std::uint32_t, std::uint32_t> nativePanes;
     output["glassPanes"] = world.contains("glass_panes")
-                               ? BuildIw7GlassPanes(world.at("glass_panes"), models, collision, glassModels)
+                               ? BuildIw7GlassPanes(world.at("glass_panes"), models, collision, glassModels, nativePanes)
                                : BuildGlassPanes(models, plan, entities, collision, glassModels,
                                           glassTargets, entityModels);
     output["assetMaterials"] = plan.assetMaterials;
