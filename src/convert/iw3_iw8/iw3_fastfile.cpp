@@ -6413,8 +6413,13 @@ Json BuildRender(const Json &world, const VisibilityGroups &visibility,
             // lightmap UVs lie in the native lightmap (StockLightmapUv).
             // A stock layered material draws its merged layered surfaces (each layer's UV and tangent transform per
             // vertex); its other surfaces keep the generated materials and their overlays.
+            // A lightless surface of a stock-only material (its world material is the stock one, as IW7's world distortion
+            // is: the lenses of eeee7f3) draws the stock layout too, with zero lightmap UVs as shadow-only surfaces do. The
+            // atlas layout (four layers, encoded lightmap words and material parameters) is what the stock technique misreads.
+            const bool stockOnlyLightless = material.stockWorldMaterialIndex && surface.lightmap < 0 &&
+                                            material.worldMaterialIndex == material.stockWorldMaterialIndex;
             const bool stock = material.stockWorldMaterialIndex &&
-                               (shadowOnly || (surface.lightmap >= 0 &&
+                               (shadowOnly || stockOnlyLightless || (surface.lightmap >= 0 &&
                                    (material.stockLayers ? surface.layerUvs.size() == surface.vertices.size() &&
                                                                surface.layerUvs.front().size() + 1 == material.stockLayers
                                                          : surface.layerUvs.empty())));
@@ -6530,7 +6535,9 @@ Json BuildRender(const Json &world, const VisibilityGroups &visibility,
                                 "IW3 surface references an invalid reflection probe");
                         addProbePoint(surface.reflectionProbe, vertex.position);
                         const std::uint32_t index = static_cast<std::uint32_t>(targetVertices++);
-                        const auto lightmap = shadowOnly ? std::array<double, 2>{}
+                        // StockLightmapUv needs a lightmap; a lightless stock surface takes zero UVs as shadow-only ones do.
+                        const auto lightmap = shadowOnly || (stock && surface.lightmap < 0)
+                                                  ? std::array<double, 2>{}
                                               : stock ? StockLightmapUv(vertex, surface, plan)
                                                       : EncodedLightmap(vertex, surface, material, plan);
                         // The tile word carries the surface's IW3 reflection probe
