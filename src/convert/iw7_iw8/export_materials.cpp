@@ -993,13 +993,23 @@ namespace zonetool::convert::iw7_iw8
 			return found;
 		}
 
+		// The zfeather twin, pinned to its disassembled PS 22ce2b91 / VS e34a45e6: mcopw_distortion_shade_ua_zfeather (technique
+		// distortion_fz_uva; Breakneck): the same offset without the per-vertex strength, tinted by the whole vertex colour, and
+		// only where the scene's depth at the moved pixel lies beyond the surface.
+		bool distortion_feather_material(const iw7::Material* material)
+		{
+			return material && material->techniqueSet &&
+				std::string_view(asset_name(material->techniqueSet->name)) == "mcopw_distortion_shade_ua_zfeather";
+		}
+
 		// IW7's model distortion, pinned to its disassembled PS 89c34e12: mo_distortion_scale (technique distortion_cs, the
 		// world distortion PS with a model VS 183f504a that does not animate the UV; Breakneck). The pipeline's MAP_DISTORTION
 		// model variant draws it. Other model distortion techsets keep drawing nothing until their shaders are checked.
 		bool distortion_model_material(const iw7::Material* material)
 		{
 			return material && material->techniqueSet &&
-				std::string_view(asset_name(material->techniqueSet->name)) == "mo_distortion_scale";
+				(std::string_view(asset_name(material->techniqueSet->name)) == "mo_distortion_scale" ||
+					distortion_feather_material(material));
 		}
 
 		// The axes along which a layer's colour sampler clamps: bit 0 U, bit 1 V. IW7's sampler state byte keeps the
@@ -2522,7 +2532,7 @@ namespace zonetool::convert::iw7_iw8
 				{
 					model_distortion = json{{"map", *map},
 						{"uvAnimation", material_constant(material, "uvAnimParms").value_or(std::array{0.0f, 0.0f, 0.0f, 0.0f})},
-						{"scale", {(*scale)[0], (*scale)[1]}}};
+						{"scale", {(*scale)[0], (*scale)[1]}}, {"feather", distortion_feather_material(material)}};
 					kind = {surface_kind::blend};
 				}
 				else
