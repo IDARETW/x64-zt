@@ -1123,6 +1123,12 @@ void LocalLighting(float2 screenPixel, float viewDepth, float3 relativePosition,
 // encoded back.
 Texture2D<float4> distortionMap : register(t12);
 Texture2D<float4> resolvedScene : register(t14);
+#ifdef MAP_DISTORTION_FEATHER
+// The zfeather twin (PS 22ce2b91 of mcopw_distortion_shade_ua_zfeather) refracts only where the scene behind lies beyond
+// the surface. Replay's floatZTexture (code texture 0, a technique argument at t15) holds the view depth over 6, as its
+// effect PSs read it (0cf327fa: the loaded depth times 6 against SV_Position.w).
+Texture2D<float4> sceneDepth : register(t15);
+#endif
 float4 DistortionColor(Input input) {
     float2 uv = input.uv.xy;
 #ifdef MAP_DISTORTION_ANIMATION
@@ -1138,7 +1144,11 @@ float4 DistortionColor(Input input) {
     float3 map = distortionMap.Sample(colorSampler, uv).xyz;
     float strength = saturate(input.color.a * map.z - .25) * 1.333333;
     float2 offset = (map.xy * 2 - 1) * strength;
+#ifdef MAP_DISTORTION_FEATHER
+    float2 scale = MAP_DISTORTION_SCALE; // the zfeather twin's VS takes no per-vertex strength
+#else
     float2 scale = MAP_DISTORTION_SCALE * vertexColor.rg;
+#endif
     float3 tangent = normalize(input.tangent.xyz), normal = normalize(input.normal);
     float3 binormal = cross(tangent, normal);
     float3 projectedTangent = float3(dot(tangent, replayView[0].xyz), dot(tangent, replayView[1].xyz),
@@ -1151,7 +1161,12 @@ float4 DistortionColor(Input input) {
     float4 bounds = screen.z * replayLighting[156];
     float2 sampleUV = clamp(screen.xy, bounds.xy, bounds.zw) / screen.z;
     float3 scene = resolvedScene.SampleLevel(gtaoSampler, sampleUV, 0).rgb;
+#ifdef MAP_DISTORTION_FEATHER
+    float behind = 6 * abs(sceneDepth.SampleLevel(gtaoSampler, sampleUV, 0).x) >= input.position.w ? 1 : 0;
+    return float4(scene * vertexColor, behind * saturate(map.z * input.color.a * 4));
+#else
     return float4(scene * vertexColor.b, saturate(map.z * input.color.a * 4));
+#endif
 }
 #endif
 float4 main(Input input) : SV_TARGET0 {

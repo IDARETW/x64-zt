@@ -109,6 +109,8 @@ struct SourceMaterial
         std::string map;
         std::array<float, 2> scale{};
         std::array<float, 3> uvAnimation{};
+        // The zfeather twin (PS 22ce2b91): no per-vertex strength, the full vertex tint, only where the scene lies behind.
+        bool feather{};
     };
     std::optional<ModelDistortion> modelDistortion;
     // A stock layer's alpha, reveal and thickness map (replayRevealMap: red alpha, green reveal).
@@ -2721,6 +2723,7 @@ SourceMaterial ReadMaterial(const std::filesystem::path &root,
         value.scale = distortion.at("scale").get<std::array<float, 2>>();
         const auto animation = distortion.at("uvAnimation").get<std::array<float, 4>>();
         value.uvAnimation = {animation[0], animation[1], animation[2]};
+        value.feather = distortion.value("feather", false);
         if (value.map.empty() || !material.distortionMap.empty())
             throw std::runtime_error("unsupported IW7 model distortion contract: " + name);
         material.modelDistortion = std::move(value);
@@ -3633,6 +3636,8 @@ Json BuildTechset(const std::string &map, const unsigned columns, const unsigned
         AppendTextureArgument(lit, "01100e000600"); // t14, code texture 6: resolvedSceneTexture
         AppendTextureArgument(lit, "00100000a400"); // pixel rows 0-3, code 164: the camera-relative view-projection
         AppendTextureArgument(lit, "001005000d00"); // pixel row 5, code 13: its scale
+        if (pixelDefines.find("#define MAP_DISTORTION_FEATHER ") != std::string::npos)
+            AppendTextureArgument(lit, "01100f000000"); // t15, code texture 0: floatZTexture
     }
     PatchStateIdentity(lit, pixel);
 
@@ -8165,12 +8170,12 @@ RenderPlan PrepareRenderAssets(const std::filesystem::path &exportRoot, const Js
         };
         // IW7 model distortion (MAP_DISTORTION): one variant per scale and UV animation, whose pixel shader refracts the
         // resolved scene by the distortion map at t12 (its constants baked in); it draws blended.
-        std::map<std::tuple<float, float, float, float, float, unsigned>, std::pair<unsigned, Json>> distortionTechsets;
+        std::map<std::tuple<float, float, float, float, float, bool, unsigned>, std::pair<unsigned, Json>> distortionTechsets;
         const auto distortionVariant = [&](const SourceMaterial &source, const unsigned kind)
             -> const std::pair<unsigned, Json> & {
             const auto &distortion = *source.modelDistortion;
             const std::tuple key{distortion.scale[0], distortion.scale[1], distortion.uvAnimation[0],
-                                 distortion.uvAnimation[1], distortion.uvAnimation[2], kind};
+                                 distortion.uvAnimation[1], distortion.uvAnimation[2], distortion.feather, kind};
             auto found = distortionTechsets.find(key);
             if (found == distortionTechsets.end())
             {
@@ -8178,6 +8183,8 @@ RenderPlan PrepareRenderAssets(const std::filesystem::path &exportRoot, const Js
                 std::snprintf(defines, sizeof(defines), "#define MAP_DISTORTION 1\n#define MAP_DISTORTION_SCALE float2(%.9g, %.9g)\n",
                               distortion.scale[0], distortion.scale[1]);
                 std::string pixel = defines;
+                if (distortion.feather)
+                    pixel += "#define MAP_DISTORTION_FEATHER 1\n";
                 if (distortion.uvAnimation != std::array<float, 3>{})
                 {
                     std::snprintf(defines, sizeof(defines), "#define MAP_DISTORTION_ANIMATION float3(%.9g, %.9g, %.9g)\n",
