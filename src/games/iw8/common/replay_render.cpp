@@ -178,6 +178,18 @@ std::optional<uint8_t> generatedTextureSlot(const char *name)
         return uint8_t{0x3E};
     if (!std::strcmp(name, "lightmapSecondary"))
         return uint8_t{0x3F};
+    // IW7 model flow and UV distortion (MAP_FLOW / MAP_UVD: the flow surface map at 0x3A, the noise map at 0x39), the baked
+    // sun depth (MAP_BAKED_SUN, 0x3C) and the native world's primary-light mask (MAP_NATIVE_WORLD, 0x40): BuildTechset's
+    // type-5 arguments bind them (map_surface_realtime.hlsl t13, t12, t9, t11), so the validator checks them too. flowMap is
+    // not named here: iw7_effect_flow.hlsl declares its own flowMap at t6/t7 for effect materials.
+    if (!std::strcmp(name, "uvdNoiseMap"))
+        return uint8_t{0x39};
+    if (!std::strcmp(name, "flowSurfaceMap"))
+        return uint8_t{0x3A};
+    if (!std::strcmp(name, "bakedSun"))
+        return uint8_t{0x3C};
+    if (!std::strcmp(name, "lightmapMask"))
+        return uint8_t{0x40};
     return std::nullopt;
 }
 
