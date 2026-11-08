@@ -90,6 +90,8 @@ namespace zonetool::iw8
 		{
 			std::vector<std::unique_ptr<loaded_zone>> zones;
 			std::map<asset_key, const loaded_asset*> assets;
+			// Named assets outside the live set: a changed one applies only on a map load.
+			std::map<asset_key, const loaded_asset*> others;
 		};
 
 		package_zones load_package(const std::filesystem::path& folder, const std::string& id)
@@ -111,9 +113,10 @@ namespace zonetool::iw8
 				auto& zone = *package.zones.emplace_back(load_zone(path, {.keep_temp_data = true}));
 				for (const auto& asset : zone.assets)
 				{
-					if (!asset.referenced && asset.header && is_refreshable(asset.type))
+					if (!asset.referenced && asset.header)
 					{
-						package.assets.try_emplace({asset.type, get_asset_name(asset.type, asset.header)}, &asset);
+						auto& target = is_refreshable(asset.type) ? package.assets : package.others;
+						target.try_emplace({asset.type, get_asset_name(asset.type, asset.header)}, &asset);
 					}
 				}
 			}
@@ -168,11 +171,16 @@ namespace zonetool::iw8
 
 		// The deployed assets are those of the running match.
 		std::map<asset_key, std::uint64_t> deployed_digests;
+		std::map<asset_key, std::uint64_t> deployed_other_digests;
 		{
 			const auto package = load_package(deployed, id);
 			for (const auto& [key, asset] : package.assets)
 			{
 				deployed_digests.emplace(key, asset_digest(*asset));
+			}
+			for (const auto& [key, asset] : package.others)
+			{
+				deployed_other_digests.emplace(key, asset_digest(*asset));
 			}
 		}
 		db_clear();
@@ -193,6 +201,24 @@ namespace zonetool::iw8
 
 			++(found == deployed_digests.end() ? added : same ? carried : changed);
 			selected.emplace_back(asset->type, asset->header, false);
+		}
+
+		// Changed or new assets outside the live set are not in the refresh zone, so the running match keeps the deployed
+		// version until the map loads again. Each type is reported once with its count, instead of being dropped silently.
+		std::map<std::int32_t, std::size_t> unapplied;
+		for (const auto& [key, asset] : package.others)
+		{
+			const auto found = deployed_other_digests.find(key);
+			if (found == deployed_other_digests.end() || found->second != asset_digest(*asset))
+			{
+				++unapplied[key.first];
+			}
+		}
+		for (const auto& [type, count] : unapplied)
+		{
+			const auto format = find_asset_format(type);
+			ZONETOOL_WARNING("%zu changed or new %s assets are outside the live-refresh set and apply only on a map load",
+				count, format ? format->name : "unknown");
 		}
 
 		// A name that only the previous refresh zone added holds no level reference; one that replaced a deployed asset
