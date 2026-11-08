@@ -3020,14 +3020,15 @@ SourceStaticModel ReadSourceModel(const std::filesystem::path &root, const std::
                                              geometry.bone_count.value_or(0) != 1);
     if (!skeleton.empty())
         converted.bones = skeleton.front().bones;
-    float previousDistance = 0.0f;
     for (const auto &sourceLod : model.at("lods"))
     {
         SourceStaticModelLod lod;
         lod.distance = sourceLod.at("distance").get<float>();
-        if (!std::isfinite(lod.distance) || lod.distance < previousDistance)
+        // A LOD no farther than the one before it is valid source data (IW7 authors distances such as 650, 419.8,
+        // 2500 and keeps them as authored, export_models.cpp): it never shows, and the static model preparation leaves
+        // it out. Only a non-finite or negative distance is invalid.
+        if (!std::isfinite(lod.distance) || lod.distance < 0.0f)
             throw std::runtime_error("IW3 model has invalid LOD distances: " + modelName);
-        previousDistance = lod.distance;
         const auto &geometryLod = geometry.lods.at(converted.lods.size());
         if (static_cast<float>(geometryLod.distance) != lod.distance || geometryLod.surfaces.empty())
             throw std::runtime_error("IW3 model has an empty render LOD: " + modelName);
