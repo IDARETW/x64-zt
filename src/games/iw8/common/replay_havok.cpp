@@ -1408,10 +1408,7 @@ std::vector<std::uint8_t> BuildShapeList(ReplayHavok &havok, const std::vector<H
         const std::uint64_t userData = (tagClass << 48) |
                                        (std::uint64_t(glassId) << 32) |
                                        (std::uint64_t(material) << 19) | surfaceFlags;
-        const auto materialNameCrc = material == 9u ||
-                                             material == kBreakableGlassSurfaceMaterial
-                                         ? kGlassMaterialNameCrc
-                                         : 0x1AB7BC33u;
+        const auto materialNameCrc = IsBreakableGlassSurface(material) ? kGlassMaterialNameCrc : 0x1AB7BC33u;
         tags.push_back({shapeContents, materialNameCrc, 0xFFFFu, {}, userData});
         tagIndices.emplace(key, newIndex);
         return newIndex;
@@ -1928,8 +1925,7 @@ std::vector<std::uint8_t> BuildShapeListNative(const std::vector<Hull> &hulls,
         const std::uint64_t tagClass = glassId ? 1 : (shapeContents & 1) ? 0 : 3;
         const std::uint64_t userData = (tagClass << 48) | (std::uint64_t(glassId) << 32) |
                                        (std::uint64_t(material) << 19) | surfaceFlags;
-        const auto materialNameCrc =
-            material == 9u || material == kBreakableGlassSurfaceMaterial ? kGlassMaterialNameCrc : 0x1AB7BC33u;
+        const auto materialNameCrc = IsBreakableGlassSurface(material) ? kGlassMaterialNameCrc : 0x1AB7BC33u;
         tags.push_back({shapeContents, materialNameCrc, 0xFFFFu, {}, userData});
         tagIndices.emplace(key, newIndex);
         return newIndex;

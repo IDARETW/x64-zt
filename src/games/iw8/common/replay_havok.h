@@ -22,6 +22,13 @@ inline constexpr std::uint32_t kBreakableGlassContents = 0x10u;
 inline constexpr std::uint32_t kReplayContents = 0x27F7FFFBu;
 inline constexpr std::uint32_t kBreakableGlassSurfaceMaterial = 9u;
 inline constexpr std::uint32_t kGlassMaterialNameCrc = 0xF728E572u;
+// Com_IsSurfaceTypeBreakableGlass_0 accepts surface masks 0x480000 (type 9) and 0x1400000 (type 40, glass_vehicle), and
+// the header comment above names 40 with 9 for mantling and sprinting. A tag of either surface takes the glass name.
+inline constexpr std::uint32_t kBreakableGlassVehicleSurfaceMaterial = 40u;
+inline constexpr bool IsBreakableGlassSurface(const std::uint32_t material)
+{
+    return material == kBreakableGlassSurfaceMaterial || material == kBreakableGlassVehicleSurfaceMaterial;
+}
 
 struct BakeInput
 {
