@@ -1466,13 +1466,13 @@ namespace zonetool::convert::iw7_iw8
 				targetname.clear();
 				removed_models.clear();
 			}
-			else if (auto value = value_of("\"classname\" \""); !value.empty())
+			else if (auto read_classname = value_of("\"classname\" \""); !read_classname.empty())
 			{
-				classname = std::move(value);
+				classname = std::move(read_classname);
 			}
-			else if (auto value = value_of("\"targetname\" \""); !value.empty())
+			else if (auto read_targetname = value_of("\"targetname\" \""); !read_targetname.empty())
 			{
-				targetname = std::move(value);
+				targetname = std::move(read_targetname);
 			}
 
 			if (!name.empty() && !output.exported_models.contains(file_name(name)))
