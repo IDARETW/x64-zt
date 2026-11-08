@@ -3816,33 +3816,68 @@ iw7_first_state( name, part, state )
 		}
 
 		// The scriptables that break (export_entities): the map script breaks each when it took its health in damage. Their
-		// effects load by their own names.
+		// effects and sounds load by their own names. Each kind registers its effects and sounds by its targetname, in event
+		// order; a break plays them at the piece once the broken model is set.
 		if (!output.scriptable_destructibles.empty())
 		{
 			std::string calls;
 			for (const auto& [targetname, kind] : output.scriptable_destructibles)
 			{
+				calls += std::format("\tiw7_destructible( \"{}\", \"{}\", {} );\n", targetname, kind.dead_model, kind.health);
 				for (const auto& effect : kind.effects)
 				{
-					effects.try_emplace(effect, effect);
-					placed.insert(effect);
+					effects.try_emplace(effect.effect, effect.effect);
+					placed.insert(effect.effect);
+					calls += std::format("\tiw7_destructible_fx( \"{}\", \"{}\", \"{}\", {} );\n", targetname, effect.effect, effect.tag,
+						effect.use_tag_angles ? 1 : 0);
 				}
 
-				calls += std::format("\tiw7_destructible( \"{}\", \"{}\", \"{}\", \"{}\", {} );\n", targetname, kind.dead_model,
-					kind.effects.empty() ? std::string{} : kind.effects.front(), kind.sound, kind.health);
+				for (const auto& sound : kind.sounds)
+				{
+					calls += std::format("\tiw7_destructible_sound( \"{}\", \"{}\", \"{}\" );\n", targetname, sound.alias, sound.tag);
+				}
 			}
 
 			start_thread("iw7_destructibles");
-			map_script += "\n// The scriptables that break: IW7 swaps their model, plays an effect and a sound when their health runs out.\n"
+			map_script += "\n// The scriptables that break: IW7 swaps their model, plays their effects and sounds when their health runs out.\n"
 				"iw7_destructibles()\n{\n" + calls + "}\n" + std::string(R"gsc(
-iw7_destructible( name, model, effect, sound, health )
+iw7_destructible( name, model, health )
 {
     pieces = getentarray( name, "targetname" );
     foreach ( piece in pieces )
-        piece thread iw7_destructible_think( model, effect, sound, health );
+        piece thread iw7_destructible_think( name, model, health );
 }
 
-iw7_destructible_think( model, effect, sound, health )
+iw7_destructible_fx( name, effect, tag, use_tag_angles )
+{
+    fx = spawnstruct();
+    fx.effect = effect;
+    fx.tag = tag;
+    fx.use_tag_angles = use_tag_angles;
+    if ( !isdefined( level.iw7_break_fx ) )
+        level.iw7_break_fx = [];
+    list = level.iw7_break_fx[name];
+    if ( !isdefined( list ) )
+        list = [];
+    list[list.size] = fx;
+    level.iw7_break_fx[name] = list;
+}
+
+iw7_destructible_sound( name, alias, tag )
+{
+    sound = spawnstruct();
+    sound.alias = alias;
+    sound.tag = tag;
+    if ( !isdefined( level.iw7_break_sounds ) )
+        level.iw7_break_sounds = [];
+    list = level.iw7_break_sounds[name];
+    if ( !isdefined( list ) )
+        list = [];
+    list[list.size] = sound;
+    level.iw7_break_sounds[name] = list;
+}
+
+iw7_destructible_think( name, model, health )
 {
     self endon( "death" );
     self.maxhealth = 1000000;
@@ -3857,14 +3892,48 @@ iw7_destructible_think( model, effect, sound, health )
     }
 
     self setcandamage( 0 );
-    if ( effect != "" && isdefined( level._effect[effect] ) )
-        playfx( level._effect[effect], self.origin + ( 0, 0, 4 ) );
-    if ( sound != "" )
-        self playsound( sound );
+    if ( model != "" )
+        self setmodel( model );
+    if ( isdefined( level.iw7_break_fx ) && isdefined( level.iw7_break_fx[name] ) )
+    {
+        foreach ( fx in level.iw7_break_fx[name] )
+            self iw7_destructible_play_fx( fx );
+    }
+    if ( isdefined( level.iw7_break_sounds ) && isdefined( level.iw7_break_sounds[name] ) )
+    {
+        foreach ( sound in level.iw7_break_sounds[name] )
+            self iw7_destructible_play_sound( sound );
+    }
     if ( model == "" )
         self delete();
+}
+
+// An effect at its tag, with the tag's angles when the PFX takes them (the piece's origin otherwise; identity orientation).
+iw7_destructible_play_fx( fx )
+{
+    if ( !isdefined( level._effect[fx.effect] ) )
+        return;
+    origin = self.origin;
+    angles = ( 0, 0, 0 );
+    if ( fx.use_tag_angles )
+        angles = self.angles;
+    if ( fx.tag != "" && isdefined( self gettagorigin( fx.tag, 1 ) ) )
+    {
+        origin = self gettagorigin( fx.tag );
+        if ( fx.use_tag_angles )
+            angles = self gettagangles( fx.tag );
+    }
+    playfx( level._effect[fx.effect], origin, anglestoforward( angles ), anglestoup( angles ) );
+}
+
+// A sound at its tag, as the compatibility layer plays it: a one-shot at the tag's position, a loop on the piece.
+iw7_destructible_play_sound( sound )
+{
+    if ( sound.tag != "" && isdefined( self gettagorigin( sound.tag, 1 ) ) )
+        iw3compat_playsoundatpos( self gettagorigin( sound.tag ), sound.alias );
     else
-        self setmodel( model );
+        self iw3compat_playsound( sound.alias );
+    self iw3compat_playloopsound( sound.alias );
 }
 )gsc");
 			ZONETOOL_INFO("iw7: the map script breaks %zu kinds of scriptables", output.scriptable_destructibles.size());

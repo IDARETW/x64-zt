@@ -112,10 +112,31 @@ namespace zonetool::convert::iw7_iw8
 		// map script breaks them when they took the health in damage.
 		struct scriptable_destructible
 		{
+			// One PFX event of the broken state: its VFX, the tag it plays on (empty: the piece's origin) and whether it takes the
+			// tag's angles (IW7 PFX useTagAngles).
+			struct break_effect
+			{
+				std::string effect;
+				std::string tag;
+				bool use_tag_angles{};
+
+				bool operator==(const break_effect&) const = default;
+			};
+
+			// One Sound event of the broken state: its alias and the tag it plays at (empty: the piece).
+			struct break_sound
+			{
+				std::string alias;
+				std::string tag;
+
+				bool operator==(const break_sound&) const = default;
+			};
+
 			std::string targetname;
 			std::string dead_model;
-			std::vector<std::string> effects;
-			std::string sound;
+			// Every effect and sound of the broken state, in event order.
+			std::vector<break_effect> effects;
+			std::vector<break_sound> sounds;
 			int health{};
 
 			bool operator==(const scriptable_destructible&) const = default;
