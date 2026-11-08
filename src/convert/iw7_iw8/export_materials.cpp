@@ -1315,6 +1315,24 @@ namespace zonetool::convert::iw7_iw8
 		// fogged and volumetrically attenuated as the unlit additive model shader draws it (MAP_UVD). Its masked twin 5654ad3f
 		// (mopw_effectunlit_add_lin_ct_ndw_uvd_nocast_mask_mra_mua_colscr_evc, Neon) takes the same rows; its alpha is the mask's
 		// at the mask's animated UV (mask_mra, MAP_UNLIT_MASKS), times the scriptable colour (white unless a script sets it).
+		// The model UV distortions that take the noise per atlas cell, at frac(uv * textureAtlas.xy) * zw + time * xy, with the
+		// same strength over textureAtlas.xy: the lit zfeather falloff twins (PS 3f93db7fe4a69626 of
+		// mcopw_effect_zfeather_falloff_blend_lin_ct_ndw_ua_uvd_nocast_colscr: Carnage, Codphish, Mars Oasis, Rally, Turista;
+		// PS e90e02c4de5c9e59 of the _em twins, its rows one later) and Neon's unlit additive one (PS 7301e48ad807fb0e). Their
+		// zfeather (scene-depth fade) is not ported (ledger mfeather); their falloff and UV animation are the model shader's.
+		bool model_uvd_cell_material(const iw7::Material* material)
+		{
+			static constexpr std::array<std::string_view, 4> names
+			{
+				"mcopw_effect_zfeather_falloff_blend_lin_ct_ndw_ua_uvd_nocast_colscr",
+				"mcopw_effect_zfeather_falloff_blend_lin_ct_ndw_ua_uvd_nocast_colscr_em",
+				"mco_effect_zfeather_falloff_blend_lin_ct_ndw_ua_uvd_nocast_colscr_em",
+				"mopw_effectunlit_zfeather_falloff_add_lin_ct_ndw_ua_uvd_nocast_colscr_evc",
+			};
+			return material && material->techniqueSet &&
+				std::ranges::find(names, std::string_view(asset_name(material->techniqueSet->name))) != names.end();
+		}
+
 		bool model_uvd_material(const iw7::Material* material)
 		{
 			static constexpr std::array<std::string_view, 2> names
@@ -1323,7 +1341,8 @@ namespace zonetool::convert::iw7_iw8
 				"mopw_effectunlit_add_lin_ct_ndw_uvd_nocast_mask_mra_mua_colscr_evc",
 			};
 			return material && material->techniqueSet &&
-				std::ranges::find(names, std::string_view(asset_name(material->techniqueSet->name))) != names.end();
+				(std::ranges::find(names, std::string_view(asset_name(material->techniqueSet->name))) != names.end() ||
+					model_uvd_cell_material(material));
 		}
 
 		// The lit UV-distortion effects, each name pinned to its disassembled PS: c258449e (Breakneck's blood drips and oil
@@ -2638,6 +2657,10 @@ namespace zonetool::convert::iw7_iw8
 				{
 					exported["iw7ModelUvd"] = {{"map", *map}, {"scroll", *scroll},
 						{"strength", {(*strength)[3] / (*atlas_cells)[0], (*strength)[3] / (*atlas_cells)[1]}}};
+					if (model_uvd_cell_material(material))
+					{
+						exported["iw7ModelUvd"]["cells"] = {(*atlas_cells)[0], (*atlas_cells)[1]};
+					}
 					ZONETOOL_INFO("iw7: model material %s keeps its UV distortion", material->name);
 				}
 				else

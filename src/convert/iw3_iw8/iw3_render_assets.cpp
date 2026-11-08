@@ -179,6 +179,8 @@ struct SourceMaterial
         std::string map;
         std::array<float, 4> scroll{};
         std::array<float, 2> strength{};
+        // textureAtlas.xy of the twins that take the noise per atlas cell (MAP_UVD_CELLS), none for the others.
+        std::optional<std::array<float, 2>> cells;
     };
     std::optional<Uvd> uvd;
     // IW3 wc_water (waterMap water_t, exported by OAT): the M x N wave spectrum
@@ -2620,11 +2622,14 @@ SourceMaterial ReadMaterial(const std::filesystem::path &root,
         value.map = uvd.at("map").get<std::string>();
         value.scroll = uvd.at("scroll").get<std::array<float, 4>>();
         value.strength = uvd.at("strength").get<std::array<float, 2>>();
+        if (uvd.contains("cells"))
+            value.cells = uvd.at("cells").get<std::array<float, 2>>();
         const auto finite = [](const auto &values) {
             return std::ranges::all_of(values, [](const float v) { return std::isfinite(v); });
         };
         if (value.map.empty() || value.map.find("..") != std::string::npos || !finite(value.scroll) ||
-            !finite(value.strength) || material.flow)
+            !finite(value.strength) || material.flow ||
+            (value.cells && (!finite(*value.cells) || !((*value.cells)[0] > 0) || !((*value.cells)[1] > 0))))
             throw std::runtime_error("unsupported IW7 model UV-distortion contract: " + name);
         material.uvd = std::move(value);
     }
@@ -8127,14 +8132,16 @@ RenderPlan PrepareRenderAssets(const std::filesystem::path &exportRoot, const Js
         };
         // IW7 model UV distortion (MAP_UVD): one variant per distortion setting, emission gain and surface kind, whose
         // pixel shader samples the colour map at UVs moved by the noise map (its constants baked in), bound at t12.
-        std::map<std::tuple<float, float, float, float, float, float, float, unsigned>, std::pair<unsigned, Json>>
+        std::map<std::tuple<float, float, float, float, float, float, float, float, float, unsigned>,
+                 std::pair<unsigned, Json>>
             uvdTechsets;
         const auto uvdVariant = [&](const SourceMaterial &source, const unsigned kind, const bool emissive)
             -> const std::pair<unsigned, Json> & {
             const auto &uvd = *source.uvd;
             const float emission = emissive ? source.emission : 1.0f;
+            const auto cells = uvd.cells.value_or(std::array{0.0f, 0.0f});
             const std::tuple key{uvd.scroll[0], uvd.scroll[1], uvd.scroll[2], uvd.scroll[3],
-                                 uvd.strength[0], uvd.strength[1], emission, kind};
+                                 uvd.strength[0], uvd.strength[1], cells[0], cells[1], emission, kind};
             auto found = uvdTechsets.find(key);
             if (found == uvdTechsets.end())
             {
@@ -8145,6 +8152,12 @@ RenderPlan PrepareRenderAssets(const std::filesystem::path &exportRoot, const Js
                               uvd.scroll[0], uvd.scroll[1], uvd.scroll[2], uvd.scroll[3], uvd.strength[0],
                               uvd.strength[1]);
                 std::string pixel = defines;
+                if (uvd.cells)
+                {
+                    std::snprintf(defines, sizeof(defines), "#define MAP_UVD_CELLS float2(%.9g, %.9g)\n", cells[0],
+                                  cells[1]);
+                    pixel += defines;
+                }
                 if (emissive)
                 {
                     std::snprintf(defines, sizeof(defines), "#define MAP_MODEL_EMISSION %.9g\n", source.emission);

@@ -227,9 +227,16 @@ float4 FlowTexel(float2 uv, float time) {
 // (MaterialTextureID_flowMap, slot 0x39); MAP_UVD_SCROLL is uvDistortParms (scroll xy, scale zw) and MAP_UVD_STRENGTH
 // the strength over textureAtlas.xy.
 Texture2D<float4> uvdNoiseMap : register(t12);
-// The colour map at the UVs moved by the scrolling noise: uv + (noise.xy * 2 - 1) * strength / atlas.
+// The colour map at the UVs moved by the scrolling noise: uv + (noise.xy * 2 - 1) * strength / atlas. MAP_UVD_CELLS
+// (textureAtlas.xy) takes the noise per atlas cell, at frac(uv * atlas) * zw + time * xy, as the lit zfeather falloff
+// model twins do (mcopw/mco_effect_zfeather_falloff_blend_lin_ct_ndw_ua_uvd_nocast_colscr*: PS 3f93db7fe4a69626).
 float4 UvdTexel(float2 uv, float time) {
-    float2 noise = uvdNoiseMap.Sample(colorSampler, uv * MAP_UVD_SCROLL.zw + time * MAP_UVD_SCROLL.xy).xy;
+#ifdef MAP_UVD_CELLS
+    float2 noiseUV = frac(uv * MAP_UVD_CELLS) * MAP_UVD_SCROLL.zw + time * MAP_UVD_SCROLL.xy;
+#else
+    float2 noiseUV = uv * MAP_UVD_SCROLL.zw + time * MAP_UVD_SCROLL.xy;
+#endif
+    float2 noise = uvdNoiseMap.Sample(colorSampler, noiseUV).xy;
     return sourceAtlas.SampleBias(colorSampler, uv + (noise * 2 - 1) * MAP_UVD_STRENGTH, MAP_MIP_BIAS);
 }
 #endif
