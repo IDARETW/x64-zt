@@ -1306,6 +1306,12 @@ namespace zonetool::convert::iw7_iw8
 		// The IW7-to-Replay unit of these lights is open (AGENTS.md 3.2 and the local-light unit ledger). Each takes
 		// Replay's linear light definition.
 		const auto scale = light_unit_scale(source);
+		// The sun group of IW7's GfxWorld: primary lights 1..lastSunPrimaryLightIndex (see the dropped directional lights below).
+		if (const auto* world = source.world())
+		{
+			ZONETOOL_INFO("iw7: lights: sun group ends at primary light %u of %u", world->lastSunPrimaryLightIndex, com_world->primaryLightCount);
+		}
+
 		auto lights = json::array();
 		std::size_t local_lights{};
 		std::size_t narrowed_spots{};
@@ -1383,11 +1389,19 @@ namespace zonetool::convert::iw7_iw8
 			std::optional<float> intensity;
 			if (type == 1 && i != sun_light)
 			{
-				// One sun lights the world. Logged: the sun is the only directional light Replay takes, so every other one is
-				// dropped (MEASURE: the count and luminances per map, grep "directional light").
+				// One sun lights the world: Replay takes one directional light. IW7 lists its sun group in 1..lastSunPrimaryLightIndex
+				// (s2_h1 gfxworld.cpp 209 treats the extra suns the same way), so a dropped directional light is logged with
+				// whether it repeats the sun: the same direction and the raw colour of the sun (Breakneck: light 2 repeats light
+				// 1 exactly). A light that differs from the sun is a sun-group light that Replay cannot take.
 				type = 0;
 				dropped_directionals++;
-				ZONETOOL_INFO("iw7: lights: directional light %u (luminance %g) is dropped; Replay has one sun", i, luminance);
+				const bool has_sun = sun_light < com_world->primaryLightCount;
+				const auto& sun_source = has_sun ? com_world->primaryLights[sun_light] : light;
+				const auto dot = light.dir[0] * sun_source.dir[0] + light.dir[1] * sun_source.dir[1] + light.dir[2] * sun_source.dir[2];
+				const auto sun_luminance = 0.2126f * sun_source.color[0] + 0.7152f * sun_source.color[1] + 0.0722f * sun_source.color[2];
+				const auto repeats_sun = has_sun && dot > 0.999f && std::abs(luminance - sun_luminance) <= 0.001f * std::max(sun_luminance, 1.0f);
+				ZONETOOL_INFO("iw7: lights: directional light %u (luminance %g, direction dot sun %g) is dropped; Replay has one sun%s",
+					i, luminance, dot, repeats_sun ? "; it repeats the sun" : "; it differs from the sun");
 			}
 			else if (type == 1)
 			{
