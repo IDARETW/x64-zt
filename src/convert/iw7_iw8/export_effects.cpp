@@ -61,9 +61,16 @@ namespace zonetool::convert::iw7_iw8
 			state_emissive_curve | state_intensity_curve | state_vector_fields | state_inherit_parent_velocity | state_play_sounds |
 			state_child_effects | state_size_curve | state_size_lerp;
 
+		// IW7 state bits to Replay's (both names from the PARTICLE_STATE_DEF_FLAG enums: IW7 structs.hpp 8670-8724, game-test
+		// PDB 99433-99482). Bits 0-9 agree; IW7's second velocity pair (10, 11) and its unnamed bit 24 have no Replay bit.
+		// IW7 12-23 sit two bits above Replay (USE_PHYSICS 0x1000 -> 1 << 10, RAY_CAST 0x800000 -> 1 << 21); IW7 25-30
+		// (HAS_EMISSIVE_CURVE, INTENSITY, VECTOR_FIELDS, INHERIT_PARENT_VELOCITY, DRAW_WITH_VIEW_MODEL, PLAY_SOUNDS) sit three
+		// bits above Replay's 22-27; IW7 31-35 (ON_IMPACT_USE_SURFACE_TYPE .. BLOCKS_SIGHT) sit two above Replay's 29-33. A
+		// single shift of two moved IW7 INHERIT_PARENT_VELOCITY onto Replay's DRAW_WITH_VIEW_MODEL (1 << 26) and PLAY_SOUNDS
+		// onto HAS_CAMERA_OFFSET_POSITION_ONLY (1 << 28); the module-derived bits (22-25, 27) are rebuilt either way.
 		std::uint64_t replay_state_flags(const std::uint64_t flags)
 		{
-			return (flags & 0x3FF) | (flags >> 12 << 10);
+			return (flags & 0x3FF) | ((flags >> 12 & 0xFFF) << 10) | ((flags >> 25 & 0x3F) << 22) | ((flags >> 31 & 0x1F) << 29);
 		}
 
 		// Replay particle element types: IW7 draws clouds and spark clouds as sprites in Replay's element list, which has
