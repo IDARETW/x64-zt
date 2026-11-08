@@ -1692,8 +1692,13 @@ float4 main(Input input) : SV_TARGET0 {
     // reflection (glass is not a surface-lit kind: "almost invisible"); round
     // 93's map-average level washed panes white; before, the IW3 style used an
     // approximation on the map-average SH.
-    // Not for a sky object (skyPlaced): its probe lookup would take the scaled position as a world one.
-    if (kind == 2 && !layer && !decalLayer && !skyPlaced)
+    // Not for a sky object (MAP_SKY_OBJECTS, flag bit 23): its probe lookup would take the scaled position as a world one.
+    // Glass is never kind 1 (the sky box), so only that flag matters; without sky objects the test is the same as before.
+#ifdef MAP_SKY_OBJECTS
+    if (kind == 2 && !layer && !decalLayer && !skyObject)
+#else
+    if (kind == 2 && !layer && !decalLayer)
+#endif
     {
         float3 view = normalize(-input.relativePosition);
         float fresnel = pow(saturate(1 - abs(dot(view, shadingNormal))),
