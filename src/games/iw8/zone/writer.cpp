@@ -138,7 +138,7 @@ namespace zonetool::iw8
 				write_stream stream(this->writer_,
 					[this](write_stream& s, const std::int32_t type, void** field)
 					{
-						this->write_asset(s, type, field);
+						this->write_asset(s, type, field, true, true);
 					},
 					[this](const std::uint32_t id)
 					{
@@ -224,6 +224,8 @@ namespace zonetool::iw8
 			std::unordered_set<const void*> references_;
 			// Virtual block positions of the inserted pointers and list entries that hold each written asset.
 			std::map<asset_key, std::size_t> aliases_;
+			// The same for the stubs of write_options::reference_uses.
+			std::map<asset_key, std::size_t> reference_aliases_;
 			std::deque<std::vector<std::uint8_t>> stubs_;
 			std::deque<std::string> stub_names_;
 			// stub copy -> header of the referenced asset, for the markers of its fields
@@ -272,11 +274,15 @@ namespace zonetool::iw8
 				writer.pop_stream();
 			}
 
-			void write_asset(write_stream& stream, const std::int32_t type, void** field, const bool insert_by_default = true)
+			void write_asset(write_stream& stream, const std::int32_t type, void** field, const bool insert_by_default = true,
+				const bool use = false)
 			{
 				auto& writer = stream.writer();
 				const auto header = *field;
 				const asset_key key{type, name_of(type, header)};
+				// write_options::reference_uses: a use is a stub, which never aliases the data of a list entry.
+				const auto reference = use && this->options_.reference_uses;
+				auto& aliases = reference ? this->reference_aliases_ : this->aliases_;
 
 				// A kept marker writes the asset again, as the zone did; a kept offset points where the zone did.
 				const auto kept = this->marker_of(field);
@@ -286,7 +292,7 @@ namespace zonetool::iw8
 					return;
 				}
 
-				if (const auto alias = this->aliases_.find(key); alias != this->aliases_.end() && !kept)
+				if (const auto alias = aliases.find(key); alias != aliases.end() && !kept)
 				{
 					writer.set_pointer(field, writer.offset_value(write_stream::virtual_block, alias->second));
 					return;
@@ -302,17 +308,17 @@ namespace zonetool::iw8
 				writer.set_pointer(field, kept.value_or(insert ? write_stream::insert : write_stream::following));
 				writer.align(3);
 				// Later uses point at the asset data: a stub keeps the first place, a written asset the latest.
-				const auto stub = !this->headers_.contains(header) && (this->references_.contains(header) ||
-					!this->assets_.contains(key));
+				const auto stub = reference || (!this->headers_.contains(header) && (this->references_.contains(header) ||
+					!this->assets_.contains(key)));
 				const auto remember = [&](const std::size_t position)
 				{
 					if (stub)
 					{
-						this->aliases_.try_emplace(key, position);
+						aliases.try_emplace(key, position);
 					}
 					else
 					{
-						this->aliases_.insert_or_assign(key, position);
+						aliases.insert_or_assign(key, position);
 					}
 				};
 
@@ -343,7 +349,11 @@ namespace zonetool::iw8
 				}
 
 				void* source = header;
-				if (!this->headers_.contains(header))
+				if (reference)
+				{
+					source = this->stub(*format, header, key.second);
+				}
+				else if (!this->headers_.contains(header))
 				{
 					const auto full = this->references_.contains(header) ? this->assets_.end() : this->assets_.find(key);
 					source = full != this->assets_.end() ? full->second : this->stub(*format, header, key.second);
