@@ -611,6 +611,12 @@ namespace zonetool::convert::iw7_iw8
 		submodels.push_back(submodel_json(bounds_of(world.models[0].bounds)));
 		const auto ents_shapes = map_ents ? read_shapes(map_ents->havokEntsShapeData, map_ents->havokEntsShapeDataSize, "map entities") :
 			std::nullopt;
+		// The pieces of the map entities' shapes (the brush models' physics overrides) that do not convert; read_shapes only
+		// names the form of each, so the count attributes the compressed mesh primitives and shape classes it dropped.
+		if (ents_shapes && ents_shapes->unknown)
+		{
+			ZONETOOL_WARNING("iw7: %zu pieces of the map entities' Havok shapes do not convert and are left out of the brush models", ents_shapes->unknown);
+		}
 		std::size_t solid_models{};
 		std::size_t model_triangles{};
 		for (auto i = 1; i < world.modelCount; i++)
