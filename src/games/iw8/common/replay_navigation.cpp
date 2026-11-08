@@ -1912,6 +1912,7 @@ Result Build(const Source &source)
     std::vector<std::string> animscripts(nodes.size());
     std::size_t traversalCount = 0;
     std::size_t droppedTraversals = 0;
+    std::vector<std::pair<std::size_t, std::size_t>> traversalPairs; // Begin and End pathnode indices
     {
         // A traversal endpoint links to the generated nodes and to the endpoints of earlier traversals, as the
         // authored graph does: 30 of Breakneck's 32 jump_up End nodes (IW7 PathData, horizontal lengths 4 to 256)
@@ -1968,6 +1969,7 @@ Result Build(const Source &source)
                                     static_cast<std::uint16_t>(begin + 1), true});
             walkLinks(begin, begin + 1);
             walkLinks(begin + 1, begin);
+            traversalPairs.emplace_back(begin, begin + 1);
             ++traversalCount;
         }
     }
@@ -2087,6 +2089,17 @@ Result Build(const Source &source)
                     zoneTouching[static_cast<std::size_t>(a)][static_cast<std::size_t>(b)] =
                         zoneTouching[static_cast<std::size_t>(b)][static_cast<std::size_t>(a)] = 1;
             }
+        }
+        // Authored traversals join zones that no grid step connects (a raised platform and the floor below).
+        // The stock zone graphs carry them: the swarm's census reports every mp_shipment and mp_m_speed traversal
+        // pair whose endpoints have zones touching (27 of 27 and 24 of 24; the others end in unzoned nodes; not
+        // re-measured here). Without this a platform's zone has no zone-node link, so zone routing cannot reach it.
+        for (const auto &[begin, end] : traversalPairs)
+        {
+            const auto a = static_cast<std::size_t>(zoneOf[begin]);
+            const auto b = static_cast<std::size_t>(zoneOf[end]);
+            if (a != b)
+                zoneTouching[a][b] = zoneTouching[b][a] = 1;
         }
     }
 
