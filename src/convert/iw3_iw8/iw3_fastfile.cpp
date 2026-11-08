@@ -12881,6 +12881,10 @@ PreparedMap PrepareFastfile(const ImportOptions &options)
         std::unordered_map<std::string, iw8::navigation::Vec3> negotiationEnds;
         std::size_t unsupportedTraversals = 0;
         std::size_t incompleteTraversals = 0;
+        std::size_t unnamedEnds = 0;
+        // Other node_* classes (cover, ambush, exposed, door, turret) have no Replay pathnode yet; counted per class
+        // so the next conversion log shows what the bot graph leaves out.
+        std::map<std::string, std::size_t> leftOutNodes;
         const auto field = [](const EntityFields &entity, const char *key) {
             const auto found = entity.find(key);
             return found == entity.end() ? std::string{} : found->second;
@@ -12914,16 +12918,34 @@ PreparedMap PrepareFastfile(const ImportOptions &options)
             }
             else if (name == "node_negotiation_end" && !field(entity, "targetname").empty())
                 negotiationEnds.emplace(field(entity, "targetname"), ParseVector(origin->second));
+            else if (name == "node_negotiation_end")
+                ++unnamedEnds;
+            else if (name.starts_with("node_"))
+                ++leftOutNodes[name];
         }
         std::size_t unpairedTraversals = 0;
+        std::set<std::string> usedEnds;
         for (const NegotiationBegin &begin : negotiationBegins)
         {
             const auto end = negotiationEnds.find(begin.target);
             if (end == negotiationEnds.end())
                 ++unpairedTraversals;
             else
+            {
+                usedEnds.insert(begin.target);
                 navigation.traversals.push_back({begin.origin, end->second, begin.animscript});
+            }
         }
+        // An end that no begin names (or that has no targetname) is not a traversal: counted, not used.
+        const std::size_t unusedEnds = negotiationEnds.size() - usedEnds.size();
+        std::string leftOut;
+        for (const auto &[name, count] : leftOutNodes)
+            leftOut += (leftOut.empty() ? "" : ", ") + name + " " + std::to_string(count);
+        if (!leftOut.empty())
+            zt::info("iw3: navigation source leaves out node records with no Replay pathnode: %s", leftOut.c_str());
+        if (unnamedEnds || unusedEnds)
+            zt::info("iw3: navigation source: %zu node_negotiation_end without a targetname, %zu ends no begin names",
+                     unnamedEnds, unusedEnds);
         zt::info("iw3: navigation source has %zu hulls, %zu triangles, %zu pathnode markers, "
                  "%zu spawns and %zu traversals (%zu IW7-only wall runs/boost jumps, %zu without an end "
                  "node, %zu without an animscript or target left out)",
