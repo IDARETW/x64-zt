@@ -861,7 +861,10 @@ namespace zonetool::convert::iw7_iw8
 						}
 
 						result.push_back({{"t", "fx"}, {"effect", vfx ? std::string(asset_name(iw7::get_asset_name(iw7::ASSET_TYPE_VFX, vfx))) :
-							std::string{}}, {"tags", tags}, {"loop", fx.loopRate}, {"kill", fx.killOnExit}, {"use_tag_angles", fx.useTagAngles}});
+							std::string{}}, {"tags", tags}, {"loop", fx.loopRate}, {"kill", fx.killOnExit}, {"use_tag_angles", fx.useTagAngles},
+							{"allow_missing_tag", fx.allowMissingTag}, {"root_on_missing_tag", fx.useRootOnMissingTag},
+							{"oneshot_looping", fx.oneshotLooping}, {"viewmodel", fx.isViewmodel},
+							{"nearest_vehicle_velocity", fx.allowNearestVehicleVelocity}});
 						break;
 					}
 					case iw7::Scriptable_EventType_Sound:
@@ -870,15 +873,19 @@ namespace zonetool::convert::iw7_iw8
 						break;
 					case iw7::Scriptable_EventType_HideShowBone:
 						result.push_back({{"t", "hide"}, {"tag", data.hideShowBone.tagName ? data.hideShowBone.tagName : ""},
-							{"hide", data.hideShowBone.hide}, {"children", data.hideShowBone.hideShowChildren}});
+							{"hide", data.hideShowBone.hide}, {"children", data.hideShowBone.hideShowChildren},
+							{"allow_missing_tag", data.hideShowBone.allowMissingTag}});
 						break;
 					case iw7::Scriptable_EventType_Explosion:
 						result.push_back({{"t", "explosion"}, {"tag", data.explosion.tagName ? data.explosion.tagName : ""},
-							{"radius", data.explosion.radius}, {"inner", data.explosion.dmgInner}, {"outer", data.explosion.dmgOuter}});
+							{"radius", data.explosion.radius}, {"inner", data.explosion.dmgInner}, {"outer", data.explosion.dmgOuter},
+							{"weapon", data.explosion.weapon != nullptr}, {"allow_missing_tag", data.explosion.allowMissingTag},
+							{"root_on_missing_tag", data.explosion.useRootOnMissingTag}});
 						break;
 					case iw7::Scriptable_EventType_Screenshake:
 						result.push_back({{"t", "shake"}, {"duration", data.screenshake.duration}, {"radius", data.screenshake.radius},
-							{"scale", data.screenshake.scaleEarthquake}, {"earthquake", data.screenshake.isEarthquake}});
+							{"scale", data.screenshake.scaleEarthquake}, {"earthquake", data.screenshake.isEarthquake},
+							{"screen_shake", data.screenshake.isScreenShake}});
 						break;
 					case iw7::Scriptable_EventType_ApplyForce:
 						result.push_back({{"t", "force"}, {"pos", {data.applyForce.forcePos[0], data.applyForce.forcePos[1],
@@ -1044,6 +1051,72 @@ namespace zonetool::convert::iw7_iw8
 
 				list.push_back({{"name", part.name ? part.name : ""}, {"tag", part.tagName ? part.tagName : ""}, {"parent", parents[p]},
 					{"states", states}});
+			}
+
+			// The fields the machine does not carry (missing-tag rules, the explosion's weapon, viewmodel and vehicle-velocity
+			// flags, the screen shake) are tallied per kind, so the conversion log shows how many events would play differently
+			// from the source; random thresholds outside [0, 1] are tallied too. The machine itself is unchanged by them.
+			if (convert)
+			{
+				std::map<std::string, std::size_t> dropped;
+				const auto flag = [&](const char* field, const bool set)
+				{
+					if (set)
+					{
+						dropped[field]++;
+					}
+				};
+				const std::function<void(const json&)> tally = [&](const json& fields)
+				{
+					for (const auto& event : fields)
+					{
+						const auto t = event.value("t", std::string{});
+						if (t == "fx")
+						{
+							flag("PFX allow_missing_tag false", !event.value("allow_missing_tag", true));
+							flag("PFX root_on_missing_tag true", event.value("root_on_missing_tag", false));
+							flag("PFX oneshot_looping true", event.value("oneshot_looping", false));
+							flag("PFX viewmodel true", event.value("viewmodel", false));
+							flag("PFX nearest_vehicle_velocity true", event.value("nearest_vehicle_velocity", false));
+						}
+						else if (t == "hide")
+						{
+							flag("hide children true", event.value("children", false));
+							flag("hide allow_missing_tag false", !event.value("allow_missing_tag", true));
+						}
+						else if (t == "explosion")
+						{
+							flag("explosion weapon set", event.value("weapon", false));
+							flag("explosion allow_missing_tag false", !event.value("allow_missing_tag", true));
+							flag("explosion root_on_missing_tag true", event.value("root_on_missing_tag", false));
+						}
+						else if (t == "shake")
+						{
+							flag("shake screen_shake true", event.value("screen_shake", false));
+						}
+						else if (t == "random")
+						{
+							// The threshold is read as a probability (export_effects: randomfloat(1) < threshold); the count checks the range.
+							const auto threshold = event.value("threshold", 0.0f);
+							flag("random threshold outside [0, 1]", !(threshold >= 0.0f && threshold <= 1.0f));
+							tally(event.value("a", json::array()));
+							tally(event.value("b", json::array()));
+						}
+					}
+				};
+				for (const auto& part : list)
+				{
+					for (const auto& state : part.at("states"))
+					{
+						tally(state.at("events"));
+					}
+				}
+
+				for (const auto& [field, count] : dropped)
+				{
+					ZONETOOL_INFO("iw7 scriptable %s: %zu events set %s", def.name ? def.name : "<unnamed>",
+						count, field.data());
+				}
 			}
 
 			return {{"def", def.name ? std::string(asset_name(def.name)) : std::string{}}, {"parts", list}};
