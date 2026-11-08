@@ -499,7 +499,9 @@ namespace zonetool::convert::iw7_iw8
 			result.health = healthy.data.health.health;
 			result.mindamage = healthy.data.health.minimumDamage;
 			auto changes = false;
-			auto model_event = false;
+			// Replay's ScriptableCl_RunStateEventModel keeps one model per instance and every Model event overwrites it, and the
+			// state machine's setmodel runs in event order. The state's last Model event therefore decides the broken model.
+			const iw7::ScriptableEventDef* last_model{};
 			for (auto e = 0u; broken.base.events && e < broken.base.numEvents; e++)
 			{
 				const auto& event = broken.base.events[e];
@@ -520,18 +522,7 @@ namespace zonetool::convert::iw7_iw8
 				if (event.type == iw7::Scriptable_EventType_Model)
 				{
 					changes = true;
-					model_event = true;
-					const auto model = source.resolve(iw7::ASSET_TYPE_XMODEL, event.data.model.model);
-					if (model && result.dead_model.empty())
-					{
-						result.dead_model = asset_name(iw7::get_asset_name(iw7::ASSET_TYPE_XMODEL, model));
-						output.models.try_emplace(file_name(result.dead_model), model);
-					}
-					else if (!model && event.data.model.model)
-					{
-						// A model pointer that the loaded zones do not hold: the piece still goes away, as an empty model does.
-						ZONETOOL_WARNING("iw7: the broken model of %s is not in the loaded zones; its piece is removed", def.name ? def.name : "?");
-					}
+					last_model = &event;
 				}
 				else if (event.type == iw7::Scriptable_EventType_PFX)
 				{
@@ -540,23 +531,19 @@ namespace zonetool::convert::iw7_iw8
 					if (vfx)
 					{
 						changes = true;
-						// Replay's PFX plays at the tag of its first name (the machine's fx does the same); several tags, and a
-						// looping effect that plays once here, are reported rather than silently dropped.
-						const auto vfx_name = std::string(asset_name(iw7::get_asset_name(iw7::ASSET_TYPE_VFX, vfx)));
-						if (fx.scrTagNames && fx.scrTagCount > 1)
+						// Replay's PFX takes its tag from the event's tag list at random on every play (ScriptableCl_PlayParticleFX:
+						// BG_irand over scrTagCount), so every tag is kept and the break picks one as Replay does. A looping effect
+						// repeats at its loop rate while the piece stands (iw7_destructible_fx).
+						extraction::scriptable_destructible::break_effect break_fx;
+						break_fx.effect = std::string(asset_name(iw7::get_asset_name(iw7::ASSET_TYPE_VFX, vfx)));
+						for (auto t = 0u; fx.scrTagNames && t < fx.scrTagCount; t++)
 						{
-							ZONETOOL_WARNING("iw7: break effect %s of %s has %u tags; only the first (%s) plays", vfx_name.c_str(),
-								def.name ? def.name : "?", fx.scrTagCount, script_string(fx.scrTagNames[0]).c_str());
+							break_fx.tags.push_back(script_string(fx.scrTagNames[t]));
 						}
 
-						if (fx.loopRate > 0.0f)
-						{
-							ZONETOOL_WARNING("iw7: break effect %s of %s loops (rate %f); the break plays it once", vfx_name.c_str(),
-								def.name ? def.name : "?", fx.loopRate);
-						}
-
-						result.effects.push_back({vfx_name, fx.scrTagNames && fx.scrTagCount ? script_string(fx.scrTagNames[0]) : std::string{},
-							fx.useTagAngles});
+						break_fx.use_tag_angles = fx.useTagAngles;
+						break_fx.loop = fx.loopRate > 0.0f ? fx.loopRate : 0.0f;
+						result.effects.push_back(std::move(break_fx));
 					}
 				}
 				else if (event.type == iw7::Scriptable_EventType_Sound && event.data.sound.soundAlias)
@@ -571,7 +558,26 @@ namespace zonetool::convert::iw7_iw8
 				return std::nullopt;
 			}
 
-			result.removes = model_event && result.dead_model.empty();
+			if (last_model)
+			{
+				const auto model = source.resolve(iw7::ASSET_TYPE_XMODEL, last_model->data.model.model);
+				if (model)
+				{
+					result.dead_model = asset_name(iw7::get_asset_name(iw7::ASSET_TYPE_XMODEL, model));
+					output.models.try_emplace(file_name(result.dead_model), model);
+				}
+				else if (last_model->data.model.model)
+				{
+					// A model pointer that the loaded zones do not hold: the piece still goes away, as an empty model does.
+					ZONETOOL_WARNING("iw7: the broken model of %s is not in the loaded zones; its piece is removed", def.name ? def.name : "?");
+				}
+			}
+
+			result.removes = last_model && result.dead_model.empty();
+			// The health state's valid damage causes are kept for the report at the kind's first instance (not applied, see
+			// scriptable_destructible::valid_causes).
+			result.valid_causes = healthy.data.health.validDamageCause;
+
 			std::string kind(def.name ? asset_name(def.name) : std::string_view{"scriptable"});
 			std::ranges::transform(kind, kind.begin(), [](const unsigned char c)
 			{
@@ -2207,8 +2213,21 @@ namespace zonetool::convert::iw7_iw8
 			{
 				const auto unique = unique_destructible(output, *destructible);
 				entities += std::format("\"targetname\" \"{}\"\n", unique.targetname);
-				output.scriptable_destructibles.try_emplace(unique.targetname, unique);
+				const auto added = output.scriptable_destructibles.try_emplace(unique.targetname, unique).second;
 				destructibles++;
+				// Reported once per kind (the shortcut is found once per instance). MEASURE: the minimum damage and the damage causes of
+				// the breaking kinds are logged here, for the census of the next conversion log.
+				if (added && unique.mindamage > 0)
+				{
+					ZONETOOL_INFO("iw7: break kind %s counts only hits of %d or more (its health state's minimumDamage)", unique.targetname.data(),
+						unique.mindamage);
+				}
+
+				if (added && unique.valid_causes != 0)
+				{
+					ZONETOOL_WARNING("iw7: break kind %s takes only damage causes %d, which the break does not filter by", unique.targetname.data(),
+						unique.valid_causes);
+				}
 			}
 			else if (animation)
 			{

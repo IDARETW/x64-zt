@@ -3883,8 +3883,14 @@ iw7_first_state( name, part, state )
 				{
 					effects.try_emplace(effect.effect, effect.effect);
 					placed.insert(effect.effect);
-					calls += std::format("\tiw7_destructible_fx( \"{}\", \"{}\", \"{}\", {} );\n", targetname, effect.effect, effect.tag,
-						effect.use_tag_angles ? 1 : 0);
+					calls += "\tfx_tags = [];\n";
+					for (const auto& tag : effect.tags)
+					{
+						calls += std::format("\tfx_tags[fx_tags.size] = \"{}\";\n", tag);
+					}
+
+					calls += std::format("\tiw7_destructible_fx( \"{}\", \"{}\", fx_tags, {}, {:.4f} );\n", targetname, effect.effect,
+						effect.use_tag_angles ? 1 : 0, effect.loop);
 				}
 
 				for (const auto& sound : kind.sounds)
@@ -3903,12 +3909,15 @@ iw7_destructible( name, model, removes, health, mindamage )
         piece thread iw7_destructible_think( name, model, removes, health, mindamage );
 }
 
-iw7_destructible_fx( name, effect, tag, use_tag_angles )
+iw7_destructible_fx( name, effect, tags, use_tag_angles, loop )
 {
     fx = spawnstruct();
     fx.effect = effect;
-    fx.tag = tag;
+    fx.tags = [];
+    foreach ( tag in tags )
+        fx.tags[fx.tags.size] = tag;
     fx.use_tag_angles = use_tag_angles;
+    fx.loop = loop;
     if ( !isdefined( level.iw7_break_fx ) )
         level.iw7_break_fx = [];
     list = level.iw7_break_fx[name];
@@ -3962,40 +3971,100 @@ iw7_destructible_think( name, model, removes, health, mindamage )
     }
     if ( removes )
     {
-        // The piece is hidden, not deleted, so a loop that the break started on it would go on in Replay: it stops here,
-        // as deleting the piece ended its loops before.
-        self stoploopsound();
+        // The piece is hidden, not deleted, so the loops the break started on it stop here: its looping effects (notify below)
+        // and the loop sources of its looping sounds. Deleting the piece ended them before.
+        self notify( "iw7_break_removed" );
+        if ( isdefined( self.iw7_break_loops ) )
+        {
+            foreach ( loop in self.iw7_break_loops )
+            {
+                loop stoploopsound();
+                loop delete();
+            }
+        }
         self hide();
         self notsolid();
     }
 }
 
-// An effect at its tag, with the tag's angles when the PFX takes them (the piece's origin otherwise; identity orientation).
+// An effect at one of its tags, with the tag's angles when the PFX takes them (the piece's origin otherwise; identity
+// orientation). Replay's PFX picks one of its tags at random on every play (ScriptableCl_PlayParticleFX: BG_irand over the
+// tag count). A looping effect repeats at its loop rate until the piece is removed.
 iw7_destructible_play_fx( fx )
 {
     if ( !isdefined( level._effect[fx.effect] ) )
         return;
     origin = self.origin;
     angles = ( 0, 0, 0 );
+    tag = "";
+    if ( fx.tags.size > 0 )
+        tag = fx.tags[randomint( fx.tags.size )];
     if ( fx.use_tag_angles )
         angles = self.angles;
-    if ( fx.tag != "" && isdefined( self gettagorigin( fx.tag, 1 ) ) )
+    if ( tag != "" && isdefined( self gettagorigin( tag, 1 ) ) )
     {
-        origin = self gettagorigin( fx.tag );
+        origin = self gettagorigin( tag );
         if ( fx.use_tag_angles )
-            angles = self gettagangles( fx.tag );
+            angles = self gettagangles( tag );
     }
-    playfx( level._effect[fx.effect], origin, anglestoforward( angles ), anglestoup( angles ) );
+    if ( fx.loop <= 0 )
+    {
+        playfx( level._effect[fx.effect], origin, anglestoforward( angles ), anglestoup( angles ) );
+        return;
+    }
+    self thread iw7_destructible_fx_loop( fx.effect, origin, angles, fx.loop );
 }
 
-// A sound at its tag, as the compatibility layer plays it: a one-shot at the tag's position, a loop on the piece.
+// One effect entity, triggered again every loop seconds (the machine's iw7_scriptable_fx repeats its effect the same way)
+// until the piece is removed; the entity is deleted then.
+iw7_destructible_fx_loop( effect, origin, angles, loop )
+{
+    self endon( "iw7_break_removed" );
+    self endon( "death" );
+    if ( loop < 0.05 )
+        loop = 0.05;
+    fx = spawnfx( level._effect[effect], origin, anglestoforward( angles ), anglestoup( angles ) );
+    triggerfx( fx );
+    self thread iw7_destructible_fx_stop( fx );
+    for ( ;; )
+    {
+        wait( loop );
+        triggerfx( fx );
+    }
+}
+
+iw7_destructible_fx_stop( fx )
+{
+    self waittill( "iw7_break_removed" );
+    fx delete();
+}
+
+// A sound at its tag, as the compatibility layer plays it: a one-shot at the tag's position, or at the piece. A loop plays from
+// its own script_origin, linked to the tag (or the piece), kept in the piece's list until the piece is removed: Replay keeps one
+// loop index per entity (ScrCmd_PlayLoopSound 0x141260440), so a loop on the piece would replace another loop of it.
 iw7_destructible_play_sound( sound )
 {
-    if ( sound.tag != "" && isdefined( self gettagorigin( sound.tag, 1 ) ) )
+    tagged = sound.tag != "" && isdefined( self gettagorigin( sound.tag, 1 ) );
+    if ( iw3compat_sound_kind( sound.alias ) == 2 )
+    {
+        origin = self.origin;
+        if ( tagged )
+            origin = self gettagorigin( sound.tag );
+        source = spawn( "script_origin", origin );
+        if ( tagged )
+            source linkto( self, sound.tag );
+        else
+            source linkto( self );
+        source iw3compat_playloopsound( sound.alias, 0 );
+        if ( !isdefined( self.iw7_break_loops ) )
+            self.iw7_break_loops = [];
+        self.iw7_break_loops[self.iw7_break_loops.size] = source;
+        return;
+    }
+    if ( tagged )
         iw3compat_playsoundatpos( self gettagorigin( sound.tag ), sound.alias );
     else
         self iw3compat_playsound( sound.alias );
-    self iw3compat_playloopsound( sound.alias );
 }
 )gsc");
 			ZONETOOL_INFO("iw7: the map script breaks %zu kinds of scriptables", output.scriptable_destructibles.size());
