@@ -1,6 +1,8 @@
 #include <std_include.hpp>
 #include "iw8.hpp"
 
+#include "zone/patch_writer.h"
+
 #include <game.hpp>
 
 namespace zonetool::iw8
@@ -32,6 +34,7 @@ namespace zonetool::iw8
 			.verify_zone = verify_zone,
 			.build_zone = build_zone,
 			.refresh_zone = refresh_zone,
+			.patch_zone = write_patch,
 		};
 
 		return iw8;

@@ -318,6 +318,26 @@ namespace zonetool::cli
 		settings.game->refresh_zone(args[0], args[1], args.size() == 3 ? args[2] : args[0]);
 	}
 
+	void patch_zone(const settings& settings, const std::span<const std::string> args)
+	{
+		if (args.size() != 2 && args.size() != 3)
+		{
+			std::cout << "usage: patchzone <base.ff> <new.ff> [<out.fp>]\n";
+			return;
+		}
+
+		if (!settings.game->patch_zone)
+		{
+			std::cout << std::format("patchzone is not supported for {}\n", settings.game->name);
+			return;
+		}
+
+		// By default the patch takes the base's name beside it: the game applies <zone>.fp to <zone>.ff only.
+		const auto output = args.size() == 3 ? std::filesystem::path(args[2]) :
+			std::filesystem::path(args[0]).replace_extension(".fp");
+		settings.game->patch_zone(args[0], args[1], output);
+	}
+
 	void generate_csv(const settings& settings, const std::span<const std::string> args)
 	{
 		if (args.empty())
