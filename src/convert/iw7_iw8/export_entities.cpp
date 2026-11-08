@@ -1256,6 +1256,8 @@ namespace zonetool::convert::iw7_iw8
 		std::size_t narrowed_spots{};
 		std::size_t leaning_ups{};
 		std::size_t large_bulbs{};
+		std::size_t dropped_directionals{};
+		std::size_t dark_locals{};
 
 		// IW7 IES light definitions (Frontier: 24 wall sconces of `light_ies_sconce_zmb`) sample the map's 128-texel R8
 		// strip `*ieslookup` at coordOffset + coordinate * coordScale, the coordinate from the spot's angle as Replay's
@@ -1326,12 +1328,16 @@ namespace zonetool::convert::iw7_iw8
 			std::optional<float> intensity;
 			if (type == 1 && i != sun_light)
 			{
-				// One sun lights the world.
+				// One sun lights the world. Logged: the sun is the only directional light Replay takes, so every other one is
+				// dropped (MEASURE: the count and luminances per map, grep "directional light").
 				type = 0;
+				dropped_directionals++;
+				ZONETOOL_INFO("iw7: lights: directional light %u (luminance %g) is dropped; Replay has one sun", i, luminance);
 			}
 			else if (type == 1)
 			{
 				std::ranges::for_each(color, [&](float& channel) { channel *= scale; });
+				ZONETOOL_INFO("iw7: lights: sun %u raw colour luminance %g (unit scale %g)", i, luminance, scale);
 			}
 			else if (type >= 2 && luminance > 0.0f && light.radius > 0.0f)
 			{
@@ -1341,6 +1347,11 @@ namespace zonetool::convert::iw7_iw8
 			}
 			else
 			{
+				// Zero-radius or black lights take no Replay light (MEASURE: count per map in the summary line).
+				if (type >= 2)
+				{
+					dark_locals++;
+				}
 				type = 0;
 			}
 
@@ -1479,6 +1490,12 @@ namespace zonetool::convert::iw7_iw8
 		{
 			ZONETOOL_INFO("iw7: effect lights link %zu light definitions of their own, %zu with an IES profile",
 				output.particle_light_defs.size(), effect_ies);
+		}
+
+		if (dropped_directionals || dark_locals)
+		{
+			ZONETOOL_INFO("iw7: lights: %zu directional lights other than the sun and %zu zero-radius or black local lights are dropped",
+				dropped_directionals, dark_locals);
 		}
 
 		if (narrowed_spots || leaning_ups || large_bulbs)
