@@ -493,6 +493,7 @@ namespace zonetool::convert::iw7_iw8
 
 			extraction::scriptable_destructible result;
 			result.health = healthy.data.health.health;
+			result.mindamage = healthy.data.health.minimumDamage;
 			auto changes = false;
 			auto model_event = false;
 			for (auto e = 0u; broken.base.events && e < broken.base.numEvents; e++)
