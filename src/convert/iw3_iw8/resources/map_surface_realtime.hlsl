@@ -202,7 +202,7 @@ Texture2D<float4> flowMap : register(t12);
 Texture2D<float4> flowSurfaceMap : register(t13);
 // Two phases of the colour map pulled along the flow, crossfaded (the effect flow of iw7_effect_flow.hlsl): the
 // phases wrap with the period and the surface map's alpha offsets them; its red scales the alpha.
-float4 FlowTexel(float2 uv, float time) {
+float4 FlowTexel(float2 uv, float time, float4 vertexColour) {
     float4 flow = flowMap.SampleLevel(colorSampler, uv, 0);
     float4 surface = flowSurfaceMap.SampleLevel(colorSampler, uv, 0);
     float2 velocity = (flow.xy * 2 - 1) * flow.z * MAP_FLOW_SCALE;
@@ -216,8 +216,12 @@ float4 FlowTexel(float2 uv, float time) {
     float4 texel = lerp(a, b, weight);
     texel.a *= surface.r;
 #ifdef MAP_FLOW_HDR
-    // mkhdr: IW7 expands the flowed colour (linear, as the sRGB image decodes it) by -log2(1 - min(c, .99)).
-    texel.rgb = -log2(1 - min(texel.rgb, .99));
+    // mkhdr (the Proto flow PS f4daf89a, disassembled): IW7 multiplies the flowed colour by the vertex colour, squares
+    // it, then expands -log2(1 - min(c^2, .99)) (DXBC log is base 2). The tint is applied after the expansion, so the
+    // vertex colour is folded in here and the caller keeps only its alpha (see the texel *= input.color site).
+    float3 linearColor = texel.rgb * vertexColour.rgb;
+    linearColor *= linearColor;
+    texel.rgb = -log2(1 - min(linearColor, .99));
 #endif
     return texel;
 }
@@ -1184,7 +1188,7 @@ float4 main(Input input) : SV_TARGET0 {
 #endif
 #if defined(MAP_FLOW) && !defined(MAP_COVERAGE)
     // The game time: pixel view row 4 .w in both the static-model and the entity techniques (code constant 0).
-    texel = FlowTexel(sampleUV, replayView[4].w);
+    texel = FlowTexel(sampleUV, replayView[4].w, input.color);
 #endif
 #if defined(MAP_UVD) && !defined(MAP_COVERAGE)
     // The same game time (pixel view row 4 .w) moves the noise.
@@ -1288,7 +1292,11 @@ float4 main(Input input) : SV_TARGET0 {
     }
     else
 #endif
+#if defined(MAP_FLOW_HDR) && defined(MAP_FLOW) && !defined(MAP_COVERAGE)
+    texel.a *= input.color.a; // FlowTexel expanded the colour with the vertex colour already.
+#else
     texel *= input.color;
+#endif
     uint alphaTest = (flags >> 3) & 3;
     if (kind == 3 && alphaTest == 1)
         texel.a = texel.a > 0 ? 1 : 0;
