@@ -772,6 +772,52 @@ namespace zonetool::convert::iw7_iw8
 			submodels.push_back(submodel_json({pane.mins, pane.maxs}, brush ? writer.add_leaf(json::array({*brush})) : 0));
 		}
 
+		// Measurement for the matching above: IW7 gives each glass convex the one-based glass id of its tag, which may name
+		// the piece (FxGlassInitPieceState index + 1) of the pane that holds it. The count says whether the id could match
+		// the geometric rule instead; it is logged, not used.
+		if (world_shapes && !glass.empty())
+		{
+			std::size_t named{};
+			std::size_t inside{};
+			std::uint32_t lowest = std::numeric_limits<std::uint32_t>::max();
+			std::uint32_t highest{};
+			for (const auto* convex : glass)
+			{
+				const auto id = static_cast<std::uint32_t>(world_shapes->tags[convex->tag].glass_id);
+				lowest = std::min(lowest, id);
+				highest = std::max(highest, id);
+				const auto pane = std::ranges::find_if(panes, [&](const glass_pane& candidate) { return candidate.piece + 1 == id; });
+				if (pane == panes.end())
+				{
+					continue;
+				}
+
+				named++;
+				std::array<float, 3> mins{FLT_MAX, FLT_MAX, FLT_MAX};
+				std::array<float, 3> maxs{-FLT_MAX, -FLT_MAX, -FLT_MAX};
+				for (const auto& point : convex->points)
+				{
+					for (std::size_t axis = 0; axis < 3; axis++)
+					{
+						mins[axis] = std::min(mins[axis], point[axis]);
+						maxs[axis] = std::max(maxs[axis], point[axis]);
+					}
+				}
+
+				const auto centre = centre_of(mins, maxs);
+				bool holds = true;
+				for (std::size_t axis = 0; axis < 3; axis++)
+				{
+					holds = holds && centre[axis] >= pane->mins[axis] - 1.0f && centre[axis] <= pane->maxs[axis] + 1.0f;
+				}
+
+				inside += holds;
+			}
+
+			ZONETOOL_INFO("iw7: %zu glass convexes carry glass ids %u..%u; %zu name a pane of this map (of %zu) and %zu of those panes hold their centre",
+				glass.size(), lowest, highest, named, panes.size(), inside);
+		}
+
 		auto static_models = json::array();
 		for (auto i = 0u; i < world.dpvs.smodelCount; i++)
 		{
