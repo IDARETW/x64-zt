@@ -8185,7 +8185,9 @@ RenderPlan PrepareRenderAssets(const std::filesystem::path &exportRoot, const Js
             // their glass variant as the static one is built.
             const bool moving = source.flagWave || source.reactiveMotion;
             const bool flag = moving && !detailed && geometry == TechniqueGeometry::staticModel;
-            if (moving && !flag && geometry == TechniqueGeometry::staticModel)
+            // DObj (entity) cloth and reactive foliage draw static too: replay_model_vertex.hlsl compiles the wave and the
+            // reactive sim out under MAP_ENTITY (no placement origin or scale per draw), so the drop is reported here.
+            if (moving && !flag)
                 zt::warn("iw3: flag or reactive material %s keeps a static surface", source.name.c_str());
             const int wave = flag ? static_cast<int>(waveOf(source).first) : -1;
             const bool flowing = source.flow.has_value() && !detailed && !flag;
