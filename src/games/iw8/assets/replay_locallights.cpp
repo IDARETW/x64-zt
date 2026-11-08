@@ -43,6 +43,11 @@ constexpr uint32_t kEntityMotionWords = 160;
 // ending on screen-tile steps that changed with the view (owner screenshots, 2026-10-18).
 constexpr unsigned kSpotSegments = 8;
 constexpr double kMaxCapStep = std::numbers::pi / 6; // 30 degrees per cap ring
+// The narrowest cosine of a spot's outer half-angle the volumes accept. The IW7 exporter bounds spots to [0.001, 0.998]
+// (export_entities.cpp, spot branch), so a spot out to 89.94 degrees keeps its whole volume; a bound of 0.0175 (89
+// degrees) cut the rim of such spots from the light volume and the cull test. The shape math stays finite here: the apex
+// offset bulb / tan(outer) is about 1/1000 of the bulb at this bound.
+constexpr double kMinSpotCos = 0.001;
 constexpr unsigned kOmniSegments = 6;
 constexpr unsigned kOmniBands = 6;
 constexpr size_t kMaxLeafLights = 16;
@@ -115,7 +120,7 @@ void VolumeMesh(const Light &light, std::vector<Vec3> &points, std::vector<uint1
         // spot); the lit points are also within the radius of the light origin. A tube
         // light lights from points up to its length away: the apex moves back by as much
         // more as holds the cones of those points, and the reach grows by the length.
-        const double outer = std::acos(std::clamp<double>(light.cosHalfFovOuter, 0.0175, 1.0));
+        const double outer = std::acos(std::clamp<double>(light.cosHalfFovOuter, kMinSpotCos, 1.0));
         const double apexOffset = (light.bulbRadius + light.tubeLength) / std::tan(outer);
         Light apex = light;
         for (unsigned k = 0; k < 3; ++k)
@@ -217,7 +222,7 @@ Data::View ViewFrustum(const Light &light)
 {
     Vec3 v;
     const Vec3 u = Basis(light.direction, v);
-    const double outer = std::acos(std::clamp<double>(light.cosHalfFovOuter, 0.0175, 1.0));
+    const double outer = std::acos(std::clamp<double>(light.cosHalfFovOuter, kMinSpotCos, 1.0));
     const double slope = std::tan(outer);
     Data::View view;
     std::vector<Vec3> corners;
@@ -279,7 +284,7 @@ bool Reaches(const Light &light, const replaybounds::Bounds &bounds)
     if (axial < -sphere)
         return false;
     const double radial = std::sqrt(std::max(0.0, distance * distance - axial * axial));
-    const double outer = std::acos(std::clamp<double>(light.cosHalfFovOuter, 0.0175, 1.0));
+    const double outer = std::acos(std::clamp<double>(light.cosHalfFovOuter, kMinSpotCos, 1.0));
     return radial * std::cos(outer) - axial * std::sin(outer) <= sphere;
 }
 
