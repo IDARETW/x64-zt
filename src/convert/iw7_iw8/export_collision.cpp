@@ -718,7 +718,10 @@ namespace zonetool::convert::iw7_iw8
 		{
 			const auto centre = centre_of(pane.mins, pane.maxs);
 			const havok_convex* piece{};
-			auto nearest = 1.0f;
+			// The piece is the nearest one whose centre lies within the pane's bounds (with a unit of margin). A pane's
+			// piece can sit more than a unit from the centre of its brush model, so no pane is left to the box fallback
+			// for that reason alone.
+			auto nearest = FLT_MAX;
 			for (const auto* convex : glass)
 			{
 				std::array<float, 3> mins{FLT_MAX, FLT_MAX, FLT_MAX};
@@ -733,6 +736,17 @@ namespace zonetool::convert::iw7_iw8
 				}
 
 				const auto other = centre_of(mins, maxs);
+				bool inside = true;
+				for (std::size_t axis = 0; axis < 3; axis++)
+				{
+					inside = inside && other[axis] >= pane.mins[axis] - 1.0f && other[axis] <= pane.maxs[axis] + 1.0f;
+				}
+
+				if (!inside)
+				{
+					continue;
+				}
+
 				const auto distance = std::max({std::abs(other[0] - centre[0]), std::abs(other[1] - centre[1]), std::abs(other[2] - centre[2])});
 				if (distance < nearest)
 				{
