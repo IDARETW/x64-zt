@@ -524,6 +524,8 @@ size_t iw3ToIw8EntityString(const std::string &input, std::string &output,
     size_t projectedOldSchoolPickups = 0;
     std::map<std::string, size_t> projectedSourceMarkers;
     std::map<std::string, std::pair<size_t, std::string>> unsupported;
+    // Keys with no Replay key id (iw3KeyToIw8KeyId): counted per key name and logged once per map.
+    std::map<std::string, size_t> unnamedKeys;
 
     const std::vector<Entity> entities = parseEntities(input);
     const auto field = [](const Entity &entity, const char *key) -> std::string {
@@ -680,6 +682,7 @@ size_t iw3ToIw8EntityString(const std::string &input, std::string &output,
             uint32_t keyId = 0;
             if (!iw3KeyToIw8KeyId(key, keyId))
             {
+                ++unnamedKeys[key];
                 continue;
             }
             if (!body.empty())
@@ -737,6 +740,22 @@ size_t iw3ToIw8EntityString(const std::string &input, std::string &output,
         }
         output += "{ " + body + " }\n";
         ++emitted;
+    }
+
+    if (!unnamedKeys.empty())
+    {
+        // Such keys reach the map script and the Replay entities nowhere; the names show which keys the source
+        // carries that the converter does not name (IW7 keys with no token text read _id_<hex>).
+        size_t total = 0;
+        std::string names;
+        for (const auto &[key, count] : unnamedKeys)
+        {
+            total += count;
+            if (!names.empty())
+                names += ", ";
+            names += key + " (" + std::to_string(count) + ")";
+        }
+        zt::warn("entities: dropped %zu key(s) with no Replay key id: %s", total, names.c_str());
     }
 
     if (!unsupported.empty())
