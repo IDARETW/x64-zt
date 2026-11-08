@@ -1319,7 +1319,9 @@ float4 main(Input input) : SV_TARGET0 {
     // Blended non-glass layers (2048) are lit like the surface under them.
     bool decalLayer = kind == 2 && (flags & 2048) != 0;
     bool surfaceLit = kind == 0 || kind == 3 || decalLayer;
-    if (!sky && !layer && (kind == 0 || kind == 3))
+    // The sky's other surfaces (skyPlaced) carry directions from the play space, not camera-relative positions, so the decal
+    // volumes, the baked sun and the local lights (below) take them out of the world's positional lighting.
+    if (!skyPlaced && !layer && (kind == 0 || kind == 3))
         ApplyDecals(input.relativePosition, normalize(input.normal), screenUV, input.position.w,
                     texel.rgb, shadingNormal);
     float3 direction = replayLighting[56].xyz;
@@ -1361,7 +1363,8 @@ float4 main(Input input) : SV_TARGET0 {
     // shadows of moving casters: players, script models and dynamic props.
     float bakedVisibility = -1;
 #ifdef MAP_BAKED_SUN
-    if (!sky && surfaceLit && nativeSun && sunReaches)
+    // A sky object's position (skyPlaced) is not camera-relative: its baked sun lookup would sample the wrong place.
+    if (!skyPlaced && surfaceLit && nativeSun && sunReaches)
         bakedVisibility =
             BakedSunVisibility(input.relativePosition + replayView[4].xyz, normalize(input.normal));
     if (bakedVisibility >= 0)
@@ -1591,7 +1594,7 @@ float4 main(Input input) : SV_TARGET0 {
 #if MAP_DEBUG_MODE == 0
     // Converted IW3 primary lights (spots, omnis) through Replay's local
     // light lists and shadows: areas IW3 lit only with them were black.
-    if (!sky && !unlit && surfaceLit) {
+    if (!skyPlaced && !unlit && surfaceLit) {
         float3 localDiffuse, localSpecular;
 #ifdef MAP_IW8_LIGHTING
         LocalLighting(screenPixel, input.position.w, input.relativePosition, shadingNormal,
