@@ -458,23 +458,14 @@ namespace zonetool::convert::iw7_iw8
 		}
 
 		// The distant models (too large for the world, or static models beyond its range) and the world surfaces beyond its
-		// range as surfaces of the sky (runtime_sky), with their own materials: the sky lies at infinity, where the middle
-		// of the spawn points sees it (export_sky drew them into the cube map from there). Each keeps its directions from
-		// there, scaled into the world's range; the world vertex shader draws them at infinity, as the sky.
+		// range as surfaces of the sky (runtime_sky), with their own materials: the sky lies at infinity, where IW7 keeps
+		// them (they are real geometry, 17896 units and more from the play space). Each keeps its world positions times
+		// sky_object_scale; the world vertex shader takes the camera's offset at the same scale (camera-relative, so the
+		// parallax of the true positions is kept) and draws them at infinity, as the sky. Their depth follows their
+		// distance from the camera (replay_world_vertex.hlsl).
 		std::vector<world_geometry_surface> export_sky_objects(const source_map& source, const iw7::GfxWorld& world, extraction& output)
 		{
-			constexpr double sky_object_range = 60000.0;
-			const auto& bounds = world.modelCount ? world.models[0].bounds : world.bounds;
-			std::array<double, 3> center{bounds.midPoint[0], bounds.midPoint[1], bounds.midPoint[2]};
-			if (const auto play = spawn_bounds(source))
-			{
-				center = {((*play)[0] + (*play)[3]) * 0.5, ((*play)[1] + (*play)[4]) * 0.5, ((*play)[2] + (*play)[5]) * 0.5};
-			}
-
-			// Every surface takes one scale, so that the sky's pieces keep the order of their distances: the world vertex
-			// shader gives them the depth of their distance (in front of the sky box), and Breakneck's black hole, its
-			// accretion disc and the debris around it no longer share one depth (they flickered against each other in shards
-			// as the GPU's draw order changed).
+			// The sky's pieces: every surface's vertices are world positions, not directions.
 			struct pending_surface
 			{
 				const mesh_surface* mesh;
@@ -565,7 +556,7 @@ namespace zonetool::convert::iw7_iw8
 								normal[axis] += vertex.normal[row] * placement.axis[row][axis];
 							}
 
-							position[axis] = placement.origin[axis] + position[axis] * placement.scale - center[axis];
+							position[axis] = placement.origin[axis] + position[axis] * placement.scale;
 						}
 
 						const auto length = std::sqrt(normal[0] * normal[0] + normal[1] * normal[1] + normal[2] * normal[2]);
@@ -583,34 +574,51 @@ namespace zonetool::convert::iw7_iw8
 				std::vector<std::array<double, 3>> directions, normals;
 				for (const auto& vertex : surface.vertices)
 				{
-					directions.push_back({vertex.position[0] - center[0], vertex.position[1] - center[1], vertex.position[2] - center[2]});
+					directions.push_back({vertex.position[0], vertex.position[1], vertex.position[2]});
 					normals.push_back({vertex.normal[0], vertex.normal[1], vertex.normal[2]});
 				}
 
 				collect(surface, std::move(directions), std::move(normals));
 			}
 
-			auto farthest = 1.0;
-			auto nearest = std::numeric_limits<double>::infinity();
-			for (const auto& surface : pending)
+			// A surface whose scaled positions leave Replay's position range is left out (logged), not compressed: a scale
+			// per map would not match the shader's constant.
+			const auto within_range = [](const std::vector<std::array<double, 3>>& positions)
 			{
-				for (const auto& direction : surface.directions)
+				return std::ranges::all_of(positions, [](const std::array<double, 3>& position)
 				{
-					const auto distance = std::sqrt(direction[0] * direction[0] + direction[1] * direction[1] + direction[2] * direction[2]);
-					farthest = std::max(farthest, distance);
-					nearest = std::min(nearest, distance);
-				}
-			}
+					return std::abs(position[0] * sky_object_scale) <= largest_world_coordinate &&
+						std::abs(position[1] * sky_object_scale) <= largest_world_coordinate &&
+						std::abs(position[2] * sky_object_scale) <= largest_world_coordinate;
+				});
+			};
 
-			const auto scale = sky_object_range / farthest;
+			auto farthest = 0.0;
+			std::size_t left_out = 0;
 			for (const auto& surface : pending)
 			{
-				add(*surface.mesh, surface.directions, surface.normals, scale);
+				if (!within_range(surface.directions))
+				{
+					left_out++;
+					continue;
+				}
+
+				for (const auto& position : surface.directions)
+				{
+					farthest = std::max(farthest, std::sqrt(position[0] * position[0] + position[1] * position[1] + position[2] * position[2]));
+				}
+
+				add(*surface.mesh, surface.directions, surface.normals, sky_object_scale);
 			}
 
-			ZONETOOL_INFO("iw7: %zu sky surfaces draw at run time (distant models and world surfaces), %.0f to %.0f units from the play "
-				"space (%.0f to %.0f as drawn)", result.size(), pending.empty() ? 0.0 : nearest, pending.empty() ? 0.0 : farthest,
-				pending.empty() ? 0.0 : nearest * scale, pending.empty() ? 0.0 : sky_object_range);
+			if (left_out != 0)
+			{
+				ZONETOOL_WARNING("iw7: %zu sky surfaces reach beyond %.0f units (scaled by %g) and are left out", left_out,
+					largest_world_coordinate, sky_object_scale);
+			}
+
+			ZONETOOL_INFO("iw7: %zu sky surfaces draw at run time (distant models and world surfaces), up to %.0f units from the world "
+				"origin (%.0f as drawn at scale %g)", result.size(), farthest, farthest * sky_object_scale, sky_object_scale);
 			return result;
 		}
 

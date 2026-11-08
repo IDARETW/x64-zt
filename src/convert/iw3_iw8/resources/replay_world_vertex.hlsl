@@ -64,6 +64,12 @@ float Iw3PolygonOffset(uint level, float3 relative, float3 normal) {
     return level * min(viewDistance * (1.0 / 262144.0), .03);
 }
 
+// The scale of the sky's other surfaces (MAP_SKY_OBJECTS): their positions are the world positions times this, so that the
+// sky's distant pieces stay within Replay's position range (export_world: sky_object_scale, keep the two equal).
+#ifdef MAP_SKY_OBJECTS
+static const float kSkyObjectScale = 0.2;
+#endif
+
 Output main(uint id : SV_VertexID) {
 #ifdef GLASS_PANE
     GlassVertex vertex = glassVertices[id];
@@ -105,10 +111,19 @@ Output main(uint id : SV_VertexID) {
     bool sky = (uint)o.metadata.y % 4 == 1;
     bool skyObject = false;
 #ifdef MAP_SKY_OBJECTS
-    // The sky's other surfaces (flag bit 23: an extraction's distant models) keep their directions from the play space
-    // as positions, drawn at infinity as the sky box is.
+    // The sky's other surfaces (flag bit 23: an extraction's distant models and world surfaces) keep their world positions
+    // scaled by kSkyObjectScale, drawn at infinity as the sky box is.
     skyObject = !sky && ((uint)o.metadata.y & 8388608) != 0;
     sky = sky || skyObject;
+#endif
+#ifdef MAP_SKY_OBJECTS
+    // A sky object (skyObject) takes its position from the world, scaled by kSkyObjectScale, and the camera's offset at the
+    // same scale: relative = s (P - camera), the true direction from the camera (its parallax included) at the scaled
+    // distance. Sky surfaces (kind 1) keep their directions as positions, around the camera wherever it is.
+    if (skyObject) {
+        relative.xyz = p + offset * kSkyObjectScale;
+        o.relativePosition = relative.xyz;
+    } else
 #endif
     if (sky) {
         relative.xyz = p;
@@ -144,12 +159,12 @@ Output main(uint id : SV_VertexID) {
     // farther than any geometry.
     if (sky)
         o.position.z = o.position.w * 1e-7;
-    // The sky's other surfaces keep the order of their distances (one scale for all, export_world): z = 1e-7 w + 1.2e-4
-    // gives the reversed depth 1e-7 + 1.2e-4 / w, a perspective depth just in front of the sky box (1e-7): 1.02e-7 at
-    // their farthest (60000 units as drawn), about 1.3e-7 at Breakneck's nearest (3559 units as drawn), far behind the
-    // world (Replay's main view is an infinite reversed projection, depth = zNear / w: BuildInfinitePerspectiveMatrix
-    // 0x1413DD900). With one depth for all, the pieces of Breakneck's black hole flickered against each other in shards
-    // as the GPU's draw order changed.
+    // The sky's other surfaces keep the order of their distances from the camera: z = 1e-7 w + 1.2e-4 gives the reversed
+    // depth 1e-7 + 1.2e-4 / w, a perspective depth just in front of the sky box (1e-7) at any distance. w is the scaled
+    // distance (kSkyObjectScale 0.2): Breakneck's nearest piece (17896 units from the play space, the camera's distance
+    // varies) is 3579 units away here at most, about 1.3e-7, and its farthest (301710 units) 60342, about 1.02e-7, far behind the world (Replay's main view
+    // is an infinite reversed projection, depth = zNear / w: BuildInfinitePerspectiveMatrix 0x1413DD900). With one depth for
+    // all, the pieces of Breakneck's black hole flickered against each other in shards as the GPU's draw order changed.
     if (skyObject)
         o.position.z = o.position.w * 1e-7 + 1.2e-4;
 #ifdef GLASS_PANE

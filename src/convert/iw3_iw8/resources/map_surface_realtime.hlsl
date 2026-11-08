@@ -1327,8 +1327,9 @@ float4 main(Input input) : SV_TARGET0 {
     // Blended non-glass layers (2048) are lit like the surface under them.
     bool decalLayer = kind == 2 && (flags & 2048) != 0;
     bool surfaceLit = kind == 0 || kind == 3 || decalLayer;
-    // The sky's other surfaces (skyPlaced) carry directions from the play space, not camera-relative positions, so the decal
-    // volumes, the baked sun and the local lights (below) take them out of the world's positional lighting.
+    // The sky's other surfaces (skyPlaced) carry their world positions scaled by kSkyObjectScale (camera-relative in the
+    // vertex stage), not world positions, so the decal volumes, the baked sun and the local lights (below) and the probes
+    // take them out of the world's positional lighting.
     if (!skyPlaced && !layer && (kind == 0 || kind == 3))
         ApplyDecals(input.relativePosition, normalize(input.normal), screenUV, input.position.w,
                     texel.rgb, shadingNormal);
@@ -1371,7 +1372,7 @@ float4 main(Input input) : SV_TARGET0 {
     // shadows of moving casters: players, script models and dynamic props.
     float bakedVisibility = -1;
 #ifdef MAP_BAKED_SUN
-    // A sky object's position (skyPlaced) is not camera-relative: its baked sun lookup would sample the wrong place.
+    // A sky object's position (skyPlaced) is scaled by kSkyObjectScale: its baked sun lookup would sample the wrong place.
     if (!skyPlaced && surfaceLit && nativeSun && sunReaches)
         bakedVisibility =
             BakedSunVisibility(input.relativePosition + replayView[4].xyz, normalize(input.normal));
@@ -1532,7 +1533,9 @@ float4 main(Input input) : SV_TARGET0 {
     }
 #endif
     gloss = FilteredGloss(gloss, specularVariance);
-    if (!sky && (flags & 128) == 0 && surfaceLit) {
+    // A sky object's probes (skyPlaced) would look up the probe boxes (world positions) with its scaled, camera-relative
+    // position: the reflection takes the sky's ambient fill instead.
+    if (!skyPlaced && (flags & 128) == 0 && surfaceLit) {
         float3 view = normalize(-input.relativePosition);
         float ndotv = saturate(dot(shadingNormal, view));
         float3 reflected = reflect(-view, shadingNormal);
@@ -1689,7 +1692,8 @@ float4 main(Input input) : SV_TARGET0 {
     // reflection (glass is not a surface-lit kind: "almost invisible"); round
     // 93's map-average level washed panes white; before, the IW3 style used an
     // approximation on the map-average SH.
-    if (kind == 2 && !layer && !decalLayer)
+    // Not for a sky object (skyPlaced): its probe lookup would take the scaled position as a world one.
+    if (kind == 2 && !layer && !decalLayer && !skyPlaced)
     {
         float3 view = normalize(-input.relativePosition);
         float fresnel = pow(saturate(1 - abs(dot(view, shadingNormal))),
