@@ -6413,11 +6413,11 @@ Json BuildRender(const Json &world, const VisibilityGroups &visibility,
             // lightmap UVs lie in the native lightmap (StockLightmapUv).
             // A stock layered material draws its merged layered surfaces (each layer's UV and tangent transform per
             // vertex); its other surfaces keep the generated materials and their overlays.
-            // A lightless surface of a stock-only material (its world material is the stock one, as IW7's world distortion
-            // is: the lenses of eeee7f3) draws the stock layout too, with zero lightmap UVs as shadow-only surfaces do. The
-            // atlas layout (four layers, encoded lightmap words and material parameters) is what the stock technique misreads.
-            const bool stockOnlyLightless = material.stockWorldMaterialIndex && surface.lightmap < 0 &&
-                                            material.worldMaterialIndex == material.stockWorldMaterialIndex;
+            // A lightless surface of a stock distortion material (IW7's world distortion: the lenses of eeee7f3) draws the
+            // stock layout too, with zero lightmap UVs as shadow-only surfaces do. Its atlas layout (four layers, encoded
+            // lightmap words and material parameters) is not the stock distortion technique's layout. IW3 sets no
+            // stockDistortion, so its lightless surfaces keep the atlas layout.
+            const bool stockOnlyLightless = material.stockDistortion && surface.lightmap < 0;
             const bool stock = material.stockWorldMaterialIndex &&
                                (shadowOnly || stockOnlyLightless || (surface.lightmap >= 0 &&
                                    (material.stockLayers ? surface.layerUvs.size() == surface.vertices.size() &&

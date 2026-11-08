@@ -59,6 +59,9 @@ struct MaterialPlan
     // Its stock Replay world material (MW120R_STOCK_WORLD: Replay's own world technique set and images,
     // additionalMaterials index + 1), 0 for none; its lightmapped surfaces draw with it.
     unsigned stockWorldMaterialIndex{};
+    // Set for an IW7 world distortion material (its stock distortion material is stockWorldMaterialIndex): its lightless
+    // surfaces take the stock layout too (iw3_fastfile BuildRender). IW3 materials never set it.
+    bool stockDistortion{};
     // The layer count of its stock layered material (0: a single-layer one): its surfaces carry each layer's UV and
     // tangent transform.
     unsigned stockLayers{};
