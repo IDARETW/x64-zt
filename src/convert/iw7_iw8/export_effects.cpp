@@ -2822,43 +2822,37 @@ iw7_scriptable_fx_stop( part, fx )
 // (ScrCmd_PlaySoundAtPosInternal 0x14126FC20: Scr_Error 2998 for a looping alias, 2997 for an unknown one), which would
 // end this thread before the rest of the state's events. The compatibility names also apply the --style iw8 alias map.
 // A sound at a tag (IW7's Sound event tagName): Replay's script sounds take no tag (ScrCmd_PlaySound 0x14125F210,
-// ScrCmd_PlayLoopSound 0x141260440), so a one-shot plays at the tag's position and a loop plays from a script_origin
-// linked to the tag, deleted when the part leaves the state or the model goes.
+// ScrCmd_PlayLoopSound 0x141260440), so a one-shot plays at the tag's position. A loop always plays from its own
+// script_origin, linked to the tag or to the model, deleted when the part leaves the state or the model goes: Replay
+// keeps one loop index per entity (ScrCmd_PlayLoopSound 0x141260440 writes Entity+35), so a loop on the model would
+// replace the loop of another part and stoploopsound would stop it.
 iw7_scriptable_sound( part, alias, tag )
 {
 	if ( alias == "" )
 		return;
-	if ( isdefined( tag ) && tag != "" && isdefined( self gettagorigin( tag, 1 ) ) )
-	{
-		if ( iw3compat_sound_kind( alias ) == 2 )
-		{
-			source = spawn( "script_origin", self gettagorigin( tag ) );
-			source linkto( self, tag );
-			source iw3compat_playloopsound( alias, 0 );
-			source thread iw7_scriptable_sound_release( self, "death" );
-			source thread iw7_scriptable_sound_release( self, "iw7_part_" + part );
-		}
-		else
-			iw3compat_playsoundatpos( self gettagorigin( tag ), alias );
-		return;
-	}
+	tagged = isdefined( tag ) && tag != "" && isdefined( self gettagorigin( tag, 1 ) );
 	if ( iw3compat_sound_kind( alias ) == 2 )
 	{
-		self iw3compat_playloopsound( alias, 0 );
-		self thread iw7_scriptable_sound_stop( part );
+		origin = self.origin;
+		if ( tagged )
+			origin = self gettagorigin( tag );
+		source = spawn( "script_origin", origin );
+		if ( tagged )
+			source linkto( self, tag );
+		else
+			source linkto( self );
+		source iw3compat_playloopsound( alias, 0 );
+		source thread iw7_scriptable_sound_release( self, "death" );
+		source thread iw7_scriptable_sound_release( self, "iw7_part_" + part );
 		return;
 	}
-	self iw3compat_playsound( alias, 0, 0 );
+	if ( tagged )
+		iw3compat_playsoundatpos( self gettagorigin( tag ), alias );
+	else
+		self iw3compat_playsound( alias, 0, 0 );
 }
 
-iw7_scriptable_sound_stop( part )
-{
-	self endon( "death" );
-	self waittill( "iw7_part_" + part );
-	self stoploopsound();
-}
-
-// self: the loop source of a tagged sound; it goes on the first of its owner's messages.
+// self: the loop source of a sound; it goes on the first of its owner's messages.
 iw7_scriptable_sound_release( owner, message )
 {
 	self endon( "death" );
