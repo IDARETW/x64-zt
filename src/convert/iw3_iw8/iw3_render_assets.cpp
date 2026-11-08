@@ -3018,6 +3018,30 @@ std::map<unsigned, std::uint8_t> TranslucentSortKeys(const std::set<unsigned> &i
     return keys;
 }
 
+// Stock decals (camera region 2) sort within GfxWorld's decal range 10 .. 17, per material: shipped twc/paint_lines_01
+// is 11, misc_carepackage_emp_decals 10, vfx_decal_surface_snow_1_nn 14, construction_bridge_metal_frame_decal 15
+// (stock material headers, info[0x11]). The owned decal path drew every converted decal at one key, so the draw order
+// of IW7's decal sorts (IW3's 9 to 23 after the +2 of the exporter) was left to the engine. Spread the map's distinct
+// decal sorts over the stock range in order, as TranslucentSortKeys does for translucent sorts; a single sort keeps the
+// stock 11.
+std::map<unsigned, std::uint8_t> DecalSortKeys(const std::set<unsigned> &iw3Sorts)
+{
+    constexpr std::size_t kFirst = 10, kLast = 17, kStock = 11;
+    std::map<unsigned, std::uint8_t> keys;
+    if (iw3Sorts.size() == 1)
+    {
+        keys[*iw3Sorts.begin()] = static_cast<std::uint8_t>(kStock);
+        return keys;
+    }
+    std::size_t index = 0;
+    for (const unsigned sort : iw3Sorts)
+    {
+        keys[sort] = static_cast<std::uint8_t>(kFirst + index * (kLast - kFirst) / (iw3Sorts.size() - 1));
+        ++index;
+    }
+    return keys;
+}
+
 bool FoliageName(const std::string &value)
 {
     return std::regex_search(
@@ -7359,6 +7383,18 @@ RenderPlan PrepareRenderAssets(const std::filesystem::path &exportRoot, const Js
         for (const auto &name : neededWorldMaterials)
             if (const auto at = name.find("__layer"); at != std::string::npos)
                 layered.insert(name.substr(0, at));
+        // The sorts of the lit blended decals drawn below as stock decals (the same test as their branch), spread over
+        // the stock decal range by DecalSortKeys.
+        std::set<unsigned> decalSorts;
+        for (const SourceMaterial &source : materials)
+        {
+            if (!neededWorldMaterials.contains(source.name) || plan.materials.at(source.name).kind != SurfaceKind::glass)
+                continue;
+            if (!source.blend && (source.flags & 2048u) && !(source.flags & 128u) &&
+                !(source.flags & (kRevealLayerFlag | kEmissionFlag)) && source.emission == 1 && !layered.contains(source.name))
+                decalSorts.insert(source.sortKey);
+        }
+        const auto decalKeys = DecalSortKeys(decalSorts);
         const Json singleTechset = Json::parse(ResourceText(IDR_IW3_TECHSET_TEMPLATE));
         std::size_t count = 0, layeredCount = 0, decalCount = 0, cutoutCount = 0, emissiveCount = 0,
                     shadowCount = 0, distortionCount = 0;
@@ -7629,6 +7665,13 @@ RenderPlan PrepareRenderAssets(const std::filesystem::path &exportRoot, const Js
                     std::clamp(std::lround(source.replayRevealSharpness.value_or(1.0f) * 255.0f), 0l, 255l));
                 tint[0] = 0x00FFFFFFu | (sharpness << 24);
                 setRow(direct, 0x09, 2, tint);
+                // The decal's own sort within the stock decal range (info[0x11], the sort of stock region 2 materials).
+                if (const auto key = decalKeys.find(source.sortKey); key != decalKeys.end())
+                {
+                    auto info = Unhex(direct.at("info").get<std::string>());
+                    info[0x11] = key->second;
+                    direct["info"] = Hex(info);
+                }
                 setSpecular(direct, 0, 3, source);
                 addMaterial(std::move(direct), source.name, planned);
                 ++decalCount;
