@@ -652,9 +652,11 @@ size_t iw3ToIw8EntityString(const std::string &input, std::string &output,
         for (const KeyValue &pair : entity)
         {
             const std::string key = lowercase(pair.key);
-            // IW3 destructibles, TVs and exploders are driven by the converted
-            // map script's IW3 compatibility layer. Rename their targetnames so
-            // Replay's own destructible/exploder scripts never adopt them.
+            // IW3 destructibles, TVs and exploders (including the exploder
+            // chunks, which setupExploders types by targetname) are driven by the
+            // converted map script's IW3 compatibility layer. Rename their
+            // targetnames so Replay's own destructible/exploder scripts never
+            // adopt them.
             std::string value = pair.value;
             if (key == "targetname")
             {
@@ -662,6 +664,10 @@ size_t iw3ToIw8EntityString(const std::string &input, std::string &output,
                 if (lowered == "destructible" || lowered == "interactive_tv" ||
                     lowered == "exploder")
                     value = "mw120r_" + lowered;
+                else if (lowered == "exploderchunk")
+                    value = "mw120r_exploderchunk";
+                else if (lowered == "exploderchunk visible")
+                    value = "mw120r_exploderchunk_visible";
                 else if (destructible)
                     value = "mw120r_destructible";
                 else if (hqRadio)

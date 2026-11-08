@@ -9,8 +9,8 @@
 // Builtin ids, argument orders and field tokens were checked against the
 // Replay 1.20 builtin tables and handlers. Effects come from common MP zones
 // (loadfx only accepts fx/ or vfx/ names). The converter renames IW3-only
-// targetnames (destructible, interactive_tv, exploder) to mw120r_* so stock
-// Replay scripts never adopt these entities.
+// targetnames (destructible, interactive_tv, exploder, exploderchunk) to mw120r_*
+// so stock Replay scripts never adopt these entities.
 
 iw3compat_noop()
 {
@@ -284,16 +284,34 @@ iw3compat_remove_gameobjects()
 // ---------------------------------------------------------------------------
 // Exploders: IW3 hides the "exploder" (damaged) state until exploder( n ).
 // ---------------------------------------------------------------------------
+// The exploder pieces are the brushes and models with a script_exploder number
+// (IW3 _load setupExploders). The converter renames the targetnames that set
+// their type (maps.cpp): mw120r_exploder (brush_show), mw120r_exploderchunk
+// and mw120r_exploderchunk_visible (brush_throw); every other piece is a
+// normal exploder (brush_delete).
 iw3compat_exploders_init()
 {
-    // IW3 _load setupExploders hides an exploder brush with hide() and
-    // notsolid() until its exploder runs. Exploder chunks are not handled yet
-    // (no brush_throw port).
-    level.mw120r_exploders = getentarray( "mw120r_exploder", "targetname" );
-    foreach ( piece in level.mw120r_exploders )
+    level.mw120r_exploder_pieces = [];
+    foreach ( classname in strtok( "script_brushmodel script_model", " " ) )
     {
-        piece hide();
-        piece notsolid();
+        foreach ( piece in getentarray( classname, "classname" ) )
+        {
+            if ( isdefined( piece.script_prefab_exploder ) )
+                piece.script_exploder = piece.script_prefab_exploder;
+            if ( !isdefined( piece.script_exploder ) )
+                continue;
+            level.mw120r_exploder_pieces[level.mw120r_exploder_pieces.size] = piece;
+            // setupExploders hides an "exploder" piece and an "exploderchunk"
+            // piece with hide() and notsolid() until its exploder runs.
+            if ( iw3compat_exploder_is_type( piece, "mw120r_exploder" ) || iw3compat_exploder_is_type( piece, "mw120r_exploderchunk" ) )
+            {
+                piece hide();
+                piece notsolid();
+            }
+            // Its own records: the effect, fire effect, sound, damage and
+            // earthquake that setupExploders attaches to every exploder entity.
+            iw3compat_exploder_record( piece );
+        }
     }
 
     // IW3 _load: a trigger with a script_exploder runs its exploder when it
@@ -340,28 +358,119 @@ iw3compat_exploder( number )
         }
     }
 
-    if ( !isdefined( level.mw120r_exploders ) )
+    if ( !isdefined( level.mw120r_exploder_pieces ) )
         return;
 
-    // IW3 _utility brush_show: show() and solid() for the exploder's own pieces.
-    foreach ( piece in level.mw120r_exploders )
+    // IW3 _utility activate_exploder: each piece of this number runs its own
+    // exploder type, after its script_delay (brush_show, brush_throw or
+    // brush_delete). Each runs in its own thread, as the delays do in IW3.
+    foreach ( piece in level.mw120r_exploder_pieces )
     {
-        if ( isdefined( piece.script_exploder ) && ( "" + piece.script_exploder ) == number )
-        {
-            piece show();
-            piece solid();
-        }
+        if ( !isdefined( piece ) || !isdefined( piece.script_exploder ) || ( "" + piece.script_exploder ) != number )
+            continue;
+        if ( iw3compat_exploder_is_type( piece, "mw120r_exploder" ) )
+            piece thread iw3compat_exploder_show( piece );
+        else if ( iw3compat_exploder_is_type( piece, "mw120r_exploderchunk" ) || iw3compat_exploder_is_type( piece, "mw120r_exploderchunk_visible" ) )
+            piece thread iw3compat_exploderchunk_throw( piece );
+        else
+            piece thread iw3compat_exploder_delete( piece );
     }
+}
 
-    models = getentarray( "script_model", "classname" );
-    foreach ( model in models )
+iw3compat_exploder_is_type( piece, type )
+{
+    return isdefined( piece.targetname ) && piece.targetname == type;
+}
+
+// IW3 _utility brush_show: after the delay, show() and solid().
+iw3compat_exploder_show( piece )
+{
+    if ( isdefined( piece.script_delay ) )
+        wait piece.script_delay;
+    if ( !isdefined( piece ) )
+        return;
+    piece show();
+    piece solid();
+}
+
+// IW3 _utility brush_delete: after the delay, the piece is removed (a brush
+// model or a script model, with its collision).
+iw3compat_exploder_delete( piece )
+{
+    if ( isdefined( piece.script_delay ) )
+        wait piece.script_delay;
+    if ( isdefined( piece ) )
+        piece delete();
+}
+
+// IW3 _utility brush_throw: the chunk shows and flies from its origin toward
+// its target entity. With script_physics it is launched at the target's own
+// target (scaled by script_physics); else it moves and spins for 12 s, and is
+// removed 6 s later. With no target it is removed at once.
+iw3compat_exploderchunk_throw( piece )
+{
+    if ( isdefined( piece.script_delay ) )
+        wait piece.script_delay;
+    if ( !isdefined( piece ) )
+        return;
+    ent = undefined;
+    if ( isdefined( piece.target ) )
+        ent = getent( piece.target, "targetname" );
+    if ( !isdefined( ent ) )
     {
-        if ( !isdefined( model.script_exploder ) || ( "" + model.script_exploder ) != number )
-            continue;
-        if ( isdefined( model.targetname ) && model.targetname == "mw120r_exploder" )
-            continue;
-        model delete();
+        piece delete();
+        return;
     }
+    piece show();
+    startorg = piece.origin;
+    temp = ent.origin - startorg;
+    if ( isdefined( piece.script_physics ) )
+    {
+        target = undefined;
+        if ( isdefined( ent.target ) )
+            target = getent( ent.target, "targetname" );
+        if ( !isdefined( target ) )
+        {
+            contact = startorg;
+            throwvec = ent.origin;
+        }
+        else
+        {
+            contact = ent.origin;
+            diff = target.origin - ent.origin;
+            throwvec = ( diff[0] * piece.script_physics, diff[1] * piece.script_physics, diff[2] * piece.script_physics );
+        }
+        piece physicslaunchserver( contact, throwvec );
+        return;
+    }
+    piece rotatevelocity( temp, 12 );
+    piece movegravity( temp, 12 );
+    wait 6;
+    if ( isdefined( piece ) )
+        piece delete();
+}
+
+// The record setupExploders creates for an exploder entity: createExploder with
+// its script_fxid, and the fields of its effect, fire effect, sound, damage and
+// earthquake, which iw3compat_exploder_play runs when the exploder runs.
+iw3compat_exploder_record( piece )
+{
+    ent = iw3compat_createexploder( piece.script_fxid );
+    ent.v["origin"] = piece.origin;
+    if ( isdefined( piece.angles ) )
+        ent.v["angles"] = piece.angles;
+    ent.v["delay"] = 0;
+    if ( isdefined( piece.script_delay ) )
+        ent.v["delay"] = piece.script_delay;
+    ent.v["firefx"] = piece.script_firefx;
+    ent.v["soundalias"] = piece.script_soundalias;
+    ent.v["damage"] = piece.script_damage;
+    ent.v["damage_radius"] = piece.script_radius;
+    ent.v["repeat"] = piece.script_repeat;
+    ent.v["delay_min"] = piece.script_delay_min;
+    ent.v["delay_max"] = piece.script_delay_max;
+    ent.v["earthquake"] = piece.script_earthquake;
+    ent.v["exploder"] = piece.script_exploder;
 }
 
 // ---------------------------------------------------------------------------
