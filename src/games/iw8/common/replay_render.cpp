@@ -1376,6 +1376,12 @@ Mesh Load(const std::string &path, const nlohmann::json &j)
             pane.halfWidth = source.at("halfWidth").get<float>();
             pane.halfHeight = source.at("halfHeight").get<float>();
             pane.halfThickness = source.at("halfThickness").get<float>();
+            // IW7 panes carry their definition's fields; IW3 panes keep the defaults.
+            pane.color = source.value("color", pane.color);
+            pane.highMipRadiusInvSq = source.value("highMipRadiusInvSq", pane.highMipRadiusInvSq);
+            pane.shatteredHighMipRadiusInvSq = source.value("shatteredHighMipRadiusInvSq", pane.shatteredHighMipRadiusInvSq);
+            pane.numCrackRings = source.value("numCrackRings", pane.numCrackRings);
+            pane.supportMask = source.value("supportMask", pane.supportMask);
             const float quaternionLength = std::inner_product(
                 pane.quaternion.begin(), pane.quaternion.end(), pane.quaternion.begin(), 0.0f);
             if (std::abs(quaternionLength - 1.0f) > 0.001f || pane.halfWidth < 0.125f ||

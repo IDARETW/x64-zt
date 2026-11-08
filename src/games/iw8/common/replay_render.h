@@ -197,6 +197,13 @@ struct GlassPane
     float halfWidth{};
     float halfHeight{};
     float halfThickness{};
+    // FxGlassDef.color, highMipRadiusInvSq, shatteredHighMipRadiusInvSq and numCrackRings, and the piece's supportMask.
+    // The defaults are those of the IW3 panes (the colour white, the mp_backlot2 values, support of every pane).
+    uint32_t color{0xFFFFFFFFu};
+    float highMipRadiusInvSq{0.00015481660375371575f};
+    float shatteredHighMipRadiusInvSq{0.6341288f};
+    int32_t numCrackRings{-1};
+    uint32_t supportMask{0xF0000000u};
 };
 // GfxSModelSurfMatIndirection.cullType classes of the GPU triangle/cluster
 // culling (stock mp_shipment survey of 1473 surfaces, 2026-10-16): 0xEF opaque

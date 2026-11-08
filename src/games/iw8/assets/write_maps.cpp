@@ -100,7 +100,8 @@ void emitFxMapBody(ZoneWriter &zw, const char *assetName, const replayrender::Me
         std::array<uint8_t, 120> definition{};
         stampf(definition.data(), 0, pane.halfThickness);
         std::memcpy(definition.data() + 4, pane.texVecs.data(), sizeof(pane.texVecs));
-        stamp32(definition.data(), 0x14, UINT32_MAX);
+        // FxGlassDef.color (white for the IW3 panes).
+        stamp32(definition.data(), 0x14, pane.color);
         const auto material = zw.assetAlias(ASSET_TYPE_MATERIAL, pane.material);
         stamp64(definition.data(), 0x18, material);
         stamp64(definition.data(), 0x20,
@@ -111,12 +112,11 @@ void emitFxMapBody(ZoneWriter &zw, const char *assetName, const replayrender::Me
             stamp64(definition.data(), offset, PTR_FOLLOWS);
         for (const size_t offset : {0x50u, 0x58u, 0x60u})
             stamp64(definition.data(), offset, PTR_FOLLOWS);
-        // Shipped FxGlassDef values (mp_backlot2): highMipRadiusInvSq, the
-        // shattered one, and numCrackRings as a 32-bit -1 (engine default).
-        // A single 0xFF byte read as 255 crack rings.
-        stampf(definition.data(), 0x68, 0.00015481660375371575f);
-        stampf(definition.data(), 0x6C, 0.6341288f);
-        stamp32(definition.data(), 0x70, UINT32_MAX);
+        // FxGlassDef.highMipRadiusInvSq, shatteredHighMipRadiusInvSq and numCrackRings (the IW3 panes take the shipped
+        // mp_backlot2 values, with numCrackRings as a 32-bit -1, the engine default; a single 0xFF byte read as 255 rings).
+        stampf(definition.data(), 0x68, pane.highMipRadiusInvSq);
+        stampf(definition.data(), 0x6C, pane.shatteredHighMipRadiusInvSq);
+        stamp32(definition.data(), 0x70, static_cast<uint32_t>(pane.numCrackRings));
         const auto found = std::find(definitions.begin(), definitions.end(), definition);
         const auto index = static_cast<size_t>(found - definitions.begin());
         if (found == definitions.end())
@@ -208,7 +208,8 @@ void emitFxMapBody(ZoneWriter &zw, const char *assetName, const replayrender::Me
         stampf(state, 0x1C,
                std::sqrt(pane.halfWidth * pane.halfWidth + pane.halfHeight * pane.halfHeight));
         std::memcpy(state + 0x20, pane.texCoordOrigin.data(), sizeof(pane.texCoordOrigin));
-        stamp32(state, 0x28, 0xF0000000u);
+        // FxGlassInitPieceState.supportMask (every pane of the IW3 panes).
+        stamp32(state, 0x28, pane.supportMask);
         stampf(state, 0x2C, pane.halfWidth * pane.halfHeight * 8.0f);
         state[0x30] = definitionIndices[index];
         state[0x31] = 4;
