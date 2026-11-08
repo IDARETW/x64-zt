@@ -6,6 +6,12 @@
 #include <game_mode.hpp>
 #include <utils/io.hpp>
 
+namespace zonetool::convert::iw3_iw8
+{
+	void convert_extraction(const std::filesystem::path& zone_path, const std::filesystem::path& extraction,
+		const zone_conversion& conversion);
+}
+
 namespace zonetool::cli
 {
 	namespace
@@ -298,6 +304,55 @@ namespace zonetool::cli
 		}
 
 		settings.game->build_zone(settings.zone_folder(), args.front());
+	}
+
+	void build_extraction(const settings& settings, const std::span<const std::string> args)
+	{
+		constexpr std::string_view usage =
+			"buildextraction <extraction folder> --map <id> --replay <game_dx12_ship_replay.exe> [--metadata <json>] [--style iw3|iw8] [--acts <acts.exe>] [--output <folder>]";
+
+		if (settings.game->name != "iw8")
+		{
+			std::cout << "buildextraction is only supported for -game iw8\n";
+			return;
+		}
+
+		if (args.empty() || args.size() % 2 == 0)
+		{
+			std::cout << std::format("usage: {}\n", usage);
+			return;
+		}
+
+		std::unordered_map<std::string, std::string> options;
+		for (auto i = 1u; i < args.size(); i += 2)
+		{
+			if (!args[i].starts_with("--"))
+			{
+				std::cout << std::format("usage: {}\n", usage);
+				return;
+			}
+
+			options[args[i].substr(2)] = args[i + 1];
+		}
+
+		if (!options.contains("map") || !options.contains("replay"))
+		{
+			std::cout << std::format("usage: {}\n", usage);
+			return;
+		}
+
+		const std::filesystem::path extraction = args.front();
+		const auto map = options.at("map");
+
+		zone_conversion conversion{};
+		conversion.source_game_path = settings.game_path;
+		conversion.target_game_path = settings.game_path;
+		conversion.output_folder = options.contains("output") ? options.at("output") : std::string("output");
+		options.erase("output");
+		conversion.options = std::move(options);
+
+		// The extraction replaces the .ff input, so the zone path only names the map.
+		convert::iw3_iw8::convert_extraction(extraction / (map + ".ff"), extraction, conversion);
 	}
 
 	void refresh_zone(const settings& settings, const std::span<const std::string> args)

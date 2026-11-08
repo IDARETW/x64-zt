@@ -10600,8 +10600,8 @@ void AddReplayTemplateEntities(CollisionData &collision, Json &render, std::stri
 PreparedMap PrepareFastfile(const ImportOptions &options)
 {
     std::error_code error;
-    if (!std::filesystem::is_regular_file(options.fastfile, error) ||
-        options.fastfile.extension() != ".ff")
+    if (options.extraction.empty() &&
+        (!std::filesystem::is_regular_file(options.fastfile, error) || options.fastfile.extension() != ".ff"))
     {
         throw std::runtime_error("IW3 input must be a readable .ff file");
     }
@@ -10815,9 +10815,7 @@ PreparedMap PrepareFastfile(const ImportOptions &options)
     const auto skeletonRoot = std::getenv("IW8_ZONETOOL_NO_EXTRACT_CACHE") && !external
                                   ? result.scratch / "skeleton"
                                   : cacheDirectory / "skeleton";
-    if (external && !std::filesystem::is_regular_file(skeletonRoot / "complete", error))
-        throw std::runtime_error("the extraction at " + cacheDirectory.string() + " has no complete skeleton export");
-    if (!std::filesystem::is_regular_file(skeletonRoot / "complete", error))
+    if (!external && !std::filesystem::is_regular_file(skeletonRoot / "complete", error))
     {
         std::error_code skeletonError;
         std::filesystem::remove_all(skeletonRoot, skeletonError);
