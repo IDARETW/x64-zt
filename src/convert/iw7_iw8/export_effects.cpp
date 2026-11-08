@@ -3823,7 +3823,8 @@ iw7_first_state( name, part, state )
 			std::string calls;
 			for (const auto& [targetname, kind] : output.scriptable_destructibles)
 			{
-				calls += std::format("\tiw7_destructible( \"{}\", \"{}\", {} );\n", targetname, kind.dead_model, kind.health);
+				calls += std::format("\tiw7_destructible( \"{}\", \"{}\", {}, {} );\n", targetname, kind.dead_model,
+					kind.removes ? 1 : 0, kind.health);
 				for (const auto& effect : kind.effects)
 				{
 					effects.try_emplace(effect.effect, effect.effect);
@@ -3841,11 +3842,11 @@ iw7_first_state( name, part, state )
 			start_thread("iw7_destructibles");
 			map_script += "\n// The scriptables that break: IW7 swaps their model, plays their effects and sounds when their health runs out.\n"
 				"iw7_destructibles()\n{\n" + calls + "}\n" + std::string(R"gsc(
-iw7_destructible( name, model, health )
+iw7_destructible( name, model, removes, health )
 {
     pieces = getentarray( name, "targetname" );
     foreach ( piece in pieces )
-        piece thread iw7_destructible_think( name, model, health );
+        piece thread iw7_destructible_think( name, model, removes, health );
 }
 
 iw7_destructible_fx( name, effect, tag, use_tag_angles )
@@ -3877,7 +3878,7 @@ iw7_destructible_sound( name, alias, tag )
     level.iw7_break_sounds[name] = list;
 }
 
-iw7_destructible_think( name, model, health )
+iw7_destructible_think( name, model, removes, health )
 {
     self endon( "death" );
     self.maxhealth = 1000000;
@@ -3904,8 +3905,11 @@ iw7_destructible_think( name, model, health )
         foreach ( sound in level.iw7_break_sounds[name] )
             self iw7_destructible_play_sound( sound );
     }
-    if ( model == "" )
-        self delete();
+    if ( removes )
+    {
+        self hide();
+        self notsolid();
+    }
 }
 
 // An effect at its tag, with the tag's angles when the PFX takes them (the piece's origin otherwise; identity orientation).

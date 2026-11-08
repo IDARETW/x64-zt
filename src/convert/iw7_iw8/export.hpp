@@ -108,7 +108,7 @@ namespace zonetool::convert::iw7_iw8
 		std::vector<scriptable_effect> scriptable_effects;
 
 		// The kinds of placed scriptables that break (cups, bottles, screens): a health state, then a state that swaps the model
-		// (none: the piece goes away), plays effects and a sound. Their instances are script models of this targetname, and the
+		// (an empty model: the piece goes away; no model event: it stays), plays effects and sounds. Their instances are script models of this targetname, and the
 		// map script breaks them when they took the health in damage.
 		struct scriptable_destructible
 		{
@@ -134,6 +134,9 @@ namespace zonetool::convert::iw7_iw8
 
 			std::string targetname;
 			std::string dead_model;
+			// The broken state sets a model that is no model (IW7's empty Model event): the piece goes away, hidden and not
+			// solid, as iw7_scriptable_model does. A break without any Model event keeps the piece and its model.
+			bool removes{};
 			// Every effect and sound of the broken state, in event order.
 			std::vector<break_effect> effects;
 			std::vector<break_sound> sounds;
