@@ -12829,6 +12829,7 @@ PreparedMap PrepareFastfile(const ImportOptions &options)
         std::vector<NegotiationBegin> negotiationBegins;
         std::unordered_map<std::string, iw8::navigation::Vec3> negotiationEnds;
         std::size_t unsupportedTraversals = 0;
+        std::size_t incompleteTraversals = 0;
         const auto field = [](const EntityFields &entity, const char *key) {
             const auto found = entity.find(key);
             return found == entity.end() ? std::string{} : found->second;
@@ -12857,6 +12858,8 @@ PreparedMap PrepareFastfile(const ImportOptions &options)
                 else if (!animscript.empty() && !field(entity, "target").empty())
                     negotiationBegins.push_back(
                         {ParseVector(origin->second), field(entity, "target"), animscript});
+                else
+                    ++incompleteTraversals;
             }
             else if (name == "node_negotiation_end" && !field(entity, "targetname").empty())
                 negotiationEnds.emplace(field(entity, "targetname"), ParseVector(origin->second));
@@ -12872,10 +12875,10 @@ PreparedMap PrepareFastfile(const ImportOptions &options)
         }
         zt::info("iw3: navigation source has %zu hulls, %zu triangles, %zu pathnode markers, "
                  "%zu spawns and %zu traversals (%zu IW7-only wall runs/boost jumps, %zu without an end "
-                 "node left out)",
+                 "node, %zu without an animscript or target left out)",
                  navigation.hulls.size(), navigation.triangles.size(), navigation.pathNodes.size(),
                  navigation.spawns.size(), navigation.traversals.size(), unsupportedTraversals,
-                 unpairedTraversals);
+                 unpairedTraversals, incompleteTraversals);
     }
     result.footsteps = result.scratch / "footsteps.native";
     WriteFootsteps(result.footsteps, brushModels, renderPlan);
