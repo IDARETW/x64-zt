@@ -7379,8 +7379,10 @@ RenderPlan PrepareRenderAssets(const std::filesystem::path &exportRoot, const Js
                                 return static_cast<unsigned>(index);
                         throw std::runtime_error("stock cut-out material has no texture slot " + std::to_string(slot));
                     };
+                    // The normal map is the identity, as the lit cut-out's is.
                     for (auto &texture : direct.at("textures"))
-                        texture["image"] = "$black";
+                        texture["image"] = Unhex(texture.at("header").get<std::string>()).at(0) == 0x09 ? "$identitynormalmap"
+                                                                                                        : "$black";
                     stockColour(direct, channelOf(0x00), source);
                     alphaMapOf(direct, channelOf(0x1B), source, source.flags & 24u);
                 }
