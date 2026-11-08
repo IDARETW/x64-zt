@@ -24,9 +24,9 @@ namespace zonetool::iw8
 		constexpr std::string_view manifest_magic = "x64-zt refresh 1";
 
 		// The live-refresh set, the types that the native replacement fixes up in place. DB_ReplaceHeadAssetEntry
-		// 0x1411AEC50 resolves stub materials (11) and sets byte_14D11ED44 for shaders 14..17, which pauses the PSO queue;
-		// DB_FixupMaterialPipelineStatesPostLoad 0x1411AA3F0 then rebuilds the pipeline states of techsets (18). Image (19)
-		// has its own move handler, which releases the old resource.
+		// 0x1411AEC50 resolves stub materials (11) and sets byte_14D11ED44 for shaders 14..17. The pipeline states of
+		// techsets (18) are then rebuilt by DB_FixupMaterialPipelineStatesPostLoad 0x1411AA3F0 while that byte is set.
+		// Image (19) has its own move handler, which releases the replaced image's resource when the move asks for it.
 		//
 		// Excluded, and reported by refresh_zone instead of replaced:
 		// - Compute (12) and library (13) shaders: DB_ReplaceHeadAssetEntry gates the shader branch on (type - 14) <= 3, so
