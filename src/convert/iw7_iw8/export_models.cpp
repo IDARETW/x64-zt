@@ -532,6 +532,8 @@ namespace zonetool::convert::iw7_iw8
 				mesh_vertex converted{};
 				std::copy_n(vertex.xyz, 3, converted.position.begin());
 				converted.normal = unpack_unit_vec(vertex.normal);
+				converted.tangent = unpack_unit_vec(vertex.tangent);
+				converted.binormal_sign = (vertex.tangent.packed >> 30) ? 1.0f : -1.0f;
 				PackedVec::Vec2UnpackTexCoords(vertex.texCoord.packed, converted.uv.data());
 				if constexpr (requires { vertex.color.array[3]; })
 				{
