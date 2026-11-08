@@ -2780,6 +2780,9 @@ SourceMaterial ReadMaterial(const std::filesystem::path &root,
         throw std::runtime_error("IW3 material has no color map: " + name);
     // Decals offset their lit pass (IW3 technique 7). Every IW3 material also
     // carries an offset2 debug state, so only the lit pass's state counts.
+    // An IW7 material whose decal bias comes from an unlit state (no lit technique, so no state 7) carries
+    // iw7DecalBias from the IW7 exporter (export_materials: decal_offset); the lit state below reads the others.
+    material.depthBias = source.value("iw7DecalBias", false);
     if (const auto entries = source.find("stateBitsEntry");
         entries != source.end() && entries->is_array() && entries->size() > 7)
     {
@@ -2789,7 +2792,7 @@ SourceMaterial ReadMaterial(const std::filesystem::path &root,
         {
             const std::string offset =
                 states.at(litState).value("polygonOffset", std::string("offset0"));
-            material.depthBias = offset != "offset0" && offset != "offsetShadowmap";
+            material.depthBias = material.depthBias || (offset != "offset0" && offset != "offsetShadowmap");
         }
     }
     // IW3 layers world decals (sorts "decal - bottom 1" 9 to "decal - top"
