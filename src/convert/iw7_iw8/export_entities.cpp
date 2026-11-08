@@ -17,6 +17,52 @@ namespace zonetool::convert::iw7_iw8
 {
 	namespace
 	{
+		// IW7's brush physics-asset key (0xCAF9) names dummy physics assets. The package defines the inline assets
+		// scriptbrushmodeldummydefault and triggermodelstaticdummydefault (map_zone.h emitPhysicsAssetReference), and
+		// stock mp_shipment defines triggermodeldummydefault, scriptbrushmodeldummydefault and triggermodelstaticdummydefault.
+		// ScriptBrushModelDummyFixed and ScriptBrushModelDummy_MPAirdropCrate are in no checked stock zone (mp_shipment,
+		// common, common_mp, global, global_mp, global_stream_mp), and triggermodeldummydefault is in none but mp_shipment.
+		// Trigger physics comes from the inline trigger model (CM_GetTriggerModel +16, G_Utils_GetPhysicsAsset), which the
+		// package always gives triggermodelstaticdummydefault, so a trigger keeps the name it had before 0xCAF9 was named.
+		// A script brush takes the dummy its map zone already gives script brush models.
+		std::string_view physasset_replacement(const std::string_view value)
+		{
+			static constexpr std::array<std::pair<std::string_view, std::string_view>, 3> replacements{{
+				{"triggermodeldummydefault", "TriggerModelStaticDummyDefault"},
+				{"ScriptBrushModelDummyFixed", "scriptbrushmodeldummydefault"},
+				{"ScriptBrushModelDummy_MPAirdropCrate", "scriptbrushmodeldummydefault"},
+			}};
+			for (const auto& [name, replacement] : replacements)
+			{
+				if (value == name)
+				{
+					return replacement;
+				}
+			}
+			return value;
+		}
+
+		// The suffix of a key line (` "value"`) with its physasset value replaced when Replay's zones lack the value.
+		std::string physasset_suffix(const std::string_view suffix, std::size_t& replaced)
+		{
+			const auto open = suffix.find('"');
+			const auto close = suffix.rfind('"');
+			if (open == std::string_view::npos || close <= open)
+			{
+				return std::string(suffix);
+			}
+
+			const auto value = suffix.substr(open + 1, close - open - 1);
+			const auto replacement = physasset_replacement(value);
+			if (replacement == value)
+			{
+				return std::string(suffix);
+			}
+
+			++replaced;
+			return std::string(suffix.substr(0, open + 1)) + std::string(replacement) + std::string(suffix.substr(close));
+		}
+
 		// IW7 entity strings name their keys by script string token ("157" is classname); the IW3 pipeline reads names.
 		std::string with_key_names(const std::string& entities)
 		{
@@ -45,6 +91,7 @@ namespace zonetool::convert::iw7_iw8
 			std::string result;
 			result.reserve(entities.size() * 2);
 			std::size_t start = 0;
+			std::size_t physasset_replaced = 0;
 			while (start < entities.size())
 			{
 				const auto end = std::min(entities.find('\n', start), entities.size());
@@ -65,7 +112,8 @@ namespace zonetool::convert::iw7_iw8
 					const auto found = names.find(id);
 					result += found != names.end() ? std::format("\"{}\"", found->second)
 						: std::format("\"_id_{:X}\"", id);
-					result += line.substr(digits);
+					result += id == 0xCAF9 ? physasset_suffix(line.substr(digits), physasset_replaced)
+						: std::string(line.substr(digits));
 				}
 				else
 				{
@@ -76,6 +124,11 @@ namespace zonetool::convert::iw7_iw8
 				start = end + 1;
 			}
 
+			if (physasset_replaced)
+			{
+				ZONETOOL_INFO("iw7: %zu physasset values name a dummy that the package does not define; they take its replacement",
+					physasset_replaced);
+			}
 			return result;
 		}
 
