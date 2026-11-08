@@ -393,7 +393,7 @@ namespace zonetool::convert::iw7_iw8
 		std::optional<std::vector<std::uint32_t>> layer_transforms;
 	};
 
-	// A piece of IW7's breakable glass (FxGlassInitPieceState and its FxGlassDef): a rectangle in the world, whose
+	// A piece of IW7's breakable glass (FxGlassInitPieceState and its FxGlassDef): an outline in the world, whose
 	// brush model (glass_brush_model) carries its bounds and whose pipeline entry is the native pane built from the
 	// fields below, in Replay's FxGlassDef and piece-state units.
 	struct glass_pane
@@ -407,17 +407,28 @@ namespace zonetool::convert::iw7_iw8
 		iw7::Material* material{};
 		// FxGlassDef.materialShattered (the intact material when the definition names none).
 		iw7::Material* material_shattered{};
-		// The rectangle's centre (the origin of the native pane), its frame and half extents in world units.
+		// The native pane's origin is its piece's frame origin (IW7's outline and texture origin are relative to it),
+		// with its frame and the bounding half extents of the outline in world units.
 		std::array<float, 3> origin{};
 		std::array<float, 4> quaternion{};
 		float half_width{};
 		float half_height{};
+		// The centre of the outline's bounding rectangle, in world units (the box of a pane without collision).
+		std::array<float, 3> centre{};
 		// FxGlassDef.halfThickness, as the definition authors it.
 		float half_thickness{};
-		// FxGlassDef.texVecs in Replay's layout (the gradients of u and v per 1/32 unit) and the texture coordinates at
-		// the centre of the pane.
+		// FxGlassDef.texVecs in Replay's layout (the gradients of u and v per 1/32 unit).
 		std::array<float, 4> tex_vecs{};
+		// FxGlassInitPieceState.texCoordOrigin, as IW7 keeps it (relative to the origin).
 		std::array<float, 2> tex_coord_origin{};
+		// FxGlassInitPieceState's outline: vertex_count vertices, then fan_count fan units (FxGlassGeometryData, four
+		// bytes each), in 1/32 units from the origin, as IW7 stores them.
+		std::vector<std::array<std::int16_t, 2>> geometry;
+		std::uint32_t vertex_count{};
+		std::uint32_t fan_count{};
+		// FxGlassInitPieceState.areaX2 and radius, as IW7 keeps them.
+		float area_x2{};
+		float radius{};
 		// FxGlassDef.color (packed RGBA), FxGlassDef.highMipRadiusInvSq / shatteredHighMipRadiusInvSq / numCrackRings
 		// and the piece's supportMask.
 		std::uint32_t color{0xFFFFFFFFu};

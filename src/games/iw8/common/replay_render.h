@@ -204,6 +204,14 @@ struct GlassPane
     float shatteredHighMipRadiusInvSq{0.6341288f};
     int32_t numCrackRings{-1};
     uint32_t supportMask{0xF0000000u};
+    // The outline of an IW7 pane, as IW7 stores it: vertexCount vertices, then fanDataCount four-byte fan units, in
+    // 1/32 units from the origin, with FxGlassInitPieceState.areaX2 and radius. Without an outline the pane is the
+    // rectangle of its half extents (the IW3 panes).
+    std::vector<std::array<int16_t, 2>> geometry;
+    uint32_t vertexCount{};
+    uint32_t fanDataCount{};
+    float areaX2{};
+    float radius{};
 };
 // GfxSModelSurfMatIndirection.cullType classes of the GPU triangle/cluster
 // culling (stock mp_shipment survey of 1473 surfaces, 2026-10-16): 0xEF opaque

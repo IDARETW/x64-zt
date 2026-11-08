@@ -2270,6 +2270,13 @@ namespace zonetool::convert::iw7_iw8
 			// The shards of a broken pane draw their own material (FxGlassDef.materialShattered).
 			const auto shattered = output.add_material(source, pane.material_shattered);
 			output.glass_materials.insert(shattered);
+			auto geometry = json::array();
+			for (const auto& unit : pane.geometry)
+			{
+				geometry.push_back(unit[0]);
+				geometry.push_back(unit[1]);
+			}
+
 			glass_json.push_back({
 				{"model", brush_models.size()},
 				{"material", material},
@@ -2278,9 +2285,15 @@ namespace zonetool::convert::iw7_iw8
 				{"tex_coord_origin", pane.tex_coord_origin},
 				{"origin", pane.origin},
 				{"quaternion", pane.quaternion},
+				{"centre", pane.centre},
 				{"half_width", pane.half_width},
 				{"half_height", pane.half_height},
 				{"half_thickness", pane.half_thickness},
+				{"geometry", std::move(geometry)},
+				{"vertex_count", pane.vertex_count},
+				{"fan_count", pane.fan_count},
+				{"area_x2", pane.area_x2},
+				{"radius", pane.radius},
 				{"color", pane.color},
 				{"high_mip_radius_inv_sq", pane.high_mip_radius_inv_sq},
 				{"shattered_high_mip_radius_inv_sq", pane.shattered_high_mip_radius_inv_sq},

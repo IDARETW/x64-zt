@@ -1394,6 +1394,29 @@ Mesh Load(const std::string &path, const nlohmann::json &j)
             pane.shatteredHighMipRadiusInvSq = source.value("shatteredHighMipRadiusInvSq", pane.shatteredHighMipRadiusInvSq);
             pane.numCrackRings = source.value("numCrackRings", pane.numCrackRings);
             pane.supportMask = source.value("supportMask", pane.supportMask);
+            // IW7 panes carry their outline: vertexCount vertices, then fanDataCount fan units (FxGlassGeometryData, four
+            // bytes each), as Replay's FxGlassInitPieceState stores them (vertCount, fanDataCount).
+            if (source.contains("geometry"))
+            {
+                const auto &units = source.at("geometry");
+                pane.vertexCount = source.at("vertexCount").get<uint32_t>();
+                pane.fanDataCount = source.at("fanDataCount").get<uint32_t>();
+                if (!units.is_array() || units.size() % 2 != 0 || units.size() / 2 != size_t(pane.vertexCount) + pane.fanDataCount ||
+                    pane.vertexCount < 3 || pane.vertexCount > 255 || pane.fanDataCount > 255)
+                    throw std::runtime_error("Invalid Replay glass-pane outline");
+                for (size_t k = 0; k < units.size(); k += 2)
+                {
+                    const auto x = units.at(k).get<int64_t>();
+                    const auto y = units.at(k + 1).get<int64_t>();
+                    if (x < INT16_MIN || x > INT16_MAX || y < INT16_MIN || y > INT16_MAX)
+                        throw std::runtime_error("Invalid Replay glass-pane outline coordinate");
+                    pane.geometry.push_back({int16_t(x), int16_t(y)});
+                }
+                pane.areaX2 = source.at("areaX2").get<float>();
+                pane.radius = source.at("radius").get<float>();
+                if (!std::isfinite(pane.areaX2) || pane.areaX2 < 0.0f || !std::isfinite(pane.radius) || pane.radius < 0.0f)
+                    throw std::runtime_error("Invalid Replay glass-pane area or radius");
+            }
             const float quaternionLength = std::inner_product(
                 pane.quaternion.begin(), pane.quaternion.end(), pane.quaternion.begin(), 0.0f);
             if (std::abs(quaternionLength - 1.0f) > 0.001f || pane.halfWidth < 0.125f ||
