@@ -5248,9 +5248,13 @@ void BuildPreparedStaticModels(const SourceStaticModels &source, const RenderPla
             axis = rotation;
             ++unrotatedInstances;
         }
+        // An IW7 NO_CAST_SHADOW placement casts into no local light either. An authored empty membership excludes it
+        // from every light (replay_locallights.cpp, authored branch); absent membership would fall back to bounds.
+        const std::optional<std::vector<std::uint32_t>> localShadowLights =
+            sourceInstance.castsShadow ? sourceInstance.shadowLights : std::optional<std::vector<std::uint32_t>>{std::vector<std::uint32_t>{}};
         staticModels.instances.push_back(
             {static_cast<unsigned>(sourceInstance.model), sourceInstance.origin,
-             QuaternionFromBasis(axis[0], axis[1], axis[2]), sourceInstance.scale, sourceInstance.shadowLights,
+             QuaternionFromBasis(axis[0], axis[1], axis[2]), sourceInstance.scale, localShadowLights,
              sourceInstance.lodScaleIndex, sourceInstance.castsShadow});
         if (collisionModels && collisionModelIndices.at(sourceInstance.model))
         {
