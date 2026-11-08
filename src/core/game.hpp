@@ -21,6 +21,9 @@ namespace zonetool
 	// Builds the live refresh zone of a map package: the assets of a rebuilt package that differ from the deployed one.
 	using refresh_command = void(*)(const std::filesystem::path& deployed, const std::filesystem::path& rebuilt,
 		const std::filesystem::path& output);
+	// Writes the patch (.fp) that turns the base fastfile into the patched one, beside the base as the game reads it.
+	using patch_command = void(*)(const std::filesystem::path& base, const std::filesystem::path& patched,
+		const std::filesystem::path& output);
 
 	struct game
 	{
@@ -36,6 +39,7 @@ namespace zonetool
 		build_command build_zone;
 		token_name_resolver token_name;
 		refresh_command refresh_zone;
+		patch_command patch_zone;
 	};
 
 	struct zone_conversion
