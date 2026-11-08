@@ -711,10 +711,12 @@ namespace zonetool::convert::iw7_iw8
 				continue;
 			}
 
-			// The cube keeps the sky's source size. A limit of 0 would read at most sampled_face_size (512) texels a face
-			// (export_materials load_image_faces), so Breakneck's 1024 sky reached the cube as an upsampled 512 map.
-			const auto faces = load_image_faces(*image, DXGI_FORMAT_R32G32B32A32_FLOAT,
-				std::numeric_limits<std::size_t>::max());
+			// The cube keeps the sky's source size up to max_sky_face texels a face. A limit of 0 would read at most
+			// sampled_face_size (512) texels a face (export_materials load_image_faces), so Breakneck's 1024 sky reached the cube
+			// as an upsampled 512 map. Replay's own sky cube (mp_shipment's sky_mp_shipment) is 2048 a face, and the float read
+			// of a larger face set costs 16 bytes a texel.
+			constexpr std::size_t max_sky_face = 2048;
+			const auto faces = load_image_faces(*image, DXGI_FORMAT_R32G32B32A32_FLOAT, max_sky_face);
 			if (faces.size() != 6 || faces.front().GetMetadata().width != faces.front().GetMetadata().height)
 			{
 				ZONETOOL_WARNING("iw7: sky image \"%s\" cannot be read: %s", image->name, image_read_failure(*image).data());
@@ -798,12 +800,12 @@ namespace zonetool::convert::iw7_iw8
 			// The cube keeps the sky's size. Only distant models drawn into the cube (without runtime_sky, where they draw at
 			// run time) need 1024 texels a face at least, since the cube map of the sky alone samples into them.
 			const auto drawn_into_cube = !runtime_sky() && (!output.distant_models.empty() || !output.distant_surfaces.empty());
-			const auto sky_size = drawn_into_cube ? std::max<std::size_t>(size, 1024) : size;
-			if (sky_size > 2048)
+			const auto wanted_size = drawn_into_cube ? std::max<std::size_t>(size, 1024) : size;
+			const auto sky_size = std::min(wanted_size, max_sky_face);
+			if (sky_size != wanted_size)
 			{
-				// The 8-bit cube is stored in the zone (6 faces, 4 bytes a texel): the zone budget (AGENTS.md) must allow it.
-				ZONETOOL_WARNING("iw7: sky \"%s\" is %zux%zu texels a face: its cube adds %zu MiB to the zone", image->name, sky_size,
-					sky_size, sky_size * sky_size * 6 * 4 / (1024 * 1024));
+				ZONETOOL_INFO("iw7: sky \"%s\" is %zux%zu texels a face: its cube is sampled at %zux%zu (the stock sky cube is 2048)",
+					image->name, wanted_size, wanted_size, sky_size, sky_size);
 			}
 			const auto sky_texels = sky_size * sky_size;
 			sky_faces sky{sky_size};
