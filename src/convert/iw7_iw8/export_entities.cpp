@@ -528,12 +528,29 @@ namespace zonetool::convert::iw7_iw8
 					if (vfx)
 					{
 						changes = true;
-						result.effects.emplace_back(asset_name(iw7::get_asset_name(iw7::ASSET_TYPE_VFX, vfx)));
+						// Replay's PFX plays at the tag of its first name (the machine's fx does the same); several tags, and a
+						// looping effect that plays once here, are reported rather than silently dropped.
+						const auto vfx_name = std::string(asset_name(iw7::get_asset_name(iw7::ASSET_TYPE_VFX, vfx)));
+						if (fx.scrTagNames && fx.scrTagCount > 1)
+						{
+							ZONETOOL_WARNING("iw7: break effect %s of %s has %u tags; only the first (%s) plays", vfx_name.c_str(),
+								def.name ? def.name : "?", fx.scrTagCount, script_string(fx.scrTagNames[0]).c_str());
+						}
+
+						if (fx.loopRate > 0.0f)
+						{
+							ZONETOOL_WARNING("iw7: break effect %s of %s loops (rate %f); the break plays it once", vfx_name.c_str(),
+								def.name ? def.name : "?", fx.loopRate);
+						}
+
+						result.effects.push_back({vfx_name, fx.scrTagNames && fx.scrTagCount ? script_string(fx.scrTagNames[0]) : std::string{},
+							fx.useTagAngles});
 					}
 				}
-				else if (event.type == iw7::Scriptable_EventType_Sound && event.data.sound.soundAlias && result.sound.empty())
+				else if (event.type == iw7::Scriptable_EventType_Sound && event.data.sound.soundAlias)
 				{
-					result.sound = asset_name(event.data.sound.soundAlias);
+					result.sounds.push_back({std::string(asset_name(event.data.sound.soundAlias)),
+						event.data.sound.tagName ? event.data.sound.tagName : ""});
 				}
 			}
 
