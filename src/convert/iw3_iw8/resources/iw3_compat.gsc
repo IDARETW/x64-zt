@@ -301,9 +301,15 @@ iw3compat_exploders_init()
             if ( !isdefined( piece.script_exploder ) )
                 continue;
             level.mw120r_exploder_pieces[level.mw120r_exploder_pieces.size] = piece;
-            // setupExploders hides an "exploder" piece and an "exploderchunk"
-            // piece with hide() and notsolid() until its exploder runs.
-            if ( iw3compat_exploder_is_type( piece, "mw120r_exploder" ) || iw3compat_exploder_is_type( piece, "mw120r_exploderchunk" ) )
+            // setupExploders (raw/maps/mp/_load.gsc) first hides a model "fx" piece
+            // (an effect placeholder) unless it is an exploderchunk; an "exploder"
+            // or "exploderchunk" piece is then hidden and made notsolid() until its
+            // exploder runs.
+            if ( piece.model == "fx" && !iw3compat_exploder_is_type( piece, "mw120r_exploderchunk" ) )
+            {
+                piece hide();
+            }
+            else if ( iw3compat_exploder_is_type( piece, "mw120r_exploder" ) || iw3compat_exploder_is_type( piece, "mw120r_exploderchunk" ) )
             {
                 piece hide();
                 piece notsolid();
@@ -403,10 +409,11 @@ iw3compat_exploder_delete( piece )
         piece delete();
 }
 
-// IW3 _utility brush_throw: the chunk shows and flies from its origin toward
-// its target entity. With script_physics it is launched at the target's own
-// target (scaled by script_physics); else it moves and spins for 12 s, and is
-// removed 6 s later. With no target it is removed at once.
+// IW3 MP _utility brush_throw (raw/maps/mp/_utility.gsc): the chunk shows and
+// flies from its origin toward its target entity's origin, spinning and falling
+// for 12 s, and is removed 6 s later. With no target it is removed at once. The
+// MP exploder records set no physics field (the MP brush_throw has no physics
+// branch), so script_physics does not launch chunks here.
 iw3compat_exploderchunk_throw( piece )
 {
     if ( isdefined( piece.script_delay ) )
@@ -422,27 +429,7 @@ iw3compat_exploderchunk_throw( piece )
         return;
     }
     piece show();
-    startorg = piece.origin;
-    temp = ent.origin - startorg;
-    if ( isdefined( piece.script_physics ) )
-    {
-        target = undefined;
-        if ( isdefined( ent.target ) )
-            target = getent( ent.target, "targetname" );
-        if ( !isdefined( target ) )
-        {
-            contact = startorg;
-            throwvec = ent.origin;
-        }
-        else
-        {
-            contact = ent.origin;
-            diff = target.origin - ent.origin;
-            throwvec = ( diff[0] * piece.script_physics, diff[1] * piece.script_physics, diff[2] * piece.script_physics );
-        }
-        piece physicslaunchserver( contact, throwvec );
-        return;
-    }
+    temp = ent.origin - piece.origin;
     piece rotatevelocity( temp, 12 );
     piece movegravity( temp, 12 );
     wait 6;
