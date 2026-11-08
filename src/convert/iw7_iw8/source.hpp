@@ -38,6 +38,7 @@ namespace zonetool::convert::iw7_iw8
 		iw7::ComWorld* com_world() const;
 		iw7::MapEnts* map_ents() const;
 		iw7::FxWorld* fx_world() const;
+		iw7::GlassWorld* glass_world() const;
 
 		// The asset of a type and name that a loaded zone holds, or nullptr.
 		void* find(iw7::XAssetType type, std::string_view name) const;
