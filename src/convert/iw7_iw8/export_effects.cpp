@@ -867,12 +867,13 @@ namespace zonetool::convert::iw7_iw8
 					return result;
 				case iw7::PARTICLE_MODULE_INIT_FLARE:
 				{
-					// The layouts agree. Replay's flare builder (ParticleEmitter_BuildSpriteVertices 0x141BA5920) scales a flare by value.min + value.max * (depth
-					// - range.min) / range.max, unclamped, unless range.max is 0, and divides its size by its depth: a size in
-					// world units. IW7's ranges grow the flare from nothing over its first units to full size (range 1 to 99,
-					// value 0 to 1: a clamped ramp); as Replay's they scaled a far flare by its depth / 99, so that Breakneck's
-					// sun and klaxon flares covered the screen. Past the ramp (as flares are seen) IW7's scale is value.max:
-					// the flare takes no depth scale and value.max in its radial scales.
+					// The layouts agree. IW7's ranges grow the flare from nothing over its first units to full size (range 1 to 99,
+					// value 0 to 1: a clamped ramp), and the converter takes the scale as value.max past that ramp: the flare
+					// takes no depth scale and value.max in its radial scales. The Replay evaluator of these ranges is not
+					// located: ParticleEmitter_BuildSpriteVertices (0x141BA5920) has no flare-specific code in its pseudocode, so
+					// the earlier claim that it applies value.min + value.max * (depth - range.min) / range.max is unverified.
+					// The depth-scale rule is kept as the IW7 semantics until the Replay evaluator is found (Preload_ParticleModuleInitFlare
+					// 0x140DB3D10 is the module loader, not the evaluator) and the Breakneck flare check settles it.
 					copy(sizeof(iw7::ParticleModuleInitFlare));
 					auto scaled = data.initFlare;
 					if (scaled.m_depthScaleRange.max > scaled.m_depthScaleRange.min)
