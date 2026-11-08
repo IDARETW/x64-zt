@@ -464,7 +464,7 @@ namespace zonetool::convert::iw7_iw8
 				// models collide with the LOD that players see up close.
 				{"collLod", 0},
 				// IW7's shadowCutoffLod (XModel +0x0D): the sun-shadow cache draws a LOD only up to it (shadows.md, the
-				// cached sun shadow's LOD <= shadowCutoffLod). 17 of the 747 Breakneck models have 1 to 4; the others 6.
+				// cached sun shadow's LOD <= shadowCutoffLod). Of the 665 Breakneck models read from the zone dump, 17 have 1 to 4 and the rest 6 (the other models were not read).
 				{"shadowCutoffLod", std::min(static_cast<int>(model->shadowCutoffLod), 6)},
 				{"flags", 0},
 				{"lods", std::move(table_lods)},
