@@ -479,22 +479,18 @@ namespace zonetool::convert::iw7_iw8
 			for (auto e = 0u; broken.base.events && e < broken.base.numEvents; e++)
 			{
 				const auto& event = broken.base.events[e];
-				// A break that does more (throws debris, explodes, shakes, damages or changes parts, waits, hides bones)
-				// runs as a state machine (scriptable_machine).
+				// The shortcut takes only a model swap, effects and sounds. Every other event type (debris, explosions, shakes,
+				// damage, state or part changes, waits, bone hides, forces, lights, suns, animations, script calls, rumbles,
+				// chunks, collisions, the mayhem and view kinds) runs the break as a state machine (scriptable_machine), which
+				// converts it or names the event it omits. The shortcut used to skip those types silently (default: break).
 				switch (event.type)
 				{
-				case iw7::Scriptable_EventType_SpawnDynent:
-				case iw7::Scriptable_EventType_Explosion:
-				case iw7::Scriptable_EventType_Screenshake:
-				case iw7::Scriptable_EventType_PartDamage:
-				case iw7::Scriptable_EventType_StateChange:
-				case iw7::Scriptable_EventType_Wait:
-				case iw7::Scriptable_EventType_Random:
-				case iw7::Scriptable_EventType_HideShowBone:
-				case iw7::Scriptable_EventType_AddModel:
-					return std::nullopt;
-				default:
+				case iw7::Scriptable_EventType_Model:
+				case iw7::Scriptable_EventType_PFX:
+				case iw7::Scriptable_EventType_Sound:
 					break;
+				default:
+					return std::nullopt;
 				}
 
 				if (event.type == iw7::Scriptable_EventType_Model)
