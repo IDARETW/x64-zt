@@ -614,6 +614,128 @@ namespace zonetool::convert::iw7_iw8
 			return result;
 		}
 
+		// IW7's model distortion, pinned to its disassembled PS 89c34e12: mo_distortion_scale (technique distortion_cs), the world
+		// distortion's PS with a model VS (183f504a) that does not animate the UV; Breakneck's magnifying glass. The other model
+		// distortion techsets (the zfeather twin) keep drawing nothing until their shaders match a Replay technique.
+		bool refracting_model_material(const iw7::Material* material)
+		{
+			return material && material->techniqueSet &&
+				std::string_view(asset_name(material->techniqueSet->name)) == "mo_distortion_scale";
+		}
+
+		// The refracting surfaces of the static models (refracting_model_material) as world surfaces in place. Replay ships no
+		// model distortion technique, and a model technique that reads its resolved scene faults in
+		// R_DrawState_SetImageDescriptorSlot (x64-zt ea50c10), while its world distortion draws natively
+		// (twc/dub_water_wall_waves_dist, export_materials iw7Distortion). A static placement never moves, so its refracting
+		// surfaces keep their place as world surfaces, under the world twin of their material; the model keeps its own
+		// surface, which draws nothing. As on IW7's world distortion surfaces (export_surface), the vertex red and green
+		// (the offset's strength along the tangent and the binormal) fold into the material's scale and blue tints.
+		std::vector<world_geometry_surface> export_refracting_models(const source_map& source, const iw7::GfxWorld& world,
+			const reflection_probes& probes, extraction& output)
+		{
+			std::vector<world_geometry_surface> result;
+			std::map<std::string, std::vector<mesh_surface>> meshes;
+			for (auto i = 0u; i < world.dpvs.smodelCount; i++)
+			{
+				const auto& instance = world.dpvs.smodelDrawInsts[i];
+				const auto name = file_name(asset_name(instance.model ? iw7::get_asset_name(iw7::ASSET_TYPE_XMODEL, instance.model) : nullptr));
+				const auto model = output.models.find(name);
+				if (model == output.models.end() || !model->second || output.distant_models.contains(name) ||
+					beyond_world(world, i) || placement_beyond_bounds(world, i, output))
+				{
+					continue;
+				}
+
+				auto mesh = meshes.find(name);
+				if (mesh == meshes.end())
+				{
+					mesh = meshes.emplace(name, model_mesh(source, *model->second)).first;
+				}
+
+				const auto& placement = instance.placement;
+				const auto rotate = [&](const std::array<float, 3>& vector)
+				{
+					std::array<double, 3> rotated{};
+					for (auto axis = 0; axis < 3; axis++)
+					{
+						for (auto row = 0; row < 3; row++)
+						{
+							rotated[axis] += vector[row] * placement.axis[row][axis];
+						}
+					}
+
+					const auto length = std::sqrt(rotated[0] * rotated[0] + rotated[1] * rotated[1] + rotated[2] * rotated[2]);
+					return length > 0.0 ? std::array{rotated[0] / length, rotated[1] / length, rotated[2] / length} : rotated;
+				};
+
+				for (const auto& source_surface : mesh->second)
+				{
+					if (!refracting_model_material(source_surface.material) || source_surface.triangles.empty())
+					{
+						continue;
+					}
+
+					auto& surface = result.emplace_back();
+					surface.material = output.add_material_world_twin(source, const_cast<iw7::Material*>(source_surface.material));
+					surface.lightmap = -1;
+					output.world_materials.insert(surface.material);
+					output.lightless_world_materials.insert(surface.material);
+					auto& strength = output.distortion_strength[surface.material];
+					float center[3]{};
+					for (const auto& source_vertex : source_surface.vertices)
+					{
+						auto& vertex = surface.vertices.emplace_back();
+						for (auto axis = 0; axis < 3; axis++)
+						{
+							double offset{};
+							for (auto row = 0; row < 3; row++)
+							{
+								offset += source_vertex.position[row] * placement.axis[row][axis];
+							}
+
+							vertex.position[axis] = placement.origin[axis] + offset * placement.scale;
+							center[axis] += static_cast<float>(vertex.position[axis] / static_cast<double>(source_surface.vertices.size()));
+						}
+
+						vertex.normal = rotate(source_vertex.normal);
+						vertex.tangent = rotate(source_vertex.tangent);
+						vertex.binormal_sign = source_vertex.binormal_sign;
+						vertex.uv = {source_vertex.uv[0], source_vertex.uv[1]};
+						std::array<int, 4> color{};
+						for (auto channel = 0; channel < 4; channel++)
+						{
+							color[channel] = static_cast<int>(std::lround(std::clamp(source_vertex.color[channel], 0.0f, 1.0f) * 255.0f));
+						}
+
+						for (auto axis = 0; axis < 2; axis++)
+						{
+							strength.low[axis] = std::min(strength.low[axis], color[axis]);
+							strength.high[axis] = std::max(strength.high[axis], color[axis]);
+						}
+
+						vertex.color = {color[2], color[2], color[2], color[3]};
+					}
+
+					for (const auto& triangle : source_surface.triangles)
+					{
+						if (std::ranges::all_of(triangle, [&](const std::uint16_t index) { return index < surface.vertices.size(); }))
+						{
+							surface.indices.insert(surface.indices.end(), triangle.begin(), triangle.end());
+						}
+					}
+
+					surface.reflection_probe = static_cast<int>(probes.find(center));
+				}
+			}
+
+			if (!result.empty())
+			{
+				ZONETOOL_INFO("iw7: %zu refracting static model surfaces draw as world distortion surfaces", result.size());
+			}
+
+			return result;
+		}
+
 		float half_to_float(const std::uint16_t half)
 		{
 			const std::uint32_t sign = (half & 0x8000u) << 16;
@@ -1680,6 +1802,13 @@ namespace zonetool::convert::iw7_iw8
 		return name;
 	}
 
+	std::string extraction::add_material_world_twin(const source_map& source, iw7::Material* header)
+	{
+		const auto name = this->add_material(source, header) + "__world";
+		this->materials[name] = source.resolve(iw7::ASSET_TYPE_MATERIAL, header);
+		return name;
+	}
+
 	std::string extraction::add_model(const source_map& source, iw7::XModel* header)
 	{
 		const auto model = source.resolve(iw7::ASSET_TYPE_XMODEL, header);
@@ -1981,13 +2110,13 @@ namespace zonetool::convert::iw7_iw8
 		}
 
 		first_surface[world.surfaceCount] = surfaces.size();
-		// The sky's surfaces (runtime_sky) belong to the world model: they go after its surfaces, before the brush models'.
-		if (runtime_sky() && world.modelCount)
+		// Surfaces that belong to the world model without an IW7 world surface: they go after its surfaces, before the
+		// brush models'.
+		const auto add_to_world_model = [&](std::vector<world_geometry_surface> added)
 		{
-			auto sky_objects = export_sky_objects(source, world, output);
 			const auto world_end = std::min<std::size_t>(world.models[0].startSurfIndex + world.models[0].surfaceCount, world.surfaceCount);
 			const auto at = first_surface[world_end];
-			const auto count = sky_objects.size();
+			const auto count = added.size();
 			for (auto& index : surface_indices)
 			{
 				if (index.get<std::size_t>() >= at)
@@ -2006,8 +2135,19 @@ namespace zonetool::convert::iw7_iw8
 				surface_indices.push_back(at + k);
 			}
 
-			surfaces.insert(surfaces.begin() + static_cast<std::ptrdiff_t>(at), std::make_move_iterator(sky_objects.begin()),
-				std::make_move_iterator(sky_objects.end()));
+			surfaces.insert(surfaces.begin() + static_cast<std::ptrdiff_t>(at), std::make_move_iterator(added.begin()),
+				std::make_move_iterator(added.end()));
+		};
+
+		if (world.modelCount)
+		{
+			// The sky's surfaces (runtime_sky) and the static models' refracting surfaces (export_refracting_models).
+			if (runtime_sky())
+			{
+				add_to_world_model(export_sky_objects(source, world, output));
+			}
+
+			add_to_world_model(export_refracting_models(source, world, probes, output));
 		}
 
 		// IW7_DRAW_RANGES=1: IW7's draw ranges of the world's surfaces and the materials of its lit decal range.

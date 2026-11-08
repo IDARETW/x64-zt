@@ -210,6 +210,9 @@ namespace zonetool::convert::iw7_iw8
 		std::string add_material(const source_map& source, iw7::Material* header);
 		// Adds a layer (1 to 3) of a layered material as a material of its own.
 		std::string add_material_layer(const source_map& source, iw7::Material* header, int layer);
+		// Adds the world twin of a model material: the material of the world surfaces that a model's surfaces become
+		// (export_world, refracting models), apart from the model's own.
+		std::string add_material_world_twin(const source_map& source, iw7::Material* header);
 		std::string add_model(const source_map& source, iw7::XModel* header);
 	};
 
@@ -374,6 +377,9 @@ namespace zonetool::convert::iw7_iw8
 	{
 		std::array<float, 3> position{};
 		std::array<float, 3> normal{};
+		// IW7's tangent and the binormal sign in its top two bits, as export_models writes a model vertex.
+		std::array<float, 3> tangent{};
+		float binormal_sign = 1.0f;
 		std::array<float, 2> uv{};
 		// RGBA from 0 to 1 (white for motion vertices, which keep no colour).
 		std::array<float, 4> color{1.0f, 1.0f, 1.0f, 1.0f};
