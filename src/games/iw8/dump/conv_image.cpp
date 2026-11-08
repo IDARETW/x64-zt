@@ -373,9 +373,14 @@ Iw8ImageDef convertImage(const ImageDumpFile &in, const unsigned compassRotation
 
     // ---- flags (IW8 GfxImageFlags). Resident map sidecar: no streaming flags. Carry nothing
     // risky. ----
-    out.flags = in.mapType == IW5_MAPTYPE_CUBE
-                    ? 0x8000u | (elements > 1 ? 0x20000u : 0u)
-                    : in.mapType == IW5_MAPTYPE_3D ? 0x10000u : (elements > 1 ? 0x20000u : 0u);
+    // The picmip and mip flags are the writer's defaults for every shape (write_image.cpp: NOPICMIP for a mipped image,
+    // NOPICMIP | NOMIPMAPS for one level). Shipped cube, 3D and array images carry them too: stock $black_cube is 0x8003,
+    // $black_3d 0x10003, and the stock 2D array probes 0x20001. A shape bit used to skip the default, so these images
+    // were written without NOPICMIP.
+    const uint32_t shapeFlags = in.mapType == IW5_MAPTYPE_CUBE
+                                    ? 0x8000u | (elements > 1 ? 0x20000u : 0u)
+                                    : in.mapType == IW5_MAPTYPE_3D ? 0x10000u : (elements > 1 ? 0x20000u : 0u);
+    out.flags = shapeFlags | (out.levelCount > 1 ? 0x1u : 0x3u);
     out.streamedPartCount = 0; // fully resident — no xpak dependency we can't satisfy offline
 
     // ---- pixels (inline resident) + totalSize ----
