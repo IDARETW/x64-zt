@@ -249,6 +249,10 @@ struct StaticModelInstance
     float scale{1};
     // Absent: derive local casters geometrically. Empty: authored exclusion from every local light.
     std::optional<std::vector<uint32_t>> shadowLights;
+    // Replay's per-instance LOD distance scale index (the instance flags byte, 0..15; 6 is 1.0):
+    // R_AddAllStaticModelSurfacesCamera_LodCalc multiplies the model's LOD thresholds by
+    // dword_142578690[index] for each placement. Entries match IW7's g_lodDistIndexToScale.
+    uint8_t lodScaleIndex{6};
 };
 struct StaticModels
 {

@@ -201,6 +201,8 @@ struct SourceStaticModelInstance
     // lighting inputs, so it lights from the grid at its bounds centre.
     bool promoted{};
     std::optional<std::vector<std::uint32_t>> shadowLights;
+    // Replay's LOD distance scale index for this placement (IW7 lod_scale); 6 is 1.0.
+    std::uint8_t lodScaleIndex{6};
 };
 
 struct SourceStaticModels
@@ -2675,6 +2677,22 @@ float ReplayLodDistance(const float distance)
                                                      kReplayNeverCulled);
 }
 
+// Replay's per-placement LOD distance scale table (dword_142578690, read by
+// R_AddAllStaticModelSurfacesCamera_LodCalc through the instance flags byte when the
+// collection record's +4 word is 1). Equal to IW7's g_lodDistIndexToScale (index 6 is 1).
+constexpr std::array<float, 16> kReplayLodDistanceScales{0.25f, 0.375f, 0.5f, 0.625f, 0.75f, 0.875f, 1.0f, 1.125f,
+                                                        1.25f, 1.5f, 1.75f, 2.0f, 2.5f, 3.0f, 3.5f, 4.0f};
+
+std::uint8_t LodScaleIndex(const float scale)
+{
+    for (std::size_t index = 0; index < kReplayLodDistanceScales.size(); ++index)
+    {
+        if (std::fabs(kReplayLodDistanceScales[index] - scale) < 1.0e-6f)
+            return static_cast<std::uint8_t>(index);
+    }
+    throw std::runtime_error("invalid static-model LOD scale");
+}
+
 // One LOD of an OpenAssetTools XMODEL_EXPORT (version 6): the model's bind
 // skeleton and, per object (one per source XSurface, in order), each
 // triangle's corners as model-space position and dominant bone.
@@ -3747,8 +3765,6 @@ std::vector<BrushModel> ReadBrushModels(const Json &world, const std::vector<Raw
             staticModels.models.push_back(std::move(model));
     }
     std::size_t instanceIndex = 0;
-    // The LOD distance scale each model already took (IW7 lod_scale).
-    std::unordered_map<std::size_t, float> lodScales;
     for (const auto &instance : world.value("models", Json::array()))
     {
         std::string modelName = instance.at("model").get<std::string>();
@@ -3807,23 +3823,11 @@ std::vector<BrushModel> ReadBrushModels(const Json &world, const std::vector<Raw
         {
             converted.axis[row] = ReadVector<3>(instance.at("axis").at(row));
         }
-        // An IW7 placement scales its model's LOD distances (lod_scale). Replay keeps one set
-        // per model, so the model takes its placements' largest scale above 1: its LODs
-        // switch no nearer than IW7's for any placement.
+        // An IW7 placement scales its model's LOD distances (lod_scale). Replay applies the same table
+        // entry per placement (the instance flags byte, see LodScaleIndex), so the model keeps IW7's
+        // distances and each placement carries its own index.
         if (const auto scale = instance.find("lod_scale"); scale != instance.end())
-        {
-            const float lodScale = scale->get<float>();
-            if (!std::isfinite(lodScale) || lodScale <= 0.0f)
-                throw std::runtime_error("invalid static-model LOD scale");
-            auto [applied, inserted] = lodScales.try_emplace(converted.model, 1.0f);
-            if (lodScale > applied->second)
-            {
-                for (auto &lod : staticModels.models[converted.model].lods)
-                    if (lod.distance < kReplayNeverCulled)
-                        lod.distance = std::min(lod.distance * lodScale / applied->second, kReplayNeverCulled);
-                applied->second = lodScale;
-            }
-        }
+            converted.lodScaleIndex = LodScaleIndex(scale->get<float>());
         // IW3 culls each placement at its own cullDist and keeps drawing the
         // lowest LOD past that LOD's distance. Replay culls at the model's last
         // LOD distance, so extend it to the farthest placement's cullDist.
@@ -5242,7 +5246,8 @@ void BuildPreparedStaticModels(const SourceStaticModels &source, const RenderPla
         }
         staticModels.instances.push_back(
             {static_cast<unsigned>(sourceInstance.model), sourceInstance.origin,
-             QuaternionFromBasis(axis[0], axis[1], axis[2]), sourceInstance.scale, sourceInstance.shadowLights});
+             QuaternionFromBasis(axis[0], axis[1], axis[2]), sourceInstance.scale, sourceInstance.shadowLights,
+             sourceInstance.lodScaleIndex});
         if (collisionModels && collisionModelIndices.at(sourceInstance.model))
         {
             auto &collisionModel = collisionModels->at(*collisionModelIndices.at(sourceInstance.model));
