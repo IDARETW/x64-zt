@@ -3908,6 +3908,9 @@ iw7_destructible_think( name, model, removes, health, mindamage )
     }
     if ( removes )
     {
+        // The piece is hidden, not deleted, so a loop that the break started on it would go on in Replay: it stops here,
+        // as deleting the piece ended its loops before.
+        self stoploopsound();
         self hide();
         self notsolid();
     }
