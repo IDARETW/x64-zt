@@ -1527,7 +1527,15 @@ namespace zonetool::convert::iw7_iw8
 				}
 			}
 
-			const auto [source, destination] = additive ? std::pair{"one", "one"} : std::pair{"srcalpha", "invsrcalpha"};
+			// IW7's additive effect PSs weight the colour by the coverage: eq_effect_zfeather_falloff_add_lin_ndw_nocast's
+			// technique 10 (PS 3e63502d89e11fb8, disassembled) writes o0.rgb = colour * texel.a * vertex.a * feather and
+			// o0.w = 0 under one/invsrcalpha. A texture that keeps its RGB where its alpha is near 0 (Breakneck's sprinkler
+			// steam vfx_steam_jet_cone_atlas_01: 65% of its texels) drew as a bright rectangle with one/one. srcalpha/one
+			// is that blend; the pipeline draws it as the additive family with the colour map premultiplied by its alpha.
+			// The owned flow and UV-distortion PSs take their alpha themselves and keep one/one.
+			const auto alpha_weighted = additive && !flow && !uvd_effect_material(material);
+			const auto [source, destination] = alpha_weighted ? std::pair{"srcalpha", "one"}
+				: additive ? std::pair{"one", "one"} : std::pair{"srcalpha", "invsrcalpha"};
 			const json state =
 			{
 				{"alphaTest", additive ? "disabled" : "gt0"},
