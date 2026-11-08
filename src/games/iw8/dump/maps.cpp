@@ -715,7 +715,12 @@ size_t iw3ToIw8EntityString(const std::string &input, std::string &output,
             body += std::to_string(kNorthYawKey) + " \"90\"";
         }
 
-        if (trigger)
+        // A source that authors its own physics asset (IW7 key 0xCAF9, named physasset by the IW7 extraction) keeps it:
+        // the dummy below would be a second physasset (37683) line of the same entity.
+        const bool authoredPhysAsset = std::ranges::any_of(entity, [](const KeyValue &pair) {
+            return lowercase(pair.key) == "physasset";
+        });
+        if (trigger && !authoredPhysAsset)
         {
             if (!body.empty())
                 body.push_back(' ');

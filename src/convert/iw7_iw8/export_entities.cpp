@@ -35,6 +35,10 @@ namespace zonetool::convert::iw7_iw8
 				// Afghan, Breakneck and Pixel, whose minimap art has +y up (their spawns land on its floor so), and absent
 				// on Paris, whose art has +x up.
 				result.try_emplace(0x213, "northyaw");
+				// 0xCAF9 names the physics asset of a brush model or trigger: its values are dummy physics assets
+				// (triggermodeldummydefault, scriptbrushmodeldummydefault, TriggerModelStaticDummyDefault, ...). Replay's
+				// physasset key is 0x9333 (iw3KeyToIw8KeyId), which the IW3 route writes for triggers as well.
+				result.try_emplace(0xCAF9, "physasset");
 				return result;
 			}();
 
