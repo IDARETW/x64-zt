@@ -2032,6 +2032,29 @@ namespace zonetool::convert::iw7_iw8
 		// animates them by. Their other states and events do not convert.
 		const auto& scriptables = map_ents->scriptableMapEnts;
 		std::set<const iw7::ScriptableDef*> dumped_machines;
+		// Two definitions whose names sanitize to one kind name must not share a machine or an animation: the contains/try_emplace
+		// on that name kept the first definition's entry, so the second kind's instances ran the first kind's machine or played its
+		// animation. Each definition keeps the first free name of its prefix (iw7_scriptable_<kind>, then _2, _3, ...).
+		std::map<std::pair<std::string, const iw7::ScriptableDef*>, std::string> kind_names;
+		std::set<std::string> taken_names;
+		const auto name_of = [&](const std::string& prefix, const iw7::ScriptableDef* definition, const std::string& kind)
+		{
+			const auto key = std::pair{prefix, definition};
+			if (const auto found = kind_names.find(key); found != kind_names.end())
+			{
+				return found->second;
+			}
+
+			auto name = prefix + kind;
+			for (auto n = 2u; taken_names.contains(name); n++)
+			{
+				name = prefix + kind + "_" + std::to_string(n);
+			}
+
+			taken_names.insert(name);
+			kind_names.emplace(key, name);
+			return name;
+		};
 		std::size_t placed{};
 		std::size_t destructibles{};
 		// Scriptables the placement leaves out, by definition name: game-mode chevrons (hardpoint) and kinds without a model or pose.
@@ -2169,7 +2192,7 @@ namespace zonetool::convert::iw7_iw8
 				// their animations.
 				if (!animation && def && changes_state(*def))
 				{
-					const auto machine_name = "iw7_scriptable_" + kind;
+					const auto machine_name = name_of("iw7_scriptable_", def, kind);
 					if (!output.scriptable_machines.contains(machine_name))
 					{
 						output.scriptable_machines.emplace(machine_name, scriptable_machine(source, *def, output, true));
@@ -2189,14 +2212,14 @@ namespace zonetool::convert::iw7_iw8
 			}
 			else if (animation)
 			{
-				animated = "iw7_animated_" + kind;
+				animated = name_of("iw7_animated_", def, kind);
 				entities += std::format("\"targetname\" \"{}\"\n", animated);
 			}
 			// A kind with several states that change (IW7 runs a state's events on every instance, named or not) runs its machine
 			// as a kind that takes damage does; the machine plays its first states' effects (iw7_scriptable_think).
 			else if (def && (takes_damage(*def) || changes_state(*def)))
 			{
-				const auto machine_name = "iw7_scriptable_" + kind;
+				const auto machine_name = name_of("iw7_scriptable_", def, kind);
 				entities += std::format("\"targetname\" \"{}\"\n", machine_name);
 				if (!output.scriptable_machines.contains(machine_name))
 				{
