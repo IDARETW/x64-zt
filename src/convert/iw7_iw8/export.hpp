@@ -112,18 +112,22 @@ namespace zonetool::convert::iw7_iw8
 		// map script breaks them when they took the health in damage.
 		struct scriptable_destructible
 		{
-			// One PFX event of the broken state: its VFX, the tag it plays on (empty: the piece's origin) and whether it takes the
-			// tag's angles (IW7 PFX useTagAngles).
+			// One PFX event of the broken state: its VFX, its tags (IW7 scrTagNames; each play takes one of them at random, as
+			// Replay's ScriptableCl_PlayParticleFX does with BG_irand over the tag count; none: the piece's origin), whether it takes
+			// the tag's angles (IW7 PFX useTagAngles) and its loop rate (IW7 loopRate: the effect plays again every loop seconds
+			// while the piece stands; 0: once).
 			struct break_effect
 			{
 				std::string effect;
-				std::string tag;
+				std::vector<std::string> tags;
 				bool use_tag_angles{};
+				float loop{};
 
 				bool operator==(const break_effect&) const = default;
 			};
 
-			// One Sound event of the broken state: its alias and the tag it plays at (empty: the piece).
+			// One Sound event of the broken state: its alias and the tag it plays at (empty: the piece). A looping alias plays from
+			// a script origin linked to the tag (or the piece) and stops when the piece is removed.
 			struct break_sound
 			{
 				std::string alias;
@@ -137,13 +141,18 @@ namespace zonetool::convert::iw7_iw8
 			// The health state's minimumDamage (IW7's ScriptableStateHealthDef): a hit below it does not count
 			// toward its health (iw7_scriptable_hurt in the machine path).
 			int mindamage{};
-			// The broken state sets a model that is no model (IW7's empty Model event): the piece goes away, hidden and not
-			// solid, as iw7_scriptable_model does. A break without any Model event keeps the piece and its model.
+			// The broken state's last Model event sets no model (IW7's empty Model event; Replay keeps the state's last model):
+			// the piece goes away, hidden and not solid, as iw7_scriptable_model does. A break without any Model event keeps the
+			// piece and its model.
 			bool removes{};
 			// Every effect and sound of the broken state, in event order.
 			std::vector<break_effect> effects;
 			std::vector<break_sound> sounds;
 			int health{};
+			// The health state's validDamageCause (IW7 Scriptable_DamageCause; 0: every cause). Replay's ScriptableBg_MatchesDamageClassFilter
+			// tests the hit's class against it, and the break's "damage" notify carries the means of death only as a string, so a
+			// restricted state is reported, not applied.
+			int valid_causes{};
 
 			bool operator==(const scriptable_destructible&) const = default;
 		};
