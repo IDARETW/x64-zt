@@ -1201,8 +1201,11 @@ namespace zonetool::convert::iw7_iw8
 					// the radius of its size x and the intensity size y * brightness * 493.38132 (curve of its emitter;
 					// R_AddParticleTrailLightInstance 0x141971D50), the factor that GScr_SetLightIntensity applies to
 					// world lights: particle and world lights share one unit, as IW7's (Neon's world lights hold 42000 to
-					// 305000, an authored 85 to 617 times it). The brightness therefore takes the light unit that the
-					// world lights' colours take (export_com_world).
+					// 305000, an authored 85 to 617 times it). The brightness takes the 493.38132 factor only: the
+					// export_entities light loop multiplies the sun colour by light_unit_scale (1 / luminance), but authored
+					// local lights are not on that unit (export_entities local branch; convert.cpp calibrateLocalLights
+					// skips them), so the particle and local-light units agree only once that open question (AGENTS.md 3.2)
+					// is settled.
 					const auto& source = data.initLightSpot;
 					const auto value = [](const float v, const float low, const float high, const float fallback)
 					{
