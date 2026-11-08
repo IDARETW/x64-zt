@@ -911,7 +911,9 @@ namespace zonetool::convert::iw7_iw8
 					{
 						const auto& damage = data.partDamage;
 						// Byte 60 sits right after amount (IW7 structs.hpp ScriptableEventPartDamageDef: amount 56, unknown60 60, amountDoT 64).
-						// The byte-60 interpretation is retained until its source meaning is verified.
+						// Replay's ScriptableEventPartDamageDef (iw8 structs.hpp, static_asserts at 21507-21512) keeps the same field order with a
+						// 4-byte partReference: amount 0xC, a bool destroy 0x10, amountDoT 0x14, intervalDoT 0x18. By layout, byte 60 is that
+						// destroy flag, and the 1e9 damage below is this converter's emulation of it. The warning counts its set events per kind.
 						const auto destroy = damage.unknown60[0] != 0;
 						if (convert && destroy)
 						{
