@@ -6,6 +6,7 @@
 
 #include <utils/compression.hpp>
 
+#include <limits>
 #include <numeric>
 
 namespace zonetool::convert::iw7_iw8
@@ -710,7 +711,10 @@ namespace zonetool::convert::iw7_iw8
 				continue;
 			}
 
-			const auto faces = load_image_faces(*image, DXGI_FORMAT_R32G32B32A32_FLOAT);
+			// The cube keeps the sky's source size. A limit of 0 would read at most sampled_face_size (512) texels a face
+			// (export_materials load_image_faces), so Breakneck's 1024 sky reached the cube as an upsampled 512 map.
+			const auto faces = load_image_faces(*image, DXGI_FORMAT_R32G32B32A32_FLOAT,
+				std::numeric_limits<std::size_t>::max());
 			if (faces.size() != 6 || faces.front().GetMetadata().width != faces.front().GetMetadata().height)
 			{
 				ZONETOOL_WARNING("iw7: sky image \"%s\" cannot be read: %s", image->name, image_read_failure(*image).data());
@@ -791,9 +795,16 @@ namespace zonetool::convert::iw7_iw8
 					value[c] += (values.plain[c] + (values.sunward[c] - values.plain[c]) * toward - value[c]) * amount;
 				}
 			};
-			// A sky that draws distant models (Breakneck's black hole, Frontier's Neptune) keeps them at 1024 texels a face
-			// at least: the cube map of the sky alone samples into it.
-			const auto sky_size = output.distant_models.empty() && output.distant_surfaces.empty() ? size : std::max<std::size_t>(size, 1024);
+			// The cube keeps the sky's size. Only distant models drawn into the cube (without runtime_sky, where they draw at
+			// run time) need 1024 texels a face at least, since the cube map of the sky alone samples into them.
+			const auto drawn_into_cube = !runtime_sky() && (!output.distant_models.empty() || !output.distant_surfaces.empty());
+			const auto sky_size = drawn_into_cube ? std::max<std::size_t>(size, 1024) : size;
+			if (sky_size > 2048)
+			{
+				// The 8-bit cube is stored in the zone (6 faces, 4 bytes a texel): the zone budget (AGENTS.md) must allow it.
+				ZONETOOL_WARNING("iw7: sky \"%s\" is %zux%zu texels a face: its cube adds %zu MiB to the zone", image->name, sky_size,
+					sky_size, sky_size * sky_size * 6 * 4 / (1024 * 1024));
+			}
 			const auto sky_texels = sky_size * sky_size;
 			sky_faces sky{sky_size};
 			// The faces sample on their own threads.
@@ -828,6 +839,7 @@ namespace zonetool::convert::iw7_iw8
 				continue;
 			}
 
+			std::size_t clipped = 0;
 			for (auto face = 0u; face < 6; face++)
 			{
 				const auto& target = *cube.GetImage(0, face, 0);
@@ -840,8 +852,21 @@ namespace zonetool::convert::iw7_iw8
 						pixel[2 - channel] = static_cast<std::uint8_t>(std::lround(linear_to_srgb(sky.colors[face][t][channel]) * 255.0f));
 					}
 
+					// The cube is 8-bit sRGB: a channel above 1 (HDR after the exposure and the colour scale) clamps to white.
+					if (sky.colors[face][t][0] > 1.0f || sky.colors[face][t][1] > 1.0f || sky.colors[face][t][2] > 1.0f)
+					{
+						clipped++;
+					}
+
 					pixel[3] = 0xFF;
 				}
+			}
+
+			// The sky's HDR above 1 is lost to the clamp in the 8-bit cube (see above): the count shows how much.
+			if (clipped != 0)
+			{
+				ZONETOOL_WARNING("iw7: sky \"%s\": %zu of %zu texels hold a colour above 1 and clamp in the 8-bit cube", image->name,
+					clipped, sky_texels * 6);
 			}
 
 			const auto name = file_name(asset_name(image->name));
