@@ -993,25 +993,6 @@ namespace zonetool::convert::iw7_iw8
 			return found;
 		}
 
-		// The zfeather twin, pinned to its disassembled PS 22ce2b91 / VS e34a45e6: mcopw_distortion_shade_ua_zfeather (technique
-		// distortion_fz_uva; Breakneck): the same offset without the per-vertex strength, tinted by the whole vertex colour, and
-		// only where the scene's depth at the moved pixel lies beyond the surface.
-		bool distortion_feather_material(const iw7::Material* material)
-		{
-			return material && material->techniqueSet &&
-				std::string_view(asset_name(material->techniqueSet->name)) == "mcopw_distortion_shade_ua_zfeather";
-		}
-
-		// IW7's model distortion, pinned to its disassembled PS 89c34e12: mo_distortion_scale (technique distortion_cs, the
-		// world distortion PS with a model VS 183f504a that does not animate the UV; Breakneck). The pipeline's MAP_DISTORTION
-		// model variant draws it. Other model distortion techsets keep drawing nothing until their shaders are checked.
-		bool distortion_model_material(const iw7::Material* material)
-		{
-			return material && material->techniqueSet &&
-				(std::string_view(asset_name(material->techniqueSet->name)) == "mo_distortion_scale" ||
-					distortion_feather_material(material));
-		}
-
 		// The axes along which a layer's colour sampler clamps: bit 0 U, bit 1 V. IW7's sampler state byte keeps the
 		// filter and mip mode below bit 5 and clamps U, V and W in bits 5 to 7 (0x13 wraps, 0x53 clamps V, 0xF3 all: the
 		// blood hand prints and wall_stain5).
@@ -2081,7 +2062,7 @@ namespace zonetool::convert::iw7_iw8
 				model_uvd_material(material);
 			// A world distortion material's distortion map keeps its raw channels (offset in red/green, strength in blue) as
 			// the flow maps do (distortion_map_hash).
-			const auto distortion_map = (output.world_materials.contains(name) || distortion_model_material(material)) && material &&
+			const auto distortion_map = output.world_materials.contains(name) && material &&
 				classify_material(material).kind == surface_kind::distortion ? distortion_map_hash(source, material) : std::nullopt;
 			const auto layer = layer_of(name);
 			// mask_mra: the mask replaces the colour's alpha (IW7 PSs e6f6218b, 5654ad3f read only the colour's rgb). An
@@ -2368,7 +2349,6 @@ namespace zonetool::convert::iw7_iw8
 		std::size_t flags{};
 		std::size_t volumetric_extinction{};
 		std::size_t world_distortions{};
-		std::size_t model_distortions{};
 		std::size_t missing_color_maps{};
 		for (const auto& [name, material] : output.materials)
 		{
@@ -2515,7 +2495,6 @@ namespace zonetool::convert::iw7_iw8
 			}
 
 			std::optional<json> world_distortion;
-			std::optional<json> model_distortion;
 			if (output.glass_materials.contains(name) && kind.kind != surface_kind::opaque)
 			{
 				kind = {surface_kind::blend};
@@ -2551,13 +2530,6 @@ namespace zonetool::convert::iw7_iw8
 						{"scale", {(*scale)[0] * strength[0], (*scale)[1] * strength[1]}}};
 					kind = {surface_kind::blend};
 				}
-				else if (distortion_model_material(material) && map && scale)
-				{
-					model_distortion = json{{"map", *map},
-						{"uvAnimation", material_constant(material, "uvAnimParms").value_or(std::array{0.0f, 0.0f, 0.0f, 0.0f})},
-						{"scale", {(*scale)[0], (*scale)[1]}}, {"feather", distortion_feather_material(material)}};
-					kind = {surface_kind::blend};
-				}
 				else
 				{
 					if (output.world_materials.contains(name))
@@ -2591,13 +2563,6 @@ namespace zonetool::convert::iw7_iw8
 				exported["iw7Distortion"] = std::move(*world_distortion);
 				exported["replayStockOnly"] = true;
 				world_distortions++;
-			}
-
-			// Model distortion (see above): the pipeline's MAP_DISTORTION model variant refracts the scene by the map.
-			if (model_distortion)
-			{
-				exported["iw7ModelDistortion"] = std::move(*model_distortion);
-				model_distortions++;
 			}
 
 			// An unlit material's mask (IW7's mask / mask_mua techsets: effect quads, glows, light cards, the black hole's
@@ -2770,11 +2735,6 @@ namespace zonetool::convert::iw7_iw8
 		if (world_distortions)
 		{
 			ZONETOOL_INFO("iw7: %zu world distortion materials draw as Replay's stock world distortion", world_distortions);
-		}
-
-		if (model_distortions)
-		{
-			ZONETOOL_INFO("iw7: %zu model distortion materials refract the scene (MAP_DISTORTION)", model_distortions);
 		}
 	}
 
