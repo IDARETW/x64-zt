@@ -1875,8 +1875,22 @@ namespace zonetool::convert::iw7_iw8
 		}
 
 		const auto extent = output.model_extents.find(file_name(asset_name(iw7::get_asset_name(iw7::ASSET_TYPE_XMODEL, draw.model))));
-		return extent != output.model_extents.end() &&
-			extent->second * std::max(draw.placement.scale, 1.0f) > largest_model_coordinate;
+		if (extent == output.model_extents.end())
+		{
+			return false;
+		}
+
+		// The floor at scale 1 sends a sub-unit placement to the sky when the model's extent times its scale would fit. The
+		// header's rule (extent times the placement scale) would keep it in the world; Replay's packing of the placed bounds
+		// is not verified, so the floor stays and each such placement is logged (MEASURE: grep "scale floor" in the log).
+		const auto beyond = extent->second * std::max(draw.placement.scale, 1.0f) > largest_model_coordinate;
+		if (beyond && extent->second * draw.placement.scale <= largest_model_coordinate)
+		{
+			ZONETOOL_INFO("iw7: placement of \"%s\" at scale %g goes to the sky by the scale floor (extent %.0f, unscaled %.0f units)",
+				extent->first.c_str(), draw.placement.scale, extent->second, extent->second * draw.placement.scale);
+		}
+
+		return beyond;
 	}
 
 	void collect_static_models(const source_map& source, extraction& output)
