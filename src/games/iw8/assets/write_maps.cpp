@@ -350,6 +350,9 @@ void emitGlassMapBody(ZoneWriter &zw, const char *assetName, const replayrender:
                 zw.writeStr(name.name);
                 if (!name.panes.empty())
                 {
+                    // AllocLoad_ushort (called by Load_G_GlassName for a nonzero pieceCount) aligns the stream to two bytes
+                    // first, so an odd-length name string leaves a pad byte before the indices.
+                    zw.align(1);
                     std::vector<uint16_t> indices;
                     indices.reserve(name.panes.size());
                     for (const uint32_t pane : name.panes)
