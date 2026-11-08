@@ -2182,6 +2182,14 @@ namespace zonetool::convert::iw7_iw8
 		std::array<std::size_t, 4> iw7_lighting{};
 		// The placements by their LOD distance scale (STATIC_MODEL_FLAG_SCALE_MODIFIER_MASK), for the log.
 		std::array<std::size_t, 16> lod_scales{};
+		// The placements that do not cast sun shadows, that take reactive motion, and that have no cull distance
+		// (cull_dist 1000000). Each model's distinct (LOD scale, cull distance) pairs: Replay has one LOD scale per
+		// placement but one cull cutoff per model (its last LOD distance), so a model with several pairs needs one
+		// variant per extra pair to match every placement (wave-3 I05).
+		std::size_t no_cast_shadow{};
+		std::size_t reactive_placements{};
+		std::size_t no_cull{};
+		std::map<const void*, std::set<std::pair<unsigned char, unsigned short>>> placement_variants;
 		// The others by their flags (without the scale): how many, with lightmap or vertex lighting data, and one model.
 		std::map<unsigned, std::tuple<std::size_t, std::size_t, std::size_t, std::string>> other_lighting;
 		for (auto i = 0u; i < dpvs.smodelCount; i++)
@@ -2196,6 +2204,11 @@ namespace zonetool::convert::iw7_iw8
 			const auto& draw = dpvs.smodelDrawInsts[i];
 			const auto flags = draw.flags;
 			lod_scales[flags & iw7::STATIC_MODEL_FLAG_SCALE_MODIFIER_MASK]++;
+			no_cast_shadow += (flags & iw7::STATIC_MODEL_FLAG_NO_CAST_SHADOW) != 0;
+			reactive_placements += (flags & iw7::STATIC_MODEL_FLAG_REACTIVEMOTION) != 0;
+			no_cull += draw.cullDist == 0;
+			placement_variants[static_cast<const void*>(draw.model)].insert({
+				static_cast<unsigned char>(flags & iw7::STATIC_MODEL_FLAG_SCALE_MODIFIER_MASK), draw.cullDist});
 			const auto lighting = (flags & iw7::STATIC_MODEL_FLAG_LIGHTGRID_LIGHTING) ? 0 : (flags & iw7::STATIC_MODEL_FLAG_VERTEXLIT_LIGHTING) ? 1
 				: (flags & iw7::STATIC_MODEL_FLAG_LIGHTMAP_LIGHTING) ? 2 : 3;
 			iw7_lighting[lighting]++;
@@ -2495,5 +2508,18 @@ namespace zonetool::convert::iw7_iw8
 		}
 
 		ZONETOOL_INFO("iw7: static model LOD scale indices: %s", scales.data());
+		std::size_t variant_models{};
+		std::size_t extra_variants{};
+		for (const auto& placed : placement_variants)
+		{
+			if (placed.second.size() > 1)
+			{
+				variant_models++;
+				extra_variants += placed.second.size() - 1;
+			}
+		}
+		ZONETOOL_INFO("iw7: static model placements: %zu no-cast-shadow, %zu reactive motion, %zu without a cull distance; "
+				"%zu models have several (LOD scale, cull distance) pairs, %zu extra variants would match them", no_cast_shadow, reactive_placements,
+				no_cull, variant_models, extra_variants);
 	}
 }
