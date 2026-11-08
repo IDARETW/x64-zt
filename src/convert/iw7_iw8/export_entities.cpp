@@ -1441,6 +1441,11 @@ namespace zonetool::convert::iw7_iw8
 		std::string result;
 		result.reserve(entities.size());
 		std::size_t removed{};
+		// The entity being read: its class and name, and the models taken from it. Each removal is logged when its block
+		// closes, since the name lines may follow the model line.
+		std::string classname;
+		std::string targetname;
+		std::vector<std::string> removed_models;
 		std::size_t start = 0;
 		while (start < entities.size())
 		{
@@ -1449,14 +1454,47 @@ namespace zonetool::convert::iw7_iw8
 			constexpr std::string_view key = "\"model\" \"";
 			const auto name = line.starts_with(key) && line.size() > key.size() + 1 && line[key.size()] != '*'
 				? line.substr(key.size(), line.size() - key.size() - 1) : std::string_view{};
+			const auto value_of = [&](const std::string_view prefix) -> std::string
+			{
+				return line.starts_with(prefix) && line.size() > prefix.size() + 1
+					? std::string(line.substr(prefix.size(), line.size() - prefix.size() - 1)) : std::string{};
+			};
+
+			if (line == "{")
+			{
+				classname.clear();
+				targetname.clear();
+				removed_models.clear();
+			}
+			else if (auto value = value_of("\"classname\" \""); !value.empty())
+			{
+				classname = std::move(value);
+			}
+			else if (auto value = value_of("\"targetname\" \""); !value.empty())
+			{
+				targetname = std::move(value);
+			}
+
 			if (!name.empty() && !output.exported_models.contains(file_name(name)))
 			{
 				removed++;
+				removed_models.emplace_back(name);
 			}
 			else
 			{
 				result.append(line);
 				result += '\n';
+			}
+
+			if (line == "}")
+			{
+				for (const auto& model : removed_models)
+				{
+					ZONETOOL_WARNING("iw7: entity \"%s\" (class \"%s\") loses its model \"%s\": the model is not in the loaded zones",
+						targetname.empty() ? "(no targetname)" : targetname.c_str(), classname.c_str(), model.c_str());
+				}
+
+				removed_models.clear();
 			}
 
 			start = end + 1;
