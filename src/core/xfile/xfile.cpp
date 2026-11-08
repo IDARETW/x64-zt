@@ -1449,33 +1449,23 @@ namespace zonetool::xfile
 
 	namespace
 	{
-		// A patch applies to one base header (apply_iw8_patch). Written over a zone whose header changed, the .fp beside it
-		// no longer matches and makes the zone unreadable ("patches another version of the zone"). Such a patch is removed
-		// with the base it patched; one whose base is the new header stays. A file too short to hold a base is left alone.
-		void remove_stale_patch(const std::filesystem::path& zone_path, const std::string_view header)
+		// Every read applies the .fp beside a zone (apply_iw8_patch), so a patch left beside a freshly written full zone
+		// either fails ("patches another version of the zone") or turns the written zone into the patched one. The written
+		// zone is the new base, so the patch is removed with a warning. Removal is unconditional: a base header equal to
+		// the written header would still apply its delta to this payload.
+		void remove_stale_patch(const std::filesystem::path& zone_path)
 		{
 			auto patch_path = zone_path;
 			patch_path.replace_extension(".fp");
 
-			std::ifstream stream(patch_path, std::ios::binary);
-			if (!stream)
+			std::error_code error;
+			if (!std::filesystem::exists(patch_path, error))
 			{
 				return;
 			}
 
-			// iw8_patch_header::base, after the magic, the version, the diff version and the window sizes.
-			constexpr std::streamoff base_offset = 0x38;
-			std::string base(header.size(), '\0');
-			stream.seekg(base_offset);
-			if (!stream.read(base.data(), static_cast<std::streamsize>(base.size())) || base == header)
-			{
-				return;
-			}
-
-			stream.close();
-			std::error_code ignored;
-			std::filesystem::remove(patch_path, ignored);
-			ZONETOOL_WARNING("removed %s: it patched another version of %s", patch_path.filename().string().data(),
+			std::filesystem::remove(patch_path, error);
+			ZONETOOL_WARNING("removed %s: a full zone was written over %s", patch_path.filename().string().data(),
 				zone_path.filename().string().data());
 		}
 	}
@@ -1517,7 +1507,7 @@ namespace zonetool::xfile
 		}
 
 		std::filesystem::rename(partial, path);
-		remove_stale_patch(path, header);
+		remove_stale_patch(path);
 	}
 
 	std::string read_iw7_shared_stream(const std::string_view data, const format& format)
