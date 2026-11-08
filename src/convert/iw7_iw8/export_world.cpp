@@ -2360,6 +2360,27 @@ namespace zonetool::convert::iw7_iw8
 			xanims.push_back(name);
 		}
 
+		// The sun's angles (pitch = -asin(z), yaw = atan2(y, x), degrees) read the direction of ComWorld's sun, which
+		// points toward the sun as the pipeline's sun direction does (SunDirection, iw3_fastfile.cpp). The worldspawn
+		// sundirection key still takes precedence there. Without a directional sun light, the -45 / 0 default remains.
+		auto sun_angles = std::array<float, 3>{-45.0f, 0.0f, 0.0f};
+		if (com_world && com_world->primaryLightCount > sun_light)
+		{
+			const auto& sun_primary = com_world->primaryLights[sun_light];
+			const auto directional = sun_primary.type == iw7::GFX_LIGHT_TYPE_DIR ||
+				sun_primary.type == iw7::GFX_LIGHT_TYPE_DIR_SHADOWMAP;
+			const auto length = std::sqrt(sun_primary.dir[0] * sun_primary.dir[0] + sun_primary.dir[1] * sun_primary.dir[1] +
+				sun_primary.dir[2] * sun_primary.dir[2]);
+			if (directional && length > 0.0f && std::isfinite(length))
+			{
+				const auto x = sun_primary.dir[0] / length;
+				const auto y = sun_primary.dir[1] / length;
+				const auto z = sun_primary.dir[2] / length;
+				constexpr auto degrees = 180.0f / std::numbers::pi_v<float>;
+				sun_angles = {std::asin(std::clamp(-z, -1.0f, 1.0f)) * degrees, std::atan2(y, x) * degrees, 0.0f};
+			}
+		}
+
 		json value =
 		{
 			{"schema", 1},
@@ -2368,7 +2389,7 @@ namespace zonetool::convert::iw7_iw8
 			{"sky", export_sky(source, output)},
 			{"fog", export_fog(source)},
 			{"grading_clut", export_grading_clut(source, output)},
-			{"sun", {{"ambient", {0.5f, 0.5f, 0.5f}}, {"angles", {-45.0f, 0.0f, 0.0f}}, {"color", {1.0f, 1.0f, 1.0f}},
+			{"sun", {{"ambient", {0.5f, 0.5f, 0.5f}}, {"angles", sun_angles}, {"color", {1.0f, 1.0f, 1.0f}},
 				{"intensity", 1.0f}}},
 			{"sun_primary_light_index", sun_index},
 			{"primary_light_count", light_count},
