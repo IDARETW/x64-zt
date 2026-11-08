@@ -45,7 +45,8 @@ bool iw8_write(const std::string &outputPath, const std::vector<uint8_t> &zoneBo
     std::memcpy(header.magic, kMagicUnsec, sizeof(header.magic));
     header.headerVersion = kHeaderVersion;
     header.xfileVersion = params.xfileVersion;
-    header.dashCompressBuild = compressed ? 1 : 0;
+    // 0 for every unsigned zone, stored or compressed (xfile::write_iw8_header: the DW client refuses a nonzero flag).
+    header.dashCompressBuild = 0;
     header.dashEncryptBuild = 0;
     header.transientFileType = params.transientFileType;
     header.residentPartSize = static_cast<uint32_t>(residentSize);
