@@ -267,6 +267,10 @@ struct StaticModelInstance
     // R_AddAllStaticModelSurfacesCamera_LodCalc multiplies the model's LOD thresholds by
     // dword_142578690[index] for each placement. Entries match IW7's g_lodDistIndexToScale.
     uint8_t lodScaleIndex{6};
+    // IW7 STATIC_MODEL_FLAG_NO_CAST_SHADOW. A placement that does not cast clears the sun bit of its collection
+    // (collection +0x0E, bit sunIndex - 1): R_AddAllStaticModelsSurfacesCachedSunShadow 0x1418D5030 admits a
+    // collection to the sun shadow cache only when that bit is set. Stock Replay has such collections with flags 0.
+    bool castsShadow{true};
 };
 struct StaticModels
 {

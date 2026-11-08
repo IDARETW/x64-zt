@@ -203,6 +203,9 @@ struct SourceStaticModelInstance
     std::optional<std::vector<std::uint32_t>> shadowLights;
     // Replay's LOD distance scale index for this placement (IW7 lod_scale); 6 is 1.0.
     std::uint8_t lodScaleIndex{6};
+    // IW7 STATIC_MODEL_FLAG_NO_CAST_SHADOW: the placement is left out of the sun shadow caches.
+    // IW3 placements always cast (see replay_render.h StaticModelInstance::castsShadow).
+    bool castsShadow{true};
 };
 
 struct SourceStaticModels
@@ -3828,6 +3831,7 @@ std::vector<BrushModel> ReadBrushModels(const Json &world, const std::vector<Raw
         // distances and each placement carries its own index.
         if (const auto scale = instance.find("lod_scale"); scale != instance.end())
             converted.lodScaleIndex = LodScaleIndex(scale->get<float>());
+        converted.castsShadow = !instance.value("no_cast_shadow", false);
         // IW3 culls each placement at its own cullDist and keeps drawing the
         // lowest LOD past that LOD's distance. Replay culls at the model's last
         // LOD distance, so extend it to the farthest placement's cullDist.
@@ -5247,7 +5251,7 @@ void BuildPreparedStaticModels(const SourceStaticModels &source, const RenderPla
         staticModels.instances.push_back(
             {static_cast<unsigned>(sourceInstance.model), sourceInstance.origin,
              QuaternionFromBasis(axis[0], axis[1], axis[2]), sourceInstance.scale, sourceInstance.shadowLights,
-             sourceInstance.lodScaleIndex});
+             sourceInstance.lodScaleIndex, sourceInstance.castsShadow});
         if (collisionModels && collisionModelIndices.at(sourceInstance.model))
         {
             auto &collisionModel = collisionModels->at(*collisionModelIndices.at(sourceInstance.model));

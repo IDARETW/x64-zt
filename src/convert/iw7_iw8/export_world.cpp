@@ -1439,6 +1439,8 @@ namespace zonetool::convert::iw7_iw8
 				// The placement's LOD distance scale: the index in its flags into g_lodDistIndexToScale (the table of
 				// IW7's engine generation, as H1's; index 6 is 1).
 				{"lod_scale", lod_distance_scale(instance.flags)},
+				// STATIC_MODEL_FLAG_NO_CAST_SHADOW: the placement is left out of the sun shadow caches (replay_render).
+				{"no_cast_shadow", (instance.flags & iw7::STATIC_MODEL_FLAG_NO_CAST_SHADOW) != 0},
 				{"ground_lighting", ground.value_or(0)},
 				// IW3's STATIC_MODEL_FLAG_GROUND_LIGHTING.
 				{"model_flags", ground ? 1 : 0},
