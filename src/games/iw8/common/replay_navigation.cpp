@@ -1984,10 +1984,16 @@ Result Build(const Source &source)
     }
     std::size_t linkCount = 0;
     std::size_t isolated = 0;
-    for (const auto &list : links)
+    std::size_t isolatedEnds = 0;
+    for (std::size_t node = 0; node < links.size(); ++node)
     {
-        linkCount += list.size();
-        isolated += list.empty() ? 1u : 0u;
+        linkCount += links[node].size();
+        if (links[node].empty())
+        {
+            ++isolated;
+            // The authored traversal endpoints are the last 2 * traversalCount fixed nodes.
+            isolatedEnds += node + 2 * traversalCount >= fixedCount ? 1u : 0u;
+        }
     }
 
     // Zones: regions of the walkable cell graph around pathnode zoneSeeds picked
@@ -2290,12 +2296,13 @@ Result Build(const Source &source)
     const double seconds =
         std::chrono::duration<double>(std::chrono::steady_clock::now() - started).count();
     timing.lap("tactical graph");
+    // "isolated" counts every node with no link (marker, spawn, coverage or traversal end), so it is not a spawn count.
     zt::info("navigation: %zu fixed pathnodes (%zu IW3 markers placed, %zu off-mesh; %zu spawn "
-             "and %zu coverage nodes; %zu unlinked dropped), %zu links, %zu unlinked spawn "
-             "nodes, %zu zones",
+             "and %zu coverage nodes; %zu unlinked dropped), %zu links, %zu isolated nodes "
+             "(%zu traversal ends), %zu zones",
              fixedCount, markerNodes, droppedMarkers, spawnNodes,
              fixedCount + droppedUnlinked - markerNodes - spawnNodes - 2 * traversalCount, droppedUnlinked,
-             linkCount, isolated, zoneCount);
+             linkCount, isolated, isolatedEnds, zoneCount);
     if (traversalCount || droppedTraversals)
         zt::info("navigation: %zu authored traversals as Begin/End pathnodes with a negotiation link (%zu off the "
                  "walkable mesh or past the node limit left out)",
