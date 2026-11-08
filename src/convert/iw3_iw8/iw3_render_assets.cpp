@@ -5299,13 +5299,30 @@ RenderPlan PrepareRenderAssets(const std::filesystem::path &exportRoot, const Js
     parallelFor(uniqueNames.size(),
                 [&](const std::size_t index) { readMaterials[index] = ReadMaterial(exportRoot, sourcePaths, uniqueNames[index]); });
     {
+        // Every image an emitter below reads is decoded here, on every core: colour, normal, response, detail, the
+        // stock replay colour, normal-gloss and reveal maps, the world distortion map, and the IW7 model flow and UV
+        // distortion maps. IW7 maps used to preload their colour maps only, so the atlas tile, static model, entity
+        // and glass emitters decoded the rest one at a time on the main thread (Breakneck: 259 s of static model
+        // materials, 66 s of entity materials, 67 s of atlas tiles, most of it serial decoding). The emitters load
+        // these images anyway; only the thread and the order change. Reveal, distortion, flow and UV-distortion
+        // images come only from IW7 extractions (export_materials.cpp, export_world.cpp), so IW3 keeps its set.
         std::set<std::string> imageNames;
         for (const SourceMaterial &material : readMaterials)
-            if (material.kind != SurfaceKind::skipped)
-                for (const std::string *name : {&material.color, &material.normal, &material.response, &material.detail,
-                                                 &material.replayColor, &material.replayNormalGloss})
-                    if (!name->empty() && (!iw7Images || name == &material.color))
+        {
+            if (material.kind == SurfaceKind::skipped)
+                continue;
+            for (const std::string *name : {&material.color, &material.normal, &material.response, &material.detail,
+                                             &material.replayColor, &material.replayNormalGloss, &material.replayReveal,
+                                             &material.distortionMap})
+                if (!name->empty())
+                    imageNames.insert(*name);
+            if (material.flow)
+                for (const std::string *name : {&material.flow->map, &material.flow->surface})
+                    if (!name->empty())
                         imageNames.insert(*name);
+            if (material.uvd && !material.uvd->map.empty())
+                imageNames.insert(material.uvd->map);
+        }
         const std::vector<std::string> names(imageNames.begin(), imageNames.end());
         std::vector<std::optional<std::vector<Image>>> loaded(names.size());
         parallelFor(names.size(), [&](const std::size_t index) {
