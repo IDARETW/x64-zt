@@ -1193,7 +1193,7 @@ namespace zonetool::xfile
 		}
 
 		void read_iw8(byte_reader& reader, std::string& data, const std::filesystem::path& path, const format& format,
-			fastfile& file)
+			fastfile& file, const bool apply_patch)
 		{
 			if (format.block_count != iw8_block_count)
 			{
@@ -1234,7 +1234,7 @@ namespace zonetool::xfile
 				payload = decompress_iw8_frame(path, strip_iw8_rsa_blocks(reader.rest()), header.size);
 			}
 
-			file.payload = apply_iw8_patch(path, header, std::move(payload));
+			file.payload = apply_patch ? apply_iw8_patch(path, header, std::move(payload)) : std::move(payload);
 			if (std::ranges::find(iw8_xfile_versions, header.xfile_version) == iw8_xfile_versions.end())
 			{
 				throw std::runtime_error(std::format("xfile version 0x{:X} is not a Replay 1.20 version", header.xfile_version));
@@ -1450,16 +1450,21 @@ namespace zonetool::xfile
 
 	fastfile read(const std::filesystem::path& path, const format& format)
 	{
+		return read(path, format, true);
+	}
+
+	fastfile read(const std::filesystem::path& path, const format& format, const bool apply_patch)
+	{
 		std::string data;
 		if (!game_files::read(path, data))
 		{
 			throw std::runtime_error("cannot read file");
 		}
 
-		return read(path, std::move(data), format);
+		return read(path, std::move(data), format, apply_patch);
 	}
 
-	fastfile read(const std::filesystem::path& path, std::string data, const format& format)
+	fastfile read(const std::filesystem::path& path, std::string data, const format& format, const bool apply_patch)
 	{
 		struct
 		{
@@ -1500,7 +1505,7 @@ namespace zonetool::xfile
 			read_s2(reader, format, file);
 			break;
 		case container::iw8:
-			read_iw8(reader, data, path, format, file);
+			read_iw8(reader, data, path, format, file, apply_patch);
 			break;
 		case container::unsupported:
 			throw std::runtime_error(std::format("the {} container has no v2 reader", format.unsigned_magic));

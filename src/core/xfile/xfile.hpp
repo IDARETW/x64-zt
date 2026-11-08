@@ -49,8 +49,11 @@ namespace zonetool::xfile
 	};
 
 	fastfile read(const std::filesystem::path& path, const format& format);
+	// apply_patch = false returns the zone's own payload, before the Replay patch (.fp) beside it. A patch is built
+	// from that base payload, so patchzone reads both of its zones this way.
+	fastfile read(const std::filesystem::path& path, const format& format, bool apply_patch);
 	// The same from the file's data, already read.
-	fastfile read(const std::filesystem::path& path, std::string data, const format& format);
+	fastfile read(const std::filesystem::path& path, std::string data, const format& format, bool apply_patch = true);
 	// Writes an unsigned zone. An IW8 payload is compressed with Oodle Kraken in Replay's IWC frame when an Oodle library
 	// is set (set_oodle_directory), as stock fastfiles are; it is stored without one, or with MW120R_FF_STORED=1.
 	void write(const std::filesystem::path& path, const format& format, const fastfile& file);
