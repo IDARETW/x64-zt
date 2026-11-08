@@ -8300,6 +8300,19 @@ RenderPlan PrepareRenderAssets(const std::filesystem::path &exportRoot, const Js
                 info[0x11] = translucentKeys.at(source.sortKey);
                 direct["info"] = Hex(info);
             }
+            if (refracting)
+            {
+                // A refracting model reads resolvedSceneTexture (code texture 6), which Replay fills only for the
+                // distortion sort: the stock distortion material (twc/dub_water_wall_waves_dist) is camera region 3
+                // (CAMERA_REGION_LIT_TRANS) at sort 24, GfxWorld sortKeyDistortion, drawn by RBT_Distortion
+                // ("distorted"). At an ordinary translucent key the code texture is null and
+                // R_DrawState_SetImageDescriptorSlot -> Stream_TouchImageLastUsedFrame faults (owner's Breakneck
+                // match, 2026-11-07: 0x1413FCAD4, Stream_TouchImageLastUsedFrame + 4).
+                auto info = Unhex(direct.at("info").get<std::string>());
+                info[0x10] = 3;
+                info[0x11] = 24;
+                direct["info"] = Hex(info);
+            }
             direct["techset"] = techsetEntry->second.first;
             direct["techsetDefinition"] = techsetEntry->second.second;
             direct["imageDefinitions"] = Json::array();
