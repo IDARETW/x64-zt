@@ -117,6 +117,8 @@ namespace zonetool::convert::iw7_iw8
 			std::vector<std::string> effects;
 			std::string sound;
 			int health{};
+
+			bool operator==(const scriptable_destructible&) const = default;
 		};
 		std::map<std::string, scriptable_destructible> scriptable_destructibles;
 		// The placed scriptables of the other kinds that take damage (several parts, stages, reactions, explosions, IW7's
