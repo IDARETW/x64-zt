@@ -1830,7 +1830,11 @@ Result Build(const Source &source)
         };
         for (const PathNode &node : nodes)
             spread(node.cell);
-        while (nodes.size() < kMaxFixedNodes)
+        // Authored traversals are appended after this fill and must still fit under the node cap, so coverage stops
+        // early enough to leave their Begin and End slots (two per traversal, as in the traversal block below).
+        const std::size_t fillCap =
+            kMaxFixedNodes - std::min<std::size_t>(kMaxFixedNodes, 2 * source.traversals.size());
+        while (nodes.size() < fillCap)
         {
             std::size_t farthest = 0;
             int farthestDistance = -1;
