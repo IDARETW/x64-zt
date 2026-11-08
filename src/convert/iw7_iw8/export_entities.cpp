@@ -574,8 +574,7 @@ namespace zonetool::convert::iw7_iw8
 			}
 
 			result.removes = last_model && result.dead_model.empty();
-			// The health state's valid damage causes are kept for the report at the kind's first instance (not applied, see
-			// scriptable_destructible::valid_causes).
+			// The hits that count: the health state's minimumDamage and validDamageCause (applied by iw7_destructible_cause).
 			result.valid_causes = healthy.data.health.validDamageCause;
 
 			std::string kind(def.name ? asset_name(def.name) : std::string_view{"scriptable"});
@@ -2215,8 +2214,7 @@ namespace zonetool::convert::iw7_iw8
 				entities += std::format("\"targetname\" \"{}\"\n", unique.targetname);
 				const auto added = output.scriptable_destructibles.try_emplace(unique.targetname, unique).second;
 				destructibles++;
-				// Reported once per kind (the shortcut is found once per instance). MEASURE: the minimum damage and the damage causes of
-				// the breaking kinds are logged here, for the census of the next conversion log.
+				// Reported once per kind (the shortcut is found once per instance): the hit filters of the kinds that have them.
 				if (added && unique.mindamage > 0)
 				{
 					ZONETOOL_INFO("iw7: break kind %s counts only hits of %d or more (its health state's minimumDamage)", unique.targetname.data(),
@@ -2225,7 +2223,7 @@ namespace zonetool::convert::iw7_iw8
 
 				if (added && unique.valid_causes != 0)
 				{
-					ZONETOOL_WARNING("iw7: break kind %s takes only damage causes %d, which the break does not filter by", unique.targetname.data(),
+					ZONETOOL_INFO("iw7: break kind %s counts only the damage causes %d (Scriptable_DamageCause)", unique.targetname.data(),
 						unique.valid_causes);
 				}
 			}

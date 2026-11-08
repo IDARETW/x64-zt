@@ -150,8 +150,7 @@ namespace zonetool::convert::iw7_iw8
 			std::vector<break_sound> sounds;
 			int health{};
 			// The health state's validDamageCause (IW7 Scriptable_DamageCause; 0: every cause). Replay's ScriptableBg_MatchesDamageClassFilter
-			// tests the hit's class against it, and the break's "damage" notify carries the means of death only as a string, so a
-			// restricted state is reported, not applied.
+			// tests the hit's class against it; the break matches the notify's means of death (iw7_destructible_cause).
 			int valid_causes{};
 
 			bool operator==(const scriptable_destructible&) const = default;
