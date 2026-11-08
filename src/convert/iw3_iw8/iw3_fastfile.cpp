@@ -11330,8 +11330,8 @@ PreparedMap PrepareFastfile(const ImportOptions &options)
                 zt::info("iw3: %zu debris model(s) launch as physics props", physicsPartPresets.size());
         }
         {
-            // The play space for iw3compat_out_of_bounds: the minimap region
-            // (or the world without its sky) plus a margin, from below the
+            // The play space for iw3compat_out_of_bounds: the world without its
+            // sky, united with the minimap region, plus a margin, from below the
             // lowest geometry to well above the highest. Past it Replay's
             // visibility pass indexed a light bitset with a negative index
             // (crash at 0x141959080+0x71A when falling or flying out; IW8 maps
@@ -11349,13 +11349,17 @@ PreparedMap PrepareFastfile(const ImportOptions &options)
                         high[axis] = std::max(high[axis], value);
                     }
             }
+            // The minimap region is unioned with the world extent, never a
+            // replacement: Nuketown's corners span y -1440..1464 while its
+            // world floor reaches y -7124..3979 (x -6063..6129), so replacing
+            // the extent put 18% of its up-facing floor outside the kill box.
             convert::CompassBounds compass;
             if (convert::iw3CompassBounds(entities, compass))
             {
-                low[0] = std::min(compass.northwestX, compass.southeastX);
-                high[0] = std::max(compass.northwestX, compass.southeastX);
-                low[1] = std::min(compass.northwestY, compass.southeastY);
-                high[1] = std::max(compass.northwestY, compass.southeastY);
+                low[0] = std::min(low[0], std::min(compass.northwestX, compass.southeastX));
+                high[0] = std::max(high[0], std::max(compass.northwestX, compass.southeastX));
+                low[1] = std::min(low[1], std::min(compass.northwestY, compass.southeastY));
+                high[1] = std::max(high[1], std::max(compass.northwestY, compass.southeastY));
             }
             if (low[0] <= high[0] && low[2] <= high[2])
             {
