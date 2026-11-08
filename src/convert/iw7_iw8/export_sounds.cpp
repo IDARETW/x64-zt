@@ -797,6 +797,16 @@ namespace zonetool::convert::iw7_iw8
 			global_banks.emplace_back(zone + ".sabs");
 		}
 
+		// The localized zones of the map (eng_<map>, eng_patch_<map>; source_map::load takes them with the map) keep sound
+		// files of their own, and they may hold no sound-bank asset, so bank_zones does not name them. Frontier's 19
+		// emt_frontier_control_vo_* aliases name exactly the 19 entries of eng_mp_frontier.sabl (its header's entryCount),
+		// which the search above missed, so the aliases stayed silent. Those files join the search.
+		for (const std::string zone : {"eng_patch_" + std::string(source.name()), "eng_" + std::string(source.name())})
+		{
+			global_banks.emplace_back(zone + ".sabl");
+			global_banks.emplace_back(zone + ".sabs");
+		}
+
 		// The bank entry of an alias's sound: its own zone's banks, then the other loaded zones' and the global ones.
 		const auto sound_entry = [&](const iw7::SndAlias& alias, const std::pair<asset_bank, asset_bank>& files)
 			-> std::pair<const asset_bank*, const iw7::SndAssetBankEntry*>
