@@ -25,5 +25,8 @@ struct Iw8WriteParams
 
 bool iw8_write(const std::string &outputPath, const std::vector<uint8_t> &zoneBody,
                const Iw8WriteParams &params);
+// The Replay install whose oo2core_*_win64.dll compresses the fastfiles iw8_write writes (Oodle Kraken, as stock
+// fastfiles are). Without one, or with MW120R_FF_STORED=1, fastfiles are written stored.
+void iw8_set_oodle_directory(const std::string &directory);
 bool inspect_ff(const std::string &fastfilePath);
 } // namespace zt

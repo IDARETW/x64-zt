@@ -51,8 +51,13 @@ namespace zonetool::xfile
 	fastfile read(const std::filesystem::path& path, const format& format);
 	// The same from the file's data, already read.
 	fastfile read(const std::filesystem::path& path, std::string data, const format& format);
-	// Writes an unsigned zone with the payload stored (not compressed).
+	// Writes an unsigned zone. An IW8 payload is compressed with Oodle Kraken in Replay's IWC frame when an Oodle library
+	// is set (set_oodle_directory), as stock fastfiles are; it is stored without one, or with MW120R_FF_STORED=1.
 	void write(const std::filesystem::path& path, const format& format, const fastfile& file);
+	// The game install whose oo2core_*_win64.dll compresses IW8 payloads (Oodle is not redistributable).
+	void set_oodle_directory(const std::filesystem::path& directory);
+	// Replay's compressed IWC frame of an IW8 payload; empty when no Oodle compressor is available or MW120R_FF_STORED=1.
+	std::string compress_iw8_frame(std::string_view payload);
 
 	// Reads one stream of an IW7 shared stream file (assetfile<N>.pak): signed blocks that hold a compressed payload.
 	std::string read_iw7_shared_stream(std::string_view data, const format& format);

@@ -2,6 +2,7 @@
 #include "settings.hpp"
 #include "game_registry.hpp"
 
+
 #include <utils/io.hpp>
 
 namespace zonetool::cli
@@ -162,6 +163,11 @@ namespace zonetool::cli
 		game_files::set(result.game->open_files
 			? result.game->open_files(result.game_path)
 			: game_files::open_folder(result.zone_folder()));
+		// The Replay install's oo2core compresses the fastfiles that iw8 commands write.
+		if (result.game->name == "iw8")
+		{
+			zonetool::xfile::set_oodle_directory(result.game_path);
+		}
 
 		return result;
 	}
