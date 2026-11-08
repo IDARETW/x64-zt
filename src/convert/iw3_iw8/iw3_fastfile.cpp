@@ -10644,6 +10644,37 @@ void AddReplayTemplateEntities(CollisionData &collision, Json &render, std::stri
              "white_phosphorus_damage below the world");
 }
 
+// The IW3 play space: the world without its sky, united with the minimap region (the corners are never a
+// replacement: Nuketown's corners span y -1440..1464 while its floor reaches y -7124..3979). It bounds the
+// out-of-bounds kill box (iw3compat_out_of_bounds) and the sun-depth image, so a player and the shadow
+// they stand in share one region. Both stay unset (low > high) when the map has neither world nor corners.
+void PlaySpaceExtent(const std::vector<RawSurface> &worldSurfaces, const std::string &entities, Vec3 &low,
+                     Vec3 &high)
+{
+    low = {INFINITY, INFINITY, INFINITY};
+    high = {-INFINITY, -INFINITY, -INFINITY};
+    for (const RawSurface &surface : worldSurfaces)
+    {
+        if (surface.material.find("sky") != std::string::npos)
+            continue;
+        for (const RawVertex &vertex : surface.vertices)
+            for (std::size_t axis = 0; axis < 3; ++axis)
+            {
+                const float value = static_cast<float>(vertex.position[axis]);
+                low[axis] = std::min(low[axis], value);
+                high[axis] = std::max(high[axis], value);
+            }
+    }
+    convert::CompassBounds compass;
+    if (convert::iw3CompassBounds(entities, compass))
+    {
+        low[0] = std::min(low[0], std::min(compass.northwestX, compass.southeastX));
+        high[0] = std::max(high[0], std::max(compass.northwestX, compass.southeastX));
+        low[1] = std::min(low[1], std::min(compass.northwestY, compass.southeastY));
+        high[1] = std::max(high[1], std::max(compass.northwestY, compass.southeastY));
+    }
+}
+
 PreparedMap PrepareFastfile(const ImportOptions &options)
 {
     std::error_code error;
@@ -11383,31 +11414,9 @@ PreparedMap PrepareFastfile(const ImportOptions &options)
             // visibility pass indexed a light bitset with a negative index
             // (crash at 0x141959080+0x71A when falling or flying out; IW8 maps
             // kill out-of-bounds players before that).
-            Vec3 low{INFINITY, INFINITY, INFINITY}, high{-INFINITY, -INFINITY, -INFINITY};
-            for (const RawSurface &surface : worldSurfaces)
-            {
-                if (surface.material.find("sky") != std::string::npos)
-                    continue;
-                for (const RawVertex &vertex : surface.vertices)
-                    for (std::size_t axis = 0; axis < 3; ++axis)
-                    {
-                        const float value = static_cast<float>(vertex.position[axis]);
-                        low[axis] = std::min(low[axis], value);
-                        high[axis] = std::max(high[axis], value);
-                    }
-            }
-            // The minimap region is unioned with the world extent, never a
-            // replacement: Nuketown's corners span y -1440..1464 while its
-            // world floor reaches y -7124..3979 (x -6063..6129), so replacing
-            // the extent put 18% of its up-facing floor outside the kill box.
-            convert::CompassBounds compass;
-            if (convert::iw3CompassBounds(entities, compass))
-            {
-                low[0] = std::min(low[0], std::min(compass.northwestX, compass.southeastX));
-                high[0] = std::max(high[0], std::max(compass.northwestX, compass.southeastX));
-                low[1] = std::min(low[1], std::min(compass.northwestY, compass.southeastY));
-                high[1] = std::max(high[1], std::max(compass.northwestY, compass.southeastY));
-            }
+            // The extent is shared with the sun-depth image (PlaySpaceExtent).
+            Vec3 low{}, high{};
+            PlaySpaceExtent(worldSurfaces, entities, low, high);
             if (low[0] <= high[0] && low[2] <= high[2])
             {
                 char bounds[256];
@@ -12104,18 +12113,26 @@ PreparedMap PrepareFastfile(const ImportOptions &options)
     }
     {
         // Baked sun visibility for every converted receiver (world, static
-        // models, entities) over the play space: the minimap region plus a
-        // margin, at every height a caster there reaches. Native shadow
-        // cascades drop casters outside their range and view; this does not.
+        // models, entities) over the play space plus a margin, at every height
+        // a caster there reaches. Native shadow cascades drop casters outside
+        // their range and view; this does not. The region was the minimap
+        // corners alone: Nuketown's depth image covered y -1952..1976 at 1.12
+        // units per texel, so its floor south of that band (down to y -7124)
+        // had no baked sun depth. The shared play space (PlaySpaceExtent) is
+        // the same extent the kill box uses; the 4096-tile budget makes it
+        // coarser, about 3 units per texel on Nuketown. A map without minimap
+        // corners keeps the whole 32768-unit box (mp_test: its world is only
+        // x,y -832..832, and its depth image is unchanged).
         float minX = -16384, maxX = 16384, minY = -16384, maxY = 16384;
-        convert::CompassBounds compass;
-        if (convert::iw3CompassBounds(entities, compass))
+        if (convert::CompassBounds compass; convert::iw3CompassBounds(entities, compass))
         {
             constexpr float margin = 512;
-            minX = std::min(compass.northwestX, compass.southeastX) - margin;
-            maxX = std::max(compass.northwestX, compass.southeastX) + margin;
-            minY = std::min(compass.northwestY, compass.southeastY) - margin;
-            maxY = std::max(compass.northwestY, compass.southeastY) + margin;
+            Vec3 low{}, high{};
+            PlaySpaceExtent(worldSurfaces, entities, low, high);
+            minX = low[0] - margin;
+            maxX = high[0] + margin;
+            minY = low[1] - margin;
+            maxY = high[1] + margin;
         }
         float minZ = INFINITY, maxZ = -INFINITY;
         for (const auto &surface : result.shadowScene.surfaces)
