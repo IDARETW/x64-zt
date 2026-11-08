@@ -603,7 +603,8 @@ namespace zonetool::convert::iw7_iw8
 		}
 
 		// The table's aliases (zone ambience beds, ambient elements) export with the aliases that the scripts name.
-		for (const auto& name : export_sound_table(source, *bank, output))
+		const auto table_aliases = export_sound_table(source, *bank, output);
+		for (const auto& name : table_aliases)
 		{
 			output.sound_names.insert(name);
 		}
@@ -898,7 +899,21 @@ namespace zonetool::convert::iw7_iw8
 			const auto name = pending.back();
 			pending.pop_back();
 			const auto found = lists.find(name);
-			if (found == lists.end() || !visited.insert(name).second)
+			if (found == lists.end())
+			{
+				// Script literals are not all aliases, so only the names that the zone tables play are reported: a zone bed or
+				// ambient element that no loaded bank defines stays silent in the game (Breakneck's last_stand_overlay_sfx_plr,
+				// defined only in mp_codphish.ff and mp_marsoasis.ff).
+				if (table_aliases.contains(name) && visited.insert(name).second)
+				{
+					ZONETOOL_WARNING("iw7: alias \"%s\" is in no loaded sound bank; the zone or ambient element that plays it stays silent",
+						name.data());
+				}
+
+				continue;
+			}
+
+			if (!visited.insert(name).second)
 			{
 				continue;
 			}

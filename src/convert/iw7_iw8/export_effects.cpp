@@ -4353,6 +4353,41 @@ iw7_destructible_play_sound( sound )
 			output.sound_names.insert((*it)[1].str());
 		}
 
+		// The aliases that the map script plays by a literal name: the play calls' first argument, and playsoundatpos's last
+		// (the alias). IW7 finds a sound only among the loaded banks' aliases, so Replay plays nothing for a name that none of
+		// them defines; reported here, since the names are otherwise dropped without a trace (export_sounds walks them).
+		{
+			std::set<std::string> defined;
+			for (const auto& [bank_name, asset] : source.assets(iw7::ASSET_TYPE_SOUND_BANK))
+			{
+				const auto* bank = static_cast<const iw7::SndBank*>(asset);
+				for (auto i = 0u; bank && bank->alias && i < bank->aliasCount; i++)
+				{
+					if (bank->alias[i].aliasName)
+					{
+						defined.emplace(asset_name(bank->alias[i].aliasName));
+					}
+				}
+			}
+
+			static const std::regex played(
+				R"re(\b(?:playsound|playloopsound|playsoundasmaster|ambientplay)\s*\(\s*"([\w/]+)")re", std::regex::icase);
+			static const std::regex played_at(R"re(\bplaysoundatpos\s*\([^;]*?,\s*"([\w/]+)"\s*\))re", std::regex::icase);
+			std::set<std::string> reported;
+			for (const auto* pattern : {&played, &played_at})
+			{
+				for (auto it = std::sregex_iterator(map_script.begin(), map_script.end(), *pattern); it != std::sregex_iterator(); ++it)
+				{
+					const auto name = (*it)[1].str();
+					if (!defined.contains(name) && reported.insert(name).second)
+					{
+						ZONETOOL_WARNING("iw7: the map script plays alias \"%s\", which no loaded sound bank defines; it plays nothing",
+							name.c_str());
+					}
+				}
+			}
+		}
+
 		const auto missing = export_effect_graphs(source, output, {placed.begin(), placed.end()});
 		// The map script's own effects that are not in the loaded zones: their playfx and stopfx do nothing at run time (IW7
 		// Frontier's solar ambient vfx_opsmap_3d_ambient_large). Reported, not replaced by another effect.
