@@ -506,7 +506,13 @@ namespace zonetool::convert::iw7_iw8
 				record.gravityOptions = static_cast<std::uint32_t>(emitter.gravityOptions);
 				std::memcpy(record.groupIDs, emitter.groupIDs, sizeof(record.groupIDs));
 				// Replay's own conversions of IW7 effects (common_mp) emit by distance at 0.1, as converted IW3 effects;
-				// IW7's two floats in its place are not that density.
+				// IW7's two floats in its place (ParticleEmitterDef unk1/unk2 at +124/+128, Replay's emitByDistanceDensity
+				// offset) are not known to be that density, so they are logged for the census before any use.
+				if (emitter.unk1 != 0.0f || emitter.unk2 != 0.0f)
+				{
+					ZONETOOL_INFO("iw7: effect \"%s\" emitter keeps emit-by-distance density 0.1 over its unk1 %g unk2 %g",
+						this->current_.data(), emitter.unk1, emitter.unk2);
+				}
 				record.emitByDistanceDensity = {0.1f, 0.1f};
 				std::memcpy(&record.particleSpawnShapeRange, &emitter.particleSpawnShapeRange, 8);
 
