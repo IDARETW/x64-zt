@@ -2849,7 +2849,8 @@ namespace zonetool::convert::iw7_iw8
 		const auto name = "compass_map_" + source.name();
 		const auto* material = static_cast<const iw7::Material*>(source.find(iw7::ASSET_TYPE_MATERIAL, name));
 		// The minimap is the material's colour map (semantic TS_COLOR_MAP). Its first texture can be a
-		// game-mode mask instead (Frontier's compass_map_mp_frontier_tdmd), so the slot is chosen by semantic.
+		// game-mode mask instead (Frontier's compass_map_mp_frontier_tdmd), so the colour map is preferred.
+		// Without one, the first texture is kept as before.
 		const iw7::GfxImage* image = nullptr;
 		if (material && material->textureCount && material->textureTable)
 		{
@@ -2858,10 +2859,7 @@ namespace zonetool::convert::iw7_iw8
 			{
 				return texture.semantic == iw7::TS_COLOR_MAP;
 			});
-			if (colour != textures.end())
-			{
-				image = source.resolve(iw7::ASSET_TYPE_IMAGE, colour->image);
-			}
+			image = source.resolve(iw7::ASSET_TYPE_IMAGE, (colour != textures.end() ? colour : textures.begin())->image);
 		}
 		if (!image)
 		{
