@@ -561,7 +561,8 @@ namespace zonetool::convert::iw7_iw8
 	// particle systems as native Replay effects (extracted/vfx/<name>.json), with the materials and models that they use.
 	void export_effects(const source_map& source, extraction& output, const zone_conversion& conversion);
 	// Converts IW7 particle systems and the effects that they start to native Replay effects.
-	void export_effect_graphs(const source_map& source, extraction& output, const std::vector<std::string>& effects);
+	// Returns the effects (vfx names) that are not in the loaded zones.
+	std::set<std::string> export_effect_graphs(const source_map& source, extraction& output, const std::vector<std::string>& effects);
 	// Writes the aliases of the map's sound bank (<map>.all) that the scripts name, with their secondary aliases, as IW3
 	// alias definitions (extracted/soundaliases/<alias>.iw3.json), and their sounds of the bank's .sabl (FLAC frames)
 	// as wave files, which the pipeline converts.

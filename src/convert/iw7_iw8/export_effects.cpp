@@ -3679,6 +3679,19 @@ iw7_out_of_bounds_clear()
 			ZONETOOL_INFO("iw7: translated the map script (%zu bytes) with %zu effects of its own", map_script.size(), loaded.size());
 			placed.insert(loaded.begin(), loaded.end());
 
+			// The effects that the translated map code reads by key (level._effect[ "vfx_..." ], from getfx or the playfx of
+			// a playfxontag) whose loadfx sits in an fx script that main never runs. Breakneck's blackhole debris plays
+			// vfx_breakneck_explosion_01 (mp_breakneck_fx::main registers it; the map script never runs that script), and no
+			// placement uses it, so it converts with the map's effects. Keys in a quoted literal only: the registration's
+			// own name, not a substring of another key.
+			for (const auto& [key, path] : effects)
+			{
+				if (map_script.find("\"" + key + "\"") != std::string::npos)
+				{
+					placed.insert(path);
+				}
+			}
+
 			// The animation suite plays the effect that each animObj entity names by its script_noteworthy (vfx_...).
 			if (map_script.find("setupvfxobjs(") != std::string::npos)
 			{
@@ -4299,7 +4312,17 @@ iw7_destructible_play_sound( sound )
 			output.sound_names.insert((*it)[1].str());
 		}
 
-		export_effect_graphs(source, output, {placed.begin(), placed.end()});
+		const auto missing = export_effect_graphs(source, output, {placed.begin(), placed.end()});
+		// The map script's own effects that are not in the loaded zones: their playfx and stopfx do nothing at run time (IW7
+		// Frontier's solar ambient vfx_opsmap_3d_ambient_large). Reported, not replaced by another effect.
+		for (const auto& [key, path] : effects)
+		{
+			if (missing.contains(path) && map_script.find("\"" + key + "\"") != std::string::npos)
+			{
+				ZONETOOL_WARNING("iw7: the map script reads effect %s (%s), which is not in the loaded zones; it plays nothing",
+					key.data(), path.data());
+			}
+		}
 
 		const auto folder = output.extracted / "maps";
 		std::filesystem::create_directories(folder / "mp");
@@ -4355,7 +4378,7 @@ iw7_destructible_play_sound( sound )
 			placed.size(), effects.size(), unknown_calls);
 	}
 
-	void export_effect_graphs(const source_map& source, extraction& output, const std::vector<std::string>& effects)
+	std::set<std::string> export_effect_graphs(const source_map& source, extraction& output, const std::vector<std::string>& effects)
 	{
 		effect_converter converter(source, output);
 		std::size_t converted{};
@@ -4376,5 +4399,7 @@ iw7_destructible_play_sound( sound )
 		{
 			ZONETOOL_INFO("iw7: %zu flare states away from their source (ghosts) stay Replay flares", converter.flare_ghosts());
 		}
+
+		return converter.missing();
 	}
 }
