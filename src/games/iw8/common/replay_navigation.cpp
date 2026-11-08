@@ -1907,16 +1907,21 @@ Result Build(const Source &source)
     }
     // Authored traversals as Begin/End node pairs after the generated nodes (fixed nodes: Nav_SetupNavLinks walks
     // Path_FixedNodeCount). The Begin node's one negotiation link to its End node becomes a bfx nav link; both
-    // nodes also link to the generated nodes they reach on foot, as those link to each other.
+    // nodes also link to the nodes they reach on foot: generated nodes and earlier traversal endpoints (walkLinks).
     std::vector<std::uint16_t> nodeTypes(nodes.size(), kPathnodeType);
     std::vector<std::string> animscripts(nodes.size());
     std::size_t traversalCount = 0;
     std::size_t droppedTraversals = 0;
     {
-        const std::size_t generated = nodes.size();
-        const auto walkLinks = [&](const std::size_t node) {
-            for (std::size_t other = 0; other < generated; ++other)
+        // A traversal endpoint links to the generated nodes and to the endpoints of earlier traversals, as the
+        // authored graph does: 30 of Breakneck's 32 jump_up End nodes (IW7 PathData, horizontal lengths 4 to 256)
+        // link only to other Begin/End nodes, so scanning generated nodes alone left those ends isolated (the build
+        // log's isolated count). Its own partner is skipped: the authored graph has no link back down its traversal.
+        const auto walkLinks = [&](const std::size_t node, const std::size_t partner) {
+            for (std::size_t other = 0; other < nodes.size(); ++other)
             {
+                if (other == node || other == partner)
+                    continue;
                 const float distance = HorizontalDistance(nodes[node].origin, nodes[other].origin);
                 if (distance > kLinkDistance ||
                     !WalkableLine(grid, nodes[node].cell, nodes[node].origin, nodes[other].cell,
@@ -1961,8 +1966,8 @@ Result Build(const Source &source)
             links.emplace_back();
             links[begin].push_back({HorizontalDistance(traversal.begin, traversal.end),
                                     static_cast<std::uint16_t>(begin + 1), true});
-            walkLinks(begin);
-            walkLinks(begin + 1);
+            walkLinks(begin, begin + 1);
+            walkLinks(begin + 1, begin);
             ++traversalCount;
         }
     }
