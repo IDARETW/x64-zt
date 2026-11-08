@@ -3304,6 +3304,8 @@ iw7_out_of_bounds_clear()
 				R"re(\s*scripts\\mp\\(?:maps\\\w+\\[\w\\]+|load|compass)::\w+\([^;]*\);)re");
 			static const std::regex loaded(R"re(loadfx\(\s*"([^"]+?)(?:\.vfx)?"\s*\))re");
 			std::string result = std::format("// The map script (IW7 scripts\\mp\\maps\\{0}\\{0}).\n\n", map);
+			// The names of the exploder calls that pass players or a time (listed below).
+			std::vector<std::string> client_exploders;
 			// The lengths of the animations that the script names, for iw7_getanimlength (written when the script calls it).
 			std::map<std::string, float> animation_lengths;
 			bool takes_lengths{};
@@ -3355,9 +3357,17 @@ iw7_out_of_bounds_clear()
 					return "level._effect[ " + join(arguments) + " ]";
 				});
 
-				// IW7's exploder( name, players, start time ) runs the createfx exploders of the name (iw7_exploder).
-				body = rewrite_calls(body, "scripts\\engine\\utility::exploder", [](const std::vector<std::string>& arguments)
+				// IW7's exploder( name, players, start time ) runs the createfx exploders of the name (iw7_exploder). Its
+				// players and time reach only activate_clientside_exploder (2618.gsc:910), which runs for a name that no server
+				// exploder holds when shouldrunserversideeffects() is false (activate_exploder, 2618.gsc:864). The client
+				// exploders are not exported, so those calls are listed for the conversion log.
+				body = rewrite_calls(body, "scripts\\engine\\utility::exploder", [&](const std::vector<std::string>& arguments)
 				{
+					if (arguments.size() > 1)
+					{
+						client_exploders.push_back(arguments.front());
+					}
+
 					return "iw7_exploder( " + arguments.front() + " )";
 				});
 
@@ -3492,6 +3502,13 @@ iw7_out_of_bounds_clear()
 				body = std::regex_replace(body, loaded, "loadfx( \"$1\" )");
 				result += std::format("{}({})\n{}\n", function.name, function.parameters.empty() ? "" : " " + function.parameters + " ",
 					body);
+			}
+
+			if (!client_exploders.empty())
+			{
+				ZONETOOL_WARNING("iw7: %zu exploder calls pass players or a time (%s); a name with no server exploder plays on the client "
+					"(activate_clientside_exploder, 2618.gsc:910), which is not converted", client_exploders.size(),
+					join(client_exploders).c_str());
 			}
 
 			// gsc-tool writes the names that it has no text for as their IW7 token ids (_id_XXXX), which compile to the
