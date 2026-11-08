@@ -1347,15 +1347,6 @@ namespace zonetool::convert::iw7_iw8
 			return std::pair(std::move(text), static_cast<std::uint8_t>(std::lround(visibility / static_cast<double>(frames.size()))));
 		}
 
-		// IW7 placements scale their model's LOD distances by g_lodDistIndexToScale[flags & 0xF] (index 6 is 1; designers
-		// raise it on large props seen from afar: Renaissance 554 of 9221 placements, up to 4).
-		float lod_distance_scale(const unsigned short flags)
-		{
-			constexpr std::array<float, 16> scales{0.25f, 0.375f, 0.5f, 0.625f, 0.75f, 0.875f, 1.0f, 1.125f, 1.25f, 1.5f, 1.75f, 2.0f,
-				2.5f, 3.0f, 3.5f, 4.0f};
-			return scales[flags & iw7::STATIC_MODEL_FLAG_SCALE_MODIFIER_MASK];
-		}
-
 		struct authored_shadow_membership
 		{
 			std::vector<std::vector<std::uint32_t>> surfaces;

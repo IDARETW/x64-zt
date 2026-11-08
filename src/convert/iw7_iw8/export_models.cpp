@@ -183,6 +183,48 @@ namespace zonetool::convert::iw7_iw8
 				: placement_scales{};
 		}
 
+		// The distance beyond which IW7 draws no placement of a model: the largest placement cullDist (GfxStaticModelDrawInst;
+		// 0 never culls), each times its LOD scale when that is above 1 (Replay applies a placement's scale at its final
+		// cut-off, so a scaled-up placement would otherwise vanish early). None for a model the world does not place, or that
+		// some placement never culls. Breakneck: 11554 of 13265 placements cull, median 3000 units.
+		std::optional<float> placement_cull_distance(const source_map& source, const std::string& name)
+		{
+			static std::unordered_map<const source_map*, std::unordered_map<std::string, float>> cache;
+			auto& culls = cache[&source];
+			if (culls.empty())
+			{
+				culls.emplace("", std::numeric_limits<float>::infinity());
+				if (const auto* world = source.world())
+				{
+					for (auto i = 0u; i < world->dpvs.smodelCount; i++)
+					{
+						const auto& instance = world->dpvs.smodelDrawInsts[i];
+						if (!instance.model)
+						{
+							continue;
+						}
+
+						const auto key = file_name(asset_name(iw7::get_asset_name(iw7::ASSET_TYPE_XMODEL, instance.model)));
+						const auto cull = instance.cullDist ? static_cast<float>(instance.cullDist) *
+							std::max(1.0f, lod_distance_scale(instance.flags)) : std::numeric_limits<float>::infinity();
+						const auto [entry, added] = culls.try_emplace(key, cull);
+						if (!added)
+						{
+							entry->second = std::max(entry->second, cull);
+						}
+					}
+				}
+			}
+
+			const auto found = culls.find(name);
+			if (name.empty() || found == culls.end() || !std::isfinite(found->second))
+			{
+				return std::nullopt;
+			}
+
+			return found->second;
+		}
+
 		// A model's export, planned in model order: its materials (each registers with the extraction), LOD distances
 		// and surfaces. A model that does not convert has none (it warns why).
 		struct model_plan
@@ -280,8 +322,14 @@ namespace zonetool::convert::iw7_iw8
 				// farther than the one before it never shows (XModelSelectLod takes the first LOD whose distance
 				// exceeds the view distance), and the converter leaves such LODs out (iw3_fastfile.cpp
 				// ReadSourceModel). Raising them to previous + 1 made them show in a 1-unit band.
+				// The last LOD ends where IW7 culls the model's farthest placement (placement_cull_distance): Replay culls an
+				// instance at its model's last LOD distance. With 1000000 for every model, every placement of the map stayed
+				// drawable from anywhere, and Breakneck's views overran the static-model draw budget: objects, even the
+				// viewmodel, flickered in and out (owner's live test; r_forceLod 3 hid most of it). A model the world does
+				// not place, or that a placement never culls, keeps 1000000.
 				const float authored = std::isfinite(info.dist) ? info.dist : 0.0f;
-				previous_distance = lod + 1 == model->numLods ? std::max(1000000.0f, previous_distance + 1.0f)
+				previous_distance = lod + 1 == model->numLods
+					? std::max(placement_cull_distance(source, name).value_or(1000000.0f), previous_distance + 1.0f)
 					: std::max(1.0f, authored);
 				planned.distance = previous_distance;
 			}
