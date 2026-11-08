@@ -2107,7 +2107,9 @@ namespace zonetool::convert::iw7_iw8
 				animated = "iw7_animated_" + kind;
 				entities += std::format("\"targetname\" \"{}\"\n", animated);
 			}
-			else if (def && takes_damage(*def))
+			// A kind with several states that change (IW7 runs a state's events on every instance, named or not) runs its machine
+			// as a kind that takes damage does; the machine plays its first states' effects (iw7_scriptable_think).
+			else if (def && (takes_damage(*def) || changes_state(*def)))
 			{
 				const auto machine_name = "iw7_scriptable_" + kind;
 				entities += std::format("\"targetname\" \"{}\"\n", machine_name);
