@@ -736,14 +736,21 @@ std::string BuildReplayVision(const std::optional<ExpFog> &fog, const std::strin
         std::size_t kept{};
         for (const auto &[name, token] : kVolumetricFields)
         {
+            // IW7's volumetric air fields are not in Replay's units: Breakneck's (air density .5, absorption .035,
+            // ambient brightness 0) blacked out everything a few metres from the camera in the owner's match
+            // (2026-11-07, live: r_volumetrics 0 restored the lit station), while IW7 draws that air faintly. The
+            // stock air of the template vision stays until the unit mapping is established; the veil and the
+            // r_volumeLightScatter dvars keep IW7's values (same dvars, same ranges).
+            if (name.starts_with("volumetric"))
+                continue;
             if (const auto found = iw7Volumetrics->find(std::string(name)); found != iw7Volumetrics->end())
             {
                 overrides[token] = found->get<std::string>();
                 kept++;
             }
         }
-        zt::info("iw3: vision keeps %zu IW7 volumetric, veil and light scatter fields (air density %s)", kept,
-                 iw7Volumetrics->value("volumetricAirDensity", std::string("0")).c_str());
+        zt::info("iw3: vision keeps %zu IW7 veil and light scatter fields; the stock air stays (IW7 air density %s)",
+                 kept, iw7Volumetrics->value("volumetricAirDensity", std::string("0")).c_str());
     }
     if (!fog)
     {
