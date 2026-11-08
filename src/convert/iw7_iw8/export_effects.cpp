@@ -1969,20 +1969,28 @@ namespace zonetool::convert::iw7_iw8
 		constexpr std::string_view map_script_helpers = R"gsc(
 iw7_getstruct( name, key )
 {
+	// scripts\engine\utility::getstruct (IW7 decompile 2626.gsc:981): a name that several structs hold has no single struct.
 	structs = common_scripts\utility::getstructarray( name, key );
-	if ( structs.size )
+	if ( structs.size == 1 )
 		return structs[ 0 ];
 	return undefined;
 }
 
 iw7_waittill_either( first, second )
 {
+	// scripts\engine\utility::waittill_either (2626.gsc:606) returns the message that ended the wait.
 	self endon( first );
 	self waittill( second );
+	return second;
 }
 
 iw7_waittill_any_return( a, b, c, d, e, f )
 {
+	// scripts\engine\utility::waittill_any_return (2626.gsc:257): the wait ends with the entity's death unless one of the
+	// messages is death itself.
+	if ( ( !isdefined( a ) || a != "death" ) && ( !isdefined( b ) || b != "death" ) && ( !isdefined( c ) || c != "death" ) &&
+		( !isdefined( d ) || d != "death" ) && ( !isdefined( e ) || e != "death" ) && ( !isdefined( f ) || f != "death" ) )
+		self endon( "death" );
 	ent = spawnstruct();
 	if ( isdefined( a ) )
 		self thread iw7_waittill_string( a, ent );
@@ -2003,6 +2011,9 @@ iw7_waittill_any_return( a, b, c, d, e, f )
 
 iw7_waittill_string( message, ent )
 {
+	// scripts\engine\utility::waittill_string (2626.gsc:178): the watch ends with the entity's death unless it waits for it.
+	if ( message != "death" )
+		self endon( "death" );
 	ent endon( "die" );
 	self waittill( message );
 	ent notify( "returned", message );
@@ -2039,10 +2050,15 @@ iw7_array_remove( values, removed )
 
 iw7_spawn_tag_origin( origin, angles )
 {
-	if ( !isdefined( origin ) )
+	// scripts\engine\utility::spawn_tag_origin (2626.gsc:2315): the origin falls back to the caller's, then to the world origin,
+	// and the tag is hidden.
+	if ( !isdefined( origin ) && isdefined( self.origin ) )
 		origin = self.origin;
+	else if ( !isdefined( origin ) )
+		origin = ( 0, 0, 0 );
 	ent = spawn( "script_model", origin );
 	ent setmodel( "tag_origin" );
+	ent hide();
 	if ( isdefined( angles ) )
 		ent.angles = angles;
 	else if ( isdefined( self.angles ) )
@@ -2062,12 +2078,16 @@ iw7_flag( name )
 	return isdefined( level.iw7_flags ) && isdefined( level.iw7_flags[ name ] ) && level.iw7_flags[ name ];
 }
 
-iw7_flag_set( name )
+iw7_flag_set( name, payload )
 {
+	// scripts\engine\utility::flag_set (2626.gsc:565): the flag's notify carries the payload when one is given.
 	if ( !isdefined( level.iw7_flags ) )
 		level.iw7_flags = [];
 	level.iw7_flags[ name ] = 1;
-	level notify( name );
+	if ( isdefined( payload ) )
+		level notify( name, payload );
+	else
+		level notify( name );
 }
 
 iw7_flag_clear( name )
@@ -2079,8 +2099,15 @@ iw7_flag_clear( name )
 
 iw7_flag_wait( name )
 {
+	// scripts\engine\utility::flag_wait (2626.gsc:576) returns the payload of the notify that ended the wait.
+	payload = undefined;
 	while ( !iw7_flag( name ) )
-		level waittill( name );
+	{
+		payload = undefined;
+		level waittill( name, payload );
+	}
+	if ( isdefined( payload ) )
+		return payload;
 }
 
 iw7_delaythread( delay, function, a, b, c, d )
@@ -2090,17 +2117,21 @@ iw7_delaythread( delay, function, a, b, c, d )
 
 iw7_delaythread_proc( delay, function, a, b, c, d )
 {
+	// scripts\engine\utility::delaythread_proc (2626.gsc:3051): the call runs on its own thread, and the delay ends with
+	// the entity's death or stop_delay_thread.
+	self endon( "death" );
+	self endon( "stop_delay_thread" );
 	wait( delay );
 	if ( isdefined( d ) )
-		self [[ function ]]( a, b, c, d );
+		self thread [[ function ]]( a, b, c, d );
 	else if ( isdefined( c ) )
-		self [[ function ]]( a, b, c );
+		self thread [[ function ]]( a, b, c );
 	else if ( isdefined( b ) )
-		self [[ function ]]( a, b );
+		self thread [[ function ]]( a, b );
 	else if ( isdefined( a ) )
-		self [[ function ]]( a );
+		self thread [[ function ]]( a );
 	else
-		self [[ function ]]();
+		self thread [[ function ]]();
 }
 
 iw7_unsupported( a, b, c, d, e, f )
