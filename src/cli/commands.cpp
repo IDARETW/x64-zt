@@ -31,6 +31,7 @@ namespace zonetool::cli
 			command{"verifyzone", "verifyzone <zone> | verifyzone --all", verify_zone},
 			command{"listzone", "listzone <zone> | listzone --all", list_zone},
 			command{"buildzone", "buildzone <zone>", build_zone},
+			command{"refreshzone", "refreshzone <deployed map folder> <rebuilt map folder> [<output folder>]", refresh_zone},
 			command{"generatecsv", "generatecsv <map> [sp] [--path <dir>]...", generate_csv},
 		};
 

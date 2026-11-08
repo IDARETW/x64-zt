@@ -300,6 +300,24 @@ namespace zonetool::cli
 		settings.game->build_zone(settings.zone_folder(), args.front());
 	}
 
+	void refresh_zone(const settings& settings, const std::span<const std::string> args)
+	{
+		if (args.size() != 2 && args.size() != 3)
+		{
+			std::cout << "usage: refreshzone <deployed map folder> <rebuilt map folder> [<output folder>]\n";
+			return;
+		}
+
+		if (!settings.game->refresh_zone)
+		{
+			std::cout << std::format("refreshzone is not supported for {}\n", settings.game->name);
+			return;
+		}
+
+		// By default the refresh zone goes beside the deployed package, where the game's map_refresh reads it.
+		settings.game->refresh_zone(args[0], args[1], args.size() == 3 ? args[2] : args[0]);
+	}
+
 	void generate_csv(const settings& settings, const std::span<const std::string> args)
 	{
 		if (args.empty())

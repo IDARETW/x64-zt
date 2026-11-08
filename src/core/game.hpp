@@ -18,6 +18,9 @@ namespace zonetool
 	using listing_command = std::string(*)(const std::filesystem::path& zone_folder, const std::filesystem::path& zone_path);
 	using build_command = void(*)(const std::filesystem::path& zone_folder, const std::string& name);
 	using token_name_resolver = std::string(*)(std::uint32_t id);
+	// Builds the live refresh zone of a map package: the assets of a rebuilt package that differ from the deployed one.
+	using refresh_command = void(*)(const std::filesystem::path& deployed, const std::filesystem::path& rebuilt,
+		const std::filesystem::path& output);
 
 	struct game
 	{
@@ -32,6 +35,7 @@ namespace zonetool
 		listing_command list_zone;
 		build_command build_zone;
 		token_name_resolver token_name;
+		refresh_command refresh_zone;
 	};
 
 	struct zone_conversion

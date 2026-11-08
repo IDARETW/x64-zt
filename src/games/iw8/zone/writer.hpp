@@ -24,6 +24,9 @@ namespace zonetool::iw8
 		std::uint64_t assets_marker{};
 		// The expected size of the zone data, which the writer reserves (0: none).
 		std::size_t expected_size{};
+		// Each use of an asset writes a name stub, also of an asset of the list: only the list entries hold data.
+		// Replay resolves the stubs to the live entries (DB_LinkXAssetEntry), which a refresh zone replaces in place.
+		bool reference_uses{};
 	};
 
 	struct zone_inventory
