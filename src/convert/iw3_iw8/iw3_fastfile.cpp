@@ -5669,6 +5669,35 @@ Json BuildIw7GlassPanes(const Json &table, const std::vector<BrushModel> &models
     return panes;
 }
 
+// IW7's named glass groups: each name keeps the native panes of its pieces (a piece without a native pane is left out).
+Json BuildIw7GlassNames(const Json &table, const std::map<std::uint32_t, std::uint32_t> &nativePanes)
+{
+    if (!table.is_array())
+        throw std::runtime_error("IW7 glass name table is not an array");
+    Json names = Json::array();
+    std::size_t droppedGroups = 0;
+    for (const Json &source : table)
+    {
+        Json panes = Json::array();
+        for (const Json &piece : source.at("pieces"))
+        {
+            const auto found = nativePanes.find(piece.get<std::uint32_t>());
+            if (found != nativePanes.end())
+                panes.push_back(found->second);
+        }
+        if (panes.empty())
+        {
+            ++droppedGroups;
+            continue;
+        }
+        names.push_back({{"name", source.at("name")}, {"panes", panes}});
+    }
+    if (droppedGroups)
+        zt::info("iw7: %zu named glass group(s) have no native pane and are left out", droppedGroups);
+    zt::info("iw7: %zu named glass group(s) with native panes", names.size());
+    return names;
+}
+
 Json BuildGlassPanes(const std::vector<BrushModel> &models, const RenderPlan &plan,
                      const std::string &entityText, CollisionData &collision,
                      std::set<std::uint32_t> &glassModels,
@@ -6746,6 +6775,8 @@ Json BuildRender(const Json &world, const VisibilityGroups &visibility,
                                ? BuildIw7GlassPanes(world.at("glass_panes"), models, collision, glassModels, nativePanes)
                                : BuildGlassPanes(models, plan, entities, collision, glassModels,
                                           glassTargets, entityModels);
+    if (world.contains("glass_names"))
+        output["glassNames"] = BuildIw7GlassNames(world.at("glass_names"), nativePanes);
     output["assetMaterials"] = plan.assetMaterials;
     output["stockMaterials"] = plan.stockMaterials;
     return output;

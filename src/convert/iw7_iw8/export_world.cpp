@@ -2306,6 +2306,13 @@ namespace zonetool::convert::iw7_iw8
 			surfaces.push_back({material, -1, static_cast<int>(probes.find(center)), std::move(vertices), {0, 1, 2, 0, 2, 3}});
 		}
 
+		// The named glass groups (their script names and IW7 piece indices), and the shard physics of the panes.
+		auto glass_names_json = json::array();
+		for (const auto& name : glass_names(source))
+		{
+			glass_names_json.push_back({{"name", name.name}, {"pieces", name.pieces}});
+		}
+
 		// Replay draws one DPVS cell and leaves occlusion to Umbra: one cell with one tree that holds every surface
 		// and static model.
 		const auto bounds = bounds_json(world.bounds);
@@ -2422,6 +2429,7 @@ namespace zonetool::convert::iw7_iw8
 			{"brush_models", std::move(brush_models)},
 			// IW7's breakable glass panes (their native fields), built by the pipeline in place of the IW3 brush-model rebuild.
 			{"glass_panes", std::move(glass_json)},
+			{"glass_names", std::move(glass_names_json)},
 			{"dpvs", {{"planes", json::array()}, {"nodes", json::array({1})},
 				{"cells", json::array({std::move(cell)})}}},
 			{"lightmaps", std::move(lightmaps.entries)},

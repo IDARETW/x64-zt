@@ -213,6 +213,12 @@ struct GlassPane
     float areaX2{};
     float radius{};
 };
+// A named group of breakable glass (G_GlassData.glassNames): its script name and the indices of its panes.
+struct GlassName
+{
+    std::string name;
+    std::vector<uint32_t> panes;
+};
 // GfxSModelSurfMatIndirection.cullType classes of the GPU triangle/cluster
 // culling (stock mp_shipment survey of 1473 surfaces, 2026-10-16): 0xEF opaque
 // back-face culled; 0xFF only model decals laid on other geometry (logos,
@@ -288,6 +294,7 @@ struct Mesh : Material
     Image reflectionProbeArrayImage;
     std::vector<NativeLightmap> nativeLightmaps;
     std::vector<GlassPane> glassPanes;
+    std::vector<GlassName> glassNames;
     std::vector<Volumetric> volumetrics;
     std::vector<unsigned> surfaceMaterials;
     unsigned opaqueCount = 0;

@@ -310,12 +310,16 @@ void emitGlassMapBody(ZoneWriter &zw, const char *assetName, const replayrender:
     // (alignment 7), then Load_G_GlassData DFD220 (40 bytes). G_InitGlass
     // 1213500 always dereferences this object even with no breakable pieces.
     zw.align(7);
-    // Replay's G_GlassData: glassPieces +0, pieceCount +8, spatial tree +32.
+    // G_GlassData (40 bytes): glassPieces +0, pieceCount +8, glassNameCount +16, glassNames +24, spatial tree +32.
+    const auto nameCount = static_cast<uint32_t>(mesh.glassNames.size());
     uint8_t glassData[40]{};
     if (pieceCount)
     {
         stamp64(glassData, 0x00, PTR_FOLLOWS);
         stamp32(glassData, 0x08, pieceCount);
+        stamp32(glassData, 0x10, nameCount);
+        if (nameCount)
+            stamp64(glassData, 0x18, PTR_FOLLOWS);
         stamp64(glassData, 0x20, PTR_FOLLOWS);
     }
     zw.write(glassData, sizeof(glassData));
@@ -324,6 +328,36 @@ void emitGlassMapBody(ZoneWriter &zw, const char *assetName, const replayrender:
         zw.align(3);
         std::vector<uint8_t> pieces(size_t(pieceCount) * 12);
         zw.write(pieces.data(), pieces.size());
+
+        // Load_G_GlassData (0x140DFD220): the name records (24 bytes: nameStr +0, the script string +8, pieceCount +12,
+        // pieceIndices +16), then each name's string and piece indices in order (Load_G_GlassName 0x140DFD370).
+        if (nameCount)
+        {
+            zw.align(7);
+            std::vector<uint8_t> records(size_t(nameCount) * 24, 0);
+            for (size_t n = 0; n < nameCount; ++n)
+            {
+                uint8_t *record = records.data() + n * 24;
+                const auto count = mesh.glassNames[n].panes.size();
+                stamp64(record, 0x00, PTR_FOLLOWS);
+                stamp16(record, 0x0C, static_cast<uint16_t>(count));
+                if (count)
+                    stamp64(record, 0x10, PTR_FOLLOWS);
+            }
+            zw.write(records.data(), records.size());
+            for (const auto &name : mesh.glassNames)
+            {
+                zw.writeStr(name.name);
+                if (!name.panes.empty())
+                {
+                    std::vector<uint16_t> indices;
+                    indices.reserve(name.panes.size());
+                    for (const uint32_t pane : name.panes)
+                        indices.push_back(static_cast<uint16_t>(pane));
+                    zw.write(indices.data(), indices.size() * sizeof(indices.front()));
+                }
+            }
+        }
 
         zw.align(7);
         uint8_t tree[24]{};
