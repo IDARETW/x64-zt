@@ -1770,17 +1770,16 @@ Result Build(const Source &source)
     // ---- pathnodes
     std::vector<PathNode> nodes;
     const auto addNode = [&](const std::uint32_t cell, const Vec3 &hint) {
+        // The node keeps its authored XY. Locate can return a cell a few columns away from a marker beside an eroded
+        // wall, and the earlier snap moved the node to that column's centre (up to four cells from the marker).
+        // The height is the cell's floor plane at the point of the cell nearest the hint, so the plane is never
+        // extrapolated beyond the cell (Grid::HeightAt is an extrapolation outside its cell).
         const int ix = grid.ColumnX(cell);
         const int iy = grid.ColumnY(cell);
-        float x = grid.CenterX(ix);
-        float y = grid.CenterY(iy);
-        if (static_cast<int>(std::floor((hint[0] - grid.minX) / grid.cell)) == ix &&
-            static_cast<int>(std::floor((hint[1] - grid.minY) / grid.cell)) == iy)
-        {
-            x = hint[0];
-            y = hint[1];
-        }
-        const Vec3 origin{x, y, grid.HeightAt(cell, x, y)};
+        const float halfCell = grid.cell * 0.5f;
+        const float nearestX = std::clamp(hint[0], grid.CenterX(ix) - halfCell, grid.CenterX(ix) + halfCell);
+        const float nearestY = std::clamp(hint[1], grid.CenterY(iy) - halfCell, grid.CenterY(iy) + halfCell);
+        const Vec3 origin{hint[0], hint[1], grid.HeightAt(cell, nearestX, nearestY)};
         for (const PathNode &existing : nodes)
             if (Distance(existing.origin, origin) < 8.0f)
                 return;
