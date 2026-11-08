@@ -216,6 +216,11 @@ namespace zonetool::convert::iw7_iw8
 		return this->first<iw7::GlassWorld>(iw7::ASSET_TYPE_GLASSWORLD);
 	}
 
+	iw7::PathData* source_map::path_data() const
+	{
+		return this->first<iw7::PathData>(iw7::ASSET_TYPE_PATHDATA);
+	}
+
 	void* source_map::find(const iw7::XAssetType type, const std::string_view name) const
 	{
 		const auto pool = this->assets_.find(type);

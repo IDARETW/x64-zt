@@ -1547,7 +1547,32 @@ struct PathNode
 {
     Vec3 origin{};
     std::uint32_t cell{};
+    std::int32_t authored{-1}; // the authored PathData node whose links this node takes (-1: generated links)
 };
+
+// The authored node of a PathData type nearest to a marker's XY, within one unit, that no fixed node has claimed (-1 if
+// none). The exporter keeps each node's XY exactly; the entity Z differs from the authored Z (Breakneck markers: 17 to
+// 33 units), so the XY decides the match.
+std::int32_t MatchAuthored(const std::vector<AuthoredNode> &authored, const std::vector<std::uint8_t> &claimed,
+                           const Vec3 &origin, const std::uint16_t type)
+{
+    constexpr float kMatchDistance = 1.0f;
+    std::int32_t best = -1;
+    float bestDistance = kMatchDistance;
+    for (std::size_t index = 0; index < authored.size(); ++index)
+    {
+        if (authored[index].type != type || claimed[index])
+            continue;
+        const float distance =
+            std::hypot(authored[index].origin[0] - origin[0], authored[index].origin[1] - origin[1]);
+        if (distance <= bestDistance)
+        {
+            bestDistance = distance;
+            best = static_cast<std::int32_t>(index);
+        }
+    }
+    return best;
+}
 
 std::int32_t BuildTree(std::vector<Data::TreeNode> &tree, const std::vector<PathNode> &nodes,
                        std::vector<std::uint16_t> &indices, const std::size_t first,
@@ -1785,14 +1810,28 @@ Result Build(const Source &source)
                 return;
         nodes.push_back({origin, cell});
     };
+    // A marker that becomes a node takes the authored PathData node at its XY (IW7 sources only).
+    std::vector<std::uint8_t> claimed(source.authored.size(), 0);
     std::size_t droppedMarkers = 0;
     for (const Vec3 &marker : source.pathNodes)
     {
         const std::int32_t cell = Locate(grid, marker, 72.0f, 36.0f, 4);
         if (cell < 0)
+        {
             ++droppedMarkers;
-        else
-            addNode(static_cast<std::uint32_t>(cell), marker);
+            continue;
+        }
+        const std::size_t before = nodes.size();
+        addNode(static_cast<std::uint32_t>(cell), marker);
+        if (nodes.size() > before)
+        {
+            const std::int32_t authored = MatchAuthored(source.authored, claimed, marker, kPathnodeType);
+            if (authored >= 0)
+            {
+                claimed[static_cast<std::size_t>(authored)] = 1;
+                nodes.back().authored = authored;
+            }
+        }
     }
     const std::size_t markerNodes = nodes.size();
     for (const Vec3 &spawn : source.spawns)
@@ -1867,7 +1906,8 @@ Result Build(const Source &source)
     ParallelFor(nodes.size(), [&](const std::size_t a) {
         for (std::size_t b = 0; b < nodes.size(); ++b)
         {
-            if (a == b)
+            // Two authored nodes take their authored links only (the authored pass below).
+            if (a == b || (nodes[a].authored >= 0 && nodes[b].authored >= 0))
                 continue;
             const float distance = HorizontalDistance(nodes[a].origin, nodes[b].origin);
             if (distance > kLinkDistance)
@@ -1905,8 +1945,9 @@ Result Build(const Source &source)
         for (std::size_t node = 0; node < nodes.size(); ++node)
             if (!links[node].empty())
                 order.push_back(node);
+        // An authored node stays without generated links: its authored links come in the authored pass.
         for (std::size_t node = 0; node < nodes.size(); ++node)
-            if (links[node].empty() && spawnNode[node])
+            if (links[node].empty() && (spawnNode[node] || nodes[node].authored >= 0))
                 order.push_back(node);
         droppedUnlinked = nodes.size() - order.size();
         std::vector<std::int32_t> remap(nodes.size(), -1);
@@ -1941,7 +1982,8 @@ Result Build(const Source &source)
         const auto walkLinks = [&](const std::size_t node, const std::size_t partner) {
             for (std::size_t other = 0; other < nodes.size(); ++other)
             {
-                if (other == node || other == partner)
+                if (other == node || other == partner ||
+                    (nodes[node].authored >= 0 && nodes[other].authored >= 0))
                     continue;
                 const float distance = HorizontalDistance(nodes[node].origin, nodes[other].origin);
                 if (distance > kLinkDistance ||
@@ -1976,9 +2018,18 @@ Result Build(const Source &source)
                 ++droppedTraversals;
                 continue;
             }
+            // The Begin and End nodes take the authored PathData nodes of types 16 and 17 at the entity origins.
+            const std::int32_t beginAuthored =
+                MatchAuthored(source.authored, claimed, traversal.begin, kNegotiationBeginType);
+            if (beginAuthored >= 0)
+                claimed[static_cast<std::size_t>(beginAuthored)] = 1;
+            const std::int32_t endAuthored =
+                MatchAuthored(source.authored, claimed, traversal.end, kNegotiationEndType);
+            if (endAuthored >= 0)
+                claimed[static_cast<std::size_t>(endAuthored)] = 1;
             const std::size_t begin = nodes.size();
-            nodes.push_back({traversal.begin, static_cast<std::uint32_t>(beginCell)});
-            nodes.push_back({traversal.end, static_cast<std::uint32_t>(endCell)});
+            nodes.push_back({traversal.begin, static_cast<std::uint32_t>(beginCell), beginAuthored});
+            nodes.push_back({traversal.end, static_cast<std::uint32_t>(endCell), endAuthored});
             nodeTypes.push_back(kNegotiationBeginType);
             nodeTypes.push_back(kNegotiationEndType);
             animscripts.push_back(traversal.animscript);
@@ -1991,6 +2042,60 @@ Result Build(const Source &source)
             walkLinks(begin + 1, begin);
             traversalPairs.emplace_back(begin, begin + 1);
             ++traversalCount;
+        }
+    }
+    // Path 3D nodes (type 20): the authored volume graph of IW7, with its own components, horizontal links and 3D origins.
+    // They follow the ground nodes, take no floor cell and sit in no zone.
+    const std::size_t groundCount = nodes.size();
+    std::size_t path3DNodes = 0;
+    std::size_t droppedPath3D = 0;
+    for (std::size_t index = 0; index < source.authored.size(); ++index)
+    {
+        if (source.authored[index].type != kPathnode3DType)
+            continue;
+        if (nodes.size() >= kMaxFixedNodes)
+        {
+            ++droppedPath3D;
+            continue;
+        }
+        nodes.push_back({source.authored[index].origin, 0, static_cast<std::int32_t>(index)});
+        nodeTypes.push_back(kPathnode3DType);
+        animscripts.emplace_back();
+        links.emplace_back();
+        ++path3DNodes;
+    }
+    // Authored links (IW7 PathData): an authored fixed node links to the fixed nodes that its authored links name, with the
+    // authored lengths and in the authored direction. Negotiation links stay with their traversal, and a link to a node
+    // that is not fixed (dropped, or a wall run or boost end) is left out.
+    std::size_t authoredLinks = 0;
+    std::size_t authoredGround = 0;
+    if (!source.authored.empty())
+    {
+        std::vector<std::int32_t> nodeOf(source.authored.size(), -1);
+        for (std::size_t node = 0; node < nodes.size(); ++node)
+            if (nodes[node].authored >= 0 && nodeOf[static_cast<std::size_t>(nodes[node].authored)] < 0)
+                nodeOf[static_cast<std::size_t>(nodes[node].authored)] = static_cast<std::int32_t>(node);
+        for (std::size_t node = 0; node < nodes.size(); ++node)
+        {
+            if (nodes[node].authored < 0)
+                continue;
+            if (node < groundCount)
+                ++authoredGround;
+            for (const AuthoredLink &link : source.authored[static_cast<std::size_t>(nodes[node].authored)].links)
+            {
+                if (link.negotiation || link.node >= source.authored.size())
+                    continue;
+                const std::int32_t other = nodeOf[link.node];
+                if (other < 0 || other == static_cast<std::int32_t>(node))
+                    continue;
+                const auto target = static_cast<std::uint16_t>(other);
+                auto &list = links[node];
+                if (std::any_of(list.begin(), list.end(),
+                                [&](const Data::Link &existing) { return existing.node == target; }))
+                    continue;
+                list.push_back({link.distance, target});
+                ++authoredLinks;
+            }
         }
     }
     const std::size_t fixedCount = nodes.size();
@@ -2008,8 +2113,8 @@ Result Build(const Source &source)
         if (links[node].empty())
         {
             ++isolated;
-            // The authored traversal endpoints are the last 2 * traversalCount fixed nodes.
-            isolatedEnds += node + 2 * traversalCount >= fixedCount ? 1u : 0u;
+            // The traversal endpoints are the last 2 * traversalCount ground nodes (Path 3D nodes follow them).
+            isolatedEnds += node < groundCount && node + 2 * traversalCount >= groundCount ? 1u : 0u;
         }
     }
 
@@ -2042,7 +2147,7 @@ Result Build(const Source &source)
             }
         };
         std::vector<std::size_t> zoneSeeds;
-        for (std::size_t node = 0; node < fixedCount; ++node)
+        for (std::size_t node = 0; node < groundCount; ++node)
             if (distance[nodes[node].cell] == std::numeric_limits<int>::max())
             {
                 zoneSeeds.push_back(node);
@@ -2052,7 +2157,7 @@ Result Build(const Source &source)
         {
             std::size_t farthest = 0;
             int farthestDistance = -1;
-            for (std::size_t node = 0; node < fixedCount; ++node)
+            for (std::size_t node = 0; node < groundCount; ++node)
                 if (distance[nodes[node].cell] > farthestDistance)
                 {
                     farthestDistance = distance[nodes[node].cell];
@@ -2089,7 +2194,7 @@ Result Build(const Source &source)
         }
         // Seeds sharing a cell leave empty zones; renumber the used ones.
         std::vector<std::int32_t> renumber(zoneSeeds.size(), -1);
-        for (std::size_t node = 0; node < fixedCount; ++node)
+        for (std::size_t node = 0; node < groundCount; ++node)
         {
             const std::int32_t zone = cellZone[nodes[node].cell];
             if (zone < 0)
@@ -2135,14 +2240,14 @@ Result Build(const Source &source)
     {
         std::vector<Vec3> sums(zoneCount, Vec3{});
         std::vector<std::size_t> counts(zoneCount, 0);
-        for (std::size_t node = 0; node < fixedCount; ++node)
+        for (std::size_t node = 0; node < groundCount; ++node)
         {
             sums[static_cast<std::size_t>(zoneOf[node])] =
                 Add(sums[static_cast<std::size_t>(zoneOf[node])], nodes[node].origin);
             ++counts[static_cast<std::size_t>(zoneOf[node])];
         }
         std::vector<float> best(zoneCount, kInfinity);
-        for (std::size_t node = 0; node < fixedCount; ++node)
+        for (std::size_t node = 0; node < groundCount; ++node)
         {
             const auto zone = static_cast<std::size_t>(zoneOf[node]);
             const Vec3 centroid = Scale(sums[zone], 1.0f / static_cast<float>(counts[zone]));
@@ -2270,7 +2375,8 @@ Result Build(const Source &source)
             if (ix % spacing != spacing / 2 || iy % spacing != spacing / 2)
                 continue;
             const Vec3 ground = grid.Center(static_cast<std::uint32_t>(cell));
-            const bool covered = std::any_of(nodes.begin(), nodes.end(), [&](const PathNode &node) {
+            // Only ground nodes cover a ground point: a Path 3D node hangs in the air above its floor.
+            const bool covered = std::any_of(nodes.begin(), nodes.begin() + static_cast<std::ptrdiff_t>(groundCount), [&](const PathNode &node) {
                 const float dx = node.origin[0] - ground[0];
                 const float dy = node.origin[1] - ground[1];
                 return dx * dx + dy * dy < 48.0f * 48.0f &&
@@ -2318,12 +2424,16 @@ Result Build(const Source &source)
              "and %zu coverage nodes; %zu unlinked dropped), %zu links, %zu isolated nodes "
              "(%zu traversal ends), %zu zones",
              fixedCount, markerNodes, droppedMarkers, spawnNodes,
-             fixedCount + droppedUnlinked - markerNodes - spawnNodes - 2 * traversalCount, droppedUnlinked,
+             groundCount + droppedUnlinked - markerNodes - spawnNodes - 2 * traversalCount, droppedUnlinked,
              linkCount, isolated, isolatedEnds, zoneCount);
     if (traversalCount || droppedTraversals)
         zt::info("navigation: %zu authored traversals as Begin/End pathnodes with a negotiation link (%zu off the "
                  "walkable mesh or past the node limit left out)",
                  traversalCount, droppedTraversals);
+    if (!source.authored.empty())
+        zt::info("navigation: authored PathData: %zu of %zu ground nodes take their authored links (%zu links); "
+                 "%zu Path 3D nodes (%zu left out at the node limit)",
+                 authoredGround, groundCount, authoredLinks, path3DNodes, droppedPath3D);
     zt::info("navigation: tactical graph %zu points, %zu visible pairs, %zu vis bytes; %.1fs",
              pointCount, visiblePairs, visBytes, seconds);
     if (const char *debugPath = std::getenv("IW8_ZONETOOL_NAV_DEBUG"); debugPath && *debugPath)
@@ -2382,15 +2492,15 @@ Result Build(const Source &source)
     return result;
 }
 
-std::vector<Vec3> FixedPathNodes(const Result &result)
+std::vector<FixedPathNode> FixedPathNodes(const Result &result)
 {
-    std::vector<Vec3> origins;
+    std::vector<FixedPathNode> nodes;
     if (!result.data)
-        return origins;
-    origins.reserve(result.data->fixedNodeCount);
+        return nodes;
+    nodes.reserve(result.data->fixedNodeCount);
     for (std::uint32_t node = 0; node < result.data->fixedNodeCount; ++node)
-        origins.push_back(result.data->nodes[node].origin);
-    return origins;
+        nodes.push_back({result.data->nodes[node].origin, result.data->nodes[node].type});
+    return nodes;
 }
 
 namespace

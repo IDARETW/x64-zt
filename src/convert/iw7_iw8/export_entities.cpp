@@ -249,7 +249,10 @@ namespace zonetool::convert::iw7_iw8
 			result += block;
 			for (const auto& [name, count] : dropped)
 			{
-				ZONETOOL_INFO("iw7: dropped %zu entities of class \"%s\", which Replay maps do not have", count, name.data());
+				if (name.starts_with("node_"))
+					ZONETOOL_INFO("iw7: left out %zu entities of class \"%s\": the bot navigation takes the authored PathData nodes", count, name.data());
+				else
+					ZONETOOL_INFO("iw7: dropped %zu entities of class \"%s\", which Replay maps do not have", count, name.data());
 			}
 
 			if (script_lights)
@@ -1605,6 +1608,51 @@ namespace zonetool::convert::iw7_iw8
 		write_json(output.extracted / (bsp_name(source) + ".replay-comworld.json"), common_world);
 
 		ZONETOOL_INFO("iw7: exported %u primary lights with %zu local lights", com_world->primaryLightCount, local_lights);
+	}
+
+	// The authored PathData (IW7 aipaths) of the map, in the zone's node order, so that each link names its node by index.
+	// The bot navigation (replay_navigation) takes the links of the pathnode markers, the traversal Begin and End nodes and
+	// the Path 3D nodes from it; the types are the zone's: 0 an error node, 1 a marker, 16 and 17 a traversal Begin and End,
+	// 20 a Path 3D node, and any other type (cover, ambush, exposed, door, turret) that Replay has no pathnode for.
+	void export_path_data(const source_map& source, extraction& output)
+	{
+		const auto path_data = source.path_data();
+		if (!path_data)
+		{
+			ZONETOOL_WARNING("iw7: map \"%s\" holds no aipaths; its bot navigation is generated from the markers", source.name().data());
+			return;
+		}
+
+		json nodes = json::array();
+		std::map<std::uint16_t, std::size_t> types;
+		for (std::uint32_t index = 0; index < path_data->nodeCount; ++index)
+		{
+			const auto& node = path_data->nodes[index];
+			json links = json::array();
+			for (std::uint16_t link = 0; link < node.constant.totalLinkCount; ++link)
+			{
+				const auto& authored = node.constant.Links[link];
+				links.push_back(json::array({authored.nodeNum, authored.fDist, authored.negotiationLink != 0}));
+			}
+			types[node.constant.type]++;
+			nodes.push_back({
+				{"type", node.constant.type},
+				{"origin", {node.constant.vLocalOrigin[0], node.constant.vLocalOrigin[1], node.constant.vLocalOrigin[2]}},
+				{"links", std::move(links)},
+			});
+		}
+
+		const auto count = [&](const std::uint16_t type) { return types.contains(type) ? types.at(type) : std::size_t{}; };
+		const auto other = path_data->nodeCount - count(0) - count(1) - count(16) - count(17) - count(20);
+		ZONETOOL_INFO("iw7: exported %u aipaths nodes: %zu markers, %zu traversal ends, %zu Path 3D nodes, %zu error nodes, %zu other",
+			path_data->nodeCount, count(1), count(16) + count(17), count(20), count(0), other);
+
+		write_json(output.extracted / (bsp_name(source) + ".replay-pathdata.json"),
+		{
+			{"schema", 1},
+			{"name", bsp_name(source)},
+			{"nodes", std::move(nodes)},
+		});
 	}
 
 	void remove_missing_entity_models(const source_map& source, const extraction& output)

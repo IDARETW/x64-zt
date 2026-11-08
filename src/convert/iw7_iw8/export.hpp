@@ -676,6 +676,8 @@ namespace zonetool::convert::iw7_iw8
 
 	light_layout light_layout_of(const source_map& source);
 	void export_com_world(const source_map& source, extraction& output);
+	// The map's authored PathData (IW7 aipaths) as the bot navigation reads it: each node's type, origin and links.
+	void export_path_data(const source_map& source, extraction& output);
 	void export_entities(const source_map& source, extraction& output);
 	void export_collision(const source_map& source, extraction& output);
 	void export_materials(const source_map& source, extraction& output);

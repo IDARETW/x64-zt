@@ -12990,6 +12990,35 @@ PreparedMap PrepareFastfile(const ImportOptions &options)
             zt::info("iw3: navigation source: %zu node_negotiation_end without a targetname, %zu named ends not used "
                      "by a paired traversal",
                      unnamedEnds, unusedEnds);
+        // IW7's authored PathData (the exporter's <map>.replay-pathdata.json; IW3 and extractions without it have none).
+        // Build keeps the links of the markers, traversal ends and Path 3D nodes that it matches to this graph.
+        const auto pathDataPath = worldPath.parent_path() / (sourceAsset + ".replay-pathdata.json");
+        if (std::filesystem::is_regular_file(pathDataPath))
+        {
+            const Json pathData = ReadJson(pathDataPath);
+            if (pathData.at("schema") != 1)
+                throw std::runtime_error("unsupported IW7 PathData export schema");
+            const auto &pathNodesJson = pathData.at("nodes");
+            navigation.authored.reserve(pathNodesJson.size());
+            for (const Json &item : pathNodesJson)
+            {
+                iw8::navigation::AuthoredNode authored;
+                authored.origin = ReadVector<3>(item.at("origin"));
+                authored.type = item.at("type").get<std::uint16_t>();
+                for (const Json &link : item.at("links"))
+                {
+                    iw8::navigation::AuthoredLink out;
+                    out.node = link.at(0).get<std::uint32_t>();
+                    out.distance = link.at(1).get<float>();
+                    out.negotiation = link.at(2).get<bool>();
+                    if (out.node >= pathNodesJson.size())
+                        throw std::runtime_error("IW7 PathData export links a node outside its list");
+                    authored.links.push_back(out);
+                }
+                navigation.authored.push_back(std::move(authored));
+            }
+            zt::info("iw3: navigation source has %zu authored PathData nodes", navigation.authored.size());
+        }
         zt::info("iw3: navigation source has %zu hulls, %zu triangles, %zu pathnode markers, "
                  "%zu spawns and %zu traversals (%zu IW7-only wall runs/boost jumps, %zu without an end "
                  "node, %zu without an animscript or target left out)",

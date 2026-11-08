@@ -116,6 +116,8 @@ namespace zonetool::convert::iw7_iw8
 		lap("collision");
 		export_com_world(source, output);
 		lap("lights");
+		export_path_data(source, output);
+		lap("bot paths");
 		export_materials(source, output);
 		lap("materials and images");
 		// The map art of the map select (and Frontier's minimap) is in the ui zone, which loads after the materials so that

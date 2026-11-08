@@ -1686,7 +1686,8 @@ int writeMapPackage(const Args &args, const std::string &map, const std::string 
         navigation = pendingNavigation.get();
         timing.lap("bot navigation");
     }
-    // Replay spawns each fixed pathnode from a node_* MapEnts record, in order.
+    // Replay spawns each fixed pathnode from a node_* MapEnts record, in order: a Path 3D node (type 20) from
+    // node_3d_pathnode, the others from node_pathnode (stock mp_m_speed carries both classes in its fixed order).
     std::string mapEntities = entities;
     if (navigation)
     {
@@ -1695,15 +1696,21 @@ int writeMapPackage(const Args &args, const std::string &map, const std::string 
         if (!convert::iw3KeyToIw8KeyId("classname", classnameKey) ||
             !convert::iw3KeyToIw8KeyId("origin", originKey))
             throw std::runtime_error("Replay entity key table lacks classname or origin");
-        const auto origins = iw8::navigation::FixedPathNodes(navigation);
-        for (const auto &origin : origins)
+        const auto fixedNodes = iw8::navigation::FixedPathNodes(navigation);
+        std::size_t path3DRecords = 0;
+        for (const auto &node : fixedNodes)
         {
+            const bool path3D = node.type == iw8::navigation::kPathnode3DType;
+            if (path3D)
+                ++path3DRecords;
             char line[192];
-            std::snprintf(line, sizeof(line), "{ %u \"node_pathnode\" %u \"%.3f %.3f %.3f\" }\n",
-                          classnameKey, originKey, origin[0], origin[1], origin[2]);
+            std::snprintf(line, sizeof(line), "{ %u \"%s\" %u \"%.3f %.3f %.3f\" }\n",
+                          classnameKey, path3D ? "node_3d_pathnode" : "node_pathnode", originKey,
+                          node.origin[0], node.origin[1], node.origin[2]);
             mapEntities += line;
         }
-        info("navigation: appended %zu node_pathnode MapEnts records", origins.size());
+        info("navigation: appended %zu node_* MapEnts records (%zu node_3d_pathnode)", fixedNodes.size(),
+             path3DRecords);
     }
     int result = 0;
     auto collision = pendingCollision.valid() ? pendingCollision.get() : loadCollision(args, dumpDirectory, assetName);
