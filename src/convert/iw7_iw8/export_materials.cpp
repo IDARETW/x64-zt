@@ -1723,7 +1723,11 @@ namespace zonetool::convert::iw7_iw8
 
 		// "effectunlit": IW7's unlit effect shading of models (the ops table's planets, mo_effectunlit_falloff_add_...): as
 		// lit additive surfaces they added only the dim room light, so the planets did not show (owner test of 58aac89).
-		result.unlit = has("unlit") || has("effectunlit");
+		// IW7's model "effect" techsets (mc/mco/mcopw/mo/mopw_effect_*; ten over the 33 maps) shade unlit as well: their drawn
+		// techniques (slots 8 and 10) take the colour map squared, the tint, fog and the volumetric term, with no light,
+		// also the one with the shl token (PS 7398f8f1fc071d2d, a78d2d0ef5a15f2f, 60b6e9db8edf9341, 3f93db7fe4a69626).
+		// Effect quads (eq_effect_*) are lit by their per-particle lighting map and stay out of this rule.
+		result.unlit = has("unlit") || has("effectunlit") || (has("effect") && !tokens.empty() && tokens.front().starts_with('m'));
 		// "psfalloff": the falloff of the pixel shader (the ops table's hologram planes).
 		result.falloff = has("falloff") || has("psfalloff");
 		for (const auto token : tokens)
