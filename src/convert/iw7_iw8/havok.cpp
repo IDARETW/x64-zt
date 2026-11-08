@@ -361,7 +361,8 @@ namespace zonetool::convert::iw7_iw8
 						// The header byte is type (bits 0-3), compression (bits 4-5) and tag count (bits 6-7): Havok's custom
 						// primitive layout (hkcdStaticMeshTree.h, "First index : Num vertices : 8 | Num tags : 2 | Compression : 2 |
 						// Type : 4"). The tags follow the shared vertex entry and do not change the piece's points. Breakneck's
-						// one unconverted piece (type 82 = 0x52: convex type 2, 32-bit vertices, one tag) reads like an untagged one.
+						// log names this form once (report_unknown keeps one line per form): type 82 = 0x52 is convex type 2,
+						// 32-bit vertices (compression 1, the 0x10 format), with one tag.
 						const auto header = table_entry(indices[0]);
 						const auto type = header & 0xFF;
 						const auto format = type & 0x30;
