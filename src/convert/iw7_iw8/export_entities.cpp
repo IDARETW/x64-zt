@@ -1152,8 +1152,10 @@ namespace zonetool::convert::iw7_iw8
 		}
 
 		// IW7 local lights are physical, as Replay's: a light of colour c lights a surface with c * N.L / (pi d^2)
-		// inside its radius, in the units of the lightmaps (calibration: lamps then light their surroundings at the
-		// level of the brightest lightmap texels). Each takes Replay's linear light definition.
+		// inside its radius. Authored spot and omni intensities are used as they are: convert.cpp's calibrateLocalLights
+		// skips them (only the lightUnitScale multiply applies), so no brightest-lightmap-texel calibration happens here.
+		// The IW7-to-Replay unit of these lights is open (AGENTS.md 3.2 and the local-light unit ledger). Each takes
+		// Replay's linear light definition.
 		const auto scale = light_unit_scale(source);
 		auto lights = json::array();
 		std::size_t local_lights{};
