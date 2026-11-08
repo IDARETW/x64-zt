@@ -211,7 +211,9 @@ namespace zonetool::convert::iw7_iw8
 			auto extent = 0.0f;
 
 			// IW7_LOD_DUMP=<model>: the model's LODs (distance, flags, materials and technique sets) and LOD fields.
-			if (const auto dump = std::getenv("IW7_LOD_DUMP"); dump && name == dump)
+			// IW7_LOD_DUMP=*: the same for every model (the raw distance of each model's last LOD, which the exporter
+			// replaces with 1000000, and its shadowCutoffLod).
+			if (const auto dump = std::getenv("IW7_LOD_DUMP"); dump && ((dump[0] == '*' && dump[1] == '\0') || name == dump))
 			{
 				ZONETOOL_INFO("iw7 lod dump %s: numLods %d shadowCutoffLod %d collLod %d maxLoadedLod %d", name.data(), model->numLods,
 					model->shadowCutoffLod, model->collLod, model->maxLoadedLod);
