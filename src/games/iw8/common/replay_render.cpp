@@ -2322,8 +2322,13 @@ void EmitStaticModels(ZoneWriter &writer, const StaticModels &models,
         collection[0x0E] = sunShadowMask;
         writer.write(collection, sizeof(collection));
     }
-    for (size_t index = 0; index < models.instances.size(); ++index)
-        writer.writeT<uint8_t>(6);
+    // Per-placement instance flags byte: the LOD distance scale index (see StaticModelInstance::lodScaleIndex).
+    for (const auto &instance : models.instances)
+    {
+        if (instance.lodScaleIndex >= 16)
+            throw std::runtime_error("Invalid Replay static-model LOD scale index");
+        writer.writeT<uint8_t>(instance.lodScaleIndex);
+    }
 
     writer.align(3);
     for (const auto &instance : models.instances)
