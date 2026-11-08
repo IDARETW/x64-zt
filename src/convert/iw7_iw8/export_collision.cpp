@@ -445,6 +445,12 @@ namespace zonetool::convert::iw7_iw8
 		const auto& world = *source.world();
 		const auto* clip_map = source.clip_map();
 		const auto* map_ents = source.map_ents();
+		// export_entities (which runs first) already rejects a zone without map entities; the trigger models below need them.
+		if (!map_ents)
+		{
+			throw std::runtime_error(std::format("zone \"{}\" holds no map entities", source.name()));
+		}
+
 		collision_writer writer;
 
 		std::size_t glass_pieces{};
