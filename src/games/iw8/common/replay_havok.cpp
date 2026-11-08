@@ -2007,6 +2007,11 @@ std::vector<std::uint8_t> BuildShapeListNative(const std::vector<Hull> &hulls,
             try
             {
                 polytope = hk::convex_hull(points, 0.0f);
+                // A hull of more vertices than a convex shape keeps welds its own vertices, from a quarter of a game unit up,
+                // until it fits (the clutter hulls do the same, BakePhysicsAssetNative and hullOf). The add below throws
+                // above max_convex_shape_vertices (objects.cpp), which would end the whole world/brush collision bake.
+                for (float weld = 0.25f / 32.0f; polytope.vertices.size() > hk::max_convex_shape_vertices; weld *= 2.0f)
+                    polytope = hk::convex_hull(polytope.vertices, weld);
             }
             catch (const std::exception &e)
             {
