@@ -23,15 +23,26 @@ namespace zonetool::iw8
 	{
 		constexpr std::string_view manifest_magic = "x64-zt refresh 1";
 
-		// The types that the native replacement fixes up: DB_ReplaceHeadAssetEntry resolves stub materials, pauses the
-		// PSO queue for shaders and marks techsets for fixup; DB_PostLoadXZone rebuilds the material pipeline states.
+		// The live-refresh set, the types that the native replacement fixes up in place. DB_ReplaceHeadAssetEntry
+		// 0x1411AEC50 resolves stub materials (11) and sets byte_14D11ED44 for shaders 14..17, which pauses the PSO queue;
+		// DB_FixupMaterialPipelineStatesPostLoad 0x1411AA3F0 then rebuilds the pipeline states of techsets (18). Image (19)
+		// has its own move handler, which releases the old resource.
+		//
+		// Excluded, and reported by refresh_zone instead of replaced:
+		// - Compute (12) and library (13) shaders: DB_ReplaceHeadAssetEntry gates the shader branch on (type - 14) <= 3, so
+		//   no fixup runs and a live swap would leave their consumers on the old objects.
+		// - XModel (9): only XModelSurfs (8) takes the model branch (sub_140F64060 sets byte_14B94D378, sub_140F63D20
+		//   runs); type 9 has no branch, and DB_MoveXModelAsset releases the GPU resources of the old model.
+		//
+		// A refresh zone is loaded by DB_LoadFastfiles with DB_PostLoadXZone(a1 = 0): DB_RefreshSystemsAfterPostLoad then
+		// skips G_Utils_RebuildPhysicsOnAssetChange 0x140FD8300, sub_1416A9120 and R_DynEntClient_RelinkAllFromMapEnts
+		// 0x1417F55A0, which run only for a1 != 0. Physics assets, detail collision and dynent relinks therefore do not
+		// update through map_refresh; no type with those consumers belongs in this set without that proof.
 		bool is_refreshable(const std::int32_t type)
 		{
 			switch (type)
 			{
 			case ASSET_TYPE_MATERIAL:
-			case ASSET_TYPE_COMPUTESHADER:
-			case ASSET_TYPE_LIBSHADER:
 			case ASSET_TYPE_VERTEXSHADER:
 			case ASSET_TYPE_HULLSHADER:
 			case ASSET_TYPE_DOMAINSHADER:
