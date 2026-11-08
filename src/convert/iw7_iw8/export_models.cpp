@@ -463,6 +463,9 @@ namespace zonetool::convert::iw7_iw8
 				// a collision mesh of that LOD let bullets pass parts of models that LOD0 shows (owner test 2026-10-18):
 				// models collide with the LOD that players see up close.
 				{"collLod", 0},
+				// IW7's shadowCutoffLod (XModel +0x0D): the sun-shadow cache draws a LOD only up to it (shadows.md, the
+				// cached sun shadow's LOD <= shadowCutoffLod). 17 of the 747 Breakneck models have 1 to 4; the others 6.
+				{"shadowCutoffLod", std::min(static_cast<int>(model->shadowCutoffLod), 6)},
 				{"flags", 0},
 				{"lods", std::move(table_lods)},
 				{"rootBoneName", ""},

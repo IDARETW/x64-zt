@@ -167,6 +167,8 @@ struct SourceStaticModel
 {
     std::string name;
     std::size_t collisionLod{SIZE_MAX};
+    // IW7's shadowCutoffLod (the sun-shadow cache draws a LOD up to it). IW3 sources have none: 6 (every LOD).
+    std::uint8_t shadowCutoffLod{6};
     // XModel contents (IW7 sources give theirs: Replay's bits); IW3 models are solid.
     std::uint32_t contents{1};
     std::vector<SourceStaticModelLod> lods;
@@ -2996,6 +2998,11 @@ SourceStaticModel ReadSourceModel(const std::filesystem::path &root, const std::
         throw std::runtime_error("IW3 model has an invalid collision LOD: " + modelName);
     if (collisionLod >= 0)
         converted.collisionLod = static_cast<std::size_t>(collisionLod);
+    // Absent for IW3 sources (every LOD casts); IW7 sources give their shadowCutoffLod, at most 6.
+    const int shadowCutoffLod = model.value("shadowCutoffLod", 6);
+    if (shadowCutoffLod < 0 || shadowCutoffLod > 6)
+        throw std::runtime_error("IW3 model has an invalid shadow cutoff LOD: " + modelName);
+    converted.shadowCutoffLod = static_cast<std::uint8_t>(shadowCutoffLod);
     const auto geometryPath =
         SafeChild(root, std::filesystem::path("xmodel") / (modelName + ".replay.json"));
     if (!std::filesystem::is_regular_file(geometryPath))
@@ -4693,6 +4700,8 @@ void BuildPreparedStaticModels(const SourceStaticModels &source, const RenderPla
         });
         if (!drawn && (!entityDraw || sourceModel.lods.empty()))
             throw std::runtime_error("IW3 static model has no visible surfaces: " + sourceModel.name);
+        // The source index of each LOD that is kept, in order: Replay's LOD indices count these (see shadowCutoffLod below).
+        std::vector<std::size_t> keptSourceLods;
         for (std::size_t lodIndex = 0; drawn && lodIndex < sourceModel.lods.size(); ++lodIndex)
         {
             const SourceStaticModelLod &sourceLod = sourceModel.lods[lodIndex];
@@ -4989,6 +4998,7 @@ void BuildPreparedStaticModels(const SourceStaticModels &source, const RenderPla
                 lod.partBits[word] = static_cast<std::uint32_t>(xse.modelSurfPartBits[word]);
             lod.surfsName = converted.name;
             prepared.model.lods.push_back(std::move(lod));
+            keptSourceLods.push_back(lodIndex);
             surfaceOffset += static_cast<std::uint32_t>(converted.surfaces.size());
             prepared.lods.push_back(std::move(converted));
             staticModel.lods.push_back(std::move(staticLod));
@@ -5003,6 +5013,20 @@ void BuildPreparedStaticModels(const SourceStaticModels &source, const RenderPla
             for (const Surface &surface : sourceModel.lods.front().surfaces)
                 for (const Vertex &vertex : surface.vertices)
                     modelBounds.Add(vertex.position);
+        }
+
+        // IW7's shadowCutoffLod counts source LODs (the sun-shadow cache takes a LOD whose index is at most it); Replay
+        // counts the kept ones, so a LOD left out above shifts the indices. The cutoff becomes the last kept LOD at or
+        // below the source cutoff. LOD 0 is always kept, so the search always finds one.
+        if (drawn && sourceModel.shadowCutoffLod < 6)
+        {
+            std::uint8_t replayCutoff = 0;
+            for (std::size_t kept = 0; kept < keptSourceLods.size(); ++kept)
+            {
+                if (keptSourceLods[kept] <= static_cast<std::size_t>(sourceModel.shadowCutoffLod))
+                    replayCutoff = static_cast<std::uint8_t>(kept);
+            }
+            prepared.model.shadowCutoffLod = replayCutoff;
         }
 
         const replaybounds::Bounds bounds = modelBounds.Finish();
