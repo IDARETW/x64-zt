@@ -184,10 +184,16 @@ namespace zonetool::iw8
 			selected.emplace_back(asset->type, asset->header, false);
 		}
 
-		for (const auto& [type, name] : previous)
+		// A name that only the previous refresh zone added holds no level reference; one that replaced a deployed asset
+		// leaves that asset's references on a default stub.
+		for (const auto& key : previous)
 		{
-			ZONETOOL_WARNING("%s (type %d) was in the previous refresh zone but is not in the rebuilt package: it stays "
-				"default in a running match until the map loads again", name.data(), type);
+			if (deployed_digests.contains(key))
+			{
+				ZONETOOL_WARNING("%s (type %d) replaced a deployed asset in the previous refresh zone but is not in the "
+					"rebuilt package: it stays default in a running match until the map loads again", key.second.data(),
+					key.first);
+			}
 		}
 
 		const auto written = write_zone(selected, selected, no_strings, {.reference_uses = true});
