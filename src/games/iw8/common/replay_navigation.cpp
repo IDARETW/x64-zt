@@ -1882,6 +1882,23 @@ Result Build(const Source &source)
     // Unlinked nodes are kept only where a spawn needs one within 300 units
     // (sv_bot_mp 273); linked nodes go first because the pathdata check
     // (sv_bot_mp 272) wants a linked node among the first ten.
+    // A spawn with no linked node within 300 units keeps every unlinked node within 300 units of it. The earlier
+    // rule kept only spawn-added nodes, so a marker that the spawn pass had treated as covering the spawn (within 96
+    // units) was dropped and could leave the spawn with no node in range.
+    {
+        constexpr float kSpawnNodeDistance = 300.0f;
+        for (const Vec3 &spawn : source.spawns)
+        {
+            bool linkedInRange = false;
+            for (std::size_t node = 0; node < nodes.size() && !linkedInRange; ++node)
+                linkedInRange = !links[node].empty() && Distance(nodes[node].origin, spawn) <= kSpawnNodeDistance;
+            if (linkedInRange)
+                continue;
+            for (std::size_t node = 0; node < nodes.size(); ++node)
+                if (links[node].empty() && Distance(nodes[node].origin, spawn) <= kSpawnNodeDistance)
+                    spawnNode[node] = 1;
+        }
+    }
     std::size_t droppedUnlinked = 0;
     {
         std::vector<std::size_t> order;
