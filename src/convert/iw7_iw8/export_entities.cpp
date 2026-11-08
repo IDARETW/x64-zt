@@ -22,9 +22,10 @@ namespace zonetool::convert::iw7_iw8
 		// stock mp_shipment defines triggermodeldummydefault, scriptbrushmodeldummydefault and triggermodelstaticdummydefault.
 		// ScriptBrushModelDummyFixed and ScriptBrushModelDummy_MPAirdropCrate are in no checked stock zone (mp_shipment,
 		// common, common_mp, global, global_mp, global_stream_mp), and triggermodeldummydefault is in none but mp_shipment.
-		// Trigger physics comes from the inline trigger model (CM_GetTriggerModel +16, G_Utils_GetPhysicsAsset), which the
-		// package always gives triggermodelstaticdummydefault, so a trigger keeps the name it had before 0xCAF9 was named.
-		// A script brush takes the dummy its map zone already gives script brush models.
+		// A trigger's physics does not read its entity key: G_Utils_GetPhysicsAsset takes the inline trigger model for trigger
+		// entities (CM_GetTriggerModel +16, which the package gives triggermodelstaticdummydefault), so the replacement changes
+		// only the entity string. maps.cpp's injection already gave the other triggers that name; white_phosphorus_damage took
+		// the dynamic triggermodeldummydefault there. A script brush takes the dummy its map zone already gives script brushes.
 		std::string_view physasset_replacement(const std::string_view value)
 		{
 			static constexpr std::array<std::pair<std::string_view, std::string_view>, 3> replacements{{
