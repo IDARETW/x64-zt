@@ -7353,19 +7353,42 @@ RenderPlan PrepareRenderAssets(const std::filesystem::path &exportRoot, const Js
                     throw std::runtime_error("shadow-only world materials need the Replay install (--replay)");
                 if (!stockLibrary)
                     stockLibrary.emplace(replayZones);
-                Json direct = stockLibrary->Material("tw/shadowcaster");
+                // An alpha-tested caster (IW3 flag 8 or 16) casts through its colour map's alpha, as its local-light caster
+                // does (alphaTest 2 or 3 in the caster records): it draws as the stock cut-out (tw
+                // plastic_pvc_wire_cable_sheet_01_ge128, whose shadow techniques test slot 0x1B at 0.5), not as an opaque
+                // shadowcaster. Its colour is not otherwise drawn.
+                const bool alphaTested = (source.flags & 24u) && !source.replayColor.empty();
+                Json direct = stockLibrary->Material(alphaTested ? "tw/plastic_pvc_wire_cable_sheet_01_ge128"
+                                                                 : "tw/shadowcaster");
                 const auto &[techsetName, techsetFile] =
                     stockTechset(stockLibrary->TechniqueSet(direct.at("techset").get<std::string>()),
-                                 "tw", "_shadowcaster", source);
+                                 "tw", alphaTested ? "_cutout" : "_shadowcaster", source);
                 direct["source"] = source.name;
                 direct["techset"] = techsetName;
                 direct["techsetDefinition"] = techsetFile;
                 direct["imageDefinitions"] = Json::array();
-                for (auto &texture : direct.at("textures"))
+                if (alphaTested)
                 {
-                    const auto header = Unhex(texture.at("header").get<std::string>());
-                    if (header.at(0) == 0)
-                        texture["image"] = "$gray";
+                    const auto channelOf = [&](const unsigned slot) {
+                        const auto &textures = direct.at("textures");
+                        for (std::size_t index = 0; index < textures.size(); ++index)
+                            if (Unhex(textures[index].at("header").get<std::string>()).at(0) == slot)
+                                return static_cast<unsigned>(index);
+                        throw std::runtime_error("stock cut-out material has no texture slot " + std::to_string(slot));
+                    };
+                    for (auto &texture : direct.at("textures"))
+                        texture["image"] = "$black";
+                    stockColour(direct, channelOf(0x00), source);
+                    alphaMapOf(direct, channelOf(0x1B), source, source.flags & 24u);
+                }
+                else
+                {
+                    for (auto &texture : direct.at("textures"))
+                    {
+                        const auto header = Unhex(texture.at("header").get<std::string>());
+                        if (header.at(0) == 0)
+                            texture["image"] = "$gray";
+                    }
                 }
                 addMaterial(std::move(direct), source.name, planned);
                 planned.worldMaterialIndex = planned.stockWorldMaterialIndex;
