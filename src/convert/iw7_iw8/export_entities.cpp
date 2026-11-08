@@ -1589,6 +1589,9 @@ namespace zonetool::convert::iw7_iw8
 					{"npc", (kept & 0x10) ? trigger_string(triggers, value16(triggers.npcTriggers)) : std::string{}},
 					{"blend", (kept & 0x8) ? value16(triggers.blendLookup) : -1},
 					{"audioState", value16(triggers.audioStateIds)},
+					// The vision set of a vision trigger (role 0x1): IW7 names it by an offset into triggerString. Replay reads
+					// vision/<name>.vision (CG_StartClientSideTriggersVisionTrigger); the package carries only the map's own.
+					{"vision", (type & 0x1) ? trigger_string(triggers, value16(triggers.visionSetTriggers)) : std::string{}},
 					{"hulls", std::move(hull_items)},
 				};
 				if (triggers.audioRvbPanInfo)
@@ -1604,6 +1607,23 @@ namespace zonetool::convert::iw7_iw8
 			for (auto& item : items)
 			{
 				item["priority"] = (item["type"].get<int>() & 0x2) ? 10.0f : 0.0f;
+			}
+
+			// The vision sets that the vision triggers name. The vision role is cleared (kept as role 0x1 only when the package
+			// ships the set), so these triggers keep the map's vision: the names are logged for the owner's decision.
+			std::map<std::string, std::size_t> vision_sets;
+			for (const auto& item : items)
+			{
+				if (const auto& name = item["vision"].get_ref<const std::string&>(); !name.empty())
+				{
+					vision_sets[name]++;
+				}
+			}
+
+			for (const auto& [name, triggers_named] : vision_sets)
+			{
+				ZONETOOL_WARNING("iw7: %zu client triggers name the vision set \"%s\"; the package ships only the map's vision, so they keep it",
+					triggers_named, name.c_str());
 			}
 
 			// The blend nodes of the kept blends (audio blends), renumbered in order.
