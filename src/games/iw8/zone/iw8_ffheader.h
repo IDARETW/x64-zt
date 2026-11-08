@@ -34,7 +34,7 @@ struct IW8_DB_FFHeader
     char magic[8];             // 0x00  "IWffa100"
     uint32_t headerVersion;    // 0x08  = 11  (the asserted HARD gate)
     uint32_t xfileVersion;     // 0x0C  = 0xFF7 (MW2019 1.20 Replay asset format)
-    uint8_t dashCompressBuild; // 0x10  0 = stored, 1 = Oodle
+    uint8_t dashCompressBuild; // 0x10  signed stock zones 1; unsigned zones 0 (the IWC frame type selects decompression)
     uint8_t dashEncryptBuild;  // 0x11  = 0
     uint8_t transientFileType; // 0x12  0 = base/resident zone, 1 = _tr transient
     uint8_t _pad13;            // 0x13

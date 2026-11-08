@@ -1,5 +1,6 @@
 #include <std_include.hpp>
 #include "xfile.hpp"
+#include <log.hpp>
 
 #include <io/game_files.hpp>
 #include <utils/cryptography.hpp>
@@ -612,6 +613,8 @@ namespace zonetool::xfile
 			std::intptr_t, void*, void*, void*, std::intptr_t, int);
 
 		// Oodle is not redistributable: use the oo2core library of the game install that holds the zone.
+		std::filesystem::path oodle_install_directory();
+
 		oodle_decompress_t load_oodle(const std::filesystem::path& zone_path)
 		{
 			static std::mutex mutex;
@@ -621,6 +624,27 @@ namespace zonetool::xfile
 			if (decompress)
 			{
 				return decompress;
+			}
+
+			// The configured Replay install first (set_oodle_directory), then the folders above the zone.
+			if (const auto install = oodle_install_directory(); !install.empty())
+			{
+				std::error_code error;
+				for (const auto& entry : std::filesystem::directory_iterator(install, error))
+				{
+					const auto name = entry.path().filename().string();
+					if (name.starts_with("oo2core_") && name.ends_with("_win64.dll"))
+					{
+						if (const auto library = LoadLibraryW(entry.path().c_str()))
+						{
+							decompress = reinterpret_cast<oodle_decompress_t>(GetProcAddress(library, "OodleLZ_Decompress"));
+							if (decompress)
+							{
+								return decompress;
+							}
+						}
+					}
+				}
 			}
 
 			auto folder = std::filesystem::absolute(zone_path).parent_path();
@@ -665,6 +689,12 @@ namespace zonetool::xfile
 		std::filesystem::path oodle_compress_directory;
 		oodle_compress_t oodle_compress{};
 		bool oodle_compress_searched{};
+
+		std::filesystem::path oodle_install_directory()
+		{
+			std::lock_guard _(oodle_compress_mutex);
+			return oodle_compress_directory;
+		}
 
 		oodle_compress_t load_oodle_compress()
 		{
@@ -1238,8 +1268,10 @@ namespace zonetool::xfile
 			std::memcpy(header.magic, format.unsigned_magic.data(), sizeof(header.magic));
 			header.version = format.version;
 			header.xfile_version = file.xfile_version ? file.xfile_version : iw8_xfile_versions.back();
-			// Stock compressed zones set the build's compression flag (techsets_mp_shipment: 1).
-			header.compressed = compressed_frame_size ? 1 : 0;
+			// The compression flag stays 0 for every unsigned zone: the frame's type byte selects decompression, the 63
+			// stock unsigned zones with compressed frames keep it 0, and the DW client's unsigned-package gate
+			// (DB_IsReplayIwcHeader, DB_ResetFileReader.cpp) refuses a nonzero flag with DB_DiscError.
+			header.compressed = 0;
 			header.transient = file.transient ? 1 : 0;
 			header.resident_size = static_cast<std::uint32_t>(resident);
 			header.always_loaded_size = static_cast<std::uint32_t>(file.payload.size());
@@ -1266,16 +1298,37 @@ namespace zonetool::xfile
 	}
 
 	// Replay's compressed frame (DB_Block_TryNewBlock 0x140D89B90): "\x02IWC", a segment header (the u32 size of the
-	// payload it decompresses to, three zero bytes, the codec: 6 = Oodle Kraken), then blocks of {compressed size,
+	// payload it decompresses to, three bytes the reader does not read (stock unsigned zones hold 00 00 01), the codec:
+	// 6 = Oodle Kraken), then blocks of {compressed size,
 	// decompressed size, CTR counter} and their bytes, each padded to 4. Replay decodes every block on its own
 	// (DB_Block_DecompressOodle 0x140D89940: no dictionary base, 442552 bytes of decoder scratch); stock blocks hold
 	// 64 KiB, which compress in parallel here.
 	std::string compress_iw8_frame(const std::string_view payload)
 	{
+		// The reader's window holds one decompressed block (0x10000) and one padded compressed block of at most 0x12800
+		// bytes (DB_Block_ReadData 0x140D89A50).
 		constexpr std::size_t block_size = 0x10000;
+		constexpr std::size_t max_padded_block = 0x12800;
+		static_assert(block_size <= 0x10000);
 		const char* stored = std::getenv("MW120R_FF_STORED");
-		const auto compress = (stored && *stored && *stored != '0') ? nullptr : load_oodle_compress();
-		if (!compress || payload.size() > std::numeric_limits<std::uint32_t>::max())
+		if (stored && *stored && *stored != '0')
+		{
+			return {};
+		}
+
+		const auto compress = load_oodle_compress();
+		if (!compress)
+		{
+			static std::once_flag warned;
+			std::call_once(warned, []()
+			{
+				ZONETOOL_WARNING("IW8 zones are written stored: no oo2core_*_win64.dll in \"%s\" (set the Replay install)",
+					oodle_compress_directory.string().data());
+			});
+			return {};
+		}
+
+		if (payload.size() > std::numeric_limits<std::uint32_t>::max())
 		{
 			return {};
 		}
@@ -1293,7 +1346,8 @@ namespace zonetool::xfile
 				const auto size = std::min(block_size, payload.size() - offset);
 				const auto written = compress(oodle_compressor_kraken, payload.data() + offset, static_cast<std::intptr_t>(size),
 					scratch.data(), oodle_level_normal, nullptr, nullptr, nullptr, nullptr, 0);
-				if (written <= 0 || static_cast<std::size_t>(written) > scratch.size())
+				if (written <= 0 || static_cast<std::size_t>(written) > scratch.size() ||
+					((static_cast<std::size_t>(written) + 3) & ~std::size_t(3)) > max_padded_block)
 				{
 					failed = true;
 					return;

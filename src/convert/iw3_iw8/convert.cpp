@@ -379,15 +379,15 @@ bool validateZoneFile(const std::string &path, ZoneValidation *details = nullptr
     std::memcpy(&header, bytes.data(), (std::min)(bytes.size(), sizeof(header)));
     if (std::memcmp(header.magic, iw8ff::kMagicUnsec, 8) != 0 ||
         header.headerVersion != iw8ff::kHeaderVersion ||
-        header.xfileVersion != iw8ff::kXFileVersion || header.dashCompressBuild > 1 ||
+        header.xfileVersion != iw8ff::kXFileVersion || header.dashCompressBuild != 0 ||
         header.dashEncryptBuild != 0)
     {
         err("validate: %s has an unsupported Replay header", path.c_str());
         return false;
     }
     // A stored frame ("\x01IWC" and the zone), or an Oodle Kraken one ("\x02IWC" and blocks: xfile::write).
-    const bool compressed = header.dashCompressBuild == 1;
-    if (std::memcmp(bytes.data() + 0x88, compressed ? "\x02IWC" : "\x01IWC", 4) != 0 ||
+    const bool compressed = std::memcmp(bytes.data() + 0x88, "\x02IWC", 4) == 0;
+    if ((!compressed && std::memcmp(bytes.data() + 0x88, "\x01IWC", 4) != 0) ||
         (!compressed && header.xfileHeader.size != bytes.size() - 0x8C) ||
         header.residentPartSize != bytes.size() - 0x88 ||
         header.alwaysLoadedPartSize != header.xfileHeader.size)
