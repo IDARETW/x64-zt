@@ -537,6 +537,15 @@ namespace zonetool::convert::iw7_iw8
 			return result;
 		}
 
+		// The playback of an IW7 Scriptable animation event that the converter carries: stateful, client-only in MP, with
+		// no override, no pause on exit, no start time, rate 1 and no blend. Other settings are not played.
+		bool default_scriptable_animation(const iw7::ScriptableEventAnimationDef& value)
+		{
+			return value.stateful && value.clientOnlyInMP && !value.overrideAnimation && !value.pauseOnExit &&
+				value.startTimeMin == 0.0f && value.startTimeMax == 0.0f && !value.startTimeNormalized &&
+				value.playbackRateMin == 1.0f && value.playbackRateMax == 1.0f && value.blendTime == 0.0f;
+		}
+
 		// The states of a scriptable's parts that play an animation (Frontier: the ops table's solar system idle, 1799
 		// frames on 35 bones, from its first state; the floor panels' closed pose from their first state and their raise,
 		// a scripted state that the map script sets).
@@ -562,12 +571,6 @@ namespace zonetool::convert::iw7_iw8
 							auto* current = result.event;
 							auto* current_anim = anim;
 							std::set<const iw7::ScriptableEventAnimationDef*> visited;
-							const auto supported = [](const iw7::ScriptableEventAnimationDef& value)
-							{
-								return value.stateful && value.clientOnlyInMP && !value.overrideAnimation && !value.pauseOnExit &&
-									value.startTimeMin == 0.0f && value.startTimeMax == 0.0f && !value.startTimeNormalized &&
-									value.playbackRateMin == 1.0f && value.playbackRateMax == 1.0f && value.blendTime == 0.0f;
-							};
 							const auto label = std::string(def.name ? def.name : "<unnamed>");
 							while (current->eventAtEndCount)
 							{
@@ -575,7 +578,7 @@ namespace zonetool::convert::iw7_iw8
 								// followed by one animation with the source's default playback settings.
 								if (!visited.insert(current).second || current->eventAtEndCount != 1 || !current->eventsAtEnd ||
 									(current_anim->flags & 1) || !current_anim->numframes || !std::isfinite(current_anim->framerate) ||
-									current_anim->framerate <= 0.0f || !supported(*current))
+									current_anim->framerate <= 0.0f || !default_scriptable_animation(*current))
 								{
 									throw std::runtime_error("unsupported IW7 Scriptable animation end event: " + label);
 								}
@@ -586,11 +589,18 @@ namespace zonetool::convert::iw7_iw8
 								}
 								current = &end.data.animation;
 								current_anim = source.resolve(iw7::ASSET_TYPE_XANIMPARTS, current->animation);
-								if (!current_anim || !current_anim->name || !supported(*current))
+								if (!current_anim || !current_anim->name || !default_scriptable_animation(*current))
 								{
 									throw std::runtime_error("unsupported IW7 Scriptable end animation: " + label);
 								}
 								result.on_end.push_back({current, current_anim});
+							}
+							// A root animation without an end chain is played by the plain path, which carries none of these settings;
+							// the chain above checks its own events.
+							if (!default_scriptable_animation(*result.event))
+							{
+								ZONETOOL_WARNING("iw7 scriptable %s: animation %s keeps the source's start time, rate, blend, pause, override or "
+									"stateful settings, which the converter does not play", label.data(), std::string(asset_name(anim->name)).data());
 							}
 							break;
 						}
@@ -821,6 +831,11 @@ namespace zonetool::convert::iw7_iw8
 						const auto* anim = data.animation.animation ? source.resolve(iw7::ASSET_TYPE_XANIMPARTS, data.animation.animation) :
 							nullptr;
 						std::string name = anim && anim->name ? std::string(asset_name(anim->name)) : std::string{};
+						if (convert && !name.empty() && anim && !default_scriptable_animation(data.animation))
+						{
+							ZONETOOL_WARNING("iw7 scriptable %s: animation %s keeps the source's start time, rate, blend, pause, override or "
+								"stateful settings, which the converter does not play", def.name ? def.name : "<unnamed>", name.data());
+						}
 						if (convert && !name.empty() && !export_script_animation(source, name, output))
 						{
 							name.clear();
