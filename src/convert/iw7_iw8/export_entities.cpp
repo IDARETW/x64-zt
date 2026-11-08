@@ -860,6 +860,11 @@ namespace zonetool::convert::iw7_iw8
 						const auto& damage = data.partDamage;
 						// The byte-60 interpretation is retained until its source meaning is verified.
 						const auto destroy = damage.unknown60[0] != 0;
+						if (convert && destroy)
+						{
+							ZONETOOL_WARNING("iw7 scriptable %s: a part-damage event sets byte 60, converted as destroy (1e9 damage); that meaning is unverified",
+								def.name ? def.name : "<unnamed>");
+						}
 						result.push_back({{"t", "damage"}, {"part", reference_part(damage.partReference, self)},
 							{"amount", destroy ? 1.0e9f : damage.amount}, {"dot", damage.amountDoT}, {"interval", damage.intervalDoT}});
 						break;
