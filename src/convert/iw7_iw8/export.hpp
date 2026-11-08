@@ -631,6 +631,11 @@ namespace zonetool::convert::iw7_iw8
 
 	// Replay's world vertices reach 100000 units (replay_render: "Position out of range").
 	constexpr float largest_world_coordinate = 100000.0f;
+	// The sky's other surfaces (runtime_sky) hold their world positions times this scale, which keeps them within
+	// largest_world_coordinate (up to 500000 units from the world origin). The world vertex shader (replay_world_vertex.hlsl,
+	// kSkyObjectScale: keep the two equal) takes the camera's offset at the same scale, so their directions from the camera
+	// are the true ones (parallax included) and their depth follows the scaled distance.
+	constexpr double sky_object_scale = 0.2;
 	// The play space: the bounds of the spawn points (mins, then maxs), or nothing for a map without spawn points.
 	std::optional<std::array<float, 6>> spawn_bounds(const source_map& source);
 	// Whether a static model of the world reaches beyond the range of the world: the sky draws it, not the world
