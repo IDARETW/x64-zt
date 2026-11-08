@@ -1292,6 +1292,12 @@ namespace zonetool::convert::iw7_iw8
 							bytes[10], bytes[11], bytes[12], bytes[13], bytes[14]);
 					}
 
+					// The fade fields are read as bytes at 8 and 9, while the IW7 struct declares u16 times at 8, 10, 12 and 14
+					// (ParticleModuleInitDecal, 48 bytes). A census of the raw bytes 8-15 per decal decides between the two
+					// readings (u16 at 8 is byte 8 + 256 * byte 9; the reader above expects bytes 10-14 to be zero).
+					ZONETOOL_INFO("iw7: effect \"%s\" decal raw bytes 8-15 %02x %02x %02x %02x %02x %02x %02x %02x", this->current_.data(),
+						bytes[8], bytes[9], bytes[10], bytes[11], bytes[12], bytes[13], bytes[14], bytes[15]);
+
 					result.set(0, decal);
 					base();
 					auto entries = json::array();
