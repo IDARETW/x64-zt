@@ -12936,7 +12936,8 @@ PreparedMap PrepareFastfile(const ImportOptions &options)
                 navigation.traversals.push_back({begin.origin, end->second, begin.animscript});
             }
         }
-        // An end that no begin names (or that has no targetname) is not a traversal: counted, not used.
+        // A named end that no paired begin uses is not a traversal: counted, not used. This includes ends whose only
+        // begin was left out (wall run, boost or incomplete), so the count is ends not used, not ends never named.
         const std::size_t unusedEnds = negotiationEnds.size() - usedEnds.size();
         std::string leftOut;
         for (const auto &[name, count] : leftOutNodes)
@@ -12944,7 +12945,8 @@ PreparedMap PrepareFastfile(const ImportOptions &options)
         if (!leftOut.empty())
             zt::info("iw3: navigation source leaves out node records with no Replay pathnode: %s", leftOut.c_str());
         if (unnamedEnds || unusedEnds)
-            zt::info("iw3: navigation source: %zu node_negotiation_end without a targetname, %zu ends no begin names",
+            zt::info("iw3: navigation source: %zu node_negotiation_end without a targetname, %zu named ends not used "
+                     "by a paired traversal",
                      unnamedEnds, unusedEnds);
         zt::info("iw3: navigation source has %zu hulls, %zu triangles, %zu pathnode markers, "
                  "%zu spawns and %zu traversals (%zu IW7-only wall runs/boost jumps, %zu without an end "
