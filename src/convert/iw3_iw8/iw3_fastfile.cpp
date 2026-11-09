@@ -12433,7 +12433,13 @@ PreparedMap PrepareFastfile(const ImportOptions &options)
             // a missing asset in IW3 and drew nothing. Keep it that way: the
             // whole loadfx call becomes undefined, which the compat createfx
             // paths skip, instead of an unrelated stock stand-in.
-            const bool absent = alias == effectAliases.end() && !scriptEffect(name) &&
+            // A Replay stock effect the map script names itself (vfx/..., not this converter's vfx/mw120r/
+            // outputs; the IW8 Radiant editor writes them for fx_origin placements) is kept as written: it loads
+            // from the always-loaded common zones through the level vfx table (convert.cpp), so it is neither an
+            // absent IW3 effect nor a candidate for a stock stand-in.
+            const bool stockName = name.starts_with("vfx/") && !name.starts_with("vfx/mw120r/") &&
+                                   alias == effectAliases.end() && !scriptEffect(name);
+            const bool absent = !stockName && alias == effectAliases.end() && !scriptEffect(name) &&
                                 std::ranges::none_of(result.fxEffects, [&](const PreparedFx &effect) {
                                     return effect.name == name;
                                 });
@@ -12450,7 +12456,7 @@ PreparedMap PrepareFastfile(const ImportOptions &options)
                     continue;
                 }
             }
-            const std::string replacement = scriptEffect(name).value_or(
+            const std::string replacement = stockName ? name : scriptEffect(name).value_or(
                 alias != effectAliases.end() ? alias->second : scripts::StockEffectFor(name));
             zt::info("iw3: script effect %s -> %s", name.c_str(), replacement.c_str());
             gsc.replace(at, end - at, replacement);
