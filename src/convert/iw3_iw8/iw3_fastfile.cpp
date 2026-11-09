@@ -6696,10 +6696,24 @@ Json BuildRender(const Json &world, const VisibilityGroups &visibility,
         if (sourceIndex >= sourceProbeCount)
             throw std::runtime_error("IW3 render plan references an invalid reflection probe");
         Vec3 minimum{}, maximum{};
+        // An authored volume (world.json reflection_probes[i].volume = [[mins], [maxs]], written by IW8 Radiant
+        // from the probe entity) wins over the derived bounds; probe 0 stays the whole-world default.
+        const auto &sourceProbe = world.at("reflection_probes").at(sourceIndex);
+        const bool authoredVolume = sourceIndex != 0 && sourceProbe.contains("volume") &&
+                                    sourceProbe.at("volume").is_array() && sourceProbe.at("volume").size() == 2;
         if (sourceIndex == 0)
         {
             minimum = ReadVector<3>(worldBounds.at(0));
             maximum = ReadVector<3>(worldBounds.at(1));
+        }
+        else if (authoredVolume)
+        {
+            minimum = ReadVector<3>(sourceProbe.at("volume").at(0));
+            maximum = ReadVector<3>(sourceProbe.at("volume").at(1));
+            for (std::size_t axis = 0; axis < 3; ++axis)
+                if (!(maximum[axis] > minimum[axis]))
+                    throw std::runtime_error("IW3 reflection probe volume has no extent");
+            zt::info("iw3: reflection probe %zu uses its authored volume", sourceIndex);
         }
         else if (geometryProbeBounds[sourceIndex].valid)
         {
