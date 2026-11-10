@@ -1474,6 +1474,22 @@ Mesh Load(const std::string &path, const nlohmann::json &j)
         const auto origin = vector(source.at("origin"), 3);
         std::copy(origin.begin(), origin.end(), probe.origin.begin());
         probe.volume = LoadBounds(source.at("volume"));
+        if (const auto priority = source.find("priority"); priority != source.end())
+        {
+            probe.priority = priority->get<float>();
+            if (!std::isfinite(probe.priority))
+                throw std::runtime_error("Non-finite Replay reflection-probe priority");
+        }
+        if (const auto feather = source.find("feather"); feather != source.end())
+        {
+            const auto values = vector(*feather, 3);
+            for (std::size_t axis = 0; axis < 3; ++axis)
+            {
+                if (!std::isfinite(values[axis]) || values[axis] <= 0.0f)
+                    throw std::runtime_error("Replay reflection-probe feather must be positive");
+                probe.feather[axis] = values[axis];
+            }
+        }
         probe.image = LoadImageDefinition(path, source.at("image"), 0x8000u);
         if (!reflectionImages.insert(probe.image.name).second)
             throw std::runtime_error("Duplicate Replay reflection-probe image");
@@ -2541,7 +2557,7 @@ void EmitReflectionProbes(ZoneWriter &writer, const Mesh &mesh)
     {
         const auto &probe = mesh.reflectionProbes[index];
         if (probe.instances.empty())
-            entries.push_back({index, nullptr, sourceInstances ? unplacedPriority : 10.0f});
+            entries.push_back({index, nullptr, sourceInstances ? unplacedPriority : probe.priority});
         for (const auto &instance : probe.instances)
         {
             if (!sourceFallback && instance.priority <= std::numeric_limits<float>::lowest())
@@ -2606,10 +2622,9 @@ void EmitReflectionProbes(ZoneWriter &writer, const Mesh &mesh)
         put(instance, 0x64,
             fallback ? std::numeric_limits<float>::lowest()
             : sourceInstances ? unplacedPriority
-                              : 10.0f);
+                              : source.priority);
         const std::array<float, 3> feather =
-            fallback ? std::array<float, 3>{8.0f, 8.0f, 8.0f}
-                     : std::array<float, 3>{1.0f, 1.0f, 4.0f};
+            fallback ? std::array<float, 3>{8.0f, 8.0f, 8.0f} : source.feather;
         std::memcpy(instance + 0x68, feather.data(), sizeof(feather));
         writer.write(instance, sizeof(instance));
     };

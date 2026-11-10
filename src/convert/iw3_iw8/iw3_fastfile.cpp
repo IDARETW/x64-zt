@@ -6742,6 +6742,14 @@ Json BuildRender(const Json &world, const VisibilityGroups &visibility,
                                               {"volume", {minimum, maximum}},
                                               {"image", probe.image},
                                               {"sh", probe.sh}});
+        // IW8 Radiant: an authored priority and feather (1 / blend distance per axis) for the probe's box.
+        if (sourceProbe.contains("priority"))
+            output["reflectionProbes"].back()["priority"] = sourceProbe.at("priority");
+        if (sourceProbe.contains("feather"))
+            output["reflectionProbes"].back()["feather"] = sourceProbe.at("feather");
+        if (sourceProbe.contains("priority") || sourceProbe.contains("feather"))
+            zt::info("iw3: reflection probe %zu priority %g, feather %s", sourceIndex,
+                     sourceProbe.value("priority", 10.0), sourceProbe.value("feather", Json::array()).dump().c_str());
         // Sources with their own probe instances (IW7) keep them.
         if (const auto &source = world.at("reflection_probes").at(sourceIndex);
             source.contains("instances"))

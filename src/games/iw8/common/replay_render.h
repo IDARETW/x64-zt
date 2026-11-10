@@ -151,6 +151,9 @@ struct ReflectionProbe
     std::array<std::array<float, 9>, 4> sh{};
     // The source's instances; none: one axis-aligned instance of the volume.
     std::vector<ReflectionProbeInstance> instances;
+    // That instance's priority (higher wins where boxes overlap) and feather (1 / blend distance per axis).
+    float priority = 10.0f;
+    std::array<float, 3> feather{1.0f, 1.0f, 4.0f};
 };
 // A projected mask of a volumetric (GfxVolumetricMask, 40 bytes). R_VOL_AddVolumetric
 // (0x1418B6EC0) binds the image of an opacity mask (type 2) and offsets its UV by
