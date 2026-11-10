@@ -12353,6 +12353,25 @@ PreparedMap PrepareFastfile(const ImportOptions &options)
     // Sound aliases the map's scripts play, plus the IW3 vehicle destructible
     // sounds the compatibility layer plays itself.
     std::map<std::string, bool> soundAliases;
+    // Stock Replay aliases the map script plays by name (IW8 Radiant: extracted/sound/<map>.stock_sounds.txt, one
+    // "<alias> <0 one-shot|1 loop>" per line). They are in Replay's always-loaded banks, so they are registered with
+    // the compatibility layer as they are instead of being converted from IW3 audio.
+    std::map<std::string, bool> stockSounds;
+    {
+        std::ifstream list(exportRoot / "sound" / (options.map + ".stock_sounds.txt"));
+        std::string alias;
+        int looping = 0;
+        while (list >> alias >> looping)
+        {
+            const bool safe = std::ranges::all_of(alias, [](const char c) {
+                return std::isalnum(static_cast<unsigned char>(c)) || c == '_' || c == '.' || c == '-';
+            });
+            if (safe && !alias.empty())
+                stockSounds[Lowercase(alias)] = looping != 0;
+        }
+        if (!stockSounds.empty())
+            zt::info("iw3: %zu stock Replay sound alias(es) played by name", stockSounds.size());
+    }
     {
         std::set<std::string> requestedSounds = sound::ReadScriptSoundNames(exportRoot / "maps" / "mp");
         for (const char *folder : {"createfx", "createart"})
@@ -12375,12 +12394,16 @@ PreparedMap PrepareFastfile(const ImportOptions &options)
         if (options.style == MapStyle::iw8)
             for (const auto &sound : kIw8StyleSounds)
                 requestedSounds.erase(sound.iw3);
+        for (const auto &[alias, looping] : stockSounds)
+            requestedSounds.erase(alias);
         std::set<std::string> literals;
         for (const char *folder : {"mp", "createfx", "createart"})
             literals.merge(sound::ReadScriptStringLiterals(exportRoot / "maps" / folder));
         if (options.style == MapStyle::iw8)
             for (const auto &sound : kIw8StyleSounds)
                 literals.erase(sound.iw3);
+        for (const auto &[alias, looping] : stockSounds)
+            literals.erase(alias);
         if (auto sounds = sound::Convert(exportRoot, options.searchPaths, options.map, requestedSounds,
                                          literals))
         {
@@ -12613,6 +12636,9 @@ PreparedMap PrepareFastfile(const ImportOptions &options)
                "    level.mw120r_sound_alias = [];\n";
         for (const auto &[name, looping] : soundAliases)
             gsc += "    level.mw120r_sounds[\"" + name + "\"] = " + (looping ? "2" : "1") + ";\n";
+        for (const auto &[name, looping] : stockSounds)
+            if (!soundAliases.contains(name))
+                gsc += "    level.mw120r_sounds[\"" + name + "\"] = " + (looping ? "2" : "1") + ";\n";
         if (options.style == MapStyle::iw8)
             for (const auto &sound : kIw8StyleSounds)
             {
