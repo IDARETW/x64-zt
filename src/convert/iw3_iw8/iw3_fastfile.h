@@ -281,6 +281,9 @@ struct PreparedMap
     // IW8 GSC translated from the map's IW3 scripts (without the generated
     // minimap function), compiled with gsc-tool at package time.
     std::string mapScript;
+    // HUD materials the map's source scripts name in precacheshader / setshader string literals (the translation drops
+    // precacheshader); listed in the level "mat" NetConstStrings table at package time.
+    std::vector<std::string> scriptMaterials;
     // Converted IW3 film grade (empty name without one); the generated Replay
     // vision file in rawFiles references it.
     std::string gradingClutName;

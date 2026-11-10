@@ -1754,7 +1754,7 @@ int writeMapPackage(const Args &args, const std::string &map, const std::string 
             iw8::writePhysicsAsset(writer, glassPhysics);
         // Models and effects this zone registers; only these go into the level
         // NetConstStrings (stock names already sit in the common tables).
-        std::set<std::string> zoneModels, zoneEffects, scriptModels, scriptEffects;
+        std::set<std::string> zoneModels, zoneEffects, scriptModels, scriptEffects, scriptMaterials;
         if (prepared)
         {
             for (const auto &model : prepared->xmodels)
@@ -1939,6 +1939,14 @@ int writeMapPackage(const Args &args, const std::string &map, const std::string 
             static const std::regex scriptModel(R"re((?:precachemodel|setmodel)\s*\(\s*"([^"]+)")re",
                                                 std::regex::icase);
             static const std::regex scriptEffect(R"re(loadfx\s*\(\s*"([^"]+)")re", std::regex::icase);
+            // HUD materials (setshader / precacheshader): named in the level "mat" table, as script models are in
+            // "mdl", so a map script can draw stock HUD icons (IW8 Radiant research 36).
+            static const std::regex scriptMaterial(R"re((?:setshader|precacheshader)\s*\(\s*"([^"]+)")re",
+                                                   std::regex::icase);
+            for (auto match = std::sregex_iterator(scriptSource.begin(), scriptSource.end(),
+                                                   scriptMaterial);
+                 match != std::sregex_iterator(); ++match)
+                scriptMaterials.insert((*match)[1].str());
             for (auto match = std::sregex_iterator(scriptSource.begin(), scriptSource.end(),
                                                    scriptModel);
                  match != std::sregex_iterator(); ++match)
@@ -2008,6 +2016,9 @@ int writeMapPackage(const Args &args, const std::string &map, const std::string 
                     effects.insert(effect);
             levelStrings[0].assign(models.begin(), models.end());  // "mdl"
             levelStrings[6].assign(effects.begin(), effects.end()); // "vfx"
+            if (prepared)
+                scriptMaterials.insert(prepared->scriptMaterials.begin(), prepared->scriptMaterials.end());
+            levelStrings[1].assign(scriptMaterials.begin(), scriptMaterials.end()); // "mat"
             // Script-played animations (scriptmodelplayanim) resolve through
             // the level "anm" table, like script models through "mdl".
             if (prepared)
@@ -2017,8 +2028,8 @@ int writeMapPackage(const Args &args, const std::string &map, const std::string 
                 for (const auto &asset : prepared->nativeAssets)
                     if (asset.type == zonetool::iw8::ASSET_TYPE_RUMBLE)
                         levelStrings[3].push_back(zonetool::iw8::get_asset_name(asset.type, asset.header)); // "rmb"
-            info("assets: level NetConstStrings: %zu model(s), %zu effect(s)", models.size(),
-                 effects.size());
+            info("assets: level NetConstStrings: %zu model(s), %zu effect(s), %zu HUD material(s)", models.size(),
+                 effects.size(), scriptMaterials.size());
         }
         iw8::registerMapWorldAssets(
             writer, worldStrings, assetName, mapEntities, bounds, lighting, collision,

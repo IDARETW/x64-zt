@@ -10015,6 +10015,7 @@ PreparedMap::PreparedMap(PreparedMap &&other) noexcept
     , dynamicEntities(std::move(other.dynamicEntities))
     , navigation(std::move(other.navigation))
     , mapScript(std::move(other.mapScript))
+    , scriptMaterials(std::move(other.scriptMaterials))
     , gradingClutName(std::move(other.gradingClutName))
     , gradingClutPixels(std::move(other.gradingClutPixels))
     , soundBank(std::move(other.soundBank))
@@ -10062,6 +10063,7 @@ PreparedMap &PreparedMap::operator=(PreparedMap &&other) noexcept
         dynamicEntities = std::move(other.dynamicEntities);
         navigation = std::move(other.navigation);
         mapScript = std::move(other.mapScript);
+        scriptMaterials = std::move(other.scriptMaterials);
         gradingClutName = std::move(other.gradingClutName);
         gradingClutPixels = std::move(other.gradingClutPixels);
         soundBank = std::move(other.soundBank);
@@ -11421,6 +11423,14 @@ PreparedMap PrepareFastfile(const ImportOptions &options)
                      scriptSources.size(), translation.translatedMain ? "source" : "generated");
             scriptStrings = std::move(translation.strings);
             result.mapScript = std::move(translation.gsc);
+            // HUD materials named in the source (before translation drops precacheshader).
+            static const std::regex hudMaterial(R"re((?:precacheshader|setshader)\s*\(\s*"([^"]+)")re", std::regex::icase);
+            std::set<std::string> materials;
+            for (const auto &source : scriptSources)
+                for (auto match = std::sregex_iterator(source.text.begin(), source.text.end(), hudMaterial);
+                     match != std::sregex_iterator(); ++match)
+                    materials.insert((*match)[1].str());
+            result.scriptMaterials.assign(materials.begin(), materials.end());
         }
         catch (const std::exception &error)
         {
