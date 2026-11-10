@@ -616,7 +616,7 @@ std::string BuildReplayVision(const std::optional<ExpFog> &fog, const std::strin
                               const MapStyle style, const std::array<float, 3> &sunDirection,
                               const Iw8LightingReference *exposure, const float lightUnitScale,
                               const std::optional<NativeFog> &nativeFog, const nlohmann::json *iw7Tonemap,
-                              const nlohmann::json *iw7Volumetrics)
+                              const nlohmann::json *iw7Volumetrics, const nlohmann::json *userOverrides)
 {
     std::map<std::string_view, std::string> overrides;
     if (style == MapStyle::iw8)
@@ -804,6 +804,40 @@ std::string BuildReplayVision(const std::optional<ExpFog> &fog, const std::strin
     }
     if (!gradingClut.empty())
         overrides["NONMKTKNNM"] = gradingClut; // grading CLUT (stock: <map>_clut)
+
+    // vision/<map>.overrides.json (IW8 Radiant's vision editor): {"<dev name or token>": value, ...}, applied last.
+    // A value is a number, a [x, y, z] array or a string; unknown names fail the build rather than vanish.
+    if (userOverrides && userOverrides->is_object())
+    {
+        static constexpr std::pair<std::string_view, std::string_view> kNames[] = {
+#include "replay_vision_names.inc"
+        };
+        for (const auto &[key, value] : userOverrides->items())
+        {
+            std::string_view token;
+            for (const auto &field : kVisionFields)
+                if (key == field.token)
+                    token = field.token;
+            for (const auto &[name, tok] : kNames)
+                if (key == name)
+                    token = tok;
+            if (token.empty())
+                throw std::runtime_error("vision override names no Replay vision field: " + key);
+            std::string text;
+            if (value.is_number())
+                text = Number(value.get<float>());
+            else if (value.is_array() && value.size() == 3)
+                text = Vector({value[0].get<float>(), value[1].get<float>(), value[2].get<float>()});
+            else if (value.is_boolean())
+                text = value.get<bool>() ? "1" : "0";
+            else if (value.is_string())
+                text = value.get<std::string>();
+            else
+                throw std::runtime_error("vision override " + key + " has an unsupported value");
+            overrides[token] = text;
+        }
+        zt::info("iw3: applied %zu vision override(s)", userOverrides->size());
+    }
 
     std::string text;
     for (const auto &field : kVisionFields)

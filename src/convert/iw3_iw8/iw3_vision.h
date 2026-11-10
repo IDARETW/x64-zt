@@ -135,5 +135,6 @@ std::string BuildReplayVision(const std::optional<ExpFog> &fog, const std::strin
                               float lightUnitScale = 1.0f,
                               const std::optional<NativeFog> &nativeFog = std::nullopt,
                               const nlohmann::json *iw7Tonemap = nullptr,
-                              const nlohmann::json *iw7Volumetrics = nullptr);
+                              const nlohmann::json *iw7Volumetrics = nullptr,
+                              const nlohmann::json *userOverrides = nullptr);
 } // namespace iw3

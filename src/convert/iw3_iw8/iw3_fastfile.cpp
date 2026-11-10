@@ -10931,10 +10931,24 @@ PreparedMap PrepareFastfile(const ImportOptions &options)
     {
         // An IW7 extraction's own volumetric air, veil and light scatter (iw7_volumetrics).
         const auto volumetrics = world.find("iw7_volumetrics");
+        // IW8 Radiant's vision editor: extracted/vision/<map>.overrides.json (field name or token -> value).
+        Json visionOverrides;
+        {
+            const auto path = exportRoot / "vision" / (sourceMap + ".overrides.json");
+            std::error_code overridesError;
+            if (std::filesystem::is_regular_file(path, overridesError))
+            {
+                std::ifstream input(path);
+                visionOverrides = Json::parse(input, nullptr, false);
+                if (visionOverrides.is_discarded() || !visionOverrides.is_object())
+                    throw std::runtime_error("invalid vision overrides: " + path.string());
+            }
+        }
         const std::string vision = BuildReplayVision(expFog, result.gradingClutName, options.style,
                                                      SunDirection(world, entities), lightingMatch.exposure,
                                                      lightingMatch.lightUnitScale, nativeFog, iw7Tonemap,
-                                                     volumetrics != world.end() ? &*volumetrics : nullptr);
+                                                     volumetrics != world.end() ? &*volumetrics : nullptr,
+                                                     visionOverrides.is_object() ? &visionOverrides : nullptr);
         result.rawFiles.push_back(
             {"vision/" + options.map + ".vision",
              std::vector<std::uint8_t>(vision.begin(), vision.end())});
