@@ -100,6 +100,23 @@ namespace zonetool::iw8
 				if (asset_trace)
 				{
 					*asset_trace << "A " << type << ' ' << (*name ? *name : "") << '\n';
+					// Sound alias catalog (IW8 Radiant 4.5): "S <alias> <loop 0/1> <distMax>" for each alias list of a
+					// resident bank, so editors can offer the aliases a map script can play.
+					if (type == 21 && header)
+					{
+						const auto& bank = static_cast<const SndBankResident*>(header)->bank;
+						for (std::uint32_t i = 0; bank.alias && i < bank.aliasCount; ++i)
+						{
+							const auto& list = bank.alias[i];
+							if (!list.aliasName || !*list.aliasName)
+							{
+								continue;
+							}
+							const auto* head = list.count > 0 ? list.head : nullptr;
+							*asset_trace << "S " << list.aliasName << ' ' << (head && (head->flags & 1) ? 1 : 0) << ' '
+							             << (head ? head->distMax : 0.0f) << '\n';
+						}
+					}
 				}
 
 				*field = header;
