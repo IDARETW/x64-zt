@@ -4365,7 +4365,7 @@ std::vector<PromotedScriptModel> TakeUnscriptedScriptModels(std::string &text,
         // IW3 compatibility layer handles stay entities.
         if (const auto *name = field("targetname");
             name && (*name == "exploder" || *name == "oldschool_pickup" ||
-                     *name == "destructible" || *name == "interactive_tv" ||
+                     *name == "destructible" || *name == "destructable" || *name == "interactive_tv" ||
                      targeted.contains(*name) || scripted.contains(*name)))
             continue;
         // A model that draws nothing (tag_origin) stays a script model, without surfaces.
