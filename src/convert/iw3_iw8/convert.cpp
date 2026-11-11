@@ -1754,7 +1754,7 @@ int writeMapPackage(const Args &args, const std::string &map, const std::string 
             iw8::writePhysicsAsset(writer, glassPhysics);
         // Models and effects this zone registers; only these go into the level
         // NetConstStrings (stock names already sit in the common tables).
-        std::set<std::string> zoneModels, zoneEffects, scriptModels, scriptEffects, scriptMaterials;
+        std::set<std::string> zoneModels, zoneEffects, scriptModels, scriptEffects, scriptMaterials, scriptAnims;
         if (prepared)
         {
             for (const auto &model : prepared->xmodels)
@@ -1955,6 +1955,13 @@ int writeMapPackage(const Args &args, const std::string &map, const std::string 
                                                    scriptEffect);
                  match != std::sregex_iterator(); ++match)
                 scriptEffects.insert((*match)[1].str());
+            // Stock animations played by name (IW8 Radiant iw8r_anim: scriptmodelplayanim / precachempanim): named in
+            // the level "anm" table, as loaded effects are in "vfx"; the xanim itself stays in its stock zone.
+            static const std::regex scriptAnim(R"re((?:scriptmodelplayanim|precachempanim)\s*\(\s*"([^"]+)")re",
+                                               std::regex::icase);
+            for (auto match = std::sregex_iterator(scriptSource.begin(), scriptSource.end(), scriptAnim);
+                 match != std::sregex_iterator(); ++match)
+                scriptAnims.insert((*match)[1].str());
             const std::filesystem::path work =
                 std::filesystem::path(path_dir(outputDirectory)) / ".iw3-scripts" / map;
             try
@@ -2024,6 +2031,9 @@ int writeMapPackage(const Args &args, const std::string &map, const std::string 
             if (prepared)
                 for (const auto &anim : prepared->xanims)
                     levelStrings[16].push_back(anim.name); // "anm"
+            for (const auto &anim : scriptAnims)
+                if (std::find(levelStrings[16].begin(), levelStrings[16].end(), anim) == levelStrings[16].end())
+                    levelStrings[16].push_back(anim); // "anm": stock animations named by the map script
             if (prepared)
                 for (const auto &asset : prepared->nativeAssets)
                     if (asset.type == zonetool::iw8::ASSET_TYPE_RUMBLE)
