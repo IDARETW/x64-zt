@@ -6968,6 +6968,10 @@ std::uint32_t ConvertContents(const std::uint32_t source)
     // it as solid stopped bullets before they reached native glass.
     if (source & 0x10u)
         result |= 1u;
+    // IW8 Radiant water volumes: IW3 CONTENTS_WATER 0x20 is kept (Replay names physicscontents_water; the bit is
+    // in kReplayContents) so the volume is water, not a wall.
+    if (source & 0x20u)
+        result |= 0x20u;
     // Non-solid IW3 player clips (clip_nosight stair ramps and window clips
     // carry AI-no-sight 0x1000 and item-clip 0x400) must use the shipped
     // player-clip contents (0x30200 / 0x30000 / 0x10000); with the IW3 extras
