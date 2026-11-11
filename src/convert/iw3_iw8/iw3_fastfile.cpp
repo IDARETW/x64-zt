@@ -10974,6 +10974,29 @@ PreparedMap PrepareFastfile(const ImportOptions &options)
         zt::info("iw3: converted vision (%s lighting, fog %s, grading CLUT %s)",
                  options.style == MapStyle::iw8 ? "iw8" : "iw3", expFog ? "yes" : nativeFog ? "native" : "no",
                  result.gradingClutName.empty() ? "none" : result.gradingClutName.c_str());
+        // IW8 Radiant vision volumes: extracted/vision/<map>.vol<N>.overrides.json -> vision/<map>_v<N>.vision, the
+        // map's vision with that volume's overrides on top (the map script switches a player to it inside the volume).
+        for (int volume = 0; volume < 64; ++volume)
+        {
+            const auto path = exportRoot / "vision" / (sourceMap + ".vol" + std::to_string(volume) + ".overrides.json");
+            std::error_code volumeError;
+            if (!std::filesystem::is_regular_file(path, volumeError))
+                continue;
+            std::ifstream input(path);
+            Json merged = visionOverrides.is_object() ? visionOverrides : Json::object();
+            const Json own = Json::parse(input, nullptr, false);
+            if (own.is_discarded() || !own.is_object())
+                throw std::runtime_error("invalid vision volume overrides: " + path.string());
+            for (const auto &[key, value] : own.items())
+                merged[key] = value;
+            const std::string volumeVision = BuildReplayVision(expFog, result.gradingClutName, options.style,
+                                                               SunDirection(world, entities), lightingMatch.exposure,
+                                                               lightingMatch.lightUnitScale, nativeFog, iw7Tonemap,
+                                                               volumetrics != world.end() ? &*volumetrics : nullptr, &merged);
+            result.rawFiles.push_back({"vision/" + options.map + "_v" + std::to_string(volume) + ".vision",
+                                       std::vector<std::uint8_t>(volumeVision.begin(), volumeVision.end())});
+            zt::info("iw3: vision volume %d: %zu override(s)", volume, own.size());
+        }
     }
     {
         // Chyron clock from the IW3 sun: 0-90 degrees of elevation read 06:00-12:00;
