@@ -203,6 +203,8 @@ struct SourceStaticModelInstance
     std::optional<std::vector<std::uint32_t>> shadowLights;
     // Replay's LOD distance scale index for this placement (IW7 lod_scale); 6 is 1.0.
     std::uint8_t lodScaleIndex{6};
+    // IW8 Radiant no_shadow: this placement casts no sun shadow (neither in the static bake nor at runtime).
+    bool noSunShadow{};
 };
 
 struct SourceStaticModels
@@ -3787,6 +3789,7 @@ std::vector<BrushModel> ReadBrushModels(const Json &world, const std::vector<Raw
         converted.model = found->second;
         if (instance.contains("shadow_lights") && !instance.at("shadow_lights").is_null())
             converted.shadowLights = instance.at("shadow_lights").get<std::vector<std::uint32_t>>();
+        converted.noSunShadow = instance.value("no_sun_shadow", false);
         const auto reflectionProbe = instance.at("reflection_probe").get<unsigned>();
         const auto sourceProbeCount = world.at("reflection_probes").size();
         if (reflectionProbe >= sourceProbeCount || reflectionProbe > UINT16_MAX)
@@ -5089,8 +5092,12 @@ void BuildPreparedStaticModels(const SourceStaticModels &source, const RenderPla
             // per-material contents need their own source-to-target mapping.
             // Static placements and script models use the contents of the
             // shipped Static / KeyframedEntity assets.
-            if (collisionModels || scriptModelPhysics || clutter)
+            // Script models and clutter (dynamic props) also block players (owner test: players walked through
+            // them; 0xB180 shares no bit with the player mask 0x2014011, CONTENTS_SOLID 1 does).
+            if (collisionModels)
                 physics.contents = 0xB180u;
+            if (scriptModelPhysics || clutter)
+                physics.contents = 0xB181u;
             std::map<Vec3, std::uint32_t> vertexIndices;
             const auto appendVertex = [&](const Vec3 &vertex) {
                 const auto found = vertexIndices.find(vertex);
@@ -5247,7 +5254,7 @@ void BuildPreparedStaticModels(const SourceStaticModels &source, const RenderPla
         staticModels.instances.push_back(
             {static_cast<unsigned>(sourceInstance.model), sourceInstance.origin,
              QuaternionFromBasis(axis[0], axis[1], axis[2]), sourceInstance.scale, sourceInstance.shadowLights,
-             sourceInstance.lodScaleIndex});
+             sourceInstance.lodScaleIndex, sourceInstance.noSunShadow});
         if (collisionModels && collisionModelIndices.at(sourceInstance.model))
         {
             auto &collisionModel = collisionModels->at(*collisionModelIndices.at(sourceInstance.model));
@@ -5323,6 +5330,8 @@ void BuildShadowScene(const std::vector<BrushModel> &brushModels,
     const std::size_t worldSurfaceCount = scene.surfaces.size();
     for (const SourceStaticModelInstance &instance : staticModels.instances)
     {
+        if (instance.noSunShadow)
+            continue;  // IW8 Radiant no_shadow: not a sun caster
         if (instance.model >= staticModels.models.size())
             throw std::runtime_error("IW3 shadow instance references a missing model");
         const SourceStaticModel &model = staticModels.models[instance.model];

@@ -256,6 +256,8 @@ struct StaticModelInstance
     // R_AddAllStaticModelSurfacesCamera_LodCalc multiplies the model's LOD thresholds by
     // dword_142578690[index] for each placement. Entries match IW7's g_lodDistIndexToScale.
     uint8_t lodScaleIndex{6};
+    // IW8 Radiant no_shadow: the collection's sun shadow mask is 0 (no runtime sun shadow).
+    bool noSunShadow{};
 };
 struct StaticModels
 {

@@ -2347,7 +2347,7 @@ void EmitStaticModels(ZoneWriter &writer, const StaticModels &models,
         put(collection, 0x00, static_cast<uint32_t>(index));
         put(collection, 0x04, uint32_t{1});
         put(collection, 0x08, static_cast<uint16_t>(instance.model));
-        collection[0x0E] = sunShadowMask;
+        collection[0x0E] = instance.noSunShadow ? uint8_t{0} : sunShadowMask;
         writer.write(collection, sizeof(collection));
     }
     // Per-placement instance flags byte: the LOD distance scale index (see StaticModelInstance::lodScaleIndex).
