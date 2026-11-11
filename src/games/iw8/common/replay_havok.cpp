@@ -30,6 +30,42 @@
 #include <utility>
 #include <vector>
 
+
+// The physicsmaterial.hkx material of a collision shape, by its Replay surface type (the same number the tag's user
+// data carries at bit 19). Every solid used to be PM_Concrete, and every bullet impact then looked like a concrete
+// impact whatever the surface (IW8 Radiant owner test, 2026-11-11). Name CRCs are CRC-32 of the material name, the
+// ones the clutter bodies already use (iw3_fastfile.cpp ReadClutterBody). Types without a material of their own keep
+// PM_Concrete.
+inline std::uint32_t SurfacePhysicsMaterialCrc(const std::uint32_t surfaceType)
+{
+    switch (surfaceType)
+    {
+    case 1:  // bark
+    case 22: // wood
+        return 0x0AD71E4Eu; // PM_Wood
+    case 2: // brick
+        return 0xD8B39111u; // PM_Brick
+    case 3:  // carpet
+    case 4:  // cloth
+    case 35: // cushion
+        return 0xCD123193u; // PM_Cloth
+    case 13: // metal
+        return 0xCBF7A6C4u; // PM_Metal_Solid
+    case 28: // painted metal
+        return 0xE8F3FA9Au; // PM_Metal_Sheet
+    case 16: // paper
+        return 0xA1F93A3Bu; // PM_Paper
+    case 24: // ceramic
+        return 0xF49C81BFu; // PM_Ceramic
+    case 25: // plastic
+        return 0x4B02BC9Du; // PM_Plastic
+    case 26: // rubber
+        return 0xFFD772CDu; // PM_Rubber
+    default:
+        return 0x1AB7BC33u; // PM_Concrete
+    }
+}
+
 namespace iw8::havok
 {
 namespace
@@ -1408,10 +1444,9 @@ std::vector<std::uint8_t> BuildShapeList(ReplayHavok &havok, const std::vector<H
         const std::uint64_t userData = (tagClass << 48) |
                                        (std::uint64_t(glassId) << 32) |
                                        (std::uint64_t(material) << 19) | surfaceFlags;
-        const auto materialNameCrc = material == 9u ||
-                                             material == kBreakableGlassSurfaceMaterial
+        const auto materialNameCrc = material == 9u || material == kBreakableGlassSurfaceMaterial
                                          ? kGlassMaterialNameCrc
-                                         : 0x1AB7BC33u;
+                                         : SurfacePhysicsMaterialCrc(material);
         tags.push_back({shapeContents, materialNameCrc, 0xFFFFu, {}, userData});
         tagIndices.emplace(key, newIndex);
         return newIndex;
@@ -1928,8 +1963,9 @@ std::vector<std::uint8_t> BuildShapeListNative(const std::vector<Hull> &hulls,
         const std::uint64_t tagClass = glassId ? 1 : (shapeContents & 1) ? 0 : 3;
         const std::uint64_t userData = (tagClass << 48) | (std::uint64_t(glassId) << 32) |
                                        (std::uint64_t(material) << 19) | surfaceFlags;
-        const auto materialNameCrc =
-            material == 9u || material == kBreakableGlassSurfaceMaterial ? kGlassMaterialNameCrc : 0x1AB7BC33u;
+        const auto materialNameCrc = material == 9u || material == kBreakableGlassSurfaceMaterial
+                                         ? kGlassMaterialNameCrc
+                                         : SurfacePhysicsMaterialCrc(material);
         tags.push_back({shapeContents, materialNameCrc, 0xFFFFu, {}, userData});
         tagIndices.emplace(key, newIndex);
         return newIndex;
