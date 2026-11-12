@@ -3462,8 +3462,9 @@ namespace zonetool::convert::iw3_iw8
 	//       fences, props and doors: radial and sparse-occluder entries, and no-spatial ones), a removal drops them; the
 	//       lists, chains, counts and the GfxWorld client arrays are rebuilt. Refused: streamed (transient) entries,
 	//       entries placed apart from their instance, and a removal when a list in a streamed zone names a later instance.
-	//   "remove_world_surfaces": {"boxes": [{"mins": [x, y, z], "maxs": [x, y, z]}], "surfaces": [n, ...],
-	//       "collision": true, "rebake_sun_shadow": false, "acts": "<acts.exe>"} takes world geometry out (IW8 Radiant
+	//   "remove_world_surfaces": {"boxes": [{"mins": [x, y, z], "maxs": [x, y, z], "render": true, "collision": true}],
+	//       "surfaces": [n, ...], "collision": true, "rebake_sun_shadow": false, "acts": "<acts.exe>"} takes world
+	//       geometry out (a box with "render": false only its collision, "collision": false only its triangles) (IW8 Radiant
 	//       research 96). Render: every world triangle whose three vertices lie inside one box, and every triangle of the
 	//       listed surfaces (GfxWorld surface indices), becomes degenerate (its three indices the first one), so no draw
 	//       path (opaque, prepass, shadow maps, decals) rasterizes it; counts, offsets and surface indices stay stock.
@@ -3771,7 +3772,7 @@ namespace zonetool::convert::iw3_iw8
 			{
 				throw std::runtime_error("remove_world_surfaces must be an object with \"boxes\" and / or \"surfaces\"");
 			}
-			std::vector<::iw8::stockworld::Box> boxes;
+			std::vector<::iw8::stockworld::Box> boxes, collision_boxes;
 			if (node.contains("boxes"))
 			{
 				if (!node.at("boxes").is_array())
@@ -3806,7 +3807,21 @@ namespace zonetool::convert::iw3_iw8
 							throw std::runtime_error(where + ": mins is above maxs");
 						}
 					}
-					boxes.push_back(box);
+					for (const char* key : {"render", "collision"})
+					{
+						if (entry.contains(key) && !entry.at(key).is_boolean())
+						{
+							throw std::runtime_error(where + ": " + key + " must be true or false");
+						}
+					}
+					if (entry.value("render", true))
+					{
+						boxes.push_back(box);
+					}
+					if (entry.value("collision", true))
+					{
+						collision_boxes.push_back(box);
+					}
 				}
 			}
 			std::set<std::uint32_t> whole;
@@ -3821,7 +3836,7 @@ namespace zonetool::convert::iw3_iw8
 					whole.insert(entry.get<std::uint32_t>());
 				}
 			}
-			if (boxes.empty() && whole.empty())
+			if (boxes.empty() && collision_boxes.empty() && whole.empty())
 			{
 				throw std::runtime_error("remove_world_surfaces names no box and no surface");
 			}
@@ -3833,6 +3848,7 @@ namespace zonetool::convert::iw3_iw8
 			const auto render = ::iw8::stockworld::RemoveRenderTriangles(*world, boxes, whole, kept_world_indices);
 			nlohmann::ordered_json out;
 			out["boxes"] = boxes.size();
+			out["collision_boxes"] = collision_boxes.size();
 			out["surfaces_asked"] = whole.size();
 			out["triangles_removed"] = render.triangles;
 			out["triangles_already_degenerate"] = render.alreadyDegenerate;
@@ -3841,7 +3857,7 @@ namespace zonetool::convert::iw3_iw8
 			out["surfaces_not_resident"] = render.notResident;
 			ZONETOOL_INFO("editzone: remove_world_surfaces: %zu triangle(s) of %zu surface(s) no longer draw (%zu surface(s) emptied)",
 				render.triangles, render.touched.size(), render.emptied.size());
-			if (node.value("collision", true) && !boxes.empty())
+			if (node.value("collision", true) && !collision_boxes.empty())
 			{
 				auto* clip = static_cast<clipMap_t*>(find(ASSET_TYPE_CLIPMAP));
 				if (!clip || !clip->havokWorldShapeData || !clip->havokWorldShapeDataSize)
@@ -3851,7 +3867,7 @@ namespace zonetool::convert::iw3_iw8
 				const auto& compendium = zonetool::iw8::havok::replay_compendium(zone_folder);
 				::iw8::stockworld::CollisionRemoval collision;
 				kept_world_collision = ::iw8::stockworld::RemoveCollision(std::span(reinterpret_cast<const std::uint8_t*>(
-					clip->havokWorldShapeData), clip->havokWorldShapeDataSize), compendium, boxes, collision);
+					clip->havokWorldShapeData), clip->havokWorldShapeDataSize), compendium, collision_boxes, collision);
 				if (collision.trianglesRemoved || collision.convexRemoved)
 				{
 					clip->havokWorldShapeData = reinterpret_cast<char*>(kept_world_collision.data());
