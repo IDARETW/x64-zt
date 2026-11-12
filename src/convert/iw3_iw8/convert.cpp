@@ -3438,7 +3438,7 @@ namespace zonetool::convert::iw3_iw8
 	//       "add": [{"like": n, "origin": [x, y, z], "angles": [p, y, r], "server_instanced_parts": n, "usable_parts": n,
 	//       "physics_limit": bool, "physics_limit_detail": bool}], "remove": [{"index": n, <the same numbers>}]} moves
 	//       placed scriptables (MapEnts scriptableMapEnts.mapInstances), adds copies of one and removes them (IW8 Radiant
-	//       research 89 section 8). A copy takes the definition, the class name and the flags of instance "like"; the
+	//       research 89 section 8). A copy takes the definition, the class name, the flags, the targetname and the script_noteworthy of instance "like"; the
 	//       instance count, the three server counts and the physics limits rise (or fall, for "remove") by the numbers
 	//       given (those of the definition, from the editor's catalogue). The dynamic entities of an instance follow: a
 	//       move gives them the new pose and spatial partition, a copy gets copies of the entries of "like" (signs,
@@ -4456,7 +4456,9 @@ namespace zonetool::convert::iw3_iw8
 					auto record = block.mapInstances[like];
 					record.initialAngles = {};
 					placement(entry, where, record);
-					record.target = record.targetname = record.script_linkname = record.script_linkto = record.script_noteworthy = scr_string_t{};
+					// The group names stay (scripts find loot rocks, extraction sites and the like by targetname and
+					// script_noteworthy, which stock maps share between instances); the one-to-one links are cleared.
+					record.target = record.script_linkname = record.script_linkto = scr_string_t{};
 					record.mapEntLookup = 0;
 					const auto number = [&](const char* key) -> std::int64_t
 					{
