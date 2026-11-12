@@ -77,9 +77,14 @@ struct Data
 void SetCacheDirectory(std::filesystem::path directory);
 
 // A bake whose tiles pass `budget` bytes stops early with an error that says it "exceeds" the budget.
+// tolerance (world units along the sun): a receiver that is not a caster (a player, water) and is more than this below
+// the first surface is shadowed; up to it a merged quadtree leaf may leave it lit. A larger tolerance merges more
+// texels (a smaller blob); a surface behind the first one stays shadowed whatever the tolerance.
+constexpr float DefaultTolerance = 32.0f;
 Data Bake(const Scene &scene, const std::array<float, 3> &sunDirection,
           const replaybounds::Bounds &receiverBounds, float sampleSize = 1.0f,
-          const replaybounds::Bounds *focus = nullptr, std::size_t budget = SIZE_MAX);
+          const replaybounds::Bounds *focus = nullptr, std::size_t budget = SIZE_MAX,
+          float tolerance = DefaultTolerance);
 
 // World-space sun depth image for the converted surface shaders: 16-bit
 // occluder depths (the midpoint of each texel's stored-depth interval, 0 = no
@@ -113,6 +118,11 @@ DepthImage BakeDepthImage(const Scene &scene, const std::array<float, 3> &sunDir
 std::vector<std::uint8_t> EncodeTile(std::span<const float> depths,
                                     float origin, float inverseSpan);
 
+// Shipped tiles (mp_shipment, all 2,324 parse this way) use two things these encoders do not write: a tile's own
+// depth range at +24 / +28 (its depths are normalized to the tile, not to the forest), and child type 2, an 8-byte node
+// (node word, depth) whose type-0 descendants take that depth instead of the inherited one (a root's inherited depth:
+// its +4 word, assumed; +8 decodes the same on mp_shipment). Under the converter's tiles a type-0 child inherits the
+// root's zero: no caster.
 // Lossy tile from per-texel depth intervals, as shipped blobs are built (mp_rust:
 // 83% of its occupied cells are one depth for a whole 512x512 tile). A texel
 // with a caster (upper > 0) accepts any stored depth in (lower, upper]: upper is

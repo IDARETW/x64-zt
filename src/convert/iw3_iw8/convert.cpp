@@ -17,6 +17,7 @@
 #include "iw3_ledger.h"
 #include "iw3_render_assets.h"
 #include "iw3_vision.h"
+#include "stock_sun.h"
 #include "iw3_scripts.h"
 #include <iw8/zone/iw8_ffheader.h>
 #include <iw8/zone/iw8_zone.h>
@@ -59,6 +60,9 @@
 #include <set>
 #include <string>
 #include <vector>
+
+#include <formats/compression.hpp>
+#include <zlib.h>
 
 #include <Windows.h>
 
@@ -3426,9 +3430,20 @@ namespace zonetool::convert::iw3_iw8
 	//       be in this zone or carried in with "carry" (type material). The surfaces' draw keys are left as they are: the
 	//       engine fills them at load (the converter's own maps write zeros and draw). "from": "@sky" names the map's sky
 	//       (any world material <folder>/sky_...).
-	//   "sun": {"color": [r, g, b], "intensity": x} sets the colour (linear sRGB) and / or the intensity of the stock
-	//       sun: the ComWorld primary light the first stage names (clipMap_t.stages[0].sunPrimaryLightIndex). The
-	//       direction is not changed: the baked sun shadow data holds it too (GfxCompressedSunShadowParams).
+	//   "sun": {"color": [r, g, b], "intensity": x, "direction": [pitch, yaw], "acts": "<acts.exe>"} sets the colour
+	//       (linear sRGB), the intensity and / or the direction of the stock sun: the ComWorld primary light the first
+	//       stage names (clipMap_t.stages[0].sunPrimaryLightIndex). "direction" is in degrees as the worldspawn
+	//       sundirection (a negative pitch is above the horizon, -90 to -1): toward the sun (cos p cos y, cos p sin y,
+	//       -sin p) (stock mp_shipment: -20.261 -15.4 = its light's 0.904 -0.249 0.346). A new direction also re-bakes
+	//       the GfxWorld's compressed sun shadow (GfxWorldDraw.compressedSunShadow and its params; Replay drops a sun
+	//       shadow whose stored direction is not the sun's) with the converter's own baker (replay_sunshadow) at the stock
+	//       texel size: the casters are the lit-opaque world surfaces of the zone (not the sky) and the static models of
+	//       the casting collections (STATIC_MODEL_COLLECTION_FLAG_SUN_SHADOW_1, hidden ones excepted), whose LOD0
+	//       geometry is streamed and is exported by ACTS ("acts", else IW8_ACTS; --geometry with the game's XPak files),
+	//       over the box of the casting world surfaces + 1024. Cut-out (alpha-tested) leaves cast as solid cards. The
+	//       vision's fogSunDir turns by the same pitch and yaw change, and the worldspawn's sundirection (key 968) is
+	//       rewritten. What keeps the old sun: the baked lightmaps and light grid (the bounce light of the old sun) and the
+	//       sky texture. A map whose sun shadow is in streamed transient zones (Warzone) is refused.
 	//   "loot_boxes": {"clusters": [{"mid": [x, y, z], "half": [x, y, z]}], "zones": [{"name": "...", "mid": [...],
 	//       "half": [...]}]} adds loot clusters and named loot zones after the stock ones (IW8 Radiant research 89
 	//       section 9). The stock boxes stay. A new zone's name is what the loot tables pick the loot by, so it should
@@ -3729,12 +3744,16 @@ namespace zonetool::convert::iw3_iw8
 			report["static_model_collision_removed"] = removed;
 		}
 
+		// Kept alive until the zone is written.
+		std::vector<std::uint8_t> sun_shadow_bytes;
+		std::deque<std::vector<std::uint8_t>> vision_buffers;
+		std::string sun_entity_text;
 		if (edits.contains("sun"))
 		{
 			const auto& node = edits.at("sun");
-			if (!node.is_object() || (!node.contains("color") && !node.contains("intensity")))
+			if (!node.is_object() || (!node.contains("color") && !node.contains("intensity") && !node.contains("direction")))
 			{
-				throw std::runtime_error("sun must be an object with \"color\" and / or \"intensity\"");
+				throw std::runtime_error("sun must be an object with \"color\", \"intensity\" and / or \"direction\"");
 			}
 			auto* clip = static_cast<clipMap_t*>(find(ASSET_TYPE_CLIPMAP));
 			auto* com = static_cast<ComWorld*>(find(ASSET_TYPE_COM_MAP));
@@ -3780,6 +3799,269 @@ namespace zonetool::convert::iw3_iw8
 			}
 			report["sun_color"] = {sun.colorLinearSrgb.v[0], sun.colorLinearSrgb.v[1], sun.colorLinearSrgb.v[2]};
 			report["sun_intensity"] = sun.intensity;
+			if (node.contains("direction"))
+			{
+				const auto& d = node.at("direction");
+				if (!d.is_array() || d.size() < 2 || d.size() > 3 || !d[0].is_number() || !d[1].is_number())
+				{
+					throw std::runtime_error("sun.direction is not [pitch, yaw] in degrees");
+				}
+				const auto pitch = d[0].get<double>(), yaw = d[1].get<double>();
+				if (!std::isfinite(pitch) || !std::isfinite(yaw) || pitch < -90.0 || pitch > -1.0)
+				{
+					throw std::runtime_error("sun.direction pitch must be -90 to -1 (a negative pitch is above the horizon)");
+				}
+				auto* world = static_cast<GfxWorld*>(find(ASSET_TYPE_GFXWORLD));
+				if (!world)
+				{
+					throw std::runtime_error(zone_name + " has no GfxWorld");
+				}
+				auto& draw = world->draw;
+				if (!draw.compressedSunShadow || !draw.compressedSunShadowSize)
+				{
+					throw std::runtime_error(zone_name + " keeps no compressed sun shadow in its GfxWorld: the direction cannot change");
+				}
+				for (std::uint32_t z = 0; z < draw.transientZoneCount && z < 1536; ++z)
+				{
+					if (draw.transientZones[z] && draw.transientZones[z]->compressedSunShadow)
+					{
+						throw std::runtime_error(zone_name + " keeps sun shadow tiles in its streamed transient zones: the direction "
+							"cannot change");
+					}
+				}
+				const std::array<float, 3> before{sun.dir.v[0], sun.dir.v[1], sun.dir.v[2]};
+				double before_pitch = 0, before_yaw = 0;
+				::iw8::stocksun::Angles(before, before_pitch, before_yaw);
+				const auto toward = ::iw8::stocksun::TowardSun(pitch, yaw);
+				const auto& stock_params = draw.compressedSunShadowParams;
+				report["sun_direction_before"] = {before_pitch, before_yaw};
+				report["sun_vector_before"] = {before[0], before[1], before[2]};
+				report["sun_shadow_before"] = {{"bytes", draw.compressedSunShadowSize}, {"resolution", stock_params.resolution},
+					{"sample_size", stock_params.sampleSize}, {"cells", stock_params.forestSize},
+					{"center", {stock_params.centerX, stock_params.centerY}},
+					{"direction", {stock_params.sunDirection.v[0], stock_params.sunDirection.v[1], stock_params.sunDirection.v[2]}}};
+
+				// The casters: the world surfaces of the zone and the static models' LOD0 geometry (streamed: ACTS exports it).
+				std::string acts = node.value("acts", std::string{});
+				if (acts.empty())
+				{
+					if (const char* value = std::getenv("IW8_ACTS"); value && *value)
+					{
+						acts = value;
+					}
+				}
+				const auto scratch = output / "_sun_geometry";
+				std::error_code removed;
+				std::filesystem::remove_all(scratch, removed);
+				// The play region: the GfxWorld's heightfields (the outdoor play space of an MP map), else the whole world.
+				replaybounds::Bounds play;
+				{
+					std::array<float, 3> low{INFINITY, INFINITY, INFINITY}, high{-INFINITY, -INFINITY, -INFINITY};
+					for (std::int32_t h = 0; world->heightfields && h < world->heightfieldCount; ++h)
+					{
+						for (int axis = 0; axis < 3; ++axis)
+						{
+							const auto& b = world->heightfields[h].bounds;
+							low[axis] = std::min(low[axis], b.midPoint.v[axis] - b.halfSize.v[axis]);
+							high[axis] = std::max(high[axis], b.midPoint.v[axis] + b.halfSize.v[axis]);
+						}
+					}
+					for (int axis = 0; axis < 3; ++axis)
+					{
+						const bool found = low[axis] <= high[axis];
+						play.midpoint[axis] = found ? (low[axis] + high[axis]) * 0.5f : world->bounds.midPoint.v[axis];
+						play.halfSize[axis] = found ? (high[axis] - low[axis]) * 0.5f : world->bounds.halfSize.v[axis];
+					}
+				}
+				::iw8::stocksun::SceneReport scene_report;
+				replaysunshadow::Scene scene;
+				try
+				{
+					::iw8::stocksun::GeometrySource source{acts, game_path, zone_path, scratch};
+					source.playRegion = play;
+					scene = ::iw8::stocksun::BuildScene(*world, source, scene_report);
+				}
+				catch (...)
+				{
+					std::filesystem::remove_all(scratch, removed);
+					throw;
+				}
+				std::filesystem::remove_all(scratch, removed);
+				ZONETOOL_INFO("editzone: sun-shadow casters: %zu world surface(s) (%zu triangles, %zu skipped), %zu static model "
+					"instance(s) of %zu model(s) (%zu triangles, %zu at a lower LOD), %zu instance(s) without geometry",
+					scene_report.worldSurfaces, scene_report.worldTriangles, scene_report.worldSkipped, scene_report.modelInstances,
+					scene_report.models, scene_report.modelTriangles, scene_report.lowerLodInstances, scene_report.missingInstances);
+
+				// Bake as the converter bakes its own maps (replay_sunshadow), at the stock texel size, over the box of the
+				// casting world surfaces (a static model far outside, a vista prop, casts only where it overlaps it).
+				// The converter's own 32-unit tolerance (replaysunshadow::DefaultTolerance) gave mp_shipment 308 MB (stock:
+				// 51 MB). 256 units (89 MB) leaves fewer players-under-cover lit than the stock bake does.
+				// A sun direction whose footprint does not fit the budget is cropped to the play region and a margin
+				// (a higher sun sees more of a wide map), then baked with a 2048-unit tolerance.
+				replaybounds::Bounds receivers;
+				for (int axis = 0; axis < 3; ++axis)
+				{
+					receivers.midpoint[axis] = world->bounds.midPoint.v[axis];
+					receivers.halfSize[axis] = world->bounds.halfSize.v[axis];
+				}
+				const auto grown = [](replaybounds::Bounds box, const float margin) {
+					for (auto& half : box.halfSize)
+					{
+						half += margin;
+					}
+					return box;
+				};
+				struct Step
+				{
+					float sample_size, tolerance;
+					replaybounds::Bounds focus;
+					const char* what;
+				};
+				constexpr std::size_t budget = 96u * 1024u * 1024u; // the converter's own maps' budget
+				const float stock_sample = stock_params.sampleSize == 1.0f ? 1.0f : 2.0f;
+				const std::vector<Step> ladder{{stock_sample, 256.0f, grown(scene_report.worldCasterBounds, 1024.0f), "world"},
+					{stock_sample, 256.0f, grown(play, 16384.0f), "play region + 16384"},
+					{stock_sample, 256.0f, grown(play, 12288.0f), "play region + 12288"},
+					{stock_sample, 256.0f, grown(play, 8192.0f), "play region + 8192"},
+					{2.0f, 2048.0f, grown(play, 8192.0f), "play region + 8192"},
+					{2.0f, 2048.0f, grown(play, 4096.0f), "play region + 4096"}};
+				replaysunshadow::Data baked;
+				float tolerance = 0.0f;
+				const char* coverage = "";
+				for (const auto& step : ladder)
+				{
+					try
+					{
+						baked = replaysunshadow::Bake(scene, toward, receivers, step.sample_size, &step.focus, budget, step.tolerance);
+						if (baked.bytes.size() <= budget)
+						{
+							tolerance = step.tolerance;
+							coverage = step.what;
+							break;
+						}
+					}
+					catch (const std::runtime_error& error)
+					{
+						if (std::string_view(error.what()).find("exceeds") == std::string_view::npos)
+						{
+							throw;
+						}
+					}
+					ZONETOOL_INFO("editzone: the sun shadow over the %s at %.0f unit(s) per texel and a %.0f-unit tolerance "
+						"exceeds %zu bytes", step.what, step.sample_size, step.tolerance, budget);
+					baked = {};
+				}
+				if (!tolerance)
+				{
+					throw std::runtime_error("sun.direction: the baked sun shadow exceeds Replay's budget even over the play region "
+						"and a 4096-unit margin");
+				}
+				if (baked.bytes.empty())
+				{
+					throw std::runtime_error("sun.direction: the sun shadow bake produced nothing");
+				}
+				scene = {};
+				sun_shadow_bytes = std::move(baked.bytes);
+				draw.compressedSunShadow = sun_shadow_bytes.data();
+				draw.compressedSunShadowSize = static_cast<std::uint32_t>(sun_shadow_bytes.size());
+				static_assert(sizeof(draw.compressedSunShadowParams) == sizeof(baked.parameters));
+				std::memcpy(&draw.compressedSunShadowParams, &baked.parameters, sizeof(baked.parameters));
+				for (int axis = 0; axis < 3; ++axis)
+				{
+					sun.dir.v[axis] = toward[axis];
+				}
+
+				// The vision's fog sun direction (fogSunDir, Replay token RLNQONPKS) turns with the sun: the same pitch and
+				// yaw change, so the sun-tinted fog keeps its place beside the sun.
+				auto visions = nlohmann::ordered_json::array();
+				for (const auto& asset : zone->assets)
+				{
+					if (asset.type != zonetool::iw8::ASSET_TYPE_RAWFILE || asset.referenced || !asset.header)
+					{
+						continue;
+					}
+					auto* raw = static_cast<RawFile*>(asset.header);
+					const std::string_view raw_name = raw->name ? raw->name : "";
+					if (!raw_name.starts_with("vision/") || !raw_name.ends_with(".vision") || !raw->buffer || !raw->len)
+					{
+						continue;
+					}
+					std::string text(raw->len, '\0');
+					auto size = static_cast<uLongf>(text.size());
+					if (uncompress(reinterpret_cast<Bytef*>(text.data()), &size, reinterpret_cast<const Bytef*>(raw->buffer),
+						raw->compressedLen) != Z_OK || size != text.size())
+					{
+						throw std::runtime_error("sun.direction: the vision " + std::string(raw_name) + " does not decompress");
+					}
+					static const std::regex fog_sun(R"re((^|\n)RLNQONPKS "([^"]*)")re");
+					std::smatch match;
+					if (!std::regex_search(text, match, fog_sun))
+					{
+						continue;
+					}
+					std::array<float, 3> fog{};
+					if (std::sscanf(match[2].str().c_str(), "%f %f %f", &fog[0], &fog[1], &fog[2]) != 3)
+					{
+						continue;
+					}
+					double fog_pitch = 0, fog_yaw = 0;
+					::iw8::stocksun::Angles(fog, fog_pitch, fog_yaw);
+					const auto turned = ::iw8::stocksun::TowardSun(std::clamp(fog_pitch + (pitch - before_pitch), -89.9, 89.9),
+						fog_yaw + (yaw - before_yaw));
+					char value[96];
+					std::snprintf(value, sizeof(value), "%.7g %.7g %.7g", turned[0], turned[1], turned[2]);
+					text.replace(match.position(2), match.length(2), value);
+					const auto compressed = compression::compress_zlib(reinterpret_cast<const std::uint8_t*>(text.data()), text.size());
+					auto& kept = vision_buffers.emplace_back(compressed.begin(), compressed.end());
+					kept.resize(std::max<std::size_t>(kept.size(), 1));
+					raw->buffer = reinterpret_cast<const char*>(kept.data());
+					raw->compressedLen = static_cast<std::uint32_t>(compressed.size());
+					raw->len = static_cast<std::uint32_t>(text.size());
+					visions.push_back({{"name", raw_name}, {"fog_sun_dir_before", {fog[0], fog[1], fog[2]}},
+						{"fog_sun_dir", {turned[0], turned[1], turned[2]}}});
+				}
+
+				// The worldspawn's sundirection (key 968), as the stock map writes it ("pitch yaw roll").
+				bool worldspawn_key = false;
+				if (auto* ents = static_cast<MapEnts*>(find(ASSET_TYPE_MAP_ENTS)); ents && ents->entityString && ents->numEntityChars > 1)
+				{
+					std::string text(ents->entityString, static_cast<std::size_t>(ents->numEntityChars - 1));
+					const auto open = text.find('{'), close = text.find('}');
+					static const std::regex key(R"re((^|\n)968 "([^"]*)")re");
+					std::smatch match;
+					const std::string first = open != std::string::npos && close != std::string::npos && open < close
+						? text.substr(open, close - open) : std::string{};
+					if (std::regex_search(first, match, key))
+					{
+						char value[64];
+						std::snprintf(value, sizeof(value), "%.6g %.6g 0", pitch, yaw);
+						text.replace(open + match.position(2), match.length(2), value);
+						sun_entity_text = std::move(text);
+						ents->entityString = sun_entity_text.data();
+						ents->numEntityChars = static_cast<std::int32_t>(sun_entity_text.size() + 1);
+						worldspawn_key = true;
+					}
+				}
+
+				report["sun_direction"] = {pitch, yaw};
+				report["sun_vector"] = {toward[0], toward[1], toward[2]};
+				report["sun_shadow"] = {{"bytes", draw.compressedSunShadowSize}, {"resolution", baked.parameters.resolution},
+					{"sample_size", baked.parameters.sampleSize}, {"cells", baked.parameters.forestSize},
+					{"uniform_cells", baked.uniformCells}, {"tree_cells", baked.treeCells},
+					{"center", {baked.parameters.centerX, baked.parameters.centerY}}, {"tolerance", tolerance}, {"coverage", coverage},
+					{"world_surfaces", scene_report.worldSurfaces}, {"world_triangles", scene_report.worldTriangles},
+					{"world_surfaces_skipped", scene_report.worldSkipped}, {"models", scene_report.models},
+					{"model_instances", scene_report.modelInstances}, {"model_triangles", scene_report.modelTriangles},
+					{"hidden_instances", scene_report.hiddenInstances}, {"non_casting_instances", scene_report.nonCastingInstances},
+					{"splined_instances", scene_report.splinedInstances}, {"model_surfaces_skipped", scene_report.modelSurfacesSkipped},
+					{"lower_lod_instances", scene_report.lowerLodInstances},
+					{"play_region", {{"mid", {play.midpoint[0], play.midpoint[1], play.midpoint[2]}},
+						{"half", {play.halfSize[0], play.halfSize[1], play.halfSize[2]}}}},
+					{"missing_instances", scene_report.missingInstances},
+					{"missing_models", scene_report.missingModels}};
+				report["sun_visions"] = visions;
+				report["sun_worldspawn_sundirection"] = worldspawn_key;
+			}
 		}
 
 		// Kept alive until the zone is written.

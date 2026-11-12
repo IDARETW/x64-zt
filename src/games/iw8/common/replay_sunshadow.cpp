@@ -1088,10 +1088,11 @@ void peel(Output input) {
 // A caster with no surface behind it (a hull over non-casting water) keeps
 // the same tolerance; an unbounded lower let merged leaves drop its occluder
 // onto the receivers below.
-float LowerBound(const float first, const float behind, const float inverseSpan)
+float LowerBound(const float first, const float behind, const float inverseSpan,
+                 const float toleranceUnits = DefaultTolerance)
 {
     const float margin = 2.0f * inverseSpan;
-    const float tolerance = 32.0f * inverseSpan;
+    const float tolerance = toleranceUnits * inverseSpan;
     return behind > 0.0f ? std::max(behind + margin, first - tolerance) : first - tolerance;
 }
 } // namespace
@@ -1100,8 +1101,10 @@ namespace
 {
 Data BakeUncached(const Scene &scene, const std::array<float, 3> &sunDirection,
                   const replaybounds::Bounds &receiverBounds, const float sampleSize,
-                  const replaybounds::Bounds *focus, const std::size_t budget)
+                  const replaybounds::Bounds *focus, const std::size_t budget, const float tolerance)
 {
+    if (!std::isfinite(tolerance) || tolerance < 1.0f)
+        throw std::runtime_error("compressed sun-shadow tolerance must be at least one unit");
     if (!(sampleSize == 1.0f || sampleSize == 2.0f))
         throw std::runtime_error("compressed sun-shadow sample size must be 1 or 2 (shipped values)");
     Data result;
@@ -1133,7 +1136,7 @@ Data BakeUncached(const Scene &scene, const std::array<float, 3> &sunDirection,
             const std::vector<float> &behind) {
             std::vector<float> lowerBounds(pixels.size());
             for (std::size_t index = 0; index < pixels.size(); ++index)
-                lowerBounds[index] = LowerBound(pixels[index], behind[index], grid.inverseSpan);
+                lowerBounds[index] = LowerBound(pixels[index], behind[index], grid.inverseSpan, tolerance);
             const auto cell = y * grid.width + x;
             float uniform = 0.0f;
             tiles[cell] =
@@ -1398,7 +1401,7 @@ void SetCacheDirectory(std::filesystem::path directory)
 
 Data Bake(const Scene &scene, const std::array<float, 3> &sunDirection,
           const replaybounds::Bounds &receiverBounds, const float sampleSize,
-          const replaybounds::Bounds *focus, const std::size_t budget)
+          const replaybounds::Bounds *focus, const std::size_t budget, const float tolerance)
 {
     std::vector<std::uint8_t> values{'b'};
     AppendValue(values, sunDirection);
@@ -1408,6 +1411,9 @@ Data Bake(const Scene &scene, const std::array<float, 3> &sunDirection,
     if (focus)
         AppendValue(values, *focus);
     AppendValue(values, static_cast<std::uint64_t>(budget));
+    // The default keeps the cache keys of bakes made before the tolerance was a parameter.
+    if (tolerance != DefaultTolerance)
+        AppendValue(values, tolerance);
     const auto key = g_cacheDirectory.empty() ? std::string{} : CacheKey(scene, values);
     if (const auto cached = key.empty() ? std::nullopt : ReadCache(key))
     {
@@ -1428,7 +1434,7 @@ Data Bake(const Scene &scene, const std::array<float, 3> &sunDirection,
     }
     try
     {
-        auto data = BakeUncached(scene, sunDirection, receiverBounds, sampleSize, focus, budget);
+        auto data = BakeUncached(scene, sunDirection, receiverBounds, sampleSize, focus, budget, tolerance);
         if (!key.empty())
         {
             std::vector<std::uint8_t> entry{0};
