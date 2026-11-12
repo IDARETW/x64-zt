@@ -4219,10 +4219,41 @@ namespace zonetool::convert::iw3_iw8
 							{
 								continue;
 							}
-							if (def.priority == DYNENT_PRIORITY_SPARSE_OCCLUDER || def.isTransient)
+							if (def.isTransient)
 							{
 								throw std::runtime_error(where + ": instance " + std::to_string(index) +
-									" is a door or another sparse occluder (or streamed): its dynamic entity cannot be moved yet");
+									" has a streamed dynamic entity: it cannot be moved yet");
+							}
+							// Doors and other sparse occluders: their spatialPartitionIndex names an area (about 20 doors each,
+							// research 89 section 8) whose structure is not known. A door moves only inside the box of the stock
+							// doors of its area, and keeps the area.
+							if (def.priority == DYNENT_PRIORITY_SPARSE_OCCLUDER)
+							{
+								float lo[3] = {1e30f, 1e30f, 1e30f}, hi[3] = {-1e30f, -1e30f, -1e30f};
+								for (std::uint32_t j = 0; j < list->dynEntCount[side]; j++)
+								{
+									const auto& other = defs[j];
+									if (other.priority != DYNENT_PRIORITY_SPARSE_OCCLUDER || other.spatialPartitionIndex != def.spatialPartitionIndex)
+									{
+										continue;
+									}
+									const auto& at = (other.scriptableMapIndex < before) ? block.mapInstances[other.scriptableMapIndex].initialOrigin
+										: other.initialPose.origin;
+									for (auto k = 0; k < 3; k++)
+									{
+										lo[k] = (std::min)(lo[k], at.v[k]);
+										hi[k] = (std::max)(hi[k], at.v[k]);
+									}
+								}
+								for (auto k = 0; k < 3; k++)
+								{
+									// A little room around the area's doors (a door is about 64 units wide).
+									if (record.initialOrigin.v[k] < lo[k] - 64.0f || record.initialOrigin.v[k] > hi[k] + 64.0f)
+									{
+										throw std::runtime_error(where + ": door " + std::to_string(index) +
+											" would leave its area of the map (the box of the stock doors that share it); move it less far");
+									}
+								}
 							}
 							// Only where the stock rule holds for this entry: its pose is the instance's stock placement.
 							{
@@ -4248,9 +4279,9 @@ namespace zonetool::convert::iw3_iw8
 							}
 							def.initialPose.origin = record.initialOrigin;
 							quat_of(record.initialAngles, def.initialPose.quat.v);
-							if (def.spatialPartitionIndex == 0)
+							if (def.spatialPartitionIndex == 0 || def.priority == DYNENT_PRIORITY_SPARSE_OCCLUDER)
 							{
-								continue; // the no-spatial list
+								continue; // the no-spatial list, or a door that keeps its area
 							}
 							auto* population = map_ents->dynEntSpatialPopulation[side];
 							auto* chains = list->dynEntSpatialPopulation[side];
