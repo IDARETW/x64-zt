@@ -5235,6 +5235,144 @@ bool HasStaticModelSurface(const std::filesystem::path &exportRoot,
     return material.staticModelShadowOnly ? material.castsShadow : material.kind != SurfaceKind::skipped;
 }
 
+namespace
+{
+// A world.decal_volumes entry that passed validation: the replayrender::DecalVolume definition without its
+// material index, and the material name of the extraction.
+struct SourceDecalVolume
+{
+    Json definition;
+    std::string material;
+};
+
+SourceDecalVolume ReadDecalVolume(const Json &source)
+{
+    if (!source.is_object())
+        throw std::runtime_error("it is not an object");
+    const auto numbers = [&](const char *key, const std::size_t count, const double limit,
+                             const std::optional<std::vector<double>> &fallback = std::nullopt) {
+        const auto found = source.find(key);
+        if (found == source.end())
+        {
+            if (!fallback)
+                throw std::runtime_error(std::string(key) + " is missing");
+            return *fallback;
+        }
+        if (!found->is_array() || found->size() != count)
+            throw std::runtime_error(std::format("{} needs {} numbers", key, count));
+        std::vector<double> values;
+        for (const auto &value : *found)
+        {
+            if (!value.is_number() || !std::isfinite(value.get<double>()) || std::abs(value.get<double>()) > limit)
+                throw std::runtime_error(std::format("{} has a value that is not a number within {}", key, limit));
+            values.push_back(value.get<double>());
+        }
+        return values;
+    };
+    const auto number = [&](const char *key, const double fallback, const double low, const double high) {
+        const auto found = source.find(key);
+        if (found == source.end())
+            return fallback;
+        if (!found->is_number() || !(found->get<double>() >= low && found->get<double>() <= high))
+            throw std::runtime_error(std::format("{} is not a number from {} to {}", key, low, high));
+        return found->get<double>();
+    };
+    SourceDecalVolume volume;
+    const auto material = source.find("material");
+    if (material == source.end() || !material->is_string())
+        throw std::runtime_error("material is missing");
+    volume.material = material->get<std::string>();
+    if (volume.material.empty() || volume.material.size() > 255 || volume.material.front() == ',' ||
+        volume.material.find('\0') != std::string::npos)
+        throw std::runtime_error("material is not a valid name");
+    // Replay world positions stay within 262144 units; a half size packs as an R11G11B10F float (below 65536).
+    const auto center = numbers("center", 3, 262144.0);
+    auto halfSize = numbers("half_size", 3, 65536.0);
+    for (auto &value : halfSize)
+    {
+        if (!(value > 0) || value >= 65536.0)
+            throw std::runtime_error("half_size needs three values above 0 and below 65536");
+        value = std::max(value, 0x1p-14);
+    }
+    const auto axesValue = source.find("axes");
+    if (axesValue == source.end() || !axesValue->is_array() || axesValue->size() != 3)
+        throw std::runtime_error("axes needs three vectors");
+    std::array<std::array<double, 3>, 3> axes{};
+    for (std::size_t axis = 0; axis < 3; ++axis)
+    {
+        const auto &row = axesValue->at(axis);
+        if (!row.is_array() || row.size() != 3)
+            throw std::runtime_error("axes needs three vectors of three numbers");
+        for (std::size_t k = 0; k < 3; ++k)
+        {
+            if (!row.at(k).is_number() || !std::isfinite(row.at(k).get<double>()))
+                throw std::runtime_error("axes has a value that is not a finite number");
+            axes[axis][k] = row.at(k).get<double>();
+        }
+    }
+    // The packed record stores a rotation: the axes must be unit vectors at right angles, and right handed.
+    const auto dot = [&](const std::size_t a, const std::size_t b) {
+        return axes[a][0] * axes[b][0] + axes[a][1] * axes[b][1] + axes[a][2] * axes[b][2];
+    };
+    const double handedness = axes[0][0] * (axes[1][1] * axes[2][2] - axes[1][2] * axes[2][1]) -
+                              axes[0][1] * (axes[1][0] * axes[2][2] - axes[1][2] * axes[2][0]) +
+                              axes[0][2] * (axes[1][0] * axes[2][1] - axes[1][1] * axes[2][0]);
+    constexpr double tolerance = 0.01;
+    if (std::abs(dot(0, 0) - 1) > tolerance || std::abs(dot(1, 1) - 1) > tolerance || std::abs(dot(2, 2) - 1) > tolerance ||
+        std::abs(dot(0, 1)) > tolerance || std::abs(dot(0, 2)) > tolerance || std::abs(dot(1, 2)) > tolerance ||
+        handedness < 0)
+        throw std::runtime_error("axes are not three unit vectors at right angles (depth x width = height)");
+    const double drawOrder = number("draw_order", 0, -4, 3);
+    if (drawOrder != std::floor(drawOrder))
+        throw std::runtime_error("draw_order is not a whole number");
+    // The matrix and the offset pack as half floats.
+    volume.definition = {{"center", center},
+                         {"axes", axes},
+                         {"half_size", halfSize},
+                         {"opacity", number("opacity", 1, 0, 1)},
+                         {"feather", number("feather", 0, 0, 1)},
+                         {"draw_order", static_cast<int>(drawOrder)},
+                         {"uv_matrix", numbers("uv_matrix", 4, 65504.0, std::vector<double>{1, 0, 0, 1})},
+                         {"uv_offset", numbers("uv_offset", 2, 65504.0, std::vector<double>{0, 0})}};
+    return volume;
+}
+
+std::vector<SourceDecalVolume> ReadDecalVolumes(const Json &world)
+{
+    std::vector<SourceDecalVolume> volumes;
+    const auto list = world.find("decal_volumes");
+    if (list == world.end())
+        return volumes;
+    if (!list->is_array())
+    {
+        zt::warn("iw3: world.decal_volumes is not an array; the map has no decal volumes");
+        return volumes;
+    }
+    // The frame takes 0x800 visible collections of 16 (replayrender::kDecalVolumesPerCollection); a material index
+    // has 11 bits, with 0x7FF for none.
+    constexpr std::size_t maximumVolumes = 0x800 * 16, maximumMaterials = 0x7FF;
+    std::set<std::string> materials;
+    for (std::size_t index = 0; index < list->size(); ++index)
+    {
+        try
+        {
+            if (volumes.size() == maximumVolumes)
+                throw std::runtime_error("the map already has the most decal volumes that Replay draws (32768)");
+            SourceDecalVolume volume = ReadDecalVolume(list->at(index));
+            if (!materials.contains(volume.material) && materials.size() == maximumMaterials)
+                throw std::runtime_error("the map already has 2047 decal volume materials");
+            materials.insert(volume.material);
+            volumes.push_back(std::move(volume));
+        }
+        catch (const std::exception &error)
+        {
+            zt::warn("iw3: decal volume %zu is left out: %s", index, error.what());
+        }
+    }
+    return volumes;
+}
+} // namespace
+
 RenderPlan PrepareRenderAssets(const std::filesystem::path &exportRoot, const Json &world,
                                const std::vector<std::string> &surfaceMaterials,
                                const std::vector<std::string> &worldMaterials,
@@ -5732,6 +5870,68 @@ RenderPlan PrepareRenderAssets(const std::filesystem::path &exportRoot, const Js
     }
     if (!plan.volumetrics.empty())
         zt::info("iw3: %zu world volumetrics, %zu mask images", plan.volumetrics.size(), volumetricMaskFiles.size());
+    // Decal volumes (world.decal_volumes): oriented boxes that project a decal material onto the surfaces inside
+    // them. An entry that Replay cannot draw safely is left out with a warning; it never fails the build.
+    std::vector<SourceDecalVolume> decalVolumeSources = ReadDecalVolumes(world);
+    // A material with a file in the extraction is built as an effect decal is (the FX material pass below); any
+    // other name must be a Material of a common zone with a decal volume definition.
+    std::vector<std::string> decalFxMaterials;
+    {
+        std::map<std::string, bool> usable;
+        std::set<std::string> stockNames;
+        for (const auto &volume : decalVolumeSources)
+        {
+            if (usable.contains(volume.material))
+                continue;
+            if (FindMaterial(exportRoot, sourcePaths, volume.material).empty())
+            {
+                usable[volume.material] = false;
+                stockNames.insert(volume.material);
+                continue;
+            }
+            try
+            {
+                const SourceFxMaterial source = ReadFxMaterial(exportRoot, sourcePaths, volume.material);
+                if (source.family != FxMaterialFamily::decal)
+                    throw std::runtime_error("its technique set " + source.techniqueSet + " is not a decal");
+                for (const auto &name : {source.image, source.normal, source.response})
+                    if (!name.empty())
+                        image(name);
+                usable[volume.material] = true;
+                decalFxMaterials.push_back(volume.material);
+            }
+            catch (const std::exception &error)
+            {
+                usable[volume.material] = false;
+                zt::warn("iw3: decal volume material %s is not usable (%s); its decal volumes are left out",
+                         volume.material.c_str(), error.what());
+            }
+        }
+        if (!stockNames.empty())
+        {
+            std::set<std::string> stock;
+            try
+            {
+                if (replayZones.empty())
+                    throw std::runtime_error("no Replay zone folder (--replay) to check them in");
+                stock = iw8::stock::CommonDecalVolumeMaterials(replayZones, stockNames);
+            }
+            catch (const std::exception &error)
+            {
+                zt::warn("iw3: stock decal volume materials are not checked: %s", error.what());
+            }
+            for (const auto &name : stockNames)
+            {
+                usable[name] = stock.contains(name);
+                if (!usable[name])
+                    zt::warn("iw3: decal volume material %s has no file in the extraction and is not a common-zone "
+                             "Material with a decal volume definition; its decal volumes are left out",
+                             name.c_str());
+            }
+            plan.stockMaterials.insert(stock.begin(), stock.end());
+        }
+        std::erase_if(decalVolumeSources, [&](const SourceDecalVolume &volume) { return !usable.at(volume.material); });
+    }
     timing.lap("materials and reflection probes");
     std::vector<std::array<unsigned, 2>> lightmapDimensions;
     for (const auto &pair : world.value("lightmaps", Json::array()))
@@ -8366,7 +8566,11 @@ RenderPlan PrepareRenderAssets(const std::filesystem::path &exportRoot, const Js
 
     std::size_t blendedFrames = 0, unblendedFrames = 0;
     std::optional<iw8::stock::Library> flowLibrary;
-    for (const std::string &name : fxMaterials)
+    std::vector<std::string> fxAndDecalMaterials = fxMaterials;
+    for (const auto &name : decalFxMaterials)
+        if (std::ranges::find(fxMaterials, name) == fxMaterials.end())
+            fxAndDecalMaterials.push_back(name);
+    for (const std::string &name : fxAndDecalMaterials)
     {
         SourceFxMaterial source = ReadFxMaterial(exportRoot, sourcePaths, name);
         // IW3 effects are unlit LDR colours; in stock light units (--style iw8)
@@ -8623,6 +8827,31 @@ RenderPlan PrepareRenderAssets(const std::filesystem::path &exportRoot, const Js
         if (const auto data = FxParticleMaterialData(source))
             plan.fxParticleMaterialData.emplace(name, *data);
     }
+    for (const auto &volume : decalVolumeSources)
+    {
+        std::string replayMaterial = volume.material;
+        if (std::ranges::find(decalFxMaterials, volume.material) != decalFxMaterials.end())
+        {
+            const auto built = plan.fxMaterialAliases.find(volume.material);
+            if (built == plan.fxMaterialAliases.end())
+            {
+                zt::warn("iw3: decal volume material %s was not built; a decal volume is left out",
+                         volume.material.c_str());
+                continue;
+            }
+            replayMaterial = built->second;
+        }
+        const auto index =
+            std::ranges::find(plan.decalVolumeMaterials, replayMaterial) - plan.decalVolumeMaterials.begin();
+        if (index == static_cast<std::ptrdiff_t>(plan.decalVolumeMaterials.size()))
+            plan.decalVolumeMaterials.push_back(replayMaterial);
+        Json entry = volume.definition;
+        entry["material"] = index;
+        plan.decalVolumes.push_back(std::move(entry));
+    }
+    if (!plan.decalVolumes.empty())
+        zt::info("iw3: %zu decal volumes, %zu decal volume materials (%zu built from extraction materials)",
+                 plan.decalVolumes.size(), plan.decalVolumeMaterials.size(), decalFxMaterials.size());
     if (blendedFrames || unblendedFrames)
         zt::info("iw3: %zu FX materials blend their atlas frames through Replay's frame-blend techniques; %zu that the "
                  "source blends step (the unlit alpha technique has no frame-blend twin)",
