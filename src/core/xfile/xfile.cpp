@@ -1159,6 +1159,28 @@ namespace zonetool::xfile
 			}
 		}
 
+		std::map<std::filesystem::path, std::filesystem::path>& patch_overrides()
+		{
+			static std::map<std::filesystem::path, std::filesystem::path> overrides;
+			return overrides;
+		}
+
+		std::filesystem::path override_key(const std::filesystem::path& zone_path)
+		{
+			std::error_code error;
+			auto key = std::filesystem::weakly_canonical(zone_path, error);
+			if (error)
+			{
+				key = zone_path.lexically_normal();
+			}
+			auto text = key.generic_string();
+			for (auto& c : text)
+			{
+				c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+			}
+			return text;
+		}
+
 		std::string apply_iw8_patch(const std::filesystem::path& zone_path, iw8_file_header& header, std::string payload)
 		{
 			// Replay loads the zone's chain of patches in suffix order (off_142458E18 = {".fp", ".fc"}). A second patch
@@ -1176,7 +1198,20 @@ namespace zonetool::xfile
 			patch_path.replace_extension(".fp");
 
 			std::string data;
-			if (!game_files::read(patch_path, data))
+			if (const auto named = patch_overrides().find(override_key(zone_path)); named != patch_overrides().end())
+			{
+				if (named->second.empty())
+				{
+					return payload;
+				}
+				patch_path = named->second;
+				if (!game_files::read(patch_path, data))
+				{
+					throw std::runtime_error(std::format("the patch {} named for {} cannot be read", patch_path.string(),
+						zone_path.filename().string()));
+				}
+			}
+			else if (!game_files::read(patch_path, data))
 			{
 				return payload;
 			}
@@ -1518,6 +1553,11 @@ namespace zonetool::xfile
 	fastfile read(const std::filesystem::path& path, const format& format)
 	{
 		return read(path, format, true);
+	}
+
+	void use_patch_file(const std::filesystem::path& zone_path, const std::filesystem::path& patch_path)
+	{
+		patch_overrides()[override_key(zone_path)] = patch_path;
 	}
 
 	fastfile read(const std::filesystem::path& path, const format& format, const bool apply_patch)

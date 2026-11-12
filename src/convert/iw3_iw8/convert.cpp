@@ -3087,6 +3087,11 @@ namespace zonetool::convert::iw3_iw8
 	//       class name and the flags of instance "like"; the instance count, the three server counts and the physics
 	//       limits rise by the numbers given (those of the definition, from the editor's catalogue). Nothing is removed:
 	//       the dynamic entities of other instances name their instance by index.
+	//   "stock_patches": {"<zone>.fp": "<file>" | ""} names, per patch file of the game's zone folder, the stock patch
+	//       to read that zone with ("" = the stock game has no patch of that name). The game ships patches with real
+	//       map data (mp_br_quarry.fp, mp_donetsk.fp, ...), and an installed edit replaces the patch of its zone: with
+	//       the saved stock patch named here the edit starts from the stock map again, not from the installed edit.
+	//       Without the key every zone is read with the patch beside it, as the game reads it.
 	// Output: <output>/<zone>.ff, techsets_<zone>.ff when it changed, <output>/patch/<same names>.fp (the patches that
 	// turn the stock files into them; "patch": false leaves them out) and <zone>.edit-report.json.
 	void edit_zone(const std::filesystem::path& game_path, const std::string& zone_name,
@@ -3108,6 +3113,34 @@ namespace zonetool::convert::iw3_iw8
 		const auto edits = nlohmann::json::parse(input);
 		nlohmann::ordered_json report;
 		report["zone"] = zone_name;
+
+		if (edits.contains("stock_patches"))
+		{
+			const auto& named = edits.at("stock_patches");
+			if (!named.is_object())
+			{
+				throw std::runtime_error("stock_patches must be an object: patch file name -> stock patch file or \"\"");
+			}
+			auto list = nlohmann::ordered_json::array();
+			for (const auto& [name, value] : named.items())
+			{
+				std::filesystem::path patch_name(name);
+				if (!value.is_string() || patch_name.has_parent_path() || patch_name.extension() != ".fp")
+				{
+					throw std::runtime_error("stock_patches: \"" + name + "\" must be a patch file name (<zone>.fp) with a file path or \"\"");
+				}
+				const auto file = value.get<std::string>();
+				if (!file.empty() && !std::filesystem::exists(std::filesystem::path(file)))
+				{
+					throw std::runtime_error("stock_patches: the stock patch " + file + " was not found");
+				}
+				auto zone_file = zone_folder / patch_name;
+				zone_file.replace_extension(".ff");
+				zonetool::xfile::use_patch_file(zone_file, std::filesystem::path(file));
+				list.push_back(name + (file.empty() ? " (no stock patch)" : ""));
+			}
+			report["stock_patches"] = list;
+		}
 
 		auto zone = load_zone(zone_path, {.keep_temp_data = true});
 		const auto find = [&](const std::int32_t type) -> void*

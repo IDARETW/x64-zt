@@ -49,6 +49,10 @@ namespace zonetool::xfile
 	};
 
 	fastfile read(const std::filesystem::path& path, const format& format);
+	// Names the Replay patch (.fp) that a zone file is read with, in place of the one beside it; an empty patch path
+	// reads the zone without a patch. For a stock zone whose patch in the game folder was replaced by an edit: the
+	// stock patch saved elsewhere gives the stock data again (IW8 Radiant research 88).
+	void use_patch_file(const std::filesystem::path& zone_path, const std::filesystem::path& patch_path);
 	// apply_patch = false returns the zone's own payload, before the Replay patch (.fp) beside it. A patch is built
 	// from that base payload, so patchzone reads both of its zones this way.
 	fastfile read(const std::filesystem::path& path, const format& format, bool apply_patch);
