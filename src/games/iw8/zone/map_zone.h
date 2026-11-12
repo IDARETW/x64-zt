@@ -942,25 +942,28 @@ inline void emitMapEntsBody(ZoneBuffer &zb, const char *assetName, const std::st
     {
         // ScriptableMapEnts at 0x1F8. The counts follow the definitions of the instances as in stock maps (IW8 Radiant
         // research 86, checked on mp_shipment and mp_backlot2): server instances are those whose definition has
-        // server-instanced parts, the fixed and usable part counts are the sums over the instances, and each physics
-        // limit is the number of door-like instances. No loot and no reserved instances.
+        // server-instanced parts, the fixed and usable part counts are the sums over the instances, and the physics
+        // limits count the instances by two definition flags (main and detailed; research 89). Loot points add to
+        // the server counts; no reserved instances.
         const auto &instances = scriptables->instances;
         if (scriptables->strings.size() != instances.size() || scriptables->definitionAliases.size() != instances.size())
             throw std::runtime_error("Replay scriptable instance tables disagree");
-        uint32_t server = 0, fixedParts = 0, usableParts = 0, limits = 0;
+        uint32_t server = 0, fixedParts = 0, usableParts = 0, limits = 0, detailLimits = 0;
         for (const auto &instance : instances)
         {
             server += instance.serverInstancedParts ? 1 : 0;
             fixedParts += instance.serverInstancedParts;
             usableParts += instance.usableParts;
             limits += instance.physicsLimit ? 1 : 0;
+            detailLimits += instance.physicsLimitDetail ? 1 : 0;
         }
         stamp32(me, 0x1FC, static_cast<uint32_t>(instances.size())); // mapInstanceCount
         stamp32(me, 0x208, server + lootCount);                      // serverInstanceCount
         stamp32(me, 0x20C, fixedParts + lootCount);                  // serverFixedPartCount
         stamp32(me, 0x210, usableParts + lootCount);                 // serverUsablePartCount
+        // ScriptablePhysicsLimits: client main, detailed, motion, then the same three for the server.
         for (unsigned k = 0; k < 6; ++k)
-            stamp32(me, 0x214 + k * 4, limits); // ScriptablePhysicsLimits
+            stamp32(me, 0x214 + k * 4, k % 3 == 1 ? detailLimits : limits);
         stamp64(me, 0x230, PTR_FOLLOWS);        // mapInstances
         // ffMemCost: stock 1240 = this 216-byte block + its two 64-entry reserved-dynent tables, which are not written.
         stamp32(me, 0x2C8, 216);

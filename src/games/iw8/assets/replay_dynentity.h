@@ -68,7 +68,11 @@ struct ScriptableInstance
     std::uint8_t flags{};
     std::uint32_t serverInstancedParts{}; // ScriptableDef.serverInstancedPartCount
     std::uint32_t usableParts{};          // ScriptableDef.usablePartCount
-    bool physicsLimit{};                  // counts once in each ScriptablePhysicsLimits field (stock doors)
+    // The definition's share of ScriptablePhysicsLimits (IW8 Radiant research 89, exact on 21 stock maps): the main
+    // rigid body and motion counts take definitions with flag bits 13 and 14, the detailed rigid body counts those
+    // with bits 13 and 15. Stock doors have all three.
+    bool physicsLimit{};       // main rigid body and motion counts
+    bool physicsLimitDetail{}; // detailed rigid body counts
     std::uint8_t maxParts{1};             // ScriptableDef.maxNumDynEntPartsBase
     bool instanceEntry{true};             // has a SCRIPTABLEINST dynamic entity
     bool sparseOccluder{};                // that entry is a sparse occluder (doors)

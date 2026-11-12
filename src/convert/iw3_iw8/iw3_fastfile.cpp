@@ -3703,6 +3703,7 @@ std::vector<iw8::ScriptableInstance> ReadScriptableInstances(const Json &collisi
         instance.serverInstancedParts = number(entry, "server_instanced_parts", index, 255, 0);
         instance.usableParts = number(entry, "usable_parts", index, 255, 0);
         instance.physicsLimit = flag(entry, "physics_limit", index, false);
+        instance.physicsLimitDetail = flag(entry, "physics_limit_detail", index, instance.physicsLimit);
         instance.maxParts = static_cast<std::uint8_t>(number(entry, "max_dynent_parts", index, 255, 1));
         if (!instance.maxParts)
             fail(index, "max_dynent_parts is 0");
