@@ -210,6 +210,7 @@ iw3compat_soundexists( alias )
 // Breakneck's main sets the sun shadow cascade sizes, which Replay registers under the same names, so they pass through.
 iw3compat_setdvar( name, value )
 {
+    written = name;
     name = tolower( name );
     if ( name == "compassmaxrange" )
         setdvar( "MKPRSSNNRO", value );
@@ -220,9 +221,9 @@ iw3compat_setdvar( name, value )
     else if ( name == "sm_suncascadesizemultiplier2" )
         setdvar( "sm_sunCascadeSizeMultiplier2", value );
     // IW8 Radiant game mode settings (worldspawn iw8r_mode_dvars, research 87): the editor marks the name with
-    // "iw8r:" and the dvar after the mark is set as written (lower case).
+    // "iw8r:" and the dvar after the mark is set as written, letter case kept (some dvars have upper-case names).
     else if ( getsubstr( name, 0, 5 ) == "iw8r:" )
-        setdvar( getsubstr( name, 5 ), value );
+        setdvar( getsubstr( written, 5 ), value );
 }
 
 // IW3 ambientPlay is a 2D loop for everyone. Each player carries the converted
