@@ -5883,14 +5883,14 @@ RenderPlan PrepareRenderAssets(const std::filesystem::path &exportRoot, const Js
         {
             if (usable.contains(volume.material))
                 continue;
-            if (FindMaterial(exportRoot, sourcePaths, volume.material).empty())
-            {
-                usable[volume.material] = false;
-                stockNames.insert(volume.material);
-                continue;
-            }
+            usable[volume.material] = false;
             try
             {
+                if (FindMaterial(exportRoot, sourcePaths, volume.material).empty())
+                {
+                    stockNames.insert(volume.material);
+                    continue;
+                }
                 const SourceFxMaterial source = ReadFxMaterial(exportRoot, sourcePaths, volume.material);
                 if (source.family != FxMaterialFamily::decal)
                     throw std::runtime_error("its technique set " + source.techniqueSet + " is not a decal");
@@ -5902,7 +5902,6 @@ RenderPlan PrepareRenderAssets(const std::filesystem::path &exportRoot, const Js
             }
             catch (const std::exception &error)
             {
-                usable[volume.material] = false;
                 zt::warn("iw3: decal volume material %s is not usable (%s); its decal volumes are left out",
                          volume.material.c_str(), error.what());
             }
