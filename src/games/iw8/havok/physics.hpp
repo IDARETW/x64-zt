@@ -13,6 +13,9 @@ namespace zonetool::iw8::havok
 		std::uint64_t user_data{};
 	};
 
+	// One slot of a HavokPhysicsShapeList. A slot without a shape (shape 0) is a collision tile of a big map: the
+	// tile's own zone holds the shape, the list keeps its tile index, counts, bounds and contents (IW8 Radiant
+	// research 90). Only slots with a shape are in the list's shapes and shapeNames.
 	struct shape_list_entry
 	{
 		std::uint32_t shape{};

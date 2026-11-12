@@ -546,6 +546,7 @@ namespace zonetool::iw8
 		xfile::fastfile result{};
 		result.xfile_version = file.xfile_version;
 		result.transient = file.transient;
+		result.transient_type = file.transient_type;
 		const auto preload_walk_size = file.preload_walk_size;
 		const auto expected_size = file.payload.size() + file.payload.size() / 16;
 
@@ -577,6 +578,7 @@ namespace zonetool::iw8
 		xfile::fastfile result{};
 		result.xfile_version = file.xfile_version;
 		result.transient = file.transient;
+		result.transient_type = file.transient_type;
 		const auto preload_walk_size = file.preload_walk_size;
 		// The zone is written again at about its size: reserved, a 2 GB zone does not peak at twice that.
 		const auto expected_size = file.payload.size() + file.payload.size() / 16;

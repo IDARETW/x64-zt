@@ -280,6 +280,8 @@ struct PreparedMap
     // Scriptable instances of the map (collision JSON "scriptable_instances"); their dynamic entities are already in
     // dynamicEntities.
     std::vector<iw8::ScriptableInstance> scriptableInstances;
+    // The world collision is built as streamed collision tiles (collision JSON "collision_tiles": true).
+    bool collisionTiles = false;
     // Loot points of the map (collision JSON "loot_points").
     std::vector<iw8::MapLootPoint> lootPoints;
     iw8::navigation::Source navigation;

@@ -28,6 +28,22 @@ struct BakeInput
     std::filesystem::path replayExecutable;
     std::filesystem::path collision;
     std::filesystem::path footsteps;
+    // Cut the world collision into the 32 x 32 grid of streamed collision tiles (IW8 Radiant research 90).
+    bool tiles{};
+};
+
+// The grid of collision tiles is fixed by the game: 32 x 32 tiles of 8192 units, centred on the origin.
+inline constexpr int kCollisionTileGrid = 32;
+inline constexpr float kCollisionTileSize = 8192.0f;
+inline constexpr std::uint32_t kCollisionTileCount = 1024;
+
+// The Havok shape of one collision tile (CollisionTile.havokTileShapeData) and its slot in the world shape list
+// (CollisionTile.worldCollisionShapeIdx). Only tiles with collision have one.
+struct CollisionTileShape
+{
+    std::uint32_t index{};
+    std::uint32_t slot{};
+    std::vector<std::uint8_t> data;
 };
 
 struct CollisionModel
@@ -76,6 +92,9 @@ struct BakeResult
     std::vector<CollisionHull> hulls;
     std::vector<TriggerModel> triggers;
     std::vector<LadderFace> ladders;
+    // With BakeInput::tiles: `world` is the list with one slot per tile below, and these are the tile shapes.
+    bool tiled{};
+    std::vector<CollisionTileShape> tiles;
 };
 
 struct PhysicsMesh

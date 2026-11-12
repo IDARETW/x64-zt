@@ -35,6 +35,8 @@ namespace zonetool::cli
 			command{"editzone", "editzone <zone> <edits.json> <output folder>", edit_zone},
 			command{"refreshzone", "refreshzone <deployed map folder> <rebuilt map folder> [<output folder>]", refresh_zone},
 			command{"patchzone", "patchzone <base.ff> <new.ff> [<out.fp>]", patch_zone},
+			command{"havokinfo", "havokinfo <file with Havok tagfile data> [--items]", havok_info},
+			command{"streaminfo", "streaminfo <zone> [<out.json>]", stream_info},
 			command{"generatecsv", "generatecsv <map> [sp] [--path <dir>]...", generate_csv},
 		};
 

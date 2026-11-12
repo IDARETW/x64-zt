@@ -10184,6 +10184,7 @@ PreparedMap::PreparedMap(PreparedMap &&other) noexcept
     , render(std::move(other.render))
     , dynamicEntities(std::move(other.dynamicEntities))
     , scriptableInstances(std::move(other.scriptableInstances))
+    , collisionTiles(other.collisionTiles)
     , lootPoints(std::move(other.lootPoints))
     , navigation(std::move(other.navigation))
     , mapScript(std::move(other.mapScript))
@@ -10235,6 +10236,7 @@ PreparedMap &PreparedMap::operator=(PreparedMap &&other) noexcept
         dynamicEntities = std::move(other.dynamicEntities);
         scriptableInstances = std::move(other.scriptableInstances);
         lootPoints = std::move(other.lootPoints);
+        collisionTiles = other.collisionTiles;
         navigation = std::move(other.navigation);
         mapScript = std::move(other.mapScript);
         scriptMaterials = std::move(other.scriptMaterials);
@@ -12953,6 +12955,14 @@ PreparedMap PrepareFastfile(const ImportOptions &options)
     }
     // Scriptable instances and their dynamic entities (model basis: the list writer places them after the clutter
     // entries and before the brushes).
+    if (collision.contains("collision_tiles"))
+    {
+        if (!collision.at("collision_tiles").is_boolean())
+            throw std::runtime_error("collision_tiles is not true or false");
+        result.collisionTiles = collision.at("collision_tiles").get<bool>();
+        if (result.collisionTiles)
+            zt::info("iw3: the world collision is built as streamed collision tiles");
+    }
     result.lootPoints = ReadLootPoints(collision);
     if (!result.lootPoints.empty())
         zt::info("iw3: %zu loot points", result.lootPoints.size());

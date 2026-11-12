@@ -1321,6 +1321,7 @@ namespace zonetool::xfile
 			file.block_sizes.assign(std::begin(header.block_sizes), std::end(header.block_sizes));
 			file.xfile_version = header.xfile_version;
 			file.transient = header.transient != 0;
+			file.transient_type = header.transient;
 			file.preload_walk_size = header.preload_walk_size;
 		}
 
@@ -1350,7 +1351,7 @@ namespace zonetool::xfile
 			// stock unsigned zones with compressed frames keep it 0, and the DW client's unsigned-package gate
 			// (DB_IsReplayIwcHeader, DB_ResetFileReader.cpp) refuses a nonzero flag with DB_DiscError.
 			header.compressed = 0;
-			header.transient = file.transient ? 1 : 0;
+			header.transient = file.transient_type ? file.transient_type : static_cast<std::uint8_t>(file.transient ? 1 : 0);
 			header.resident_size = static_cast<std::uint32_t>(resident);
 			header.always_loaded_size = static_cast<std::uint32_t>(file.payload.size());
 			header.size = file.payload.size();

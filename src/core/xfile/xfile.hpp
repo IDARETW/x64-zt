@@ -39,6 +39,10 @@ namespace zonetool::xfile
 		// IW8: the xfile revision, the transient flag and the capacity of the map preload plan.
 		std::uint32_t xfile_version{};
 		bool transient{};
+		// The header's transient byte as stored: the kind of transient file (0 a resident zone, 2 a world tile,
+		// 3 a collision tile or the combined collision package, 5 an infil). A written zone keeps it; a zone made
+		// with `transient` alone gets 1.
+		std::uint8_t transient_type{};
 		std::uint64_t preload_walk_size{};
 	};
 

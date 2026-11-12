@@ -24,6 +24,8 @@ namespace zonetool::cli
 	void build_zone(const settings& settings, std::span<const std::string> args);
 	void build_extraction(const settings& settings, std::span<const std::string> args);
 	void edit_zone(const settings& settings, std::span<const std::string> args);
+	void havok_info(const settings& settings, std::span<const std::string> args);
+	void stream_info(const settings& settings, std::span<const std::string> args);
 	void refresh_zone(const settings& settings, std::span<const std::string> args);
 	void patch_zone(const settings& settings, std::span<const std::string> args);
 	void generate_csv(const settings& settings, std::span<const std::string> args);

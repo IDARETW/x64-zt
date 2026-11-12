@@ -78,6 +78,8 @@ struct Args
     std::string outputDirectory;
     std::string replayExecutable;
     std::string collisionPath;
+    // The world collision is cut into streamed collision tiles (research 90).
+    bool collisionTiles = false;
     std::string footstepsPath;
     std::string unlinkerExecutable;
     std::vector<std::string> iw3Roots;
@@ -144,6 +146,20 @@ bool requireMapId(const std::string &map)
 std::array<std::string, 5> zoneNames(const std::string &map)
 {
     return {map, "srv_" + map, "eng_" + map, "ww_" + map, "techsets_" + map};
+}
+
+// The zone of one streamed collision tile, and of the combined collision package (the names the game reads from the
+// map's streaming info: <map>_cg_%05u_tr and <map>_cg_ls_tr).
+std::string collisionTileZone(const std::string &map, const std::uint32_t tile)
+{
+    char number[16];
+    std::snprintf(number, sizeof(number), "%05u", tile);
+    return map + "_cg_" + number + "_tr";
+}
+
+std::string collisionPackageZone(const std::string &map)
+{
+    return map + "_cg_ls_tr";
 }
 
 std::vector<std::string> expectedFiles(const std::string &map)
@@ -620,10 +636,31 @@ bool validatePackage(const std::string &packageDirectory, const std::string &map
         }
         actual.erase(preview);
     }
+    // A map with streamed collision (research 90) also has its 1,024 collision tile zones and the combined package:
+    // all of them or none.
+    std::vector<std::string> tileFiles;
+    for (std::uint32_t tile = 0; tile < iw8::havok::kCollisionTileCount; ++tile)
+        tileFiles.push_back(collisionTileZone(map, tile) + ".ff");
+    tileFiles.push_back(collisionPackageZone(map) + ".ff");
+    std::sort(tileFiles.begin(), tileFiles.end());
+    std::vector<std::string> presentTiles;
+    std::set_intersection(actual.begin(), actual.end(), tileFiles.begin(), tileFiles.end(), std::back_inserter(presentTiles));
+    if (!presentTiles.empty())
+    {
+        if (presentTiles != tileFiles)
+        {
+            err("validate: the package holds %zu of the %zu collision tile zones; a tiled map has all of them",
+                presentTiles.size(), tileFiles.size());
+            return false;
+        }
+        std::vector<std::string> rest;
+        std::set_difference(actual.begin(), actual.end(), tileFiles.begin(), tileFiles.end(), std::back_inserter(rest));
+        actual = std::move(rest);
+    }
     if (actual != expectedFiles(map))
     {
         err("validate: output must contain exactly five map fastfiles and map.json "
-            "(and optionally preview.rgba)");
+            "(and optionally preview.rgba, and the collision tile zones of a tiled map)");
         return false;
     }
 
@@ -1559,7 +1596,7 @@ iw8::havok::BakeResult loadCollision(const Args &args, const std::string &dumpDi
             throw std::runtime_error("--replay is required with --collision");
         }
         return iw8::havok::BakeCollision(
-            {args.replayExecutable, args.collisionPath, args.footstepsPath});
+            {args.replayExecutable, args.collisionPath, args.footstepsPath, args.collisionTiles});
     }
 
     iw8::havok::BakeResult collision;
@@ -2361,9 +2398,119 @@ int writeMapPackage(const Args &args, const std::string &map, const std::string 
         const auto native = prepared ? std::span<const zonetool::iw8::zone_asset>(prepared->nativeAssets)
                                      : std::span<const zonetool::iw8::zone_asset>{};
         zonetool::iw8::zone_inventory nativeInventory;
+        // Streamed collision (research 90): the tile zones and the combined package are written first, because the
+        // streaming info of the main zone states what each of them costs to load.
+        struct TiledCollision
+        {
+            std::deque<std::string> names;
+            std::vector<zonetool::iw8::CollisionTile> tiles;
+            std::vector<zonetool::iw8::TransientFileReference> files;
+            std::vector<zonetool::iw8::TransientAssetReference> assets;
+            std::vector<std::uint16_t> residentPages, tempPages, contentCounts;
+            std::vector<zonetool::iw8::StreamingItemContents> contents;
+            zonetool::iw8::TransientInfo transient{};
+            zonetool::iw8::StreamingInfo info{};
+        } tiled;
+        if (collision.tiled)
+        {
+            namespace zi = zonetool::iw8;
+            const auto keep = [&](std::string text) -> const char * {
+                tiled.names.push_back(std::move(text));
+                return tiled.names.back().c_str();
+            };
+            const float gridMin = -iw8::havok::kCollisionTileSize * iw8::havok::kCollisionTileGrid * 0.5f;
+            tiled.tiles.resize(iw8::havok::kCollisionTileCount);
+            for (std::uint32_t index = 0; index < iw8::havok::kCollisionTileCount; ++index)
+            {
+                auto &tile = tiled.tiles[index];
+                const auto gridX = index % iw8::havok::kCollisionTileGrid, gridY = index / iw8::havok::kCollisionTileGrid;
+                tile.name = keep("collisiontile" + std::to_string(index));
+                tile.index = index;
+                tile.gridId[0] = static_cast<std::uint8_t>(gridX);
+                tile.gridId[1] = static_cast<std::uint8_t>(gridY);
+                // The centre of the tile's square.
+                tile.origin.v[0] = gridMin + (static_cast<float>(gridX) + 0.5f) * iw8::havok::kCollisionTileSize;
+                tile.origin.v[1] = gridMin + (static_cast<float>(gridY) + 0.5f) * iw8::havok::kCollisionTileSize;
+                tile.origin.v[2] = 0.0f;
+            }
+            for (auto &shape : collision.tiles)
+            {
+                if (shape.index >= tiled.tiles.size() || shape.data.empty())
+                    throw std::runtime_error("collision tile shape is invalid");
+                auto &tile = tiled.tiles[shape.index];
+                tile.havokTileShapeDataSize = static_cast<std::uint32_t>(shape.data.size());
+                tile.havokTileShapeData = reinterpret_cast<char *>(shape.data.data());
+                tile.worldCollisionShapeIdx = shape.slot;
+            }
+            const auto pages = [](const std::uint64_t bytes) {
+                return static_cast<std::uint16_t>(std::clamp<std::uint64_t>((bytes + 0xFFFFu) / 0x10000u, 1, 0xFFFFu));
+            };
+            // One zone from tile structures: a collision zone has transient file type 3 and xfile version 0xFF3, as
+            // the stock tiles. Returns its resident and temporary cost in 64 KiB pages (block 5; blocks 1 and 2).
+            const auto writeTiles = [&](const std::string &zoneName, const std::span<const zi::zone_asset> list) {
+                auto written = zi::write_zone(list, list, {}, {});
+                zonetool::xfile::fastfile file{};
+                file.payload = std::move(written.data);
+                file.block_sizes = written.block_sizes;
+                file.xfile_version = 0xFF3;
+                file.transient = true;
+                file.transient_type = 3;
+                file.preload_walk_size = written.preload_walk_size;
+                const std::pair<std::uint16_t, std::uint16_t> cost{pages(file.block_sizes.at(5)),
+                                                                   pages(file.block_sizes.at(1) + file.block_sizes.at(2))};
+                zonetool::xfile::write(path_join(outputDirectory, zoneName + ".ff"), zi::definition().format, file);
+                return cost;
+            };
+            // The files of the streaming info: the map, every tile, the combined package.
+            tiled.files.push_back({keep(map), 0});
+            tiled.residentPages.push_back(0);
+            tiled.tempPages.push_back(0);
+            std::vector<zi::zone_asset> all;
+            for (std::uint32_t index = 0; index < iw8::havok::kCollisionTileCount; ++index)
+            {
+                const zi::zone_asset asset{zi::ASSET_TYPE_COLLISION_TILE, &tiled.tiles[index], false};
+                all.push_back(asset);
+                const auto zoneName = collisionTileZone(map, index);
+                const auto cost = writeTiles(zoneName, std::span<const zi::zone_asset>(&asset, 1));
+                tiled.files.push_back({keep(zoneName), 3});
+                tiled.residentPages.push_back(cost.first);
+                tiled.tempPages.push_back(cost.second);
+                tiled.assets.push_back({tiled.tiles[index].name, static_cast<std::uint8_t>(zi::ASSET_TYPE_COLLISION_TILE), 0xFFFFFFFFu});
+            }
+            const auto packageCost = writeTiles(collisionPackageZone(map), all);
+            tiled.files.push_back({keep(collisionPackageZone(map)), 3});
+            tiled.residentPages.push_back(packageCost.first);
+            tiled.tempPages.push_back(packageCost.second);
+            tiled.contentCounts.assign(tiled.files.size(), 0);
+            tiled.contents.assign(tiled.files.size(), zi::StreamingItemContents{});
+
+            auto &transient = tiled.transient;
+            transient.transientFiles = tiled.files.data();
+            transient.transientFileCount = static_cast<std::uint32_t>(tiled.files.size());
+            transient.transientAssets = tiled.assets.data();
+            transient.transientAssetCount = static_cast<std::uint32_t>(tiled.assets.size());
+            transient.transientCollisionTileCount = iw8::havok::kCollisionTileCount;
+            transient.transientCosts.streamContents.contentCounts = tiled.contentCounts.data();
+            transient.transientCosts.streamContents.contents = tiled.contents.data();
+            transient.transientCosts.residentPageSizes = tiled.residentPages.data();
+            transient.transientCosts.tempPageSizes = tiled.tempPages.data();
+            transient.transientCosts.transientCostCount = static_cast<std::uint32_t>(tiled.files.size());
+            tiled.info.name = keep(map);
+            tiled.info.transientInfo = &transient;
+            info("collision tiles: wrote %u tile zones (%zu with collision) and %s (%u resident pages); the main zone "
+                 "gets a streaming info with %zu files",
+                 iw8::havok::kCollisionTileCount, collision.tiles.size(), collisionPackageZone(map).c_str(),
+                 static_cast<unsigned>(packageCost.first), tiled.files.size());
+            timing.lap("collision tile zones");
+        }
+
         // Carried scriptable definitions join the zone here, and each instance record gets its definition.
-        const ZonePrepare mapPrepare = carry.empty() ? ZonePrepare{} : [&](zonetool::iw8::loaded_zone &zone) {
+        const ZonePrepare mapPrepare = carry.empty() && !collision.tiled ? ZonePrepare{} : [&](zonetool::iw8::loaded_zone &zone) {
             auto additions = NewAdditions(zone, carry.assets);
+            if (collision.tiled)
+                additions.push_back({zonetool::iw8::ASSET_TYPE_STREAMING_INFO, &tiled.info, false});
+            if (carry.empty())
+                return additions;
             std::size_t pointed = 0;
             for (const auto &asset : zone.assets)
             {
@@ -2385,7 +2532,7 @@ int writeMapPackage(const Args &args, const std::string &map, const std::string 
                  additions.size(), pointed);
             return additions;
         };
-        const bool wantInventory = !native.empty() || !carry.empty();
+        const bool wantInventory = !native.empty() || !carry.empty() || collision.tiled;
         if (!writeZone(path_join(outputDirectory, map + ".ff"), writer.takeBody(), mapParams, native,
                        wantInventory ? &nativeInventory : nullptr, mapPrepare))
         {
@@ -2906,6 +3053,7 @@ int buildIw3(const Args &args)
     build.command = "build-map";
     build.positional = {prepared.root.string(), map};
     build.collisionPath = prepared.collision.string();
+    build.collisionTiles = prepared.collisionTiles;
     build.footstepsPath = prepared.footsteps.string();
     metadata.ladderRungDistance = prepared.ladderRungDistance;
     if (!writeMetadata(prepared.root.string(), metadata))
@@ -3056,6 +3204,116 @@ namespace zonetool::convert::iw3_iw8
 		const zone_conversion& conversion)
 	{
 		convert_map(zone_path, conversion, extraction);
+	}
+
+	// The streaming info of a map zone as JSON (the streaminfo command; IW8 Radiant research 90).
+	std::string stream_info_json(const std::filesystem::path& zone_path, const std::string& zone_name)
+	{
+		using namespace zonetool::iw8;
+		const auto zone = load_zone(zone_path, {.keep_temp_data = true});
+		const StreamingInfo* info = nullptr;
+		for (const auto& asset : zone->assets)
+		{
+			if (asset.type == ASSET_TYPE_STREAMING_INFO && !asset.referenced)
+			{
+				info = static_cast<const StreamingInfo*>(asset.header);
+			}
+		}
+		nlohmann::ordered_json out;
+		out["zone"] = zone_name;
+		if (!info)
+		{
+			out["streaminginfo"] = nullptr;
+		}
+		else
+		{
+			out["name"] = info->name ? info->name : "";
+			const auto& set = info->alwaysloadedFlagSets[0];
+			out["alwaysloaded"] = {{"modelCount", set.modelCount}, {"modelSurfCount", set.modelSurfCount}};
+			if (const auto* t = info->transientInfo)
+			{
+				auto& j = out["transientInfo"];
+				j["flags"] = static_cast<std::uint32_t>(t->transientInfoFlags);
+				j["forcedStubAssetCount"] = t->forcedStubAssetCount;
+				j["transientFileCount"] = t->transientFileCount;
+				j["transientAssetCount"] = t->transientAssetCount;
+				j["transientWorldGridTileMapCount"] = t->transientWorldGridTileMapCount;
+				j["transientCollisionTileCount"] = t->transientCollisionTileCount;
+				j["transientMPCommonCount"] = t->transientMPCommonCount;
+				j["transientWorldGridBoundsCount"] = t->transientWorldGridBoundsCount;
+				j["transientWorldGridHighLodCount"] = t->transientWorldGridHighLodCount;
+				j["transientWorldGridHighLodLookupCount"] = t->transientWorldGridHighLodLookupCount;
+				j["skipLoading"] = {{"wordCount", t->transientSkipLoading.wordCount}, {"bitCount", t->transientSkipLoading.bitCount}};
+				auto sets = nlohmann::ordered_json::array();
+				for (std::uint32_t i = 0; i < t->transientSets.count; i++)
+				{
+					sets.push_back({{"name", t->transientSets.names && t->transientSets.names[i] ? t->transientSets.names[i] : ""},
+						{"mask", t->transientSets.masks ? t->transientSets.masks[i].array[0] : 0}});
+				}
+				j["transientSets"] = sets;
+				const auto& costs = t->transientCosts;
+				j["costs"] = {{"streamingItemCount", costs.streamingItemCount}, {"transientCostCount", costs.transientCostCount}};
+				auto files = nlohmann::ordered_json::array();
+				for (std::uint32_t i = 0; i < t->transientFileCount; i++)
+				{
+					nlohmann::ordered_json file;
+					file["name"] = t->transientFiles[i].name ? t->transientFiles[i].name : "";
+					file["type"] = t->transientFiles[i].type;
+					if (i < costs.transientCostCount)
+					{
+						if (costs.residentPageSizes) file["residentPages"] = costs.residentPageSizes[i];
+						if (costs.tempPageSizes) file["tempPages"] = costs.tempPageSizes[i];
+					}
+					files.push_back(std::move(file));
+				}
+				j["transientFiles"] = files;
+				auto stream_costs = nlohmann::ordered_json::array();
+				for (std::uint32_t i = 0; costs.streamingCosts && i < costs.streamingItemCount && i < 64; i++)
+				{
+					stream_costs.push_back(costs.streamingCosts[i].costInBytes);
+				}
+				j["streamingCostsHead"] = stream_costs;
+				auto content_counts = nlohmann::ordered_json::array();
+				for (std::uint32_t i = 0; costs.streamContents.contentCounts && i < costs.transientCostCount && i < 4096; i++)
+				{
+					content_counts.push_back(costs.streamContents.contentCounts[i]);
+				}
+				j["contentCounts"] = content_counts;
+				auto assets = nlohmann::ordered_json::array();
+				for (std::uint32_t i = 0; i < t->transientAssetCount; i++)
+				{
+					assets.push_back({{"name", t->transientAssets[i].name ? t->transientAssets[i].name : ""},
+						{"type", t->transientAssets[i].type}, {"mpParentIndex", t->transientAssets[i].mpParentIndex}});
+				}
+				j["transientAssets"] = assets;
+				auto stubs = nlohmann::ordered_json::array();
+				for (std::uint32_t i = 0; i < t->forcedStubAssetCount; i++)
+				{
+					stubs.push_back({{"name", t->forcedStubAssets[i].name ? t->forcedStubAssets[i].name : ""}, {"type", t->forcedStubAssets[i].type}});
+				}
+				j["forcedStubAssets"] = stubs;
+				auto maps = nlohmann::ordered_json::array();
+				for (std::uint32_t i = 0; i < t->transientWorldGridTileMapCount; i++)
+				{
+					const auto& m = t->transientWorldGridTileMaps[i];
+					nlohmann::ordered_json map = {{"indexCount", m.indexCount}, {"level", m.level}, {"lodCount", m.lodCount},
+						{"gridCountX", m.gridCountX}, {"gridCountY", m.gridCountY}, {"cellSize", m.cellSize}, {"minX", m.minX}, {"minY", m.minY}};
+					auto head = nlohmann::ordered_json::array();
+					for (std::uint32_t k = 0; m.spaceToTransientIndex && k < m.indexCount && k < 48; k++)
+					{
+						head.push_back(m.spaceToTransientIndex[k]);
+					}
+					map["indicesHead"] = head;
+					maps.push_back(std::move(map));
+				}
+				j["worldGridTileMaps"] = maps;
+			}
+			else
+			{
+				out["transientInfo"] = nullptr;
+			}
+		}
+		return out.dump(1);
 	}
 
 	// editzone (IW8 Radiant research 88): a stock map zone is loaded, changed in memory and written again with the

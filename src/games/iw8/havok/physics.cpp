@@ -109,7 +109,12 @@ namespace zonetool::iw8::havok
 		if (!entries.empty())
 		{
 			const auto count = static_cast<std::uint32_t>(entries.size());
-			const auto shapes = builder.array("T*<hknpShape>", count, std::vector<std::uint8_t>(count * 8));
+			const auto shape_count = static_cast<std::uint32_t>(std::ranges::count_if(entries, [](const shape_list_entry& entry)
+			{
+				return entry.shape != 0;
+			}));
+			const auto shapes = builder.array("T*<hknpShape>", shape_count, std::vector<std::uint8_t>(shape_count * 8));
+			std::uint32_t shape_slot = 0;
 			const auto pointer_type = type_of(builder, "T*<hknpShape>");
 			std::vector<std::uint32_t> names;
 			std::vector<std::int32_t> indices;
@@ -121,8 +126,11 @@ namespace zonetool::iw8::havok
 			for (std::uint32_t i = 0; i < count; i++)
 			{
 				const auto& entry = entries[i];
-				builder.pointer(shapes, i * 8, pointer_type, entry.shape);
-				names.push_back(add_string(builder, entry.name));
+				if (entry.shape)
+				{
+					builder.pointer(shapes, shape_slot++ * 8, pointer_type, entry.shape);
+					names.push_back(add_string(builder, entry.name));
+				}
 				indices.push_back(entry.index);
 				vertices.push_back(entry.vertex_count);
 				triangles.push_back(entry.triangle_count);

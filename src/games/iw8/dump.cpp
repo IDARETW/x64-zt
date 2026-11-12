@@ -107,6 +107,7 @@ namespace zonetool::iw8
 			file.block_sizes = written.block_sizes;
 			file.xfile_version = zone.file.xfile_version;
 			file.transient = zone.file.transient;
+			file.transient_type = zone.file.transient_type;
 			file.preload_walk_size = std::max(written.preload_walk_size, zone.file.preload_walk_size);
 			xfile::write(std::filesystem::path(output) / (zone.name + ".ff"), definition().format, file);
 		}

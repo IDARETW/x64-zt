@@ -1,5 +1,7 @@
 #include <std_include.hpp>
 #include "commands.hpp"
+#include "games/iw8/havok/compendium.hpp"
+#include "games/iw8/havok/tagfile.hpp"
 #include "game_registry.hpp"
 
 #include <formats/csv_generator.hpp>
@@ -8,6 +10,7 @@
 
 namespace zonetool::convert::iw3_iw8
 {
+	std::string stream_info_json(const std::filesystem::path& zone_path, const std::string& zone_name);
 	void edit_zone(const std::filesystem::path& game_path, const std::string& zone_name,
 		const std::filesystem::path& edits_path, const std::filesystem::path& output);
 	void convert_extraction(const std::filesystem::path& zone_path, const std::filesystem::path& extraction,
@@ -306,6 +309,155 @@ namespace zonetool::cli
 		}
 
 		settings.game->build_zone(settings.zone_folder(), args.front());
+	}
+
+	// Writes the streaming info of a map zone as JSON: the transient sets, the streamed (transient) files with their
+	// costs, the transient assets, the world grid tile maps and the counts (IW8 Radiant research 90). The game takes
+	// the collision tile count and the names of the collision tile zones from this asset
+	// (CL_TransientsCollisionMP_SetupFromAsset / RegisterFileIndex).
+	void stream_info(const settings& settings, const std::span<const std::string> args)
+	{
+		if (settings.game->name != "iw8" || args.empty())
+		{
+			std::cout << "usage: -game iw8 streaminfo <zone> [<out.json>]\n";
+			return;
+		}
+		try
+		{
+			// A zone of the game folder by name, or any zone file by path (a built map).
+			std::optional<std::filesystem::path> path;
+			if (std::error_code error; std::filesystem::is_regular_file(std::filesystem::path(args[0]), error))
+			{
+				path = std::filesystem::path(args[0]);
+			}
+			else
+			{
+				path = game_files::find_zone(args[0]);
+			}
+			if (!path)
+			{
+				throw std::runtime_error("zone " + args[0] + " was not found");
+			}
+			const auto text = convert::iw3_iw8::stream_info_json(*path, path->stem().string());
+			if (args.size() > 1)
+			{
+				std::ofstream(std::filesystem::path(args[1]), std::ios::binary) << text;
+				std::cout << "streaminfo: wrote " << args[1] << "\n";
+			}
+			else
+			{
+				std::cout << text << "\n";
+			}
+		}
+		catch (const std::exception& e)
+		{
+			std::cout << std::format("streaminfo failed: {}\n", e.what());
+			std::exit(1);
+		}
+	}
+
+	// Lists the objects of a Havok tagfile (the shape data of a collision map, a collision tile or a physics asset,
+	// saved as a file): per type the number of items, elements and bytes; with --items every item with its pointers.
+	void havok_info(const settings& settings, const std::span<const std::string> args)
+	{
+		if (settings.game->name != "iw8" || args.empty())
+		{
+			std::cout << "usage: -game iw8 havokinfo <file with Havok tagfile data> [--items]\n";
+			return;
+		}
+		try
+		{
+			using namespace zonetool::iw8::havok;
+			std::ifstream stream(std::filesystem::path(args[0]), std::ios::binary);
+			if (!stream)
+			{
+				throw std::runtime_error("cannot read " + args[0]);
+			}
+			const std::vector<std::uint8_t> data((std::istreambuf_iterator<char>(stream)), std::istreambuf_iterator<char>());
+			const auto& compendium = replay_compendium(settings.zone_folder());
+			const auto file = read_tagfile(data, &compendium);
+			// The reader maps the local types of a self-describing file onto the compendium.
+			const auto& types = compendium;
+			const auto listed = std::ranges::find(args, std::string("--items")) != args.end();
+			std::cout << std::format("{}: {} bytes, sdk {}, {}, {} items\n", args[0], data.size(), file.sdk_version,
+				file.compendium ? "compact (compendium types)" : "self-describing", file.items.size());
+			struct total
+			{
+				std::size_t items{}, elements{}, bytes{};
+			};
+			std::map<std::string, total> totals;
+			for (std::size_t index = 1; index < file.items.size(); index++)
+			{
+				const auto& entry = file.items[index];
+				const auto name = types.identity(entry.type);
+				auto& sum = totals[name];
+				sum.items++;
+				sum.elements += entry.count;
+				sum.bytes += entry.data.size();
+				if (listed || index == 1)
+				{
+					std::string targets;
+					for (std::size_t p = 0; p < entry.pointers.size() && p < 12; p++)
+					{
+						targets += std::format(" +0x{:X}->{}", entry.pointers[p].offset, entry.pointers[p].target);
+					}
+					std::cout << std::format("  item {} {} x{} ({} bytes, flags {}, {} pointers{})\n", index, name, entry.count,
+						entry.data.size(), entry.flags, entry.pointers.size(), targets);
+				}
+			}
+			// --type <identity>: the members of a compendium type. --dump <item>: the bytes of one item.
+			for (std::size_t at = 1; at + 1 < args.size(); at++)
+			{
+				if (args[at] == "--type")
+				{
+					const auto found = types.find(args[at + 1]);
+					if (!found)
+					{
+						std::cout << "  no type " << args[at + 1] << "\n";
+						continue;
+					}
+					for (auto index = *found; index;)
+					{
+						const auto& info = types.at(index);
+						std::cout << std::format("  type {} size {} align {} parent {}\n", types.identity(index), info.size, info.alignment,
+							info.parent ? types.identity(info.parent) : std::string("-"));
+						for (const auto& member : info.members)
+						{
+							std::cout << std::format("    +0x{:X} {} : {}\n", member.offset, member.name, types.identity(member.type));
+						}
+						index = info.parent;
+					}
+				}
+				if (args[at] == "--dump")
+				{
+					const auto index = static_cast<std::size_t>(std::stoul(args[at + 1]));
+					if (index < file.items.size())
+					{
+						const auto& entry = file.items[index];
+						std::cout << std::format("  item {} {} x{}:", index, types.identity(entry.type), entry.count);
+						for (std::size_t i = 0; i < entry.data.size() && i < 65536; i++)
+						{
+							std::cout << (i % 32 == 0 ? "\n    " : "") << std::format("{:02x}", entry.data[i]) << (i % 4 == 3 ? " " : "");
+						}
+						std::cout << "\n   pointers:";
+						for (const auto& pointer : entry.pointers)
+						{
+							std::cout << std::format(" +0x{:X}->{}", pointer.offset, pointer.target);
+						}
+						std::cout << "\n";
+					}
+				}
+			}
+			for (const auto& [name, sum] : totals)
+			{
+				std::cout << std::format("  {:>8} items {:>10} elements {:>12} bytes  {}\n", sum.items, sum.elements, sum.bytes, name);
+			}
+		}
+		catch (const std::exception& e)
+		{
+			std::cout << std::format("havokinfo failed: {}\n", e.what());
+			std::exit(1);
+		}
 	}
 
 	void edit_zone(const settings& settings, const std::span<const std::string> args)

@@ -1933,7 +1933,9 @@ std::vector<std::uint8_t> BuildShapeListNative(const std::vector<Hull> &hulls,
                                                const FloorMaterials &floors,
                                                const bool useFloorMaterials,
                                                const std::vector<ShapeTag> &seedTags = {},
-                                               std::vector<ShapeTag> *builtTags = nullptr)
+                                               std::vector<ShapeTag> *builtTags = nullptr,
+                                               const std::vector<zonetool::iw8::havok::shape_list_entry> *slots = nullptr,
+                                               zonetool::iw8::havok::shape_list_entry *rootShape = nullptr)
 {
     namespace hk = zonetool::iw8::havok;
     hk::object_builder builder(*g_nativeCompendium);
@@ -2126,6 +2128,21 @@ std::vector<std::uint8_t> BuildShapeListNative(const std::vector<Hull> &hulls,
         }
         entries.push_back(std::move(entry));
     }
+
+    if (rootShape)
+    {
+        // A collision tile: the shape itself is the root of the data; its tags are in the world list.
+        if (entries.size() != 1)
+            throw std::runtime_error("A collision tile shape takes one shape group");
+        *rootShape = entries.front();
+        auto tile = hk::write_self_describing_tagfile(builder.finish("20180200", {}, entries.front().shape),
+                                                      *g_nativeCompendium);
+        if (builtTags)
+            *builtTags = tags;
+        return tile;
+    }
+    if (slots)
+        entries.insert(entries.end(), slots->begin(), slots->end());
 
     std::vector<hk::shape_tag> shapeTags;
     for (const auto &tag : tags)
@@ -2486,7 +2503,118 @@ BakeResult BakeCollision(const BakeInput &input)
     }
 
     std::vector<ShapeTag> worldTags;
-    if (g_nativeCompendium)
+    if (input.tiles)
+    {
+        // Streamed collision tiles (research 90): every world hull and mesh triangle goes to the tile of its centre;
+        // what is wider than a tile, or outside the grid, stays in the always-loaded shape of slot 0. Each tile with
+        // collision gets its own Havok data (rooted at the shape) and one slot of the world list, ascending by tile
+        // index. The tag table is shared.
+        if (!g_nativeCompendium)
+            throw std::runtime_error("Collision tiles need the native Havok builder");
+        namespace hk = zonetool::iw8::havok;
+        const float gridMin = -kCollisionTileSize * kCollisionTileGrid * 0.5f;
+        const auto tileOf = [&](const float x, const float y) -> int {
+            const int gx = static_cast<int>(std::floor((x - gridMin) / kCollisionTileSize));
+            const int gy = static_cast<int>(std::floor((y - gridMin) / kCollisionTileSize));
+            if (gx < 0 || gy < 0 || gx >= kCollisionTileGrid || gy >= kCollisionTileGrid)
+                return -1;
+            return gy * kCollisionTileGrid + gx;
+        };
+        std::vector<Mesh> meshes = collision.meshes;
+        ShapeGroup always{world.name};
+        std::map<int, ShapeGroup> tileGroups;
+        for (const auto index : world.hulls)
+        {
+            const auto &hull = result.hulls[index];
+            const bool wide = hull.maximum[0] - hull.minimum[0] > kCollisionTileSize ||
+                              hull.maximum[1] - hull.minimum[1] > kCollisionTileSize;
+            const int tile = wide ? -1
+                                  : tileOf((hull.minimum[0] + hull.maximum[0]) * 0.5f,
+                                           (hull.minimum[1] + hull.maximum[1]) * 0.5f);
+            (tile < 0 ? always : tileGroups[tile]).hulls.push_back(index);
+        }
+        // Mesh triangles: one merged mesh per tile, and one for the triangles that stay in slot 0.
+        std::map<int, Mesh> tileMeshes;
+        std::map<int, std::map<std::pair<std::size_t, std::uint32_t>, std::uint32_t>> vertexOf;
+        for (const auto meshIndex : world.meshes)
+        {
+            const auto &source = collision.meshes[meshIndex];
+            for (const auto &triangle : source.triangles)
+            {
+                std::array<float, 2> low{std::numeric_limits<float>::infinity(), std::numeric_limits<float>::infinity()};
+                std::array<float, 2> high{-std::numeric_limits<float>::infinity(), -std::numeric_limits<float>::infinity()};
+                std::array<float, 2> centre{};
+                for (const auto vertex : triangle.indices)
+                {
+                    if (vertex >= source.vertices.size())
+                        throw std::runtime_error("Collision mesh triangle has an invalid vertex");
+                    for (std::size_t axis = 0; axis < 2; ++axis)
+                    {
+                        low[axis] = (std::min)(low[axis], source.vertices[vertex][axis]);
+                        high[axis] = (std::max)(high[axis], source.vertices[vertex][axis]);
+                        centre[axis] += source.vertices[vertex][axis] / 3.0f;
+                    }
+                }
+                const bool wide = high[0] - low[0] > kCollisionTileSize || high[1] - low[1] > kCollisionTileSize;
+                const int tile = wide ? -1 : tileOf(centre[0], centre[1]);
+                auto &target = tileMeshes[tile];
+                auto &remap = vertexOf[tile];
+                MeshTriangle copy = triangle;
+                for (auto &vertex : copy.indices)
+                {
+                    const auto [slot, added] = remap.try_emplace({meshIndex, vertex},
+                                                                 static_cast<std::uint32_t>(target.vertices.size()));
+                    if (added)
+                        target.vertices.push_back(source.vertices[vertex]);
+                    vertex = slot->second;
+                }
+                target.triangles.push_back(copy);
+            }
+        }
+        for (auto &[tile, mesh] : tileMeshes)
+        {
+            (tile < 0 ? always : tileGroups[tile]).meshes.push_back(meshes.size());
+            meshes.push_back(std::move(mesh));
+        }
+        if (always.hulls.empty() && always.meshes.empty() && !tileGroups.empty())
+        {
+            // The list needs a shape in slot 0: the first tile's collision stays always loaded.
+            always.hulls = std::move(tileGroups.begin()->second.hulls);
+            always.meshes = std::move(tileGroups.begin()->second.meshes);
+            tileGroups.erase(tileGroups.begin());
+        }
+        if (always.hulls.empty() && always.meshes.empty())
+            throw std::runtime_error("Collision tiles: the map has no world collision");
+
+        std::vector<ShapeTag> tags;
+        std::vector<hk::shape_list_entry> slots;
+        std::size_t tileBytes = 0;
+        for (const auto &[tile, group] : tileGroups)
+        {
+            hk::shape_list_entry entry;
+            CollisionTileShape shape;
+            shape.index = static_cast<std::uint32_t>(tile);
+            shape.slot = static_cast<std::uint32_t>(slots.size() + 1);
+            ShapeGroup named = group;
+            named.name = "collisiontile" + std::to_string(tile);
+            shape.data = BuildShapeListNative(collision.hulls, meshes, {named}, floors, true, tags, &tags, nullptr, &entry);
+            tileBytes += shape.data.size();
+            entry.shape = 0;
+            entry.name.clear();
+            entry.index = tile;
+            slots.push_back(std::move(entry));
+            result.tiles.push_back(std::move(shape));
+        }
+        const std::vector<ShapeGroup> worldGroups{std::move(always)};
+        std::vector<ShapeTag> entityTags;
+        result.world = BuildShapeListNative(collision.hulls, meshes, worldGroups, floors, true, tags, &worldTags, &slots);
+        result.entities = BuildShapeListNative(collision.hulls, collision.meshes, entities, floors, false, worldTags,
+                                               &entityTags);
+        result.tiled = true;
+        zt::info("collision: %zu collision tiles with collision (%zu bytes of tile shapes), %zu slots in the world list",
+                 result.tiles.size(), tileBytes, slots.size() + 1);
+    }
+    else if (g_nativeCompendium)
     {
         const std::vector<ShapeGroup> worldGroups{std::move(world)};
         std::vector<ShapeTag> entityTags;
