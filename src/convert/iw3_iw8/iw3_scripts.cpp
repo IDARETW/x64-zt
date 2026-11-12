@@ -138,6 +138,9 @@ std::string CommonFunction(const std::string &file, const std::string &name)
         {"scripts/mp/damage", "playerkilled_internal"}, // IW7 Neon's VR deaths wrap the player-killed callback
         {"scripts/mp/weapons", "deleteexplosive"},      // IW7 Rivet's rocket blast clears the explosives under it
         {"scripts/engine/trace", "_bullet_trace"},      // IW7 bullettrace (Fallen, Geneva, Renaissance and Riot kegs)
+        // IW8 Radiant: a map with stock door scriptables starts the stock door script, as stock map scripts and
+        // scripts/mp/load do (research 83 A.2.4). The script is in global_mp, always loaded.
+        {"scripts/engine/scriptable_door", "system_init"},
     };
     for (const auto &[script, function] : kReplayFunctions)
         if (file == script && name == function)

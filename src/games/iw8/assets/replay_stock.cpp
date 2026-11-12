@@ -958,6 +958,10 @@ StubLayout Stub(const IW8_XAssetType type)
         return {0x40, 15};
     case ASSET_TYPE_LIGHTDEF:
         return {iw8sz::LIGHTDEF, 7};
+    case ASSET_TYPE_SCRIPTABLE:
+        // ScriptableDef header (0x78 bytes, name at 0): a map's scriptable instances name definitions that live in
+        // an always-loaded zone (IW8 Radiant research 62 section 1.3a, 86).
+        return {0x78, 7};
     default:
         throw std::runtime_error("stock: no reference layout for asset type " +
                                  std::to_string(static_cast<int>(type)));

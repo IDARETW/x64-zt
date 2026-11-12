@@ -51,6 +51,7 @@ enum IW8_XAssetType : int32_t
     ASSET_TYPE_STRINGTABLE = 54,
     ASSET_TYPE_NET_CONST_STRINGS = 61,
     ASSET_TYPE_LUAFILE = 62,
+    ASSET_TYPE_SCRIPTABLE = 63, // ScriptableDef (0x78 bytes; ACTS docs/mw19/pools.md)
     ASSET_TYPE_VECTORFIELD = 65,
     ASSET_TYPE_PARTICLESIMANIMATION = 66, // FxParticleSimAnimation
     ASSET_TYPE_XMODEL_DETAIL_COLLISION = 101,
@@ -153,6 +154,8 @@ inline const char *type_name(int t)
         return "rawfile";
     case ASSET_TYPE_SCRIPTFILE:
         return "scriptfile";
+    case ASSET_TYPE_SCRIPTABLE:
+        return "scriptable";
     case ASSET_TYPE_STRINGTABLE:
         return "stringtable";
     case ASSET_TYPE_GFX_MAP_TRZONE:
