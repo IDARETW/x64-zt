@@ -1,7 +1,9 @@
 #include <std_include.hpp>
 #include "replay_render.h"
+#include "../structs.hpp"
 #include "log.h"
 #include "scratch_files.h"
+#include <shared.hpp>
 #include <algorithm>
 #include <atomic>
 #include <cmath>
@@ -1462,6 +1464,61 @@ Mesh Load(const std::string &path, const nlohmann::json &j)
                     throw std::runtime_error("Replay volumetric mask has a zero scale");
             }
             m.volumetrics.push_back(std::move(volumetric));
+        }
+    }
+    for (const auto &name : j.value("decalVolumeMaterials", nlohmann::json::array()))
+    {
+        const auto text = name.get<std::string>();
+        const bool defined = std::ranges::any_of(m.assetMaterials, [&](const Material &candidate) {
+            return candidate.material == text && !candidate.decalVolumeMaterial.empty();
+        });
+        // R_DecalVolumes indirection (0x14187D790) turns Material::decalVolumeMaterial into a pool index
+        // without a null check.
+        if (!defined && std::ranges::find(m.stockMaterials, text) == m.stockMaterials.end())
+            throw std::runtime_error("Replay decal volume material has no decal volume definition: " + text);
+        m.decalVolumeMaterials.push_back(text);
+    }
+    if (j.contains("decalVolumes"))
+    {
+        // The frame takes 0x800 visible collections (0x14187EA10), and a material index has 11 bits (0x7FF: none).
+        const auto &decalVolumes = j.at("decalVolumes");
+        if (!decalVolumes.is_array() || decalVolumes.size() > 0x800 * kDecalVolumesPerCollection ||
+            m.decalVolumeMaterials.size() > 0x7FF)
+            throw std::runtime_error("Invalid Replay decal volume table");
+        for (const auto &source : decalVolumes)
+        {
+            DecalVolume volume;
+            const auto copy = [&](const char *key, auto &target) {
+                const auto values = vector(source.at(key), target.size());
+                std::copy(values.begin(), values.end(), target.begin());
+            };
+            copy("center", volume.center);
+            copy("half_size", volume.halfSize);
+            copy("uv_matrix", volume.uvMatrix);
+            copy("uv_offset", volume.uvOffset);
+            const auto &axes = source.at("axes");
+            if (!axes.is_array() || axes.size() != 3)
+                throw std::runtime_error("Invalid Replay decal volume axes");
+            for (std::size_t axis = 0; axis < 3; ++axis)
+            {
+                const auto values = vector(axes.at(axis), 3);
+                std::copy(values.begin(), values.end(), volume.axes[axis].begin());
+            }
+            volume.material = source.at("material").get<uint32_t>();
+            volume.opacity = source.at("opacity").get<float>();
+            volume.feather = source.at("feather").get<float>();
+            volume.drawOrder = source.at("draw_order").get<int>();
+            const auto outside = [](const float value, const float low, const float high) {
+                return !(value >= low && value <= high);
+            };
+            if (volume.material >= m.decalVolumeMaterials.size() || outside(volume.opacity, 0, 1) ||
+                outside(volume.feather, 0, 1) || volume.drawOrder < -4 || volume.drawOrder > 3 ||
+                std::ranges::any_of(volume.center, [&](const float v) { return outside(v, -262144, 262144); }) ||
+                std::ranges::any_of(volume.halfSize, [&](const float v) { return outside(v, 0x1p-14f, 65536); }) ||
+                std::ranges::any_of(volume.uvMatrix, [&](const float v) { return outside(v, -65504, 65504); }) ||
+                std::ranges::any_of(volume.uvOffset, [&](const float v) { return outside(v, -65504, 65504); }))
+                throw std::runtime_error("Invalid Replay decal volume");
+            m.decalVolumes.push_back(volume);
         }
     }
     const auto &reflectionProbes = j.at("reflectionProbes");
@@ -3153,6 +3210,232 @@ void EmitVolumetrics(ZoneWriter &w, const Mesh &m)
         if (!volumetric.livePath.empty())
             w.writeStr(volumetric.livePath);
 }
+namespace
+{
+namespace replay = ::zonetool::iw8;
+
+// The rotation whose rows are the box axes, as x, y, z, w.
+std::array<double, 4> DecalVolumeQuaternion(const std::array<std::array<float, 3>, 3> &axes)
+{
+    const auto at = [&](const std::size_t row, const std::size_t column) { return double(axes[row][column]); };
+    const double trace = at(0, 0) + at(1, 1) + at(2, 2);
+    std::array<double, 4> q{};
+    if (trace > 0)
+    {
+        const double scale = std::sqrt(trace + 1) * 2;
+        q = {(at(1, 2) - at(2, 1)) / scale, (at(2, 0) - at(0, 2)) / scale, (at(0, 1) - at(1, 0)) / scale, scale / 4};
+    }
+    else if (at(0, 0) > at(1, 1) && at(0, 0) > at(2, 2))
+    {
+        const double scale = std::sqrt(1 + at(0, 0) - at(1, 1) - at(2, 2)) * 2;
+        q = {scale / 4, (at(0, 1) + at(1, 0)) / scale, (at(0, 2) + at(2, 0)) / scale, (at(1, 2) - at(2, 1)) / scale};
+    }
+    else if (at(1, 1) > at(2, 2))
+    {
+        const double scale = std::sqrt(1 + at(1, 1) - at(0, 0) - at(2, 2)) * 2;
+        q = {(at(0, 1) + at(1, 0)) / scale, scale / 4, (at(1, 2) + at(2, 1)) / scale, (at(2, 0) - at(0, 2)) / scale};
+    }
+    else
+    {
+        const double scale = std::sqrt(1 + at(2, 2) - at(0, 0) - at(1, 1)) * 2;
+        q = {(at(0, 2) + at(2, 0)) / scale, (at(1, 2) + at(2, 1)) / scale, scale / 4, (at(0, 1) - at(1, 0)) / scale};
+    }
+    const double length = std::sqrt(q[0] * q[0] + q[1] * q[1] + q[2] * q[2] + q[3] * q[3]);
+    for (auto &part : q)
+        part /= length;
+    return q;
+}
+
+// GfxStaticDecalVolumePacked bit layouts: Replay uploads the records as stored (0x14187D750) and its compute
+// shaders unpack them, so they come from the 46 records of stock mp_shipment (IW8 Radiant research 80, section 2).
+uint32_t PackDecalVolumeQuaternion(std::array<double, 4> q)
+{
+    std::size_t dropped = 0;
+    for (std::size_t part = 1; part < q.size(); ++part)
+        if (std::abs(q[part]) > std::abs(q[dropped]))
+            dropped = part;
+    if (q[dropped] < 0)
+        for (auto &part : q)
+            part = -part;
+    // The largest part is left out (its index in bits 30-31); the others span -sqrt(1/2) .. sqrt(1/2) in 10, 10
+    // and 9 bits. Bit 29 is 0 in every stock record.
+    constexpr double bias = 0.70710677;
+    constexpr std::array<double, 3> steps{0.001382418, 0.001382418, 0.0027675412};
+    constexpr std::array<long, 3> limits{1023, 1023, 511};
+    constexpr std::array<unsigned, 3> shifts{0, 10, 20};
+    auto packed = static_cast<uint32_t>(dropped) << 30;
+    std::size_t slot = 0;
+    for (std::size_t part = 0; part < q.size(); ++part)
+    {
+        if (part == dropped)
+            continue;
+        const long value = std::lround((q[part] + bias) / steps[slot]);
+        packed |= static_cast<uint32_t>(std::clamp(value, 0l, limits[slot])) << shifts[slot];
+        ++slot;
+    }
+    return packed;
+}
+
+// One unsigned float of an R11G11B10F word: a 5-bit exponent (bias 15) over the mantissa bits.
+uint32_t PackUnsignedFloat(const float value, const unsigned mantissaBits)
+{
+    int exponent = 0;
+    const double fraction = std::frexp(double(value), &exponent);
+    auto mantissa = static_cast<uint32_t>(std::lround((fraction * 2 - 1) * (1u << mantissaBits)));
+    exponent += 14;
+    if (mantissa == 1u << mantissaBits)
+    {
+        mantissa = 0;
+        ++exponent;
+    }
+    if (exponent > 30)
+        return 30u << mantissaBits | ((1u << mantissaBits) - 1);
+    return static_cast<uint32_t>(std::max(exponent, 1)) << mantissaBits | mantissa;
+}
+
+uint32_t PackHalfPair(const float low, const float high)
+{
+    return zonetool::half_float::float_to_half(low) |
+           static_cast<uint32_t>(zonetool::half_float::float_to_half(high)) << 16;
+}
+
+replay::GfxStaticDecalVolumePacked PackDecalVolume(const DecalVolume &volume, const std::size_t index)
+{
+    replay::GfxStaticDecalVolumePacked packed{};
+    std::copy(volume.center.begin(), volume.center.end(), packed.obbCenter.v);
+    packed.obbQuat = PackDecalVolumeQuaternion(DecalVolumeQuaternion(volume.axes));
+    packed.obbHalfSize = PackUnsignedFloat(volume.halfSize[0], 6) | PackUnsignedFloat(volume.halfSize[1], 6) << 11 |
+                         PackUnsignedFloat(volume.halfSize[2], 5) << 22;
+    // Bytes: blend-map edge 0 and edge 1 (the stock defaults 0 and 255), the blend-map scale, the depth feather.
+    packed.opacityParams = 0xFF00u | static_cast<uint32_t>(std::lround(volume.opacity * 255)) << 16 |
+                           static_cast<uint32_t>(std::lround(volume.feather * 255)) << 24;
+    // Stock stores a zero m10 as -0: its identity matrix is 0x00003C00 0x3C008000.
+    packed.uvMatrixAndOffset[0] = PackHalfPair(volume.uvMatrix[0], volume.uvMatrix[1]);
+    packed.uvMatrixAndOffset[1] = PackHalfPair(volume.uvMatrix[2] == 0 ? -0.0f : volume.uvMatrix[2], volume.uvMatrix[3]);
+    packed.uvMatrixAndOffset[2] = PackHalfPair(volume.uvOffset[0], volume.uvOffset[1]);
+    // The material index, no mask (0x7FF), normal blend mode 2 (no override), the running map draw order modulo
+    // 32 and the user draw order + 4.
+    constexpr uint32_t noMask = 0x7FFu << 11, noNormalOverride = 2u << 22;
+    packed.packedMaterialInfo = volume.material | noMask | noNormalOverride | static_cast<uint32_t>(index & 31) << 24 |
+                                static_cast<uint32_t>(volume.drawOrder + 4) << 29;
+    return packed;
+}
+
+replay::Bounds DecalVolumeCollectionBounds(const Mesh &m, const std::size_t collection)
+{
+    std::array<double, 3> low, high;
+    low.fill(std::numeric_limits<double>::infinity());
+    high.fill(-std::numeric_limits<double>::infinity());
+    const std::size_t first = collection * kDecalVolumesPerCollection;
+    const std::size_t end = std::min(first + kDecalVolumesPerCollection, m.decalVolumes.size());
+    for (std::size_t index = first; index < end; ++index)
+    {
+        const auto &volume = m.decalVolumes[index];
+        for (std::size_t k = 0; k < 3; ++k)
+        {
+            double extent = 0;
+            for (std::size_t axis = 0; axis < 3; ++axis)
+                extent += std::abs(double(volume.axes[axis][k])) * volume.halfSize[axis];
+            low[k] = std::min(low[k], volume.center[k] - extent);
+            high[k] = std::max(high[k], volume.center[k] + extent);
+        }
+    }
+    replay::Bounds bounds{};
+    for (std::size_t k = 0; k < 3; ++k)
+    {
+        bounds.midPoint.v[k] = static_cast<float>((low[k] + high[k]) / 2);
+        bounds.halfSize.v[k] = static_cast<float>((high[k] - low[k]) / 2);
+    }
+    return bounds;
+}
+} // namespace
+
+uint32_t DecalVolumeCollectionCount(const Mesh &m)
+{
+    return static_cast<uint32_t>((m.decalVolumes.size() + kDecalVolumesPerCollection - 1) / kDecalVolumesPerCollection);
+}
+void StampDecalVolumes(std::vector<uint8_t> &world, const Mesh &m)
+{
+    if (m.decalVolumes.empty())
+        return;
+    // Replay clears decalVisData from the collection count at client start without a pointer check (0x1418EC6F1):
+    // the counts and the visibility words go together.
+    const uint32_t collectionCount = DecalVolumeCollectionCount(m);
+    auto *draw = world.data() + offsetof(replay::GfxWorld, draw);
+    put(draw, offsetof(replay::GfxWorldDraw, decalVolumeMaterialCount), static_cast<uint32_t>(m.decalVolumeMaterials.size()));
+    put(draw, offsetof(replay::GfxWorldDraw, mapDecalVolumeCount), static_cast<uint32_t>(m.decalVolumes.size()));
+    put(draw, offsetof(replay::GfxWorldDraw, decalVolumeCollectionCount), collectionCount);
+    put(draw, offsetof(replay::GfxWorldDraw, decalVolumeMaterials), PTR_FOLLOWS);
+    put(draw, offsetof(replay::GfxWorldDraw, decalVolumeCollections), PTR_FOLLOWS);
+    put(draw, offsetof(replay::GfxWorldDraw, materialAndMaskIndirection), PTR_FOLLOWS);
+    auto *dpvs = world.data() + offsetof(replay::GfxWorld, dpvs);
+    put(dpvs, offsetof(replay::GfxWorldDpvsStatic, decalVisDataCount), (collectionCount + 31u) >> 5);
+    put(dpvs, offsetof(replay::GfxWorldDpvsStatic, decalVisData), PTR_FOLLOWS);
+}
+void EmitDecalVolumeTables(ZoneWriter &w, const Mesh &m)
+{
+    if (m.decalVolumes.empty())
+        return;
+    w.align(7);
+    for (std::size_t index = 0; index < m.decalVolumeMaterials.size(); ++index)
+        w.writeFollows();
+    for (const auto &name : m.decalVolumeMaterials)
+    {
+        Material reference;
+        reference.material = name;
+        EmitMaterial(w, reference, false);
+    }
+    w.align(3);
+    const uint32_t collectionCount = DecalVolumeCollectionCount(m);
+    for (uint32_t collection = 0; collection < collectionCount; ++collection)
+    {
+        replay::GfxDecalVolumeCollection record{};
+        record.firstZoneDecal = collection * static_cast<uint32_t>(kDecalVolumesPerCollection);
+        record.decalCount = static_cast<uint16_t>(
+            std::min<std::size_t>(kDecalVolumesPerCollection, m.decalVolumes.size() - record.firstZoneDecal));
+        w.writeT(record);
+    }
+    // materialAndMaskIndirection: Replay fills it at load (0x14187D790).
+    w.align(3);
+    for (std::size_t index = 0; index < m.decalVolumeMaterials.size(); ++index)
+        w.writeT<uint32_t>(0);
+    w.pushStream(XFILE_BLOCK_TEMP_POSTLOAD);
+    for (std::size_t index = 0; index < m.decalVolumeMaterials.size(); ++index)
+    {
+        w.align(7);
+        w.reserveCalc(sizeof(replay::Material));
+    }
+    w.popStream();
+}
+void StampTransientDecalVolumes(uint8_t *t, const Mesh &m)
+{
+    if (!m.decalVolumes.empty())
+        put(t, offsetof(replay::GfxWorldTransientZone, decalVolumes), PTR_FOLLOWS);
+}
+void EmitTransientDecalVolumes(ZoneWriter &w, const Mesh &m)
+{
+    if (m.decalVolumes.empty())
+        return;
+    const uint32_t collectionCount = DecalVolumeCollectionCount(m);
+    uint8_t data[sizeof(replay::GfxDecalVolumeTransientData)]{};
+    put(data, offsetof(replay::GfxDecalVolumeTransientData, decalVolumeCount), static_cast<uint32_t>(m.decalVolumes.size()));
+    put(data, offsetof(replay::GfxDecalVolumeTransientData, collectionCount), static_cast<uint16_t>(collectionCount));
+    put(data, offsetof(replay::GfxDecalVolumeTransientData, decalVolumes), PTR_FOLLOWS);
+    put(data, offsetof(replay::GfxDecalVolumeTransientData, collectionBounds), PTR_FOLLOWS);
+    put(data, offsetof(replay::GfxDecalVolumeTransientData, decalVolumeUids), PTR_FOLLOWS);
+    w.align(7);
+    w.write(data, sizeof(data));
+    w.align(3);
+    for (std::size_t index = 0; index < m.decalVolumes.size(); ++index)
+        w.writeT(PackDecalVolume(m.decalVolumes[index], index));
+    w.align(3);
+    for (uint32_t collection = 0; collection < collectionCount; ++collection)
+        w.writeT(DecalVolumeCollectionBounds(m, collection));
+    // Any distinct values: the uids identify a volume to the stock editor's live link.
+    w.align(3);
+    for (std::size_t index = 0; index < m.decalVolumes.size(); ++index)
+        w.writeT<uint32_t>(static_cast<uint32_t>(index + 1) * 2654435761u);
+}
 void EmitSurfaces(ZoneWriter &w, const Mesh &m)
 {
     if (!m.count)
@@ -3205,9 +3488,10 @@ std::vector<uint8_t> BuildUmbraTome(const Mesh &m, const StaticModels &staticMod
     const uint32_t worldSurfaceCount = m.worldSurfaceCount();
     const uint32_t staticModelCount = static_cast<uint32_t>(staticModels.instances.size());
     const uint32_t volumetricCount = static_cast<uint32_t>(m.volumetrics.size());
+    const uint32_t decalCollectionCount = DecalVolumeCollectionCount(m);
     const uint32_t objectCount = worldSurfaceCount + staticModelCount +
                                  static_cast<uint32_t>(primaryLights.size()) +
-                                 reflectionProbeInstances + volumetricCount;
+                                 reflectionProbeInstances + volumetricCount + decalCollectionCount;
     // Umbra user IDs carry the object class in bits 28-30 (query consumer
     // 0x18CCA80): 0 world surface, 1 static model, 3 world volumetric (its
     // volumetricVisData bit, which R_VOL_AddVolumetrics 0x1418B71E0 reads), 4
@@ -3232,6 +3516,10 @@ std::vector<uint8_t> BuildUmbraTome(const Mesh &m, const StaticModels &staticMod
         userIDList.push_back(0x50000000u + probe);
     for (uint32_t volumetric = 0; volumetric < volumetricCount; ++volumetric)
         userIDList.push_back(0x30000000u + volumetric);
+    // Class 6: decal volume collections. The query consumer sets the collection's decalVisData bit, and Replay
+    // 1.20 draws a collection only with that bit (0x14187EA10).
+    for (uint32_t collection = 0; collection < decalCollectionCount; ++collection)
+        userIDList.push_back(0x60000000u + collection);
     if (!objectCount || objectCount > 0x01000000 ||
         uint64_t(worldSurfaceCount) * 56 > m.bounds.size())
         throw std::runtime_error("Replay world surfaces cannot be represented by Umbra object IDs");

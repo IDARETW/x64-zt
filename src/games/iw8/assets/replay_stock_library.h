@@ -2,6 +2,7 @@
 
 #include <filesystem>
 #include <memory>
+#include <set>
 #include <string>
 
 #include <json.hpp>
@@ -34,4 +35,10 @@ class Library
     struct Impl;
     std::unique_ptr<Impl> impl_;
 };
+
+// The Materials among `names` that a common techsets zone or code_post_gfx owns with a decal volume definition
+// (Material::decalVolumeMaterial). Replay loads these zones with every multiplayer map, so a map can name such a
+// Material in its decal volume table.
+std::set<std::string> CommonDecalVolumeMaterials(const std::filesystem::path &zoneFolder,
+                                                 const std::set<std::string> &names);
 } // namespace iw8::stock

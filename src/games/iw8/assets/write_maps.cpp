@@ -474,6 +474,8 @@ void emitGfxMapBody(ZoneWriter &zw, const char *assetName, const std::string &me
         stamp32(gw.data(), replaymap::VolumetricVisDataCount, volumetricVisDataCount);
         stamp64(gw.data(), replaymap::VolumetricVisData, PTR_FOLLOWS);
     }
+    replayrender::StampDecalVolumes(gw, mesh);
+    const uint32_t decalVisDataCount = (replayrender::DecalVolumeCollectionCount(mesh) + 31u) >> 5;
     // R_EntityMoved 1959A60 indexes localClient*80 + entityNum/32.
     stamp32(gw.data(), 0x3F20, 160);
     stamp64(gw.data(), 0x3F28, PTR_FOLLOWS);
@@ -596,6 +598,7 @@ void emitGfxMapBody(ZoneWriter &zw, const char *assetName, const std::string &me
     }
     // Load_GfxWorldDraw D96710 loads iesLookupTexture before transient zones;
     // it aliases the "*ieslookup" image registered ahead of the world.
+    replayrender::EmitDecalVolumeTables(zw, mesh);
     // Load_GfxWorldDraw D96710 visits its 1536 inline asset pointers.
     // Load_GfxWorldTransientZonePtr D970B0: stream 1, alignment 7;
     // Load_GfxWorldTransientZone D96E90: 0x148 bytes, name in VIRTUAL.
@@ -611,6 +614,7 @@ void emitGfxMapBody(ZoneWriter &zw, const char *assetName, const std::string &me
     if (lightGrid)
         stamp64(transient, 0xF8, PTR_FOLLOWS);
     replayrender::StampTransient(transient, mesh);
+    replayrender::StampTransientDecalVolumes(transient, mesh);
     zw.write(transient, sizeof(transient));
     zw.pushStream(XFILE_BLOCK_VIRTUAL);
     zw.writeStr(assetName);
@@ -659,6 +663,7 @@ void emitGfxMapBody(ZoneWriter &zw, const char *assetName, const std::string &me
     }
     emitNativeLightmapTemp(zw, mesh);
     replaylightgrid::Emit(zw, lightGrid);
+    replayrender::EmitTransientDecalVolumes(zw, mesh);
     zw.popStream();
     zw.popStream();
     if (!mesh.nativeLightmaps.empty())
@@ -747,6 +752,7 @@ void emitGfxMapBody(ZoneWriter &zw, const char *assetName, const std::string &me
     const size_t reflectionProbeVis = size_t(reflectionProbeVisDataCount) * 4;
     // Each visibility family is aligned to 128 bytes in stream 4.
     const size_t volumetricVis = volumetricVisDataCount ? 128 + ((size_t(volumetricVisDataCount) * 4 + 127) & ~size_t(127)) : 0;
+    const size_t decalVis = decalVisDataCount ? 128 + ((size_t(decalVisDataCount) * 4 + 127) & ~size_t(127)) : 0;
     const size_t smodelVisDataCount = (staticModels.instances.size() + 31) >> 5;
     const size_t additionalSmodelVis =
         smodelVisDataCount ? 24 * ((smodelVisDataCount * 4 + 127) & ~size_t(127)) : 0;
@@ -760,7 +766,7 @@ void emitGfxMapBody(ZoneWriter &zw, const char *assetName, const std::string &me
         4 * size_t(dynEntWordCounts[0] + dynEntWordCounts[1]);
     zw.reserveCalc(0xD00 + additionalSceneBits + additionalCellVisBits + additionalSunBits +
                     additionalPrimaryLights + additionalPrimaryLightVis + reflectionProbeVis +
-                    volumetricVis + additionalSmodelVis +
+                    volumetricVis + decalVis + additionalSmodelVis +
                    dynEntCellBitsBytes + dynEntViewBitsBytes + dynEntSceneBytes +
                    dynEntMotionBytes +
                    // Light shadow/motion bitsets, plus slack for the realignment

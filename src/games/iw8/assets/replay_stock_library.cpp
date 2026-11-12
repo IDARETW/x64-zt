@@ -250,4 +250,31 @@ Json Library::Material(const std::string &name) const
     }
     return result;
 }
+
+std::set<std::string> CommonDecalVolumeMaterials(const std::filesystem::path &zoneFolder,
+                                                 const std::set<std::string> &names)
+{
+    std::set<std::string> found;
+    // The techsets zones own the Materials that the common zones name (i/vfx_decal_surface_scorch_1 is in
+    // techsets_common). techsets_common_br_mp is left out: Replay loads it for Warzone.
+    for (const char *zone : {"techsets_common", "techsets_common_core_mp", "techsets_common_base_mp",
+                             "techsets_common_mp", "code_post_gfx"})
+    {
+        if (found.size() == names.size())
+            break;
+        const auto file = zoneFolder / (std::string(zone) + ".ff");
+        if (!std::filesystem::exists(file))
+            continue;
+        const auto loaded = replay::load_zone(file);
+        for (const auto &asset : loaded->assets)
+        {
+            if (asset.type != replay::ASSET_TYPE_MATERIAL)
+                continue;
+            const auto *material = static_cast<const replay::Material *>(asset.header);
+            if (material->name && material->decalVolumeMaterial && names.contains(material->name))
+                found.insert(material->name);
+        }
+    }
+    return found;
+}
 } // namespace iw8::stock

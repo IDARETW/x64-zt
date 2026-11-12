@@ -178,6 +178,23 @@ struct Volumetric
     float density = 0, falloff = 0, heightFade = 0, anisotropy = 0;
     std::array<VolumetricMask, 4> masks;
 };
+// Replay works on decal volumes in groups of up to 16 (0x141881940).
+inline constexpr std::size_t kDecalVolumesPerCollection = 16;
+// A static decal volume of the world (GfxStaticDecalVolumePacked, 44 bytes): an oriented box that projects its
+// material along its first axis onto the surfaces inside it. Replay draws a collection of them while its Umbra
+// object (user-ID class 6) is visible.
+struct DecalVolume
+{
+    std::array<float, 3> center{};
+    // The depth axis (into the surface), then the width and height axes of the picture.
+    std::array<std::array<float, 3>, 3> axes{};
+    std::array<float, 3> halfSize{};
+    uint32_t material = 0; // index into Mesh::decalVolumeMaterials
+    float opacity = 1, feather = 0;
+    int drawOrder = 0; // -4 .. 3
+    std::array<float, 4> uvMatrix{1, 0, 0, 1};
+    std::array<float, 2> uvOffset{};
+};
 struct NativeLightmapImage
 {
     uint32_t format{};
@@ -286,6 +303,9 @@ struct Mesh : Material
     std::vector<NativeLightmap> nativeLightmaps;
     std::vector<GlassPane> glassPanes;
     std::vector<Volumetric> volumetrics;
+    std::vector<DecalVolume> decalVolumes;
+    // The Materials of the decal volumes: an asset material with a decal volume definition, or a stock one.
+    std::vector<std::string> decalVolumeMaterials;
     std::vector<unsigned> surfaceMaterials;
     unsigned opaqueCount = 0;
     // World surfaces of Replay's lit decal range (blended with a depth bias), which
@@ -323,6 +343,16 @@ void RegisterVolumetricMaskImages(iw8::ZoneWriter &writer, const Mesh &mesh);
 // The GfxVolumetric array of GfxWorldDraw.volumetrics (after lightmapTransientIndex) with
 // each one's live path; mask images are references to their registered definitions.
 void EmitVolumetrics(iw8::ZoneWriter &writer, const Mesh &mesh);
+// Decal volumes draw per collection: runs of up to 16 volumes in their order, all in transient zone 0.
+uint32_t DecalVolumeCollectionCount(const Mesh &mesh);
+// The decal volume counts and pointers of GfxWorldDraw, and the visibility words of the collections.
+void StampDecalVolumes(std::vector<uint8_t> &world, const Mesh &mesh);
+// The decal volume arrays of GfxWorldDraw (after iesLookupTexture, before the transient zones): the Materials as
+// name references, the collections and the zeroed indirection table.
+void EmitDecalVolumeTables(iw8::ZoneWriter &writer, const Mesh &mesh);
+// GfxWorldTransientZone.decalVolumes (after the light grid): the packed volumes, the collection bounds and the uids.
+void StampTransientDecalVolumes(uint8_t *transient, const Mesh &mesh);
+void EmitTransientDecalVolumes(iw8::ZoneWriter &writer, const Mesh &mesh);
 void StampWorld(std::vector<uint8_t> &world, const Mesh &mesh);
 void EmitSurfaces(iw8::ZoneWriter &writer, const Mesh &mesh);
 void StampTransient(uint8_t *transient, const Mesh &mesh);
