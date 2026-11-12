@@ -3561,6 +3561,105 @@ std::optional<iw8::havok::PhysicsSystem> KeepBoneBodies(const iw8::havok::Physic
     return result;
 }
 
+// "scriptable_instances" of the collision JSON (IW8 Radiant research 86): one object per placed scriptable with the
+// definition's name and the numbers of that definition the map-wide tables need. The definition must be in a zone the
+// game always has loaded: the map zone gets a name-only reference. A bad entry stops the build: a wrong count here is a
+// crash at load.
+std::vector<iw8::ScriptableInstance> ReadScriptableInstances(const Json &collision)
+{
+    std::vector<iw8::ScriptableInstance> result;
+    if (!collision.contains("scriptable_instances"))
+        return result;
+    const auto &list = collision.at("scriptable_instances");
+    if (!list.is_array())
+        throw std::runtime_error("scriptable_instances is not a list");
+    const auto fail = [&](const std::size_t index, const std::string &what) {
+        throw std::runtime_error("scriptable_instances[" + std::to_string(index) + "]: " + what);
+    };
+    const auto vec3 = [&](const Json &entry, const char *key, const std::size_t index, const bool required) {
+        std::array<float, 3> value{};
+        if (!entry.contains(key))
+        {
+            if (required)
+                fail(index, std::string("no ") + key);
+            return value;
+        }
+        const auto &node = entry.at(key);
+        if (!node.is_array() || node.size() != 3)
+            fail(index, std::string(key) + " is not three numbers");
+        for (std::size_t axis = 0; axis < 3; ++axis)
+        {
+            if (!node[axis].is_number())
+                fail(index, std::string(key) + " is not three numbers");
+            value[axis] = node[axis].get<float>();
+            if (!std::isfinite(value[axis]) || std::abs(value[axis]) > 1000000.0f)
+                fail(index, std::string(key) + " is out of range");
+        }
+        return value;
+    };
+    const auto text = [&](const Json &entry, const char *key, const std::size_t index) {
+        if (!entry.contains(key))
+            return std::string{};
+        if (!entry.at(key).is_string())
+            fail(index, std::string(key) + " is not text");
+        auto value = entry.at(key).get<std::string>();
+        for (const char c : value)
+            if (static_cast<unsigned char>(c) < 0x20 || c == '"')
+                fail(index, std::string(key) + " has a character that a script string cannot hold");
+        return value;
+    };
+    const auto number = [&](const Json &entry, const char *key, const std::size_t index, const unsigned maximum,
+                            const unsigned fallback) {
+        if (!entry.contains(key))
+            return fallback;
+        const auto &node = entry.at(key);
+        if (!node.is_number_unsigned() || node.get<std::uint64_t>() > maximum)
+            fail(index, std::string(key) + " is not a whole number from 0 to " + std::to_string(maximum));
+        return node.get<unsigned>();
+    };
+    const auto flag = [&](const Json &entry, const char *key, const std::size_t index, const bool fallback) {
+        if (!entry.contains(key))
+            return fallback;
+        if (!entry.at(key).is_boolean())
+            fail(index, std::string(key) + " is not true or false");
+        return entry.at(key).get<bool>();
+    };
+    if (list.size() > 2000)
+        throw std::runtime_error("scriptable_instances has more than 2000 entries");
+    for (std::size_t index = 0; index < list.size(); ++index)
+    {
+        const auto &entry = list[index];
+        if (!entry.is_object())
+            fail(index, "not an object");
+        iw8::ScriptableInstance instance;
+        instance.definition = text(entry, "definition", index);
+        if (instance.definition.empty() || instance.definition.size() > 120)
+            fail(index, "no definition name");
+        for (const char c : instance.definition)
+            if (!(std::isalnum(static_cast<unsigned char>(c)) || c == '_'))
+                fail(index, "definition name '" + instance.definition + "' has a character other than a letter, a digit or _");
+        instance.origin = vec3(entry, "origin", index, true);
+        instance.angles = vec3(entry, "angles", index, false);
+        instance.targetname = text(entry, "targetname", index);
+        instance.target = text(entry, "target", index);
+        instance.linkname = text(entry, "script_linkname", index);
+        instance.linkto = text(entry, "script_linkto", index);
+        instance.noteworthy = text(entry, "script_noteworthy", index);
+        instance.serverInstancedParts = number(entry, "server_instanced_parts", index, 255, 0);
+        instance.usableParts = number(entry, "usable_parts", index, 255, 0);
+        instance.physicsLimit = flag(entry, "physics_limit", index, false);
+        instance.maxParts = static_cast<std::uint8_t>(number(entry, "max_dynent_parts", index, 255, 1));
+        if (!instance.maxParts)
+            fail(index, "max_dynent_parts is 0");
+        instance.instanceEntry = flag(entry, "instance_dynent", index, true);
+        instance.sparseOccluder = flag(entry, "sparse_occluder", index, false);
+        instance.collisionFlags = static_cast<std::uint8_t>(number(entry, "collision_flags", index, 255, 0));
+        instance.physicsEntries = static_cast<std::uint8_t>(number(entry, "physics_dynents", index, 16, 0));
+        result.push_back(std::move(instance));
+    }
+    return result;
+}
+
 SourceDynamicEntities ReadDynamicEntities(const Json &collision, const std::filesystem::path &root,
                                           const std::filesystem::path &skeletonRoot)
 {
@@ -10028,6 +10127,7 @@ PreparedMap::PreparedMap(PreparedMap &&other) noexcept
     , shadowScene(std::move(other.shadowScene))
     , render(std::move(other.render))
     , dynamicEntities(std::move(other.dynamicEntities))
+    , scriptableInstances(std::move(other.scriptableInstances))
     , navigation(std::move(other.navigation))
     , mapScript(std::move(other.mapScript))
     , scriptMaterials(std::move(other.scriptMaterials))
@@ -10076,6 +10176,7 @@ PreparedMap &PreparedMap::operator=(PreparedMap &&other) noexcept
         shadowScene = std::move(other.shadowScene);
         render = std::move(other.render);
         dynamicEntities = std::move(other.dynamicEntities);
+        scriptableInstances = std::move(other.scriptableInstances);
         navigation = std::move(other.navigation);
         mapScript = std::move(other.mapScript);
         scriptMaterials = std::move(other.scriptMaterials);
@@ -12791,6 +12892,16 @@ PreparedMap PrepareFastfile(const ImportOptions &options)
         entity.basis = iw8::DynamicEntityBasis::brush;
         entity.brushModel = source.model;
         result.dynamicEntities.push_back(std::move(entity));
+    }
+    // Scriptable instances and their dynamic entities (model basis: the list writer places them after the clutter
+    // entries and before the brushes).
+    result.scriptableInstances = ReadScriptableInstances(collision);
+    if (!result.scriptableInstances.empty())
+    {
+        const auto scriptableEntities = iw8::ScriptableDynamicEntities(result.scriptableInstances);
+        result.dynamicEntities.insert(result.dynamicEntities.end(), scriptableEntities.begin(), scriptableEntities.end());
+        zt::info("iw3: %zu scriptable instances, %zu dynamic entities for them", result.scriptableInstances.size(),
+                 scriptableEntities.size());
     }
     timing.lap("fx and audits");
     std::size_t triangles = 0;

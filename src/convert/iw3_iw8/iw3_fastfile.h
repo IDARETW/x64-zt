@@ -277,6 +277,9 @@ struct PreparedMap
     // IW8_ZONETOOL_KEEP_SCRATCH keeps the scratch). The packager empties it once the mesh is read.
     nlohmann::json render;
     std::vector<iw8::DynamicEntity> dynamicEntities;
+    // Scriptable instances of the map (collision JSON "scriptable_instances"); their dynamic entities are already in
+    // dynamicEntities.
+    std::vector<iw8::ScriptableInstance> scriptableInstances;
     iw8::navigation::Source navigation;
     // IW8 GSC translated from the map's IW3 scripts (without the generated
     // minimap function), compiled with gsc-tool at package time.

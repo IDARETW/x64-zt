@@ -810,6 +810,16 @@ inline void writeSpatialLeaf(ZoneBuffer &zb)
     zb.writeT<uint32_t>(3u);
 }
 
+// The map's scriptable instances with their interned script strings (classname, target, targetname, script_linkname,
+// script_linkto, script_noteworthy: the ScriptableInstance field order) and, at emit time, the alias of each
+// instance's definition reference.
+struct MapScriptables
+{
+    std::vector<ScriptableInstance> instances;
+    std::vector<std::array<uint32_t, 6>> strings;
+    std::vector<uint64_t> definitionAliases;
+};
+
 // VIRTUAL(8). Caller is responsible for the surrounding push/pop. `ents` is the IW8 numeric-keyId
 // entityString (NUL added here).
 inline void emitMapEntsBody(ZoneBuffer &zb, const char *assetName, const std::string &ents,
@@ -817,7 +827,8 @@ inline void emitMapEntsBody(ZoneBuffer &zb, const char *assetName, const std::st
                             const havok::BakeResult *collision = nullptr,
                             const uint64_t edgeListAlias = PTR_NULL,
                             const DynamicEntityCounts &dynamic = {},
-                            const ClientTriggerSet *clientTriggers = nullptr)
+                            const ClientTriggerSet *clientTriggers = nullptr,
+                            const MapScriptables *scriptables = nullptr)
 {
     const uint32_t dynamicModelCount = dynamic.models;
     const uint32_t dynamicBrushCount = dynamic.brushes;
@@ -886,8 +897,9 @@ inline void emitMapEntsBody(ZoneBuffer &zb, const char *assetName, const std::st
         stamp64(me, kME_dynEntListIds, PTR_FOLLOWS);
         if (dynamicModelCount > UINT16_MAX || dynamicBrushCount > UINT16_MAX)
             throw std::runtime_error("Replay no-spatial dynamic-entity count exceeds 16 bits");
-        // Model clutter is spatial (replay_dynentity.cpp); brushes are not.
-        stamp16(me, kME_dynEntNoSpatialCount, 0);
+        // Model clutter and scriptable instance entries are spatial (replay_dynentity.cpp); scriptable physics
+        // entries and brushes are not.
+        stamp16(me, kME_dynEntNoSpatialCount, static_cast<uint16_t>(dynamic.noSpatialModels));
         stamp16(me, kME_dynEntNoSpatialCount + sizeof(uint16_t),
                 static_cast<uint16_t>(dynamicBrushCount));
         stamp16(me, kME_dynEntMaxClientHistoryCount, 10000);
@@ -907,6 +919,34 @@ inline void emitMapEntsBody(ZoneBuffer &zb, const char *assetName, const std::st
     // there are no authored instances: spawned characters use reserved slots.
     // A null tree exits before allocating their instance-to-marker table.
     stamp64(me, 0x2C0, PTR_FOLLOWS);
+    const bool hasScriptables = scriptables && !scriptables->instances.empty();
+    if (hasScriptables)
+    {
+        // ScriptableMapEnts at 0x1F8. The counts follow the definitions of the instances as in stock maps (IW8 Radiant
+        // research 86, checked on mp_shipment and mp_backlot2): server instances are those whose definition has
+        // server-instanced parts, the fixed and usable part counts are the sums over the instances, and each physics
+        // limit is the number of door-like instances. No loot and no reserved instances.
+        const auto &instances = scriptables->instances;
+        if (scriptables->strings.size() != instances.size() || scriptables->definitionAliases.size() != instances.size())
+            throw std::runtime_error("Replay scriptable instance tables disagree");
+        uint32_t server = 0, fixedParts = 0, usableParts = 0, limits = 0;
+        for (const auto &instance : instances)
+        {
+            server += instance.serverInstancedParts ? 1 : 0;
+            fixedParts += instance.serverInstancedParts;
+            usableParts += instance.usableParts;
+            limits += instance.physicsLimit ? 1 : 0;
+        }
+        stamp32(me, 0x1FC, static_cast<uint32_t>(instances.size())); // mapInstanceCount
+        stamp32(me, 0x208, server);                                  // serverInstanceCount
+        stamp32(me, 0x20C, fixedParts);                              // serverFixedPartCount
+        stamp32(me, 0x210, usableParts);                             // serverUsablePartCount
+        for (unsigned k = 0; k < 6; ++k)
+            stamp32(me, 0x214 + k * 4, limits); // ScriptablePhysicsLimits
+        stamp64(me, 0x230, PTR_FOLLOWS);        // mapInstances
+        // ffMemCost: stock 1240 = this 216-byte block + its two 64-entry reserved-dynent tables, which are not written.
+        stamp32(me, 0x2C8, 216);
+    }
     zb.pushStream(XFILE_BLOCK_TEMP_PRELOAD);
     zb.align(
         7); // struct -> retail STREAM 1: live [STREAM-STATE] map_ents curStream=1 (srv's small TEMP
@@ -968,15 +1008,40 @@ inline void emitMapEntsBody(ZoneBuffer &zb, const char *assetName, const std::st
         zb.align(3);
         // Population 0 is the radial clutter population; its leaf bounds the
         // clutter. Stock leaf extents are the entries' bounds.
-        const bool clutter = i == 0 && dynamicModelCount;
+        // Population 1 is the sparse occluders (door instance entries), bounded the same way.
+        const bool clutter = i == 0 && dynamic.radialModels;
+        const bool occluders = i == 1 && dynamic.occluderModels;
+        const auto &mins = occluders ? dynamic.occluderMins : dynamic.modelMins;
+        const auto &maxs = occluders ? dynamic.occluderMaxs : dynamic.modelMaxs;
         for (unsigned k = 0; k < 3; ++k)
-            zb.writeT<float>(clutter ? dynamic.modelMins[k] : -100000.f);
+            zb.writeT<float>(clutter || occluders ? mins[k] : -100000.f);
         for (unsigned k = 0; k < 3; ++k)
-            zb.writeT<float>(clutter ? dynamic.modelMaxs[k] : 100000.f);
+            zb.writeT<float>(clutter || occluders ? maxs[k] : 100000.f);
         zb.align(3);
         zb.writeT<uint32_t>(0xFFFFFFFFu);
     }
-    // Load_ScriptableMapEnts DBCF30 -> DDFE70 (one empty spatial leaf).
+    // Load_ScriptableMapEnts DBCF30: the instance records (72 bytes, align 8; the definition is an alias of the
+    // name-only reference registered before this asset, the six names are script-string indices), the two reserved
+    // dynent tables (none), then DDFE70, the spatial tree (one leaf that holds every instance).
+    if (hasScriptables)
+    {
+        zb.align(7);
+        for (size_t index = 0; index < scriptables->instances.size(); ++index)
+        {
+            const auto &instance = scriptables->instances[index];
+            uint8_t record[72]{};
+            stamp64(record, 0, scriptables->definitionAliases[index]);
+            for (unsigned k = 0; k < 3; ++k)
+            {
+                stampf(record, 8 + k * 4, instance.origin[k]);
+                stampf(record, 20 + k * 4, instance.angles[k]);
+            }
+            for (unsigned k = 0; k < 6; ++k)
+                stamp32(record, 32 + k * 4, scriptables->strings[index][k]);
+            record[70] = instance.flags;
+            zb.write(record, sizeof(record));
+        }
+    }
     zb.align(7);
     uint8_t scriptableTree[24]{};
     stamp64(scriptableTree, 0, PTR_FOLLOWS);
@@ -1344,10 +1409,12 @@ struct MapWorldStrings
     std::shared_ptr<staticmodelcollision::Plan> staticCollisionPlan;
     bool hasLinearLightDef = false;
     uint32_t lightDefNameStringIndex = 0;
+    std::shared_ptr<MapScriptables> scriptables;
 };
 inline MapWorldStrings internMapWorldStrings(
     ZoneWriter &writer, const std::string &ents, const MapSun &lighting,
-    const std::vector<staticmodelcollision::Model> &collisionModels)
+    const std::vector<staticmodelcollision::Model> &collisionModels,
+    const std::vector<ScriptableInstance> *scriptableInstances = nullptr)
 {
     MapWorldStrings result;
     result.spawns = std::make_shared<ReplaySpawns>(ents);
@@ -1362,6 +1429,18 @@ inline MapWorldStrings internMapWorldStrings(
         if (result.spawns->records.empty())
             throw std::runtime_error("local lightdef requires Replay spawn string list");
         result.lightDefNameStringIndex = result.spawns->intern("light_point_linear");
+    }
+    if (scriptableInstances && !scriptableInstances->empty())
+    {
+        // The class name of an instance is "scriptable_<definition>" (stock: 8005 = scriptable_com_trafficcone_01);
+        // an empty name is the null string (index 0), as in stock records.
+        result.scriptables = std::make_shared<MapScriptables>();
+        result.scriptables->instances = *scriptableInstances;
+        const auto name = [&](const std::string &text) { return text.empty() ? 0u : result.spawns->intern(text); };
+        for (const auto &instance : *scriptableInstances)
+            result.scriptables->strings.push_back({result.spawns->intern("scriptable_" + instance.definition),
+                                                   name(instance.target), name(instance.targetname), name(instance.linkname),
+                                                   name(instance.linkto), name(instance.noteworthy)});
     }
     const auto &strings = result.spawns->strings;
     if (strings.size() > 2)
@@ -1382,6 +1461,7 @@ inline void registerMapWorldAssets(ZoneWriter &writer, const MapWorldStrings &st
                                    std::shared_ptr<const ClientTriggerSet> clientTriggers = {})
 {
     const auto spawns = strings.spawns;
+    const auto scriptables = strings.scriptables;
     const auto staticCollisionPlan = strings.staticCollisionPlan;
     const bool hasLadders = !collision.ladders.empty();
     const bool hasLinearLightDef = strings.hasLinearLightDef;
@@ -1391,11 +1471,18 @@ inline void registerMapWorldAssets(ZoneWriter &writer, const MapWorldStrings &st
             emitMapEdgeListBody(output.buffer(), collision.ladders);
         });
     writer.add(ASSET_TYPE_MAP_ENTS, assetName,
-               [assetName, ents, spawns, &collision, hasLadders, dynamic, clientTriggers](ZoneWriter &output) {
+               [assetName, ents, spawns, &collision, hasLadders, dynamic, clientTriggers, scriptables](ZoneWriter &output) {
                    const uint64_t edgeListAlias =
                        hasLadders ? output.assetAlias(ASSET_TYPE_EDGELIST, assetName) : PTR_NULL;
+                   if (scriptables)
+                   {
+                       scriptables->definitionAliases.clear();
+                       for (const auto &instance : scriptables->instances)
+                           scriptables->definitionAliases.push_back(
+                               output.assetAlias(ASSET_TYPE_SCRIPTABLE, instance.definition));
+                   }
                    emitMapEntsBody(output.buffer(), assetName.c_str(), ents, spawns.get(),
-                                   &collision, edgeListAlias, dynamic, clientTriggers.get());
+                                   &collision, edgeListAlias, dynamic, clientTriggers.get(), scriptables.get());
                });
 
     // col_map(23): clipMap struct -> TEMP_PRELOAD, variable data -> VIRTUAL.

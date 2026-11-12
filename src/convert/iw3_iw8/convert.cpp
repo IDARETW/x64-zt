@@ -1405,6 +1405,9 @@ std::vector<OutputLedgerRow> outputLedgerRows(
             set(ASSET_TYPE_PARTICLESIMANIMATION, sim.name, "particle sim animation of a native effect");
         for (const auto &[type, name] : prepared->vfxReferences)
             set(type, name, "name-only reference to the common-zone asset (debris of a native effect)");
+        for (const auto &instance : prepared->scriptableInstances)
+            set(ASSET_TYPE_SCRIPTABLE, instance.definition,
+                "name-only reference to the definition of a scriptable instance of the map");
     }
     if (stock)
         for (const auto &[key, origin] : stock->Origins())
@@ -1746,7 +1749,8 @@ int writeMapPackage(const Args &args, const std::string &map, const std::string 
         static const std::vector<iw8::staticmodelcollision::Model> noStaticCollisionModels;
         const auto worldStrings = iw8::internMapWorldStrings(
             writer, mapEntities, lighting,
-            prepared ? prepared->staticModelCollisionModels : noStaticCollisionModels);
+            prepared ? prepared->staticModelCollisionModels : noStaticCollisionModels,
+            prepared ? &prepared->scriptableInstances : nullptr);
         replayrender::RegisterMapMaterials(writer, techsets, renderMesh);
         replayrender::RegisterReflectionProbeImage(writer, renderMesh);
         replayrender::RegisterVolumetricMaskImages(writer, renderMesh);
@@ -1803,6 +1807,10 @@ int writeMapPackage(const Args &args, const std::string &map, const std::string 
             // Copies: the output ledger names them after the zone build.
             for (const auto &effect : prepared->vfxEffects)
                 iw8::vfx::Register(writer, effect);
+            // The definitions of the scriptable instances: name-only references to an always-loaded zone, which
+            // the MapEnts instance records alias.
+            for (const auto &instance : prepared->scriptableInstances)
+                iw8::stock::RegisterNameReference(writer, ASSET_TYPE_SCRIPTABLE, instance.definition);
             iw8::RegisterDynamicEntityList(writer, prepared->dynamicEntities);
         }
         iw8::impact::Register(writer, map,
