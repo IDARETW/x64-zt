@@ -2327,6 +2327,24 @@ int writeMapPackage(const Args &args, const std::string &map, const std::string 
         else if (prepared && !prepared->mapScript.empty())
             warn("scripts: pass --gsc-tool (or set IW8_GSC_TOOL) to compile the converted IW3 map "
                  "scripts; using the minimap-only startup script");
+        // New game type scripts of the map (IW8 Radiant research 91 / 92), compiled as they are.
+        if (prepared && !prepared->gameTypeScripts.empty())
+        {
+            if (gscTool.empty())
+                throw std::runtime_error("the map carries game type scripts; pass --gsc-tool (or set IW8_GSC_TOOL) to compile them");
+            const std::filesystem::path work = std::filesystem::path(path_dir(outputDirectory)) / ".iw3-scripts" / map / "gametypes";
+            for (const auto &[name, gameTypeSource] : prepared->gameTypeScripts)
+            {
+                // A script that does not compile stops the build: a match started with this game type would drop.
+                const auto gscbin = iw3::scripts::Compile(gameTypeSource, gscTool, work, name);
+                const std::string scriptName = "scripts/mp/gametypes/" + name + ".gsc";
+                writer.add(ASSET_TYPE_SCRIPTFILE, scriptName,
+                           [scriptName, gscbin](iw8::ZoneWriter &output) {
+                               iw8::replay_script::emitCompiledScript(output, scriptName, gscbin);
+                           });
+                info("scripts: compiled game type script %s (%zu bytes gscbin)", scriptName.c_str(), gscbin.size());
+            }
+        }
         if (!scriptCompiled && assets.hasCompass && compassBounds)
         {
             const std::string scriptName = "scripts/mp/maps/" + map + "/" + map + ".gsc";

@@ -10192,6 +10192,7 @@ PreparedMap::PreparedMap(PreparedMap &&other) noexcept
     , lootPoints(std::move(other.lootPoints))
     , navigation(std::move(other.navigation))
     , mapScript(std::move(other.mapScript))
+    , gameTypeScripts(std::move(other.gameTypeScripts))
     , scriptMaterials(std::move(other.scriptMaterials))
     , gradingClutName(std::move(other.gradingClutName))
     , gradingClutPixels(std::move(other.gradingClutPixels))
@@ -10247,6 +10248,7 @@ PreparedMap &PreparedMap::operator=(PreparedMap &&other) noexcept
         carryAssets = std::move(other.carryAssets);
         navigation = std::move(other.navigation);
         mapScript = std::move(other.mapScript);
+        gameTypeScripts = std::move(other.gameTypeScripts);
         scriptMaterials = std::move(other.scriptMaterials);
         gradingClutName = std::move(other.gradingClutName);
         gradingClutPixels = std::move(other.gradingClutPixels);
@@ -11388,6 +11390,29 @@ PreparedMap PrepareFastfile(const ImportOptions &options)
                                                  Lowercase(entry.path().filename().string()),
                                              std::move(text)});
             }
+        }
+        // New game type scripts (IW8 GSC, compiled as they are): extracted/scripts/mp/gametypes/<name>.gsc.
+        {
+            const auto gameTypeDirectory = exportRoot / "scripts" / "mp" / "gametypes";
+            std::error_code gameTypeError;
+            if (std::filesystem::is_directory(gameTypeDirectory, gameTypeError))
+                for (const auto &entry : std::filesystem::directory_iterator(gameTypeDirectory))
+                {
+                    if (!entry.is_regular_file() || Lowercase(entry.path().extension().string()) != ".gsc")
+                        continue;
+                    const std::string name = Lowercase(entry.path().stem().string());
+                    bool valid = !name.empty() && name.size() <= 11;
+                    for (const char c : name)
+                        valid = valid && (std::islower(static_cast<unsigned char>(c)) || std::isdigit(static_cast<unsigned char>(c)) || c == '_');
+                    std::string text;
+                    if (!valid)
+                        zt::warn("iw3: game type script %s left out: the name must be 1 to 11 of a-z, 0-9 and _",
+                                 entry.path().filename().string().c_str());
+                    else if (zt::read_file_str(entry.path().string(), text))
+                        result.gameTypeScripts.push_back({name, std::move(text)});
+                }
+            if (!result.gameTypeScripts.empty())
+                zt::info("iw3: %zu game type script(s) of the map", result.gameTypeScripts.size());
         }
         // Chyron unit names: stock IW8's most common pair (Shipment's), whatever
         // the IW3 factions were (owner 2026-10-17: "OpFor" should not show).

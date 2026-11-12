@@ -300,6 +300,11 @@ struct PreparedMap
     // IW8 GSC translated from the map's IW3 scripts (without the generated
     // minimap function), compiled with gsc-tool at package time.
     std::string mapScript;
+    // New game type scripts the map carries (IW8 Radiant research 91 / 92): IW8 GSC files
+    // extracted/scripts/mp/gametypes/<name>.gsc, compiled as they are (no IW3 translation) into the map zone as
+    // scripts/mp/gametypes/<name>.gsc. A stock name cannot be replaced from a map zone (research 91), so these are new
+    // names; the match is started with that game type.
+    std::vector<std::pair<std::string, std::string>> gameTypeScripts;
     // HUD materials the map's source scripts name in precacheshader / setshader string literals (the translation drops
     // precacheshader); listed in the level "mat" NetConstStrings table at package time.
     std::vector<std::string> scriptMaterials;
