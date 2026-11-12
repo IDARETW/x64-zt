@@ -3369,7 +3369,9 @@ namespace zonetool::convert::iw3_iw8
 				{
 					cluster_lists[point.cluster].push_back(static_cast<std::uint16_t>(i));
 				}
-				if (point.zone)
+				// A loot cache point names its zone but is not in the zone's list (the rule holds on every zone of
+				// mp_br_tut, mp_br_quarry and mp_donetsk).
+				if (point.zone && point.cluster != cache_point)
 				{
 					zone_points(point.zone - 1u).push_back(static_cast<std::uint16_t>(i));
 				}
