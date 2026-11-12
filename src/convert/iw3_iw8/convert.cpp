@@ -3436,13 +3436,15 @@ namespace zonetool::convert::iw3_iw8
 	//       none). With "loot_points" (applied after this) "auto" points find the new boxes like the stock ones.
 	//   "scriptable_instances": {"move": [{"index": n, "origin": [x, y, z], "angles": [p, y, r]}],
 	//       "add": [{"like": n, "origin": [x, y, z], "angles": [p, y, r], "server_instanced_parts": n, "usable_parts": n,
-	//       "physics_limit": bool, "physics_limit_detail": bool}]} moves placed scriptables (MapEnts
-	//       scriptableMapEnts.mapInstances) and adds copies of one (IW8 Radiant research 89 section 8). Only for
-	//       instances without dynamic entities of their own (the Warzone buy station): an instance that a dynamic entity
-	//       of this zone names is refused, because that entity holds its own placement. A copy takes the definition, the
-	//       class name and the flags of instance "like"; the instance count, the three server counts and the physics
-	//       limits rise by the numbers given (those of the definition, from the editor's catalogue). Nothing is removed:
-	//       the dynamic entities of other instances name their instance by index.
+	//       "physics_limit": bool, "physics_limit_detail": bool}], "remove": [{"index": n, <the same numbers>}]} moves
+	//       placed scriptables (MapEnts scriptableMapEnts.mapInstances), adds copies of one and removes them (IW8 Radiant
+	//       research 89 section 8). A copy takes the definition, the class name and the flags of instance "like"; the
+	//       instance count, the three server counts and the physics limits rise (or fall, for "remove") by the numbers
+	//       given (those of the definition, from the editor's catalogue). The dynamic entities of an instance follow: a
+	//       move gives them the new pose and spatial partition, a copy gets copies of the entries of "like" (signs,
+	//       fences, props and doors: radial and sparse-occluder entries, and no-spatial ones), a removal drops them; the
+	//       lists, chains, counts and the GfxWorld client arrays are rebuilt. Refused: streamed (transient) entries,
+	//       entries placed apart from their instance, and a removal when a list in a streamed zone names a later instance.
 	//   "stock_patches": {"<zone>.fp": "<file>" | ""} names, per patch file of the game's zone folder, the stock patch
 	//       to read that zone with ("" = the stock game has no patch of that name). The game ships patches with real
 	//       map data (mp_br_quarry.fp, mp_donetsk.fp, ...), and an installed edit replaces the patch of its zone: with
@@ -4097,6 +4099,12 @@ namespace zonetool::convert::iw3_iw8
 		// Kept alive until the zone is written.
 		using PlacedScriptable = std::remove_pointer_t<decltype(std::declval<MapEnts&>().scriptableMapEnts.mapInstances)>;
 		std::vector<PlacedScriptable> scriptable_records;
+		// The rebuilt dynamic entity lists, bucket arrays and GfxWorld dynamic-entity arrays of a copy or removal.
+		std::deque<std::vector<DynEntityDef>> dynent_storage;
+		std::deque<std::vector<SpatialPartition_Population_Node>> dynent_node_storage;
+		std::deque<std::vector<std::uint32_t>> dynent_u32_storage;
+		std::deque<std::vector<std::uint8_t>> dynent_byte_storage;
+		std::vector<GfxSceneDynModel> dynent_scene_models;
 		if (edits.contains("scriptable_instances"))
 		{
 			auto* ents = static_cast<MapEnts*>(find(ASSET_TYPE_MAP_ENTS));
@@ -4180,12 +4188,46 @@ namespace zonetool::convert::iw3_iw8
 				{
 					throw std::runtime_error(where + ": instance " + std::to_string(value) + " is beyond the map's " + std::to_string(before));
 				}
-				if (with_dynamic_entity.contains(static_cast<std::uint32_t>(value)))
-				{
-					throw std::runtime_error(where + ": instance " + std::to_string(value) +
-						" has a dynamic entity of its own (its placement is there too); only instances without one can be moved or copied");
-				}
+				// An instance with dynamic entities of its own is copied or removed with them (the pass after "remove").
 				return static_cast<std::uint32_t>(value);
+			};
+			constexpr std::uint32_t no_node = 0xFFFFFFFF;
+			// The partition of the MapEnts spatial tree of population "pop" (0: the radial entries, 1: the sparse occluders,
+			// doors) that holds "origin": node i is a leaf for axis 3, else origin[axis] < dist -> i + 1, else rightChild
+			// (IW8 Radiant research 89 section 8: exact for the ordinary entries on Quarry, and for all 319 doors on tree 1).
+			// With "grow" the extents of every node on the path take the origin in (a node's extent holds its entries: z is
+			// the range of their origins).
+			const auto walk_tree = [&](const int pop, const vec3_t& origin, const bool grow, const std::string& where) -> std::uint32_t
+			{
+				auto* population = ents->dynEntSpatialPopulation[pop];
+				if (!population || !population->tree || !population->tree->partitions || !population->tree->partitionCount)
+				{
+					throw std::runtime_error(where + ": the map has no spatial tree for population " + std::to_string(pop));
+				}
+				auto* tree = population->tree;
+				std::uint32_t node = 0;
+				for (std::uint32_t guard = 0; ; guard++)
+				{
+					if (node >= tree->partitionCount || guard > tree->partitionCount)
+					{
+						throw std::runtime_error(where + ": the spatial tree is not walkable");
+					}
+					if (grow && tree->extents)
+					{
+						auto& box = tree->extents[node];
+						for (auto k = 0; k < 3; k++)
+						{
+							box.mins.v[k] = (std::min)(box.mins.v[k], origin.v[k]);
+							box.maxs.v[k] = (std::max)(box.maxs.v[k], origin.v[k]);
+						}
+					}
+					const auto& part = tree->partitions[node];
+					if (part.axis == 3)
+					{
+						return node;
+					}
+					node = origin.v[part.axis] < part.dist ? node + 1 : part.rightChild;
+				}
 			};
 			scriptable_records.assign(block.mapInstances, block.mapInstances + before);
 			std::size_t moved = 0, added = 0, moved_with_dynamic = 0, relinked = 0;
@@ -4194,19 +4236,36 @@ namespace zonetool::convert::iw3_iw8
 			// of its angles) and sit in the spatial partition the MapEnts tree gives for the origin, chained per partition
 			// in DynEntityList.dynEntSpatialPopulation in descending entry order (IW8 Radiant research 89 section 8: exact
 			// on Quarry, tools/dynent_pose_rules.py). Entries of the no-spatial list (partition 0) keep it.
+			const auto quat_of = [](const vec3_t& a, float* q)
+			{
+				const auto rad = 0.00872664625997164788; // pi / 360: half of the angle in radians per degree
+				const double cp = std::cos(a.v[0] * rad), sp = std::sin(a.v[0] * rad), cy = std::cos(a.v[1] * rad),
+					sy = std::sin(a.v[1] * rad), cr = std::cos(a.v[2] * rad), sr = std::sin(a.v[2] * rad);
+				q[0] = static_cast<float>(sr * cp * cy - cr * sp * sy);
+				q[1] = static_cast<float>(cr * sp * cy + sr * cp * sy);
+				q[2] = static_cast<float>(cr * cp * sy - sr * sp * cy);
+				q[3] = static_cast<float>(cr * cp * cy + sr * sp * sy);
+			};
+			// True when a dynamic entity's pose is the placement of "record" (the stock rule: origin, AnglesToQuat).
+			const auto pose_is = [&](const DynEntityDef& def, const ScriptableInstance& record)
+			{
+				float q[4];
+				quat_of(record.initialAngles, q);
+				bool same = true, q_same = true, flipped = true;
+				for (auto k = 0; k < 3; k++)
+				{
+					same = same && std::abs(def.initialPose.origin.v[k] - record.initialOrigin.v[k]) < 0.01f;
+				}
+				for (auto k = 0; k < 4; k++)
+				{
+					q_same = q_same && std::abs(def.initialPose.quat.v[k] - q[k]) < 0.002f;
+					flipped = flipped && std::abs(def.initialPose.quat.v[k] + q[k]) < 0.002f;
+				}
+				return same && (q_same || flipped);
+			};
 			const auto move_dynamic = [&](const std::uint32_t index, const ScriptableInstance& record, const std::string& where)
 			{
 				auto* map_ents = ents;
-				const auto quat_of = [](const vec3_t& a, float* q)
-				{
-					const auto rad = 0.00872664625997164788; // pi / 360: half of the angle in radians per degree
-					const double cp = std::cos(a.v[0] * rad), sp = std::sin(a.v[0] * rad), cy = std::cos(a.v[1] * rad),
-						sy = std::sin(a.v[1] * rad), cr = std::cos(a.v[2] * rad), sr = std::sin(a.v[2] * rad);
-					q[0] = static_cast<float>(sr * cp * cy - cr * sp * sy);
-					q[1] = static_cast<float>(cr * sp * cy + sr * cp * sy);
-					q[2] = static_cast<float>(cr * cp * sy - sr * sp * cy);
-					q[3] = static_cast<float>(cr * cp * cy + sr * sp * sy);
-				};
 				for (auto& asset : zone->assets)
 				{
 					if (asset.type != ASSET_TYPE_DYNENTITYLIST || asset.referenced || !asset.header)
@@ -4294,21 +4353,8 @@ namespace zonetool::convert::iw3_iw8
 							{
 								throw std::runtime_error(where + ": the map has no spatial tree for the dynamic entity of instance " + std::to_string(index));
 							}
-							const auto* tree = population->tree;
-							std::uint32_t node = 0;
-							for (std::uint32_t guard = 0; guard < tree->partitionCount; guard++)
-							{
-								const auto& part = tree->partitions[node];
-								if (part.axis == 3)
-								{
-									break;
-								}
-								node = record.initialOrigin.v[part.axis] < part.dist ? node + 1 : part.rightChild;
-								if (node >= tree->partitionCount)
-								{
-									throw std::runtime_error(where + ": the spatial tree is not walkable");
-								}
-							}
+							// The walked partition; its extents (and those above it) take the new origin in.
+							const auto node = walk_tree(0, record.initialOrigin, true, where);
 							if (node == def.spatialPartitionIndex)
 							{
 								continue;
@@ -4397,6 +4443,7 @@ namespace zonetool::convert::iw3_iw8
 				}
 			}
 			std::int64_t server = 0, fixed_parts = 0, usable_parts = 0, limits = 0, detail_limits = 0;
+			std::vector<std::uint32_t> added_like; // per added instance: the instance it copies
 			if (node.contains("add"))
 			{
 				std::size_t at = 0;
@@ -4404,7 +4451,9 @@ namespace zonetool::convert::iw3_iw8
 				{
 					const auto where = "scriptable_instances.add[" + std::to_string(at++) + "]";
 					// A copy of the stock record as it was read (a moved original does not move its copies).
-					auto record = block.mapInstances[index_of(entry, "like", where)];
+					const auto like = index_of(entry, "like", where);
+					added_like.push_back(like);
+					auto record = block.mapInstances[like];
 					record.initialAngles = {};
 					placement(entry, where, record);
 					record.target = record.targetname = record.script_linkname = record.script_linkto = record.script_noteworthy = scr_string_t{};
@@ -4441,9 +4490,10 @@ namespace zonetool::convert::iw3_iw8
 				}
 			}
 			// "remove": [{"index": n, "server_instanced_parts": n, "usable_parts": n, "physics_limit": bool,
-			// "physics_limit_detail": bool}] drops stock instances without a dynamic entity of their own (the numbers are
-			// the definition's, as for "add"). The dynamic entities that name later instances are renumbered; the spatial
-			// tree holds split planes only (no instance indices), so it stays.
+			// "physics_limit_detail": bool}] drops stock instances (the numbers are the definition's, as for "add"), with
+			// their dynamic entities (the pass below). The dynamic entities that name later instances are renumbered; the
+			// MapEnts spatial trees hold split planes and extents only (no instance indices), so they stay.
+			const auto current = scriptable_records; // moved and added, before a removal
 			std::set<std::uint32_t> removed;
 			if (node.contains("remove"))
 			{
@@ -4496,35 +4546,485 @@ namespace zonetool::convert::iw3_iw8
 						}
 					}
 					scriptable_records = std::move(kept);
-					std::size_t renumbered = 0;
-					for (auto& asset : zone->assets)
+				}
+			}
+			// The dynamic entities of the removed and the copied instances (IW8 Radiant research 89 section 8). Every
+			// stock entry of a list is on exactly one chain: the list's no-spatial chain (partition 0), a bucket of
+			// population 0 (radial entries: signs, fences, props) or of population 1 (sparse occluders: doors), each chain
+			// in descending entry order with its tail the last; partitionIds[b] names the bucket's partition of the MapEnts
+			// tree of that population. The entries of a removed instance leave the list; a copy gets copies of the entries
+			// of its "like" instance (same definition numbers, the copy's pose, the walked partition), inserted after the
+			// last entry that names a real instance (the stock order: instance entries by instance, then the 64 reserved
+			// physics entries that name 500000, then clutter). Everything that names an entry by index is renumbered: the
+			// chains, the bucket heads and tails, the no-spatial head and tail. Counts follow: the list's, the MapEnts
+			// totals, the no-spatial count, the entries with extra pose parts, the populations, and the GfxWorld dynamic
+			// entity client arrays (stock: clients = MapEnts total + 10, words, cell bits, visibility, motion bits and
+			// light shadow bits per client; runtime arrays, zero in the zone).
+			{
+				const auto kept_count = static_cast<std::uint32_t>(before - removed.size());
+				const auto final_index = [&](const std::uint32_t old) -> std::uint32_t
+				{
+					return old - static_cast<std::uint32_t>(std::distance(removed.begin(), removed.lower_bound(old)));
+				};
+				const auto scriptable_type = [](const DynEntityDef& def)
+				{
+					return def.type == DYNENT_TYPE_SCRIPTABLEINST || def.type == DYNENT_TYPE_SCRIPTABLEPHYSICS;
+				};
+				// A dynamic entity list kept in a streamed zone (Verdansk) is not rebuilt: when one of its entries names an
+				// instance at or after a removed one, its index would go stale, and nothing is removed.
+				if (!removed.empty())
+				{
+					std::set<std::uint32_t> held;
+					for (const auto& asset : zone->assets)
 					{
-						if (asset.type != ASSET_TYPE_DYNENTITYLIST || asset.referenced || !asset.header)
+						if (asset.type == ASSET_TYPE_DYNENTITYLIST && !asset.referenced && asset.header)
+						{
+							held.insert(static_cast<std::uint32_t>(static_cast<const DynEntityList*>(asset.header)->index));
+						}
+					}
+					std::size_t checked = 0;
+					const auto lists = static_cast<std::uint32_t>(ents->dynEntityListsCount);
+					for (std::uint32_t l = 0; ents->dynEntListIds && l < lists; l++)
+					{
+						const auto id = static_cast<std::uint32_t>(ents->dynEntListIds[l]);
+						if (held.contains(id))
 						{
 							continue;
 						}
-						auto* list = static_cast<DynEntityList*>(asset.header);
-						for (auto side = 0; side < 2; side++)
+						const auto path = zone_folder / std::format("{}_{:05}_tr.ff", zone_name, id);
+						if (!std::filesystem::exists(path))
 						{
-							for (std::uint32_t i = 0; list->dynEntDefList[side] && i < list->dynEntCount[side]; i++)
+							throw std::runtime_error(std::format("scriptable_instances.remove: dynamic entity list {} of {} is in a streamed zone that "
+								"was not found ({}); its entries may name instances by index, so nothing is removed", id, zone_name, path.filename().string()));
+						}
+						const auto other = load_zone(path, {});
+						for (const auto& asset : other->assets)
+						{
+							if (asset.type != ASSET_TYPE_DYNENTITYLIST || asset.referenced || !asset.header)
 							{
-								auto& entry = list->dynEntDefList[side][i];
-								// The reserved physics entries name no instance (500000 on every stock map): left as they are.
-								if ((entry.type != DYNENT_TYPE_SCRIPTABLEINST && entry.type != DYNENT_TYPE_SCRIPTABLEPHYSICS) ||
-									entry.scriptableMapIndex >= before)
+								continue;
+							}
+							const auto* list = static_cast<const DynEntityList*>(asset.header);
+							for (auto side = 0; side < 2; side++)
+							{
+								for (std::uint32_t i = 0; list->dynEntDefList[side] && i < list->dynEntCount[side]; i++)
 								{
-									continue;
-								}
-								const auto below = static_cast<std::uint32_t>(std::distance(removed.begin(), removed.lower_bound(entry.scriptableMapIndex)));
-								if (below)
-								{
-									entry.scriptableMapIndex -= below;
-									++renumbered;
+									const auto& def = list->dynEntDefList[side][i];
+									if (scriptable_type(def) && def.scriptableMapIndex < before && def.scriptableMapIndex >= *removed.begin())
+									{
+										throw std::runtime_error(std::format("scriptable_instances.remove: the streamed zone {} has a dynamic entity that names "
+											"instance {}; that zone is not rebuilt, so no instance at or before it can be removed",
+											path.filename().string(), def.scriptableMapIndex));
+									}
 								}
 							}
 						}
+						++checked;
 					}
-					report["scriptable_dynamic_entities_renumbered"] = renumbered;
+					report["scriptable_streamed_lists_checked"] = checked;
+				}
+				std::int64_t total_delta = 0, no_spatial_delta = 0, extra_pose_delta = 0;
+				auto max_pose_parts = ents->dynEntMaxPosePartCount;
+				std::size_t dyn_removed = 0, dyn_added = 0, dyn_renumbered = 0, buckets_added = 0, buckets_dropped = 0, off_chain = 0;
+				for (auto& asset : zone->assets)
+				{
+					if (asset.type != ASSET_TYPE_DYNENTITYLIST || asset.referenced || !asset.header)
+					{
+						continue;
+					}
+					auto* list = static_cast<DynEntityList*>(asset.header);
+					const auto list_name = "dynamic entity list " + std::to_string(static_cast<std::uint32_t>(list->index));
+					// Brush entries (none on a stock map) are only renumbered: a removed or copied instance must not have one.
+					for (std::uint32_t i = 0; list->dynEntDefList[1] && i < list->dynEntCount[1]; i++)
+					{
+						auto& def = list->dynEntDefList[1][i];
+						if (!scriptable_type(def) || def.scriptableMapIndex >= before)
+						{
+							continue;
+						}
+						if (removed.contains(def.scriptableMapIndex) || std::ranges::find(added_like, def.scriptableMapIndex) != added_like.end())
+						{
+							throw std::runtime_error("scriptable_instances: instance " + std::to_string(def.scriptableMapIndex) +
+								" has a brush dynamic entity; it cannot be copied or removed");
+						}
+						const auto now = final_index(def.scriptableMapIndex);
+						if (now != def.scriptableMapIndex)
+						{
+							def.scriptableMapIndex = now;
+							++dyn_renumbered;
+						}
+					}
+					auto* defs = list->dynEntDefList[0];
+					const auto n = defs ? list->dynEntCount[0] : 0u;
+					std::vector<bool> drop(n, false);
+					bool any_drop = false;
+					std::uint32_t insert_at = 0;
+					for (std::uint32_t i = 0; i < n; i++)
+					{
+						const auto& def = defs[i];
+						if (!scriptable_type(def) || def.scriptableMapIndex >= before)
+						{
+							continue; // the reserved physics entries (500000) and clutter stay
+						}
+						insert_at = i + 1;
+						if (removed.contains(def.scriptableMapIndex))
+						{
+							if (def.isTransient)
+							{
+								throw std::runtime_error("scriptable_instances.remove: instance " + std::to_string(def.scriptableMapIndex) +
+									" has a streamed dynamic entity; it cannot be removed");
+							}
+							drop[i] = true;
+							any_drop = true;
+						}
+					}
+					// The new entries: per copy, the entries of its "like" instance in their order.
+					struct NewEntry
+					{
+						DynEntityDef def;
+						int pop; // -1: the no-spatial chain, else the population
+					};
+					std::vector<NewEntry> fresh;
+					for (std::size_t k = 0; k < added_like.size(); k++)
+					{
+						const auto like = added_like[k];
+						const auto where = "scriptable_instances.add[" + std::to_string(k) + "]";
+						const auto& now = current[like];        // the instance as it is (after a move)
+						const auto& placed = current[before + k]; // the copy
+						for (std::uint32_t i = 0; i < n; i++)
+						{
+							const auto& def = defs[i];
+							if (!scriptable_type(def) || def.scriptableMapIndex != like)
+							{
+								continue;
+							}
+							if (def.isTransient)
+							{
+								throw std::runtime_error(where + ": instance " + std::to_string(like) + " has a streamed dynamic entity; it cannot be copied");
+							}
+							if (!pose_is(def, now) && !pose_is(def, block.mapInstances[like]))
+							{
+								throw std::runtime_error(where + ": instance " + std::to_string(like) +
+									" has a dynamic entity placed apart from it; it cannot be copied");
+							}
+							auto copy = def;
+							copy.initialPose.origin = placed.initialOrigin;
+							quat_of(placed.initialAngles, copy.initialPose.quat.v);
+							copy.scriptableMapIndex = kept_count + static_cast<std::uint32_t>(k);
+							copy.spatialNode.spatialNodeNext = no_node;
+							auto pop = -1;
+							if (def.priority == DYNENT_PRIORITY_SPARSE_OCCLUDER)
+							{
+								pop = 1;
+							}
+							else if (def.spatialPartitionIndex != 0)
+							{
+								pop = 0;
+							}
+							if (pop >= 0)
+							{
+								if (walk_tree(pop, def.initialPose.origin, false, where) != def.spatialPartitionIndex)
+								{
+									throw std::runtime_error(where + ": the dynamic entity of instance " + std::to_string(like) +
+										" is not in the spatial partition of its place (the stock rule does not hold for it); it cannot be copied");
+								}
+								copy.spatialPartitionIndex = walk_tree(pop, placed.initialOrigin, true, where);
+							}
+							fresh.push_back({copy, pop});
+						}
+					}
+					if (!any_drop && fresh.empty())
+					{
+						// Only the instance numbers change (instances after a removed one).
+						for (std::uint32_t i = 0; i < n; i++)
+						{
+							auto& def = defs[i];
+							if (scriptable_type(def) && def.scriptableMapIndex < before)
+							{
+								const auto now = final_index(def.scriptableMapIndex);
+								if (now != def.scriptableMapIndex)
+								{
+									def.scriptableMapIndex = now;
+									++dyn_renumbered;
+								}
+							}
+						}
+						continue;
+					}
+					// The rebuilt list.
+					auto& out = dynent_storage.emplace_back();
+					out.reserve(n + fresh.size());
+					std::vector<std::uint32_t> map_old(n, no_node), old_of, fresh_at(fresh.size());
+					const auto put_fresh = [&]
+					{
+						for (std::size_t k = 0; k < fresh.size(); k++)
+						{
+							fresh_at[k] = static_cast<std::uint32_t>(out.size());
+							out.push_back(fresh[k].def);
+							old_of.push_back(no_node);
+						}
+					};
+					for (std::uint32_t i = 0; i < n; i++)
+					{
+						if (i == insert_at)
+						{
+							put_fresh();
+						}
+						if (drop[i])
+						{
+							extra_pose_delta -= defs[i].___u15.scriptableMaxPartCount > 1 ? 1 : 0;
+							++dyn_removed;
+							continue;
+						}
+						map_old[i] = static_cast<std::uint32_t>(out.size());
+						old_of.push_back(i);
+						auto def = defs[i];
+						if (scriptable_type(def) && def.scriptableMapIndex < before)
+						{
+							const auto now = final_index(def.scriptableMapIndex);
+							if (now != def.scriptableMapIndex)
+							{
+								def.scriptableMapIndex = now;
+								++dyn_renumbered;
+							}
+						}
+						out.push_back(def);
+					}
+					if (insert_at >= n)
+					{
+						put_fresh();
+					}
+					for (const auto& entry : fresh)
+					{
+						extra_pose_delta += entry.def.___u15.scriptableMaxPartCount > 1 ? 1 : 0;
+						max_pose_parts = (std::max)(max_pose_parts, entry.def.___u15.scriptableMaxPartCount);
+					}
+					dyn_added += fresh.size();
+					// The chains, read from the stock list and written for the new one.
+					const auto read_chain = [&](const std::uint32_t head)
+					{
+						std::vector<std::uint32_t> seq;
+						for (auto at = head; at != no_node; at = defs[at].spatialNode.spatialNodeNext)
+						{
+							if (at >= n || seq.size() > n)
+							{
+								throw std::runtime_error(zone_name + ": a chain of " + list_name + " is broken");
+							}
+							seq.push_back(at);
+						}
+						return seq;
+					};
+					const auto renumbered_chain = [&](const std::vector<std::uint32_t>& seq)
+					{
+						std::vector<std::uint32_t> now;
+						for (const auto at : seq)
+						{
+							if (map_old[at] != no_node)
+							{
+								now.push_back(map_old[at]);
+							}
+						}
+						return now;
+					};
+					const auto insert_descending = [](std::vector<std::uint32_t>& seq, const std::uint32_t at)
+					{
+						seq.insert(std::find_if(seq.begin(), seq.end(), [&](const std::uint32_t other) { return other < at; }), at);
+					};
+					std::vector<bool> on_chain(out.size(), false);
+					const auto write_chain = [&](const std::vector<std::uint32_t>& seq, std::uint32_t& head, std::uint32_t* tail)
+					{
+						head = seq.empty() ? no_node : seq.front();
+						for (std::size_t j = 0; j < seq.size(); j++)
+						{
+							if (on_chain[seq[j]])
+							{
+								throw std::runtime_error(zone_name + ": entry " + std::to_string(seq[j]) + " of " + list_name + " is on two chains");
+							}
+							on_chain[seq[j]] = true;
+							out[seq[j]].spatialNode.spatialNodeNext = j + 1 < seq.size() ? seq[j + 1] : no_node;
+						}
+						if (tail)
+						{
+							*tail = seq.empty() ? no_node : seq.back();
+						}
+					};
+					const auto old_no_spatial = read_chain(list->dynEntNoSpatialList.spatialNodeNext);
+					auto no_spatial = renumbered_chain(old_no_spatial);
+					struct Bucket
+					{
+						std::uint32_t partition;
+						std::vector<std::uint32_t> seq;
+					};
+					std::array<std::vector<Bucket>, 2> buckets;
+					std::array<std::int64_t, 2> population_delta{};
+					for (auto p = 0; p < 2; p++)
+					{
+						const auto* chains = list->dynEntSpatialPopulation[p];
+						for (std::uint32_t b = 0; chains && chains->buckets && chains->partitionIds && b < chains->partitionCount; b++)
+						{
+							const auto old = read_chain(chains->buckets[b].spatialNodeNext);
+							population_delta[p] -= static_cast<std::int64_t>(old.size());
+							buckets[p].push_back({chains->partitionIds[b], renumbered_chain(old)});
+						}
+					}
+					for (std::size_t k = 0; k < fresh.size(); k++)
+					{
+						const auto pop = fresh[k].pop;
+						if (pop < 0)
+						{
+							insert_descending(no_spatial, fresh_at[k]);
+							continue;
+						}
+						if (!list->dynEntSpatialPopulation[pop])
+						{
+							throw std::runtime_error(zone_name + ": " + list_name + " has no spatial population " + std::to_string(pop));
+						}
+						auto& v = buckets[pop];
+						const auto partition = fresh[k].def.spatialPartitionIndex;
+						auto it = std::ranges::find_if(v, [&](const Bucket& b) { return b.partition == partition; });
+						if (it == v.end())
+						{
+							// A partition with no entry of this list yet: a new bucket, in the stock order (ascending ids).
+							it = v.insert(std::ranges::find_if(v, [&](const Bucket& b) { return b.partition > partition; }), Bucket{partition, {}});
+							++buckets_added;
+						}
+						insert_descending(it->seq, fresh_at[k]);
+					}
+					write_chain(no_spatial, list->dynEntNoSpatialList.spatialNodeNext, &list->dynEntNoSpatialListTail.spatialNodeNext);
+					no_spatial_delta += static_cast<std::int64_t>(no_spatial.size()) - static_cast<std::int64_t>(old_no_spatial.size());
+					for (auto p = 0; p < 2; p++)
+					{
+						auto* chains = list->dynEntSpatialPopulation[p];
+						if (!chains)
+						{
+							continue;
+						}
+						auto& v = buckets[p];
+						const auto count_before = v.size();
+						std::erase_if(v, [](const Bucket& b) { return b.seq.empty(); });
+						buckets_dropped += count_before - v.size();
+						auto& heads = dynent_node_storage.emplace_back(v.size());
+						auto& tails = dynent_node_storage.emplace_back(v.size());
+						auto& ids = dynent_u32_storage.emplace_back(v.size());
+						for (std::size_t b = 0; b < v.size(); b++)
+						{
+							ids[b] = v[b].partition;
+							write_chain(v[b].seq, heads[b].spatialNodeNext, &tails[b].spatialNodeNext);
+							population_delta[p] += static_cast<std::int64_t>(v[b].seq.size());
+						}
+						chains->buckets = heads.data();
+						chains->bucketTails = chains->bucketTails ? tails.data() : nullptr;
+						chains->partitionIds = ids.data();
+						chains->partitionCount = static_cast<std::uint32_t>(v.size());
+						chains->currentPopulation = static_cast<std::uint32_t>(static_cast<std::int64_t>(chains->currentPopulation) + population_delta[p]);
+					}
+					// An entry on no chain (none on a stock map) keeps its link, renumbered.
+					for (std::size_t i = 0; i < out.size(); i++)
+					{
+						if (on_chain[i])
+						{
+							continue;
+						}
+						++off_chain;
+						const auto old = old_of[i];
+						const auto next = old == no_node ? no_node : defs[old].spatialNode.spatialNodeNext;
+						out[i].spatialNode.spatialNodeNext = next != no_node && next < n ? map_old[next] : no_node;
+					}
+					const auto delta = static_cast<std::int64_t>(out.size()) - static_cast<std::int64_t>(n);
+					list->dynEntDefList[0] = out.data();
+					list->dynEntCount[0] = static_cast<std::uint32_t>(out.size());
+					list->dynEntCountTotal = static_cast<std::uint32_t>(static_cast<std::int64_t>(list->dynEntCountTotal) + delta);
+					total_delta += delta;
+				}
+				if (dyn_added || dyn_removed)
+				{
+					const auto shift = [](auto& count, const std::int64_t by)
+					{
+						count = static_cast<std::remove_reference_t<decltype(count)>>(static_cast<std::int64_t>(count) + by);
+					};
+					shift(ents->dynEntCount[0], total_delta);
+					shift(ents->dynEntCountTotal, total_delta);
+					shift(ents->dynEntNoSpatialCount[0], no_spatial_delta);
+					shift(ents->dynEntsWithExtraPosePartsCount, extra_pose_delta);
+					ents->dynEntMaxPosePartCount = max_pose_parts;
+				}
+				if (total_delta != 0)
+				{
+					auto* world = static_cast<GfxWorld*>(find(ASSET_TYPE_GFXWORLD));
+					if (!world)
+					{
+						throw std::runtime_error(zone_name + ": no GfxWorld to size the dynamic entity arrays by");
+					}
+					auto& dpvs = world->dpvsDyn;
+					const auto old_count = dpvs.dynEntClientCount[0];
+					const auto old_words = dpvs.dynEntClientWordCount[0];
+					const auto new_signed = static_cast<std::int64_t>(old_count) + total_delta;
+					const auto old_base = (old_count + 31) / 32;
+					const auto factor = old_base ? old_words / old_base : 0;
+					if (!old_count || new_signed <= 0 || (factor != 1 && factor != 2) || factor * old_base != old_words ||
+						world->dynEntMotionBitsEntries[0] != old_words || world->numPrimaryLightDynEntShadowVisEntries[0] % old_count)
+					{
+						throw std::runtime_error(zone_name + ": the GfxWorld dynamic entity arrays do not have the stock sizes; "
+							"no dynamic entity can be added or removed");
+					}
+					const auto new_count = static_cast<std::uint32_t>(new_signed);
+					const auto new_words = factor * ((new_count + 31) / 32);
+					const auto shadow_per = world->numPrimaryLightDynEntShadowVisEntries[0] / old_count;
+					const auto cells = world->dpvsPlanes.cellCount;
+					const auto zero = [](const void* data, const std::size_t bytes)
+					{
+						const auto* b = static_cast<const std::uint8_t*>(data);
+						return !data || std::all_of(b, b + bytes, [](const std::uint8_t x) { return x == 0; });
+					};
+					bool empty = zero(dpvs.dynEntCellBits[0], std::size_t(cells) * old_words * 4) && zero(world->dynEntMotionBits[0], std::size_t(old_words) * 4) &&
+						zero(world->primaryLightDynEntShadowVis[0], std::size_t(world->numPrimaryLightDynEntShadowVisEntries[0]) * 4);
+					for (auto j = 0; j < 12; j++)
+					{
+						empty = empty && (j == 3 || zero(dpvs.dynEntVisData[0][j], std::size_t(old_words) * 32));
+					}
+					if (!empty)
+					{
+						throw std::runtime_error(zone_name + ": the GfxWorld dynamic entity runtime arrays are not empty; "
+							"no dynamic entity can be added or removed");
+					}
+					const auto u32_array = [&](std::uint32_t*& data, const std::size_t count)
+					{
+						if (data)
+						{
+							data = dynent_u32_storage.emplace_back((std::max)(count, std::size_t(1)), 0u).data();
+						}
+					};
+					u32_array(dpvs.dynEntCellBits[0], std::size_t(cells) * new_words);
+					u32_array(world->dynEntMotionBits[0], new_words);
+					u32_array(world->primaryLightDynEntShadowVis[0], std::size_t(shadow_per) * new_count);
+					for (auto j = 0; j < 12; j++)
+					{
+						if (j != 3 && dpvs.dynEntVisData[0][j])
+						{
+							dpvs.dynEntVisData[0][j] = dynent_byte_storage.emplace_back(std::size_t(new_words) * 32, std::uint8_t(0)).data();
+						}
+					}
+					if (world->sceneDynModel)
+					{
+						dynent_scene_models.assign(new_count, GfxSceneDynModel{});
+						std::copy_n(world->sceneDynModel, (std::min)(old_count, new_count), dynent_scene_models.data());
+						world->sceneDynModel = dynent_scene_models.data();
+					}
+					dpvs.dynEntClientCount[0] = new_count;
+					dpvs.dynEntClientWordCount[0] = new_words;
+					world->dynEntMotionBitsEntries[0] = new_words;
+					world->numPrimaryLightDynEntShadowVisEntries[0] = shadow_per * new_count;
+					report["gfx_dynamic_entity_clients_before"] = old_count;
+					report["gfx_dynamic_entity_clients"] = new_count;
+				}
+				report["scriptable_dynamic_entities_renumbered"] = dyn_renumbered;
+				report["scriptable_dynamic_entities_removed"] = dyn_removed;
+				report["scriptable_dynamic_entities_added"] = dyn_added;
+				report["scriptable_dynamic_entity_buckets_added"] = buckets_added;
+				report["scriptable_dynamic_entity_buckets_dropped"] = buckets_dropped;
+				if (off_chain)
+				{
+					report["scriptable_dynamic_entities_off_chain"] = off_chain;
 				}
 			}
 			if (scriptable_records.size() > 60000)
