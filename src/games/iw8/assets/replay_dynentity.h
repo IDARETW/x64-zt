@@ -46,10 +46,12 @@ struct DynamicEntity
 };
 
 // One scriptable instance of the map (MapEnts ScriptableMapEnts.mapInstances) with the numbers of its definition the
-// map-wide counts need. The definition itself is a name-only reference to an always-loaded zone.
+// map-wide counts need. The definition itself is a name-only reference to an always-loaded zone, or, with carryZone,
+// a copy of the stock definition taken from that stock zone when the map zone is written.
 struct ScriptableInstance
 {
     std::string definition;
+    std::string carryZone; // stock zone that holds the definition in full ("" = always loaded)
     std::array<float, 3> origin{};
     std::array<float, 3> angles{};
     std::string targetname, target, linkname, linkto, noteworthy;

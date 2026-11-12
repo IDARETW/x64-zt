@@ -1,5 +1,7 @@
 #pragma once
 
+#include <functional>
+
 namespace zonetool::iw8
 {
 	struct loaded_zone;
@@ -71,4 +73,19 @@ namespace zonetool::iw8
 	xfile::fastfile rewrite_fastfile(const std::string& name, xfile::fastfile file,
 		std::span<const zone_asset> additional, zone_inventory* inventory);
 	xfile::fastfile rewrite_fastfile(const std::string& name, xfile::fastfile file);
+
+	// The name the writer keys an asset definition by (a loaded name stub has the name without its comma).
+	std::string zone_asset_name(std::int32_t type, const void* header);
+
+	// The definitions of a loaded zone that a zone holding `roots` needs in full: the roots and every asset they use,
+	// directly or through other assets, whose data the zone holds. Assets the zone only references (name stubs of a
+	// common zone) are left out: they stay references. The order is the order of first use.
+	// `references` (optional) receives the type and name of every asset the closure only references.
+	std::vector<zone_asset> asset_closure(const loaded_zone& zone, std::span<const zone_asset> roots,
+		std::vector<std::pair<std::int32_t, std::string>>* references = nullptr);
+
+	// As rewrite_fastfile with additions, but the additions are chosen after the zone has loaded: `prepare` sees the
+	// loaded definitions, may change them (for example point a field at an addition) and returns the additions.
+	xfile::fastfile rewrite_fastfile(const std::string& name, xfile::fastfile file,
+		const std::function<std::vector<zone_asset>(loaded_zone&)>& prepare, zone_inventory* inventory);
 }

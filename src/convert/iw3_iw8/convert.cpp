@@ -46,6 +46,7 @@
 #include <cstring>
 #include <filesystem>
 #include <fstream>
+#include <functional>
 #include <future>
 #include <limits>
 #include <map>
@@ -848,13 +849,230 @@ template <> Iw8WriteParams writeParams(const iw8::ZoneBuffer &buffer)
 }
 
 // Writes a zone that the converter built: the x64-zt zone writer lays it out again and the core container stores it.
+using ZonePrepare = std::function<std::vector<zonetool::iw8::zone_asset>(zonetool::iw8::loaded_zone &)>;
+
+// Stock scriptable definitions a map carries (IW8 Radiant research 86, step F3): the definition and everything it
+// uses that its stock zone holds in full (models, their surfaces, materials, images, physics assets, effects), taken
+// from the stock zone in memory and added when the map zone is written again; and the technique sets of those
+// materials, taken from the stock zone's techsets companion and added to the map's techsets zone. Assets the stock
+// zone only references (common zones) stay name references.
+struct ScriptableCarry
+{
+    std::vector<std::unique_ptr<zonetool::iw8::loaded_zone>> zones; // alive until both zones are written
+    std::vector<zonetool::iw8::zone_asset> assets;                  // for the map zone
+    std::vector<zonetool::iw8::zone_asset> techsets;                // for the techsets zone
+    std::map<std::string, void *> definitions;                      // definition name -> its header
+    std::set<std::string> materialNames;                            // carried materials (techsets zone)
+    bool empty() const
+    {
+        return definitions.empty();
+    }
+};
+
+using AssetKey = std::pair<std::int32_t, std::string>;
+
+// Additions that the loaded zone does not hold or name yet, each once.
+std::vector<zonetool::iw8::zone_asset> NewAdditions(const zonetool::iw8::loaded_zone &zone,
+                                                    const std::vector<zonetool::iw8::zone_asset> &wanted)
+{
+    std::set<AssetKey> have;
+    for (const auto &asset : zone.assets)
+        have.emplace(asset.type, zonetool::iw8::zone_asset_name(asset.type, asset.header));
+    for (const auto &asset : zone.list)
+        have.emplace(asset.type, zonetool::iw8::zone_asset_name(asset.type, asset.header));
+    std::vector<zonetool::iw8::zone_asset> result;
+    for (const auto &asset : wanted)
+        if (have.emplace(asset.type, zonetool::iw8::zone_asset_name(asset.type, asset.header)).second)
+            result.push_back(asset);
+    return result;
+}
+
+ScriptableCarry CarryScriptableDefinitions(const std::vector<iw8::ScriptableInstance> &instances,
+                                           const std::string &replayExecutable)
+{
+    ScriptableCarry carry;
+    std::map<std::string, std::set<std::string>> wanted; // stock zone -> definitions
+    for (const auto &instance : instances)
+        if (!instance.carryZone.empty())
+            wanted[instance.carryZone].insert(instance.definition);
+    if (wanted.empty())
+        return carry;
+    if (replayExecutable.empty())
+        throw std::runtime_error("carrying a stock scriptable definition needs --replay (the game folder)");
+    const auto zoneFolder = std::filesystem::path(replayExecutable).parent_path() / "zone";
+
+    // One stock zone in memory with its full definitions by type and name.
+    struct Source
+    {
+        std::unique_ptr<zonetool::iw8::loaded_zone> zone;
+        std::map<AssetKey, zonetool::iw8::zone_asset> full;
+        std::vector<zonetool::iw8::zone_asset> roots;
+        std::set<AssetKey> rootKeys;
+        std::vector<zonetool::iw8::zone_asset> closure;
+    };
+    const auto open = [&](const std::string &name, const bool required) {
+        Source source;
+        const auto path = zoneFolder / (name + ".ff");
+        if (!std::filesystem::exists(path))
+        {
+            if (required)
+                throw std::runtime_error("stock zone " + path.string() + " (scriptable definitions) was not found");
+            return source;
+        }
+        source.zone = zonetool::iw8::load_zone(path, {.keep_temp_data = true});
+        for (const auto &asset : source.zone->assets)
+            if (!asset.referenced)
+                source.full.try_emplace(AssetKey{asset.type, zonetool::iw8::zone_asset_name(asset.type, asset.header)},
+                                        zonetool::iw8::zone_asset{asset.type, asset.header, false});
+        return source;
+    };
+
+    for (const auto &[zoneName, names] : wanted)
+    {
+        info("scriptables: reading stock zone %s for %zu definition(s)", zoneName.c_str(), names.size());
+        // The map zone holds the definition, its models and the images; its techsets companion holds the materials
+        // of those models with their technique sets and shaders. Each names the other's assets by reference, so the
+        // two closures are followed until neither names anything the other holds.
+        std::array<Source, 2> sources{open(zoneName, true), open("techsets_" + zoneName, false)};
+        for (const auto &name : names)
+        {
+            const AssetKey key{zonetool::iw8::ASSET_TYPE_SCRIPTABLE, name};
+            const auto found = sources[0].full.find(key);
+            if (found == sources[0].full.end())
+                throw std::runtime_error("stock zone " + zoneName + " does not hold the scriptable definition " + name);
+            if (carry.definitions.emplace(name, found->second.header).second && sources[0].rootKeys.insert(key).second)
+                sources[0].roots.push_back(found->second);
+        }
+        std::set<AssetKey> unresolved;
+        for (int round = 0; round < 8; ++round)
+        {
+            bool grew = false;
+            unresolved.clear();
+            std::vector<AssetKey> references;
+            for (auto &source : sources)
+            {
+                if (!source.zone || source.roots.empty())
+                    continue;
+                std::vector<AssetKey> named;
+                source.closure = zonetool::iw8::asset_closure(*source.zone, source.roots, &named);
+                references.insert(references.end(), named.begin(), named.end());
+            }
+            for (const auto &key : references)
+            {
+                bool held = false;
+                for (auto &source : sources)
+                {
+                    const auto found = source.full.find(key);
+                    if (found == source.full.end())
+                        continue;
+                    held = true;
+                    if (source.rootKeys.insert(key).second)
+                    {
+                        source.roots.push_back(found->second);
+                        grew = true;
+                    }
+                }
+                if (!held)
+                    unresolved.insert(key);
+            }
+            if (!grew)
+                break;
+        }
+        const auto summary = [](const std::vector<zonetool::iw8::zone_asset> &assets) {
+            std::map<std::string, std::size_t> byType;
+            for (const auto &asset : assets)
+            {
+                const auto format = zonetool::iw8::find_asset_format(asset.type);
+                ++byType[format ? format->name : "?"];
+            }
+            std::string text;
+            for (const auto &[type, count] : byType)
+                text += (text.empty() ? "" : ", ") + std::to_string(count) + " " + type;
+            return text;
+        };
+        info("scriptables: %s gives %zu asset(s): %s", zoneName.c_str(), sources[0].closure.size(),
+             summary(sources[0].closure).c_str());
+        if (sources[1].zone)
+            info("scriptables: techsets_%s gives %zu asset(s): %s", zoneName.c_str(), sources[1].closure.size(),
+                 summary(sources[1].closure).c_str());
+        {
+            // What stays a name reference must be in a zone every multiplayer match has loaded, as it is for the
+            // stock map. The zones are read smallest first and only while something is still unaccounted for.
+            // "$..." images are engine-made.
+            static const char *const kAlwaysLoaded[] = {
+                "techsets_common",    "techsets_common_mp", "techsets_common_core_mp", "techsets_common_base_mp",
+                "techsets_global_mp", "techsets_global_stream_mp", "code_pre_gfx", "global_core_mp", "common", "global",
+                "common_core_mp",     "global_mp",          "global_stream_mp",        "code_post_gfx",
+                "common_base_mp",     "common_mp"};
+            const std::size_t referenced = unresolved.size();
+            std::erase_if(unresolved, [](const AssetKey &key) { return !key.second.empty() && key.second.front() == '$'; });
+            std::map<std::string, std::size_t> foundIn;
+            for (const char *const name : kAlwaysLoaded)
+            {
+                if (unresolved.empty())
+                    break;
+                const auto path = zoneFolder / (std::string(name) + ".ff");
+                if (!std::filesystem::exists(path))
+                    continue;
+                std::set<AssetKey> held;
+                try
+                {
+                    const auto zone = zonetool::iw8::load_zone(path, {});
+                    for (const auto &asset : zone->assets)
+                        if (!asset.referenced)
+                            held.emplace(asset.type, zonetool::iw8::zone_asset_name(asset.type, asset.header));
+                }
+                catch (const std::exception &e)
+                {
+                    warn("scriptables: cannot read %s to check name references: %s", name, e.what());
+                    continue;
+                }
+                const auto before = unresolved.size();
+                std::erase_if(unresolved, [&](const AssetKey &key) { return held.count(key) != 0; });
+                if (before != unresolved.size())
+                    foundIn[name] = before - unresolved.size();
+            }
+            std::string where;
+            for (const auto &[name, count] : foundIn)
+                where += (where.empty() ? "" : ", ") + std::to_string(count) + " in " + name;
+            info("scriptables: %zu asset(s) stay name references to always-loaded zones (%s)", referenced - unresolved.size(),
+                 where.empty() ? "engine-made" : where.c_str());
+            std::map<std::string, std::pair<std::size_t, std::string>> byType;
+            for (const auto &[type, name] : unresolved)
+            {
+                const auto format = zonetool::iw8::find_asset_format(type);
+                auto &[count, listed] = byType[format ? format->name : "?"];
+                ++count;
+                if (listed.size() < 300)
+                    listed += (listed.empty() ? "" : ", ") + name;
+            }
+            for (const auto &[type, entry] : byType)
+                warn("scriptables: %zu %s named by the carried definitions are in no zone that is always loaded; "
+                     "they will be missing in game: %s",
+                     entry.first, type.c_str(), entry.second.c_str());
+        }
+        // Each carried material lives in the techsets zone and is named from the main zone by a reference entry, as
+        // the map's own materials are.
+        for (const auto &asset : sources[1].closure)
+            if (asset.type == zonetool::iw8::ASSET_TYPE_MATERIAL)
+                carry.materialNames.insert(zonetool::iw8::zone_asset_name(asset.type, asset.header));
+        carry.assets.insert(carry.assets.end(), sources[0].closure.begin(), sources[0].closure.end());
+        carry.techsets.insert(carry.techsets.end(), sources[1].closure.begin(), sources[1].closure.end());
+        for (auto &source : sources)
+            if (source.zone)
+                carry.zones.push_back(std::move(source.zone));
+    }
+    return carry;
+}
+
+// `prepare` (optional) runs on the loaded zone before it is written again and returns more additions.
 bool writeZone(const std::string &outputPath, std::vector<uint8_t> body, const Iw8WriteParams &params,
                const std::span<const zonetool::iw8::zone_asset> additional = {},
-               zonetool::iw8::zone_inventory *inventory = nullptr)
+               zonetool::iw8::zone_inventory *inventory = nullptr, const ZonePrepare &prepare = {})
 {
     if (g_converterLayout)
     {
-        if (!additional.empty())
+        if (!additional.empty() || prepare)
         {
             err("iw8: native asset additions require the x64-zt writer");
             return false;
@@ -877,8 +1095,18 @@ bool writeZone(const std::string &outputPath, std::vector<uint8_t> body, const I
         file.xfile_version = params.xfileVersion;
         file.transient = params.transientFileType != 0;
         file.preload_walk_size = params.preloadWalkSize;
-        auto written = zonetool::iw8::rewrite_fastfile(
-            std::filesystem::path(outputPath).stem().string(), std::move(file), additional, inventory);
+        auto written = prepare
+                           ? zonetool::iw8::rewrite_fastfile(
+                                 std::filesystem::path(outputPath).stem().string(), std::move(file),
+                                 [&](zonetool::iw8::loaded_zone &zone) {
+                                     std::vector<zonetool::iw8::zone_asset> all(additional.begin(), additional.end());
+                                     const auto more = prepare(zone);
+                                     all.insert(all.end(), more.begin(), more.end());
+                                     return all;
+                                 },
+                                 inventory)
+                           : zonetool::iw8::rewrite_fastfile(std::filesystem::path(outputPath).stem().string(),
+                                                             std::move(file), additional, inventory);
         written.block_sizes[iw8::XFILE_BLOCK_TEMP_POSTLOAD] += params.postloadMargin;
         zonetool::xfile::write(outputPath, zonetool::iw8::definition().format, written);
         info("iw8: wrote %s (%zu bytes of zone data)", outputPath.c_str(), written.payload.size());
@@ -1407,7 +1635,8 @@ std::vector<OutputLedgerRow> outputLedgerRows(
             set(type, name, "name-only reference to the common-zone asset (debris of a native effect)");
         for (const auto &instance : prepared->scriptableInstances)
             set(ASSET_TYPE_SCRIPTABLE, instance.definition,
-                "name-only reference to the definition of a scriptable instance of the map");
+                instance.carryZone.empty() ? "name-only reference to the definition of a scriptable instance of the map"
+                                           : "stock scriptable definition carried from " + instance.carryZone);
     }
     if (stock)
         for (const auto &[key, origin] : stock->Origins())
@@ -1810,7 +2039,8 @@ int writeMapPackage(const Args &args, const std::string &map, const std::string 
             // The definitions of the scriptable instances: name-only references to an always-loaded zone, which
             // the MapEnts instance records alias.
             for (const auto &instance : prepared->scriptableInstances)
-                iw8::stock::RegisterNameReference(writer, ASSET_TYPE_SCRIPTABLE, instance.definition);
+                if (instance.carryZone.empty())
+                    iw8::stock::RegisterNameReference(writer, ASSET_TYPE_SCRIPTABLE, instance.definition);
             iw8::RegisterDynamicEntityList(writer, prepared->dynamicEntities);
         }
         iw8::impact::Register(writer, map,
@@ -2058,8 +2288,22 @@ int writeMapPackage(const Args &args, const std::string &map, const std::string 
         techsets.build();
         timing.lap("techsets zone build");
 
+        static const std::vector<iw8::ScriptableInstance> noScriptables;
+        const auto &scriptableInstances = prepared ? prepared->scriptableInstances : noScriptables;
+        const ScriptableCarry carry = CarryScriptableDefinitions(scriptableInstances, args.replayExecutable);
+        for (const auto &name : carry.materialNames)
+            if (!writer.has(ASSET_TYPE_MATERIAL, name))
+                iw8::stock::RegisterNameReference(writer, ASSET_TYPE_MATERIAL, name);
+        timing.lap("stock scriptable definitions");
+
         const auto techsetParams = writeParams(techsets);
-        if (!writeZone(path_join(outputDirectory, "techsets_" + map + ".ff"), techsets.takeBody(), techsetParams))
+        const ZonePrepare techsetPrepare = carry.techsets.empty() ? ZonePrepare{} : [&carry](zonetool::iw8::loaded_zone &zone) {
+            auto additions = NewAdditions(zone, carry.techsets);
+            info("scriptables: %zu stock technique-set asset(s) added to the techsets zone", additions.size());
+            return additions;
+        };
+        if (!writeZone(path_join(outputDirectory, "techsets_" + map + ".ff"), techsets.takeBody(), techsetParams, {},
+                       nullptr, techsetPrepare))
         {
             result = 1;
         }
@@ -2071,14 +2315,39 @@ int writeMapPackage(const Args &args, const std::string &map, const std::string 
         const auto native = prepared ? std::span<const zonetool::iw8::zone_asset>(prepared->nativeAssets)
                                      : std::span<const zonetool::iw8::zone_asset>{};
         zonetool::iw8::zone_inventory nativeInventory;
+        // Carried scriptable definitions join the zone here, and each instance record gets its definition.
+        const ZonePrepare mapPrepare = carry.empty() ? ZonePrepare{} : [&](zonetool::iw8::loaded_zone &zone) {
+            auto additions = NewAdditions(zone, carry.assets);
+            std::size_t pointed = 0;
+            for (const auto &asset : zone.assets)
+            {
+                if (asset.type != zonetool::iw8::ASSET_TYPE_MAP_ENTS || asset.referenced)
+                    continue;
+                auto &block = static_cast<zonetool::iw8::MapEnts *>(asset.header)->scriptableMapEnts;
+                if (block.mapInstanceCount != scriptableInstances.size() || !block.mapInstances)
+                    throw std::runtime_error("the map zone's scriptable instances do not match the extraction");
+                for (std::size_t index = 0; index < scriptableInstances.size(); ++index)
+                {
+                    if (scriptableInstances[index].carryZone.empty())
+                        continue;
+                    block.mapInstances[index].initialDef = static_cast<zonetool::iw8::ScriptableDef *>(
+                        carry.definitions.at(scriptableInstances[index].definition));
+                    ++pointed;
+                }
+            }
+            info("scriptables: %zu stock asset(s) added to the map zone, %zu instance(s) given their definition",
+                 additions.size(), pointed);
+            return additions;
+        };
+        const bool wantInventory = !native.empty() || !carry.empty();
         if (!writeZone(path_join(outputDirectory, map + ".ff"), writer.takeBody(), mapParams, native,
-                       native.empty() ? nullptr : &nativeInventory))
+                       wantInventory ? &nativeInventory : nullptr, mapPrepare))
         {
             result = 1;
         }
         timing.lap("zone write");
         auto emittedAssets = writer.assetList();
-        if (!native.empty())
+        if (wantInventory)
         {
             emittedAssets.clear();
             emittedAssets.reserve(nativeInventory.asset_offsets.size());
@@ -2091,7 +2360,7 @@ int writeMapPackage(const Args &args, const std::string &map, const std::string 
                                           stockCopier.get()))
             ledgerRows.push_back(std::move(row));
         info("build-map: main zone contains %zu assets",
-             native.empty() ? writer.assetCount() : nativeInventory.list_asset_count);
+             !wantInventory ? writer.assetCount() : nativeInventory.list_asset_count);
         info("build-map: techset zone contains %zu assets", techsets.assetCount());
     }
 

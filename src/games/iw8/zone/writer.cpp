@@ -484,6 +484,74 @@ namespace zonetool::iw8
 		return rewrite_fastfile(name, std::move(file), {});
 	}
 
+	std::string zone_asset_name(const std::int32_t type, const void* header)
+	{
+		return name_of(type, header);
+	}
+
+	std::vector<zone_asset> asset_closure(const loaded_zone& zone, const std::span<const zone_asset> roots,
+		std::vector<std::pair<std::int32_t, std::string>>* references)
+	{
+		// A scratch zone that lists only the roots, written with every definition of the source zone at hand: the
+		// writer emits each asset at its first use, so what it emitted in full is the closure.
+		std::vector<zone_asset> assets;
+		std::map<asset_key, zone_asset> full;
+		assets.reserve(zone.assets.size());
+		for (const auto& asset : zone.assets)
+		{
+			assets.emplace_back(asset.type, asset.header, asset.referenced);
+			if (!asset.referenced)
+			{
+				full.try_emplace(asset_key{asset.type, name_of(asset.type, asset.header)}, zone_asset{asset.type, asset.header, false});
+			}
+		}
+
+		const std::vector<zone_asset> list(roots.begin(), roots.end());
+		const auto written = write_zone(list, assets, zone.script_strings, {});
+
+		std::vector<zone_asset> closure;
+		std::set<asset_key> seen;
+		for (const auto& [offset, type, name] : written.asset_offsets)
+		{
+			const asset_key key{type, name};
+			const auto found = full.find(key);
+			if (found != full.end() && seen.insert(key).second)
+			{
+				closure.push_back(found->second);
+			}
+			else if (found == full.end() && references && seen.insert(key).second)
+			{
+				references->push_back(key);
+			}
+		}
+		return closure;
+	}
+
+	xfile::fastfile rewrite_fastfile(const std::string& name, xfile::fastfile file,
+		const std::function<std::vector<zone_asset>(loaded_zone&)>& prepare, zone_inventory* inventory)
+	{
+		xfile::fastfile result{};
+		result.xfile_version = file.xfile_version;
+		result.transient = file.transient;
+		const auto preload_walk_size = file.preload_walk_size;
+		const auto expected_size = file.payload.size() + file.payload.size() / 16;
+
+		auto zone = load_zone(name, std::move(file), {.keep_temp_data = true});
+		const auto additional = prepare ? prepare(*zone) : std::vector<zone_asset>{};
+		auto written = write_zone(*zone, {.expected_size = expected_size}, additional);
+		zone.reset();
+
+		result.payload = std::move(written.data);
+		result.block_sizes = std::move(written.block_sizes);
+		result.preload_walk_size = std::max<std::uint64_t>(written.preload_walk_size, preload_walk_size);
+		if (inventory)
+		{
+			inventory->list_asset_count = written.list_asset_count;
+			inventory->asset_offsets = std::move(written.asset_offsets);
+		}
+		return result;
+	}
+
 	xfile::fastfile rewrite_fastfile(const std::string& name, xfile::fastfile file,
 		const std::span<const zone_asset> additional)
 	{

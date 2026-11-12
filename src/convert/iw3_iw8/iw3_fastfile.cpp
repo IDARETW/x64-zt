@@ -3638,6 +3638,10 @@ std::vector<iw8::ScriptableInstance> ReadScriptableInstances(const Json &collisi
         for (const char c : instance.definition)
             if (!(std::isalnum(static_cast<unsigned char>(c)) || c == '_'))
                 fail(index, "definition name '" + instance.definition + "' has a character other than a letter, a digit or _");
+        instance.carryZone = text(entry, "carry_zone", index);
+        for (const char c : instance.carryZone)
+            if (!(std::isalnum(static_cast<unsigned char>(c)) || c == '_'))
+                fail(index, "carry_zone '" + instance.carryZone + "' is not a zone name");
         instance.origin = vec3(entry, "origin", index, true);
         instance.angles = vec3(entry, "angles", index, false);
         instance.targetname = text(entry, "targetname", index);

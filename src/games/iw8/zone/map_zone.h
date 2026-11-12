@@ -1477,9 +1477,12 @@ inline void registerMapWorldAssets(ZoneWriter &writer, const MapWorldStrings &st
                    if (scriptables)
                    {
                        scriptables->definitionAliases.clear();
+                       // A carried definition is not in this body: its pointer is set when the zone is written
+                       // again with the definition added (convert.cpp).
                        for (const auto &instance : scriptables->instances)
                            scriptables->definitionAliases.push_back(
-                               output.assetAlias(ASSET_TYPE_SCRIPTABLE, instance.definition));
+                               instance.carryZone.empty() ? output.assetAlias(ASSET_TYPE_SCRIPTABLE, instance.definition)
+                                                          : PTR_NULL);
                    }
                    emitMapEntsBody(output.buffer(), assetName.c_str(), ents, spawns.get(),
                                    &collision, edgeListAlias, dynamic, clientTriggers.get(), scriptables.get());
