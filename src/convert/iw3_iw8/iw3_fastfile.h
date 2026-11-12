@@ -289,6 +289,8 @@ struct PreparedMap
     std::vector<CarryAsset> carryAssets;
     // The world collision is built as streamed collision tiles (collision JSON "collision_tiles": true).
     bool collisionTiles = false;
+    // The name of the one loot zone over the loot points (collision JSON "loot_zone"; empty: none).
+    std::string lootZone;
     // Loot points of the map (collision JSON "loot_points").
     std::vector<iw8::MapLootPoint> lootPoints;
     iw8::navigation::Source navigation;

@@ -10186,6 +10186,7 @@ PreparedMap::PreparedMap(PreparedMap &&other) noexcept
     , scriptableInstances(std::move(other.scriptableInstances))
     , carryAssets(std::move(other.carryAssets))
     , collisionTiles(other.collisionTiles)
+    , lootZone(std::move(other.lootZone))
     , lootPoints(std::move(other.lootPoints))
     , navigation(std::move(other.navigation))
     , mapScript(std::move(other.mapScript))
@@ -10237,6 +10238,7 @@ PreparedMap &PreparedMap::operator=(PreparedMap &&other) noexcept
         dynamicEntities = std::move(other.dynamicEntities);
         scriptableInstances = std::move(other.scriptableInstances);
         lootPoints = std::move(other.lootPoints);
+        lootZone = std::move(other.lootZone);
         collisionTiles = other.collisionTiles;
         carryAssets = std::move(other.carryAssets);
         navigation = std::move(other.navigation);
@@ -12987,6 +12989,15 @@ PreparedMap PrepareFastfile(const ImportOptions &options)
         zt::info("iw3: %zu stock asset(s) to carry", result.carryAssets.size());
     }
     result.lootPoints = ReadLootPoints(collision);
+    if (collision.contains("loot_zone"))
+    {
+        if (!collision.at("loot_zone").is_string())
+            throw std::runtime_error("loot_zone is not a name");
+        result.lootZone = collision.at("loot_zone").get<std::string>();
+        for (const char c : result.lootZone)
+            if (!(std::islower(static_cast<unsigned char>(c)) || std::isdigit(static_cast<unsigned char>(c)) || c == '_'))
+                throw std::runtime_error("loot_zone '" + result.lootZone + "' is not a lower-case name");
+    }
     if (!result.lootPoints.empty())
         zt::info("iw3: %zu loot points", result.lootPoints.size());
     result.scriptableInstances = ReadScriptableInstances(collision);

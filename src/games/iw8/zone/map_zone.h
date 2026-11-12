@@ -818,6 +818,10 @@ struct MapScriptables
     // Loot points (spawnGroupLoot). Each takes one scriptable slot at run time: the loot count and the three server
     // counts include them (research 86: on every stock map with loot).
     std::vector<MapLootPoint> loot;
+    // One loot zone over every loot point (the small stock BR maps have one: mp_br_tut "tutorial_scavenger"); the loot
+    // tables pick the loot set by the zone name (IW8 Radiant research 87 section 2.4). Empty: no zone.
+    std::string lootZoneName;
+    uint32_t lootZoneString = 0;  // its script-string index
     std::vector<ScriptableInstance> instances;
     std::vector<std::array<uint32_t, 6>> strings;
     std::vector<uint64_t> definitionAliases;
@@ -932,6 +936,11 @@ inline void emitMapEntsBody(ZoneBuffer &zb, const char *assetName, const std::st
         // clusters, no zones.
         stamp16(me, 0x2D0, static_cast<uint16_t>(lootCount));
         stamp64(me, 0x2D8, PTR_FOLLOWS);
+        if (!scriptables->lootZoneName.empty())
+        {
+            stamp16(me, 0x2F0, 1);           // SpawnGroup.zoneCount
+            stamp64(me, 0x2F8, PTR_FOLLOWS); // SpawnGroup.zones
+        }
         stamp32(me, 0x204, lootCount); // lootInstanceCount
         stamp32(me, 0x208, lootCount); // the three server counts: the instances are added below
         stamp32(me, 0x20C, lootCount);
@@ -1087,7 +1096,44 @@ inline void emitMapEntsBody(ZoneBuffer &zb, const char *assetName, const std::st
             for (const float value : point.angles)
                 zb.writeT(value);
             zb.writeT<uint16_t>(point.cache ? 0xFFFBu : 0xFFFDu);
-            zb.writeT<uint16_t>(0);
+            zb.writeT<uint16_t>(scriptables->lootZoneName.empty() ? 0 : 1);
+        }
+        if (!scriptables->lootZoneName.empty())
+        {
+            // SpawnGroupZone (56 bytes, align 8): name, pointCount, points, clusterCount, clusters, bounds. The zone
+            // lists every point except the cache points (rule 3 of research 89: as every stock zone does).
+            std::vector<uint16_t> listed;
+            float lo[3] = {1e30f, 1e30f, 1e30f}, hi[3] = {-1e30f, -1e30f, -1e30f};
+            for (size_t i = 0; i < scriptables->loot.size(); ++i)
+            {
+                const auto &point = scriptables->loot[i];
+                for (unsigned k = 0; k < 3; ++k)
+                {
+                    lo[k] = (std::min)(lo[k], point.origin[k]);
+                    hi[k] = (std::max)(hi[k], point.origin[k]);
+                }
+                if (!point.cache)
+                    listed.push_back(static_cast<uint16_t>(i));
+            }
+            zb.align(7);
+            uint8_t zone[56]{};
+            stamp32(zone, 0, scriptables->lootZoneString);
+            stamp16(zone, 4, static_cast<uint16_t>(listed.size()));
+            if (!listed.empty())
+                stamp64(zone, 8, PTR_FOLLOWS);
+            for (unsigned k = 0; k < 3; ++k)
+            {
+                // A margin of 64 units around the points, as the stock zone boxes reach past their points.
+                stampf(zone, 32 + k * 4, (lo[k] + hi[k]) * 0.5f);
+                stampf(zone, 44 + k * 4, (hi[k] - lo[k]) * 0.5f + 64.0f);
+            }
+            zb.write(zone, sizeof(zone));
+            if (!listed.empty())
+            {
+                zb.align(1);
+                for (const auto index : listed)
+                    zb.writeT<uint16_t>(index);
+            }
         }
     }
     // MapEnts.audioPASpeakers: after the scriptables (and the empty spawn-group,
@@ -1450,7 +1496,7 @@ inline MapWorldStrings internMapWorldStrings(
     ZoneWriter &writer, const std::string &ents, const MapSun &lighting,
     const std::vector<staticmodelcollision::Model> &collisionModels,
     const std::vector<ScriptableInstance> *scriptableInstances = nullptr,
-    const std::vector<MapLootPoint> *lootPoints = nullptr)
+    const std::vector<MapLootPoint> *lootPoints = nullptr, const std::string &lootZoneName = {})
 {
     MapWorldStrings result;
     result.spawns = std::make_shared<ReplaySpawns>(ents);
@@ -1483,6 +1529,11 @@ inline MapWorldStrings internMapWorldStrings(
         if (!result.scriptables)
             result.scriptables = std::make_shared<MapScriptables>();
         result.scriptables->loot = *lootPoints;
+        if (!lootZoneName.empty())
+        {
+            result.scriptables->lootZoneName = lootZoneName;
+            result.scriptables->lootZoneString = result.spawns->intern(lootZoneName);
+        }
     }
     const auto &strings = result.spawns->strings;
     if (strings.size() > 2)
