@@ -141,6 +141,9 @@ std::string CommonFunction(const std::string &file, const std::string &name)
         // IW8 Radiant: a map with stock door scriptables starts the stock door script, as stock map scripts and
         // scripts/mp/load do (research 83 A.2.4). The script is in global_mp, always loaded.
         {"scripts/engine/scriptable_door", "system_init"},
+        // IW8 Radiant: a small map in the br game type switches the circle off as the stock Warzone tutorial map does
+        // (research 87 section 6). The script is in common_base_mp, always loaded.
+        {"scripts/mp/gametypes/br_gametypes", "disablefeature"},
     };
     for (const auto &[script, function] : kReplayFunctions)
         if (file == script && name == function)
