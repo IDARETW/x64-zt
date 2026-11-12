@@ -822,6 +822,11 @@ struct MapScriptables
     // tables pick the loot set by the zone name (IW8 Radiant research 87 section 2.4). Empty: no zone.
     std::string lootZoneName;
     uint32_t lootZoneString = 0;  // its script-string index
+    // Authored loot clusters and zones (collision JSON "loot_boxes"). With zones given, lootZoneName is not used: each
+    // point takes the first zone whose box holds it, and the first cluster whose box holds it ("first box", the rule
+    // of every stock map, research 89 section 3).
+    std::vector<MapLootBox> lootClusters, lootZones;
+    std::vector<uint32_t> lootZoneStrings;  // script-string index of each zone name
     std::vector<ScriptableInstance> instances;
     std::vector<std::array<uint32_t, 6>> strings;
     std::vector<uint64_t> definitionAliases;
@@ -936,7 +941,17 @@ inline void emitMapEntsBody(ZoneBuffer &zb, const char *assetName, const std::st
         // clusters, no zones.
         stamp16(me, 0x2D0, static_cast<uint16_t>(lootCount));
         stamp64(me, 0x2D8, PTR_FOLLOWS);
-        if (!scriptables->lootZoneName.empty())
+        if (!scriptables->lootClusters.empty())
+        {
+            stamp16(me, 0x2E0, static_cast<uint16_t>(scriptables->lootClusters.size())); // SpawnGroup.clusterCount
+            stamp64(me, 0x2E8, PTR_FOLLOWS);                                             // SpawnGroup.clusters
+        }
+        if (!scriptables->lootZones.empty())
+        {
+            stamp16(me, 0x2F0, static_cast<uint16_t>(scriptables->lootZones.size())); // SpawnGroup.zoneCount
+            stamp64(me, 0x2F8, PTR_FOLLOWS);
+        }
+        else if (!scriptables->lootZoneName.empty())
         {
             stamp16(me, 0x2F0, 1);           // SpawnGroup.zoneCount
             stamp64(me, 0x2F8, PTR_FOLLOWS); // SpawnGroup.zones
@@ -1086,7 +1101,127 @@ inline void emitMapEntsBody(ZoneBuffer &zb, const char *assetName, const std::st
     for (unsigned k = 0; k < 3; ++k)
         zb.writeT<float>(100000.f);
     // MapEnts.spawnGroupLoot.points: SpawnGroupPoint, 28 bytes (origin, angles, u16 cluster, u16 zone), align 4.
-    if (lootCount)
+    if (lootCount && (!scriptables->lootClusters.empty() || !scriptables->lootZones.empty()))
+    {
+        // Authored boxes: each point takes the first cluster and the first zone whose box holds it. Lists are
+        // ascending; a zone lists its points except the cache points, and the clusters whose first point is in it; a
+        // cluster's zone is the zone of its first point (else the zone that holds its middle). Research 89 section 3.
+        const auto &clusters = scriptables->lootClusters;
+        const auto &zones = scriptables->lootZones;
+        const auto holds = [](const MapLootBox &box, const std::array<float, 3> &p) {
+            for (unsigned k = 0; k < 3; ++k)
+                if (std::abs(p[k] - box.mid[k]) > box.half[k])
+                    return false;
+            return true;
+        };
+        std::vector<uint16_t> pointCluster(lootCount, 0xFFFDu), pointZone(lootCount, 0);
+        std::vector<std::vector<uint16_t>> clusterPoints(clusters.size()), zonePoints(zones.size()), zoneClusters(zones.size());
+        for (size_t i = 0; i < lootCount; ++i)
+        {
+            const auto &point = scriptables->loot[i];
+            for (size_t z = 0; z < zones.size(); ++z)
+                if (holds(zones[z], point.origin))
+                {
+                    pointZone[i] = static_cast<uint16_t>(z + 1);
+                    break;
+                }
+            if (point.cache)
+                pointCluster[i] = 0xFFFBu;
+            else
+                for (size_t c = 0; c < clusters.size(); ++c)
+                    if (holds(clusters[c], point.origin))
+                    {
+                        pointCluster[i] = static_cast<uint16_t>(c);
+                        clusterPoints[c].push_back(static_cast<uint16_t>(i));
+                        break;
+                    }
+            if (pointZone[i] && !point.cache)
+                zonePoints[pointZone[i] - 1u].push_back(static_cast<uint16_t>(i));
+        }
+        std::vector<uint16_t> clusterZone(clusters.size(), 0);
+        for (size_t c = 0; c < clusters.size(); ++c)
+        {
+            if (!clusterPoints[c].empty())
+                clusterZone[c] = pointZone[clusterPoints[c].front()];
+            else
+                for (size_t z = 0; z < zones.size(); ++z)
+                    if (holds(zones[z], clusters[c].mid))
+                    {
+                        clusterZone[c] = static_cast<uint16_t>(z + 1);
+                        break;
+                    }
+            if (!clusterPoints[c].empty() && clusterZone[c])
+                zoneClusters[clusterZone[c] - 1u].push_back(static_cast<uint16_t>(c));
+        }
+        zb.align(3);
+        for (size_t i = 0; i < lootCount; ++i)
+        {
+            const auto &point = scriptables->loot[i];
+            for (const float value : point.origin)
+                zb.writeT(value);
+            for (const float value : point.angles)
+                zb.writeT(value);
+            zb.writeT<uint16_t>(pointCluster[i]);
+            zb.writeT<uint16_t>(pointZone[i]);
+        }
+        const auto writeList = [&](const std::vector<uint16_t> &list) {
+            if (list.empty())
+                return;
+            zb.align(1);
+            for (const auto index : list)
+                zb.writeT<uint16_t>(index);
+        };
+        if (!clusters.empty())
+        {
+            // SpawnGroupCluster (40 bytes, align 8): zone, pointCount, points, bounds; then each cluster's points.
+            zb.align(7);
+            for (size_t c = 0; c < clusters.size(); ++c)
+            {
+                uint8_t record[40]{};
+                stamp16(record, 0, clusterZone[c]);
+                stamp16(record, 2, static_cast<uint16_t>(clusterPoints[c].size()));
+                if (!clusterPoints[c].empty())
+                    stamp64(record, 8, PTR_FOLLOWS);
+                for (unsigned k = 0; k < 3; ++k)
+                {
+                    stampf(record, 16 + k * 4, clusters[c].mid[k]);
+                    stampf(record, 28 + k * 4, clusters[c].half[k]);
+                }
+                zb.write(record, sizeof(record));
+            }
+            for (size_t c = 0; c < clusters.size(); ++c)
+                writeList(clusterPoints[c]);
+        }
+        if (!zones.empty())
+        {
+            // SpawnGroupZone (56 bytes, align 8): name, pointCount, points, clusterCount, clusters, bounds; then each
+            // zone's points and clusters.
+            zb.align(7);
+            for (size_t z = 0; z < zones.size(); ++z)
+            {
+                uint8_t record[56]{};
+                stamp32(record, 0, scriptables->lootZoneStrings.at(z));
+                stamp16(record, 4, static_cast<uint16_t>(zonePoints[z].size()));
+                if (!zonePoints[z].empty())
+                    stamp64(record, 8, PTR_FOLLOWS);
+                stamp16(record, 16, static_cast<uint16_t>(zoneClusters[z].size()));
+                if (!zoneClusters[z].empty())
+                    stamp64(record, 24, PTR_FOLLOWS);
+                for (unsigned k = 0; k < 3; ++k)
+                {
+                    stampf(record, 32 + k * 4, zones[z].mid[k]);
+                    stampf(record, 44 + k * 4, zones[z].half[k]);
+                }
+                zb.write(record, sizeof(record));
+            }
+            for (size_t z = 0; z < zones.size(); ++z)
+            {
+                writeList(zonePoints[z]);
+                writeList(zoneClusters[z]);
+            }
+        }
+    }
+    else if (lootCount)
     {
         zb.align(3);
         for (const auto &point : scriptables->loot)
@@ -1496,7 +1631,8 @@ inline MapWorldStrings internMapWorldStrings(
     ZoneWriter &writer, const std::string &ents, const MapSun &lighting,
     const std::vector<staticmodelcollision::Model> &collisionModels,
     const std::vector<ScriptableInstance> *scriptableInstances = nullptr,
-    const std::vector<MapLootPoint> *lootPoints = nullptr, const std::string &lootZoneName = {})
+    const std::vector<MapLootPoint> *lootPoints = nullptr, const std::string &lootZoneName = {},
+    const std::vector<MapLootBox> *lootClusters = nullptr, const std::vector<MapLootBox> *lootZones = nullptr)
 {
     MapWorldStrings result;
     result.spawns = std::make_shared<ReplaySpawns>(ents);
@@ -1534,6 +1670,16 @@ inline MapWorldStrings internMapWorldStrings(
             result.scriptables->lootZoneName = lootZoneName;
             result.scriptables->lootZoneString = result.spawns->intern(lootZoneName);
         }
+        if (lootClusters)
+            result.scriptables->lootClusters = *lootClusters;
+        if (lootZones)
+        {
+            result.scriptables->lootZones = *lootZones;
+            for (const auto &zone : *lootZones)
+                result.scriptables->lootZoneStrings.push_back(result.spawns->intern(zone.name));
+        }
+        if (result.scriptables->lootClusters.size() >= 0xFFFB || result.scriptables->lootZones.size() >= 0xFFFF)
+            throw std::runtime_error("too many loot clusters or zones");
     }
     const auto &strings = result.spawns->strings;
     if (strings.size() > 2)

@@ -2056,7 +2056,8 @@ int writeMapPackage(const Args &args, const std::string &map, const std::string 
             writer, mapEntities, lighting,
             prepared ? prepared->staticModelCollisionModels : noStaticCollisionModels,
             prepared ? &prepared->scriptableInstances : nullptr,
-            prepared ? &prepared->lootPoints : nullptr, prepared ? prepared->lootZone : std::string());
+            prepared ? &prepared->lootPoints : nullptr, prepared ? prepared->lootZone : std::string(),
+            prepared ? &prepared->lootClusters : nullptr, prepared ? &prepared->lootZones : nullptr);
         replayrender::RegisterMapMaterials(writer, techsets, renderMesh);
         replayrender::RegisterReflectionProbeImage(writer, renderMesh);
         replayrender::RegisterVolumetricMaskImages(writer, renderMesh);

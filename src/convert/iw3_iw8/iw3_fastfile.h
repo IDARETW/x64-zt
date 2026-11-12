@@ -291,6 +291,9 @@ struct PreparedMap
     bool collisionTiles = false;
     // The name of the one loot zone over the loot points (collision JSON "loot_zone"; empty: none).
     std::string lootZone;
+    // Authored loot clusters and zones (collision JSON "loot_boxes": {"clusters": [{mid, half}], "zones": [{name,
+    // mid, half}]}).
+    std::vector<iw8::MapLootBox> lootClusters, lootZones;
     // Loot points of the map (collision JSON "loot_points").
     std::vector<iw8::MapLootPoint> lootPoints;
     iw8::navigation::Source navigation;

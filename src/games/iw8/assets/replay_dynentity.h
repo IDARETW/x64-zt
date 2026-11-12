@@ -55,6 +55,15 @@ struct MapLootPoint
     bool cache = false;
 };
 
+// An authored loot box of a map (collision JSON "loot_boxes", IW8 Radiant research 89 section 6d): a cluster groups
+// the points inside it, a zone is named (the loot tables pick the loot by the zone name).
+struct MapLootBox
+{
+    std::array<float, 3> mid{};
+    std::array<float, 3> half{};
+    std::string name;  // zones only
+};
+
 // One scriptable instance of the map (MapEnts ScriptableMapEnts.mapInstances) with the numbers of its definition the
 // map-wide counts need. The definition itself is a name-only reference to an always-loaded zone, or, with carryZone,
 // a copy of the stock definition taken from that stock zone when the map zone is written.

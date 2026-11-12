@@ -10187,6 +10187,8 @@ PreparedMap::PreparedMap(PreparedMap &&other) noexcept
     , carryAssets(std::move(other.carryAssets))
     , collisionTiles(other.collisionTiles)
     , lootZone(std::move(other.lootZone))
+    , lootClusters(std::move(other.lootClusters))
+    , lootZones(std::move(other.lootZones))
     , lootPoints(std::move(other.lootPoints))
     , navigation(std::move(other.navigation))
     , mapScript(std::move(other.mapScript))
@@ -10239,6 +10241,8 @@ PreparedMap &PreparedMap::operator=(PreparedMap &&other) noexcept
         scriptableInstances = std::move(other.scriptableInstances);
         lootPoints = std::move(other.lootPoints);
         lootZone = std::move(other.lootZone);
+        lootClusters = std::move(other.lootClusters);
+        lootZones = std::move(other.lootZones);
         collisionTiles = other.collisionTiles;
         carryAssets = std::move(other.carryAssets);
         navigation = std::move(other.navigation);
@@ -12998,8 +13002,54 @@ PreparedMap PrepareFastfile(const ImportOptions &options)
             if (!(std::islower(static_cast<unsigned char>(c)) || std::isdigit(static_cast<unsigned char>(c)) || c == '_'))
                 throw std::runtime_error("loot_zone '" + result.lootZone + "' is not a lower-case name");
     }
+    if (collision.contains("loot_boxes"))
+    {
+        const auto &boxes = collision.at("loot_boxes");
+        if (!boxes.is_object())
+            throw std::runtime_error("loot_boxes must be an object with \"clusters\" and \"zones\" lists");
+        const auto read = [&](const char *key, std::vector<iw8::MapLootBox> &out, const bool named) {
+            if (!boxes.contains(key))
+                return;
+            const auto &list = boxes.at(key);
+            if (!list.is_array())
+                throw std::runtime_error(std::string("loot_boxes.") + key + " is not a list");
+            for (std::size_t index = 0; index < list.size(); ++index)
+            {
+                const auto &entry = list[index];
+                const auto where = std::string("loot_boxes.") + key + "[" + std::to_string(index) + "]";
+                iw8::MapLootBox box;
+                for (const char *field : {"mid", "half"})
+                {
+                    if (!entry.is_object() || !entry.contains(field) || !entry.at(field).is_array() || entry.at(field).size() != 3)
+                        throw std::runtime_error(where + ": " + field + " is not three numbers");
+                    auto &v = std::string(field) == "mid" ? box.mid : box.half;
+                    for (std::size_t axis = 0; axis < 3; ++axis)
+                    {
+                        if (!entry.at(field)[axis].is_number())
+                            throw std::runtime_error(where + ": " + field + " is not three numbers");
+                        v[axis] = entry.at(field)[axis].get<float>();
+                        if (!std::isfinite(v[axis]) || (std::string(field) == "half" && v[axis] <= 0.0f))
+                            throw std::runtime_error(where + ": " + field + " is not finite (half: above 0)");
+                    }
+                }
+                if (named)
+                {
+                    box.name = entry.value("name", std::string());
+                    if (box.name.empty())
+                        throw std::runtime_error(where + ": no name");
+                    for (const char c : box.name)
+                        if (!(std::islower(static_cast<unsigned char>(c)) || std::isdigit(static_cast<unsigned char>(c)) || c == '_'))
+                            throw std::runtime_error(where + ": '" + box.name + "' is not a lower-case name");
+                }
+                out.push_back(std::move(box));
+            }
+        };
+        read("clusters", result.lootClusters, false);
+        read("zones", result.lootZones, true);
+    }
     if (!result.lootPoints.empty())
-        zt::info("iw3: %zu loot points", result.lootPoints.size());
+        zt::info("iw3: %zu loot points, %zu loot clusters, %zu loot zones", result.lootPoints.size(), result.lootClusters.size(),
+                 result.lootZones.size());
     result.scriptableInstances = ReadScriptableInstances(collision);
     if (!result.scriptableInstances.empty())
     {
