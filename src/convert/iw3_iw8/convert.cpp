@@ -3974,10 +3974,13 @@ namespace zonetool::convert::iw3_iw8
 		ScriptableCarry carry;
 		if (edits.contains("carry"))
 		{
-			std::map<std::string, std::set<AssetKey>> wanted;
+			// Per source folder (the game's zone folder, or the "folder" of an entry: a zone the editor built, such as
+			// the brushes added to a stock map, research 88), the zones and the assets to take from them.
+			std::map<std::filesystem::path, std::map<std::string, std::set<AssetKey>>> wanted_by_folder;
 			std::set<std::string> models;
 			for (const auto& entry : edits.at("carry"))
 			{
+				auto& wanted = wanted_by_folder[entry.contains("folder") ? std::filesystem::path(entry.at("folder").get<std::string>()) : zone_folder];
 				const auto type_name = entry.at("type").get<std::string>();
 				std::int32_t type = -1;
 				for (std::int32_t candidate = 0; candidate < 256; candidate++)
@@ -4000,7 +4003,23 @@ namespace zonetool::convert::iw3_iw8
 					models.insert(name);
 				}
 			}
-			carry = CarryStockAssets(wanted, zone_folder);
+			for (auto& [folder, wanted] : wanted_by_folder)
+			{
+				if (!std::filesystem::is_directory(folder))
+				{
+					throw std::runtime_error("carry: the zone folder " + folder.string() + " was not found");
+				}
+				auto part = CarryStockAssets(wanted, folder);
+				carry.assets.insert(carry.assets.end(), part.assets.begin(), part.assets.end());
+				carry.techsets.insert(carry.techsets.end(), part.techsets.begin(), part.techsets.end());
+				carry.definitions.insert(part.definitions.begin(), part.definitions.end());
+				carry.roots.insert(part.roots.begin(), part.roots.end());
+				carry.materialNames.insert(part.materialNames.begin(), part.materialNames.end());
+				for (auto& zone_in_memory : part.zones)
+				{
+					carry.zones.push_back(std::move(zone_in_memory));
+				}
+			}
 
 			// A carried model joins the level's model table (NetConstStrings of type 0 from the map), kept sorted.
 			if (!models.empty())
