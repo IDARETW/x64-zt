@@ -258,7 +258,10 @@ bool isReplayEntity(const std::string &classname)
     return std::find(classes.begin(), classes.end(), classname) != classes.end() ||
            std::find(shipped.begin(), shipped.end(), classname) != shipped.end() ||
            std::find(modes.begin(), modes.end(), classname) != modes.end() ||
-           classname.starts_with("trigger_multiple_bcs_");
+           classname.starts_with("trigger_multiple_bcs_") ||
+           // The structs of the stock Warzone maps (IW8 Radiant research 89): script_struct_mp_atv, _tacrover, _jeep,
+           // _cargotruck, _littlebird (vehicle spawns), _spawn_selection_camera, _spawn_selection_area, _ladder_top.
+           classname.starts_with("script_struct_mp_");
 }
 
 bool isModeSpecificSpawn(const std::string &classname)

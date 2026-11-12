@@ -10184,6 +10184,7 @@ PreparedMap::PreparedMap(PreparedMap &&other) noexcept
     , render(std::move(other.render))
     , dynamicEntities(std::move(other.dynamicEntities))
     , scriptableInstances(std::move(other.scriptableInstances))
+    , carryAssets(std::move(other.carryAssets))
     , collisionTiles(other.collisionTiles)
     , lootPoints(std::move(other.lootPoints))
     , navigation(std::move(other.navigation))
@@ -10237,6 +10238,7 @@ PreparedMap &PreparedMap::operator=(PreparedMap &&other) noexcept
         scriptableInstances = std::move(other.scriptableInstances);
         lootPoints = std::move(other.lootPoints);
         collisionTiles = other.collisionTiles;
+        carryAssets = std::move(other.carryAssets);
         navigation = std::move(other.navigation);
         mapScript = std::move(other.mapScript);
         scriptMaterials = std::move(other.scriptMaterials);
@@ -12962,6 +12964,27 @@ PreparedMap PrepareFastfile(const ImportOptions &options)
         result.collisionTiles = collision.at("collision_tiles").get<bool>();
         if (result.collisionTiles)
             zt::info("iw3: the world collision is built as streamed collision tiles");
+    }
+    if (collision.contains("carry_assets"))
+    {
+        const auto &list = collision.at("carry_assets");
+        if (!list.is_array() || list.size() > 256)
+            throw std::runtime_error("carry_assets must be a list of at most 256 entries");
+        for (std::size_t index = 0; index < list.size(); ++index)
+        {
+            const auto &entry = list[index];
+            const auto text = [&](const char *key) {
+                if (!entry.is_object() || !entry.contains(key) || !entry.at(key).is_string() || entry.at(key).get<std::string>().empty())
+                    throw std::runtime_error("carry_assets[" + std::to_string(index) + "]: no " + key);
+                return entry.at(key).get<std::string>();
+            };
+            const auto zone = text("zone");
+            for (const char c : zone)
+                if (!(std::isalnum(static_cast<unsigned char>(c)) || c == '_'))
+                    throw std::runtime_error("carry_assets[" + std::to_string(index) + "]: zone '" + zone + "' is not a zone name");
+            result.carryAssets.push_back({zone, text("type"), text("name")});
+        }
+        zt::info("iw3: %zu stock asset(s) to carry", result.carryAssets.size());
     }
     result.lootPoints = ReadLootPoints(collision);
     if (!result.lootPoints.empty())

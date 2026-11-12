@@ -907,7 +907,7 @@ struct ScriptableCarry
     std::set<std::string> materialNames;                            // carried materials (techsets zone)
     bool empty() const
     {
-        return definitions.empty();
+        return definitions.empty() && assets.empty() && techsets.empty();
     }
 };
 
@@ -1107,13 +1107,33 @@ ScriptableCarry CarryStockAssets(const std::map<std::string, std::set<AssetKey>>
     return carry;
 }
 
+// The asset type of a type name as the zone formats name it ("vehicle", "xmodel", ...); -1 when none does.
+std::int32_t AssetTypeOfName(const std::string &typeName)
+{
+    for (std::int32_t candidate = 0; candidate < 256; candidate++)
+    {
+        const auto format = zonetool::iw8::find_asset_format(candidate);
+        if (format && typeName == format->name)
+            return candidate;
+    }
+    return -1;
+}
+
 ScriptableCarry CarryScriptableDefinitions(const std::vector<iw8::ScriptableInstance> &instances,
-                                           const std::string &replayExecutable)
+                                           const std::string &replayExecutable,
+                                           const std::vector<iw3::PreparedMap::CarryAsset> &more = {})
 {
     std::map<std::string, std::set<AssetKey>> wanted; // stock zone -> definitions
     for (const auto &instance : instances)
         if (!instance.carryZone.empty())
             wanted[instance.carryZone].insert({zonetool::iw8::ASSET_TYPE_SCRIPTABLE, instance.definition});
+    for (const auto &asset : more)
+    {
+        const auto type = AssetTypeOfName(asset.type);
+        if (type < 0)
+            throw std::runtime_error("carry_assets: unknown asset type " + asset.type);
+        wanted[asset.zone].insert({type, asset.name});
+    }
     if (wanted.empty())
         return {};
     if (replayExecutable.empty())
@@ -2373,7 +2393,12 @@ int writeMapPackage(const Args &args, const std::string &map, const std::string 
 
         static const std::vector<iw8::ScriptableInstance> noScriptables;
         const auto &scriptableInstances = prepared ? prepared->scriptableInstances : noScriptables;
-        const ScriptableCarry carry = CarryScriptableDefinitions(scriptableInstances, args.replayExecutable);
+        static const std::vector<iw3::PreparedMap::CarryAsset> noCarryAssets;
+        const ScriptableCarry carry =
+            CarryScriptableDefinitions(scriptableInstances, args.replayExecutable, prepared ? prepared->carryAssets : noCarryAssets);
+        if (prepared && !prepared->carryAssets.empty())
+            info("carry: %zu stock asset(s) asked for, %zu asset(s) for the map zone, %zu for the techsets zone",
+                 prepared->carryAssets.size(), carry.assets.size(), carry.techsets.size());
         for (const auto &name : carry.materialNames)
             if (!writer.has(ASSET_TYPE_MATERIAL, name))
                 iw8::stock::RegisterNameReference(writer, ASSET_TYPE_MATERIAL, name);
@@ -2504,12 +2529,53 @@ int writeMapPackage(const Args &args, const std::string &map, const std::string 
             timing.lap("collision tile zones");
         }
 
+        // Kept alive until the main zone is written: the level model table with carried models.
+        std::deque<std::string> carriedModelNames;
+        std::vector<const char *> carriedModelList;
         // Carried scriptable definitions join the zone here, and each instance record gets its definition.
         const ZonePrepare mapPrepare = carry.empty() && !collision.tiled ? ZonePrepare{} : [&](zonetool::iw8::loaded_zone &zone) {
             auto additions = NewAdditions(zone, carry.assets);
             if (collision.tiled)
                 additions.push_back({zonetool::iw8::ASSET_TYPE_STREAMING_INFO, &tiled.info, false});
-            if (carry.empty())
+            // A carried model that an entity names (MapEnts key 652, for example the model of a vehicle spawn) joins the
+            // level's model table, as the map's own models do above: script spawns it by name.
+            if (!carry.assets.empty())
+            {
+                static const std::regex entityModel(R"re((?:^|[\s{])652 "([^"*][^"]*)")re");
+                std::set<std::string> named;
+                for (auto match = std::sregex_iterator(mapEntities.begin(), mapEntities.end(), entityModel);
+                     match != std::sregex_iterator(); ++match)
+                    named.insert((*match)[1].str());
+                std::set<std::string> carriedModels;
+                for (const auto &asset : carry.assets)
+                    if (asset.type == zonetool::iw8::ASSET_TYPE_XMODEL)
+                        if (const auto name = zonetool::iw8::zone_asset_name(asset.type, asset.header); named.contains(name))
+                            carriedModels.insert(name);
+                if (!carriedModels.empty())
+                    for (const auto &asset : zone.assets)
+                    {
+                        if (asset.type != zonetool::iw8::ASSET_TYPE_NET_CONST_STRINGS || asset.referenced)
+                            continue;
+                        auto *table = static_cast<zonetool::iw8::NetConstStrings *>(asset.header);
+                        if (static_cast<std::uint32_t>(table->stringType) != 0 || static_cast<std::uint32_t>(table->sourceType) != 3)
+                            continue;
+                        std::set<std::string> listed;
+                        for (std::uint32_t i = 0; i < table->entryCount; i++)
+                            listed.insert(table->stringList[i] ? table->stringList[i] : "");
+                        const auto before = listed.size();
+                        listed.insert(carriedModels.begin(), carriedModels.end());
+                        for (const auto &text : listed)
+                            carriedModelNames.push_back(text);
+                        carriedModelList.clear();
+                        for (const auto &text : carriedModelNames)
+                            carriedModelList.push_back(text.c_str());
+                        table->stringList = carriedModelList.data();
+                        table->entryCount = static_cast<std::uint32_t>(carriedModelList.size());
+                        info("carry: %zu carried model(s) added to the level model table", listed.size() - before);
+                        break;
+                    }
+            }
+            if (carry.definitions.empty())
                 return additions;
             std::size_t pointed = 0;
             for (const auto &asset : zone.assets)
@@ -3983,6 +4049,7 @@ namespace zonetool::convert::iw3_iw8
 			file.block_sizes = std::move(written.block_sizes);
 			file.xfile_version = source.file.xfile_version;
 			file.transient = source.file.transient;
+			file.transient_type = source.file.transient_type;
 			file.preload_walk_size = std::max<std::uint64_t>(written.preload_walk_size, source.file.preload_walk_size);
 			// Stock zones declare more for the preload block than the writer computes: never less than the stock size.
 			for (std::size_t block = 0; block < file.block_sizes.size() && block < source.file.block_sizes.size(); block++)

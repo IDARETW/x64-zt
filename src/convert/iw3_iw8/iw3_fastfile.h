@@ -280,6 +280,13 @@ struct PreparedMap
     // Scriptable instances of the map (collision JSON "scriptable_instances"); their dynamic entities are already in
     // dynamicEntities.
     std::vector<iw8::ScriptableInstance> scriptableInstances;
+    // Stock assets to carry into the map zone (collision JSON "carry_assets": [{"zone", "type", "name"}]), for example
+    // the vehicle definitions of the stock Warzone maps; each comes with everything it uses.
+    struct CarryAsset
+    {
+        std::string zone, type, name;
+    };
+    std::vector<CarryAsset> carryAssets;
     // The world collision is built as streamed collision tiles (collision JSON "collision_tiles": true).
     bool collisionTiles = false;
     // Loot points of the map (collision JSON "loot_points").
