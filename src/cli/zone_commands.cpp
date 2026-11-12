@@ -8,6 +8,8 @@
 
 namespace zonetool::convert::iw3_iw8
 {
+	void edit_zone(const std::filesystem::path& game_path, const std::string& zone_name,
+		const std::filesystem::path& edits_path, const std::filesystem::path& output);
 	void convert_extraction(const std::filesystem::path& zone_path, const std::filesystem::path& extraction,
 		const zone_conversion& conversion);
 }
@@ -304,6 +306,30 @@ namespace zonetool::cli
 		}
 
 		settings.game->build_zone(settings.zone_folder(), args.front());
+	}
+
+	void edit_zone(const settings& settings, const std::span<const std::string> args)
+	{
+		constexpr std::string_view usage = "editzone <zone> <edits.json> <output folder>";
+		if (settings.game->name != "iw8")
+		{
+			std::cout << "editzone is only supported for -game iw8\n";
+			return;
+		}
+		if (args.size() != 3)
+		{
+			std::cout << std::format("usage: {}\n", usage);
+			return;
+		}
+		try
+		{
+			convert::iw3_iw8::edit_zone(settings.game_path, args[0], args[1], args[2]);
+		}
+		catch (const std::exception& e)
+		{
+			std::cout << std::format("editzone failed: {}\n", e.what());
+			std::exit(1);
+		}
 	}
 
 	void build_extraction(const settings& settings, const std::span<const std::string> args)

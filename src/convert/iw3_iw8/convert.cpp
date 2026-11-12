@@ -44,6 +44,7 @@
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <deque>
 #include <filesystem>
 #include <fstream>
 #include <functional>
@@ -856,12 +857,15 @@ using ZonePrepare = std::function<std::vector<zonetool::iw8::zone_asset>(zonetoo
 // from the stock zone in memory and added when the map zone is written again; and the technique sets of those
 // materials, taken from the stock zone's techsets companion and added to the map's techsets zone. Assets the stock
 // zone only references (common zones) stay name references.
+using AssetKeyOf = std::pair<std::int32_t, std::string>;
+
 struct ScriptableCarry
 {
     std::vector<std::unique_ptr<zonetool::iw8::loaded_zone>> zones; // alive until both zones are written
     std::vector<zonetool::iw8::zone_asset> assets;                  // for the map zone
     std::vector<zonetool::iw8::zone_asset> techsets;                // for the techsets zone
     std::map<std::string, void *> definitions;                      // definition name -> its header
+    std::set<AssetKeyOf> roots;                                     // every asset asked for and found
     std::set<std::string> materialNames;                            // carried materials (techsets zone)
     bool empty() const
     {
@@ -887,19 +891,13 @@ std::vector<zonetool::iw8::zone_asset> NewAdditions(const zonetool::iw8::loaded_
     return result;
 }
 
-ScriptableCarry CarryScriptableDefinitions(const std::vector<iw8::ScriptableInstance> &instances,
-                                           const std::string &replayExecutable)
+// `wanted`: stock zone -> the assets (type, name) to take from it with everything they use.
+ScriptableCarry CarryStockAssets(const std::map<std::string, std::set<AssetKey>> &wanted,
+                                 const std::filesystem::path &zoneFolder)
 {
     ScriptableCarry carry;
-    std::map<std::string, std::set<std::string>> wanted; // stock zone -> definitions
-    for (const auto &instance : instances)
-        if (!instance.carryZone.empty())
-            wanted[instance.carryZone].insert(instance.definition);
     if (wanted.empty())
         return carry;
-    if (replayExecutable.empty())
-        throw std::runtime_error("carrying a stock scriptable definition needs --replay (the game folder)");
-    const auto zoneFolder = std::filesystem::path(replayExecutable).parent_path() / "zone";
 
     // One stock zone in memory with its full definitions by type and name.
     struct Source
@@ -929,18 +927,24 @@ ScriptableCarry CarryScriptableDefinitions(const std::vector<iw8::ScriptableInst
 
     for (const auto &[zoneName, names] : wanted)
     {
-        info("scriptables: reading stock zone %s for %zu definition(s)", zoneName.c_str(), names.size());
+        info("scriptables: reading stock zone %s for %zu asset(s)", zoneName.c_str(), names.size());
         // The map zone holds the definition, its models and the images; its techsets companion holds the materials
         // of those models with their technique sets and shaders. Each names the other's assets by reference, so the
         // two closures are followed until neither names anything the other holds.
         std::array<Source, 2> sources{open(zoneName, true), open("techsets_" + zoneName, false)};
-        for (const auto &name : names)
+        for (const auto &key : names)
         {
-            const AssetKey key{zonetool::iw8::ASSET_TYPE_SCRIPTABLE, name};
             const auto found = sources[0].full.find(key);
             if (found == sources[0].full.end())
-                throw std::runtime_error("stock zone " + zoneName + " does not hold the scriptable definition " + name);
-            if (carry.definitions.emplace(name, found->second.header).second && sources[0].rootKeys.insert(key).second)
+            {
+                const auto format = zonetool::iw8::find_asset_format(key.first);
+                throw std::runtime_error("stock zone " + zoneName + " does not hold the " +
+                                         std::string(format ? format->name : "asset") + " " + key.second);
+            }
+            carry.roots.insert(key);
+            if (key.first == zonetool::iw8::ASSET_TYPE_SCRIPTABLE)
+                carry.definitions.emplace(key.second, found->second.header);
+            if (sources[0].rootKeys.insert(key).second)
                 sources[0].roots.push_back(found->second);
         }
         std::set<AssetKey> unresolved;
@@ -1063,6 +1067,20 @@ ScriptableCarry CarryScriptableDefinitions(const std::vector<iw8::ScriptableInst
                 carry.zones.push_back(std::move(source.zone));
     }
     return carry;
+}
+
+ScriptableCarry CarryScriptableDefinitions(const std::vector<iw8::ScriptableInstance> &instances,
+                                           const std::string &replayExecutable)
+{
+    std::map<std::string, std::set<AssetKey>> wanted; // stock zone -> definitions
+    for (const auto &instance : instances)
+        if (!instance.carryZone.empty())
+            wanted[instance.carryZone].insert({zonetool::iw8::ASSET_TYPE_SCRIPTABLE, instance.definition});
+    if (wanted.empty())
+        return {};
+    if (replayExecutable.empty())
+        throw std::runtime_error("carrying a stock scriptable definition needs --replay (the game folder)");
+    return CarryStockAssets(wanted, std::filesystem::path(replayExecutable).parent_path() / "zone");
 }
 
 // `prepare` (optional) runs on the loaded zone before it is written again and returns more additions.
@@ -3036,5 +3054,273 @@ namespace zonetool::convert::iw3_iw8
 		const zone_conversion& conversion)
 	{
 		convert_map(zone_path, conversion, extraction);
+	}
+
+	// editzone (IW8 Radiant research 88): a stock map zone is loaded, changed in memory and written again with the
+	// choices of this writer, as the converter's own map zones are (the stock file's own pointer layout cannot be
+	// kept: it aliases data by offset, and an edit moves the data). Every definition an edit does not touch is
+	// written from the stock definition in memory. Edits (a JSON file):
+	//   "entities": path of an IW8 entity text (numeric keys, as the game stores it). A stock map keeps its spawn
+	//       points only in a compiled list, not in the text; the editor shows them as mp_*_spawn* entities. When the
+	//       text has such entities they become the compiled list (in file order) and are taken out of the text;
+	//       when it has none the stock list stays. "rebuild_spawns": false keeps the stock list in every case;
+	//   "hide_static_models": indices into GfxWorld.smodels.smodelInstanceData whose scale becomes 0;
+	//   "carry": [{"zone", "type", "name"}] assets of other stock zones added with everything they use (their
+	//       materials and technique sets go to the techsets companion); a carried xmodel is also named in the
+	//       level's model table so that a script_model entity can use it.
+	// Output: <output>/<zone>.ff, techsets_<zone>.ff when it changed, and <zone>.edit-report.json.
+	void edit_zone(const std::filesystem::path& game_path, const std::string& zone_name,
+		const std::filesystem::path& edits_path, const std::filesystem::path& output)
+	{
+		using namespace zonetool::iw8;
+		const auto zone_folder = game_path / "zone";
+		const auto zone_path = zone_folder / (zone_name + ".ff");
+		if (!std::filesystem::exists(zone_path))
+		{
+			throw std::runtime_error("stock zone " + zone_path.string() + " was not found");
+		}
+
+		std::ifstream input(edits_path, std::ios::binary);
+		if (!input)
+		{
+			throw std::runtime_error("cannot read the edits file " + edits_path.string());
+		}
+		const auto edits = nlohmann::json::parse(input);
+		nlohmann::ordered_json report;
+		report["zone"] = zone_name;
+
+		auto zone = load_zone(zone_path, {.keep_temp_data = true});
+		const auto find = [&](const std::int32_t type) -> void*
+		{
+			for (const auto& asset : zone->assets)
+			{
+				if (asset.type == type && !asset.referenced)
+				{
+					return asset.header;
+				}
+			}
+			return nullptr;
+		};
+
+		// Kept alive until the zone is written.
+		std::string entity_text;
+		std::vector<SpawnPointEntityRecord> spawn_records;
+		std::vector<std::vector<const char*>> string_lists;
+		std::deque<std::string> names;
+
+		if (edits.contains("entities"))
+		{
+			auto* ents = static_cast<MapEnts*>(find(ASSET_TYPE_MAP_ENTS));
+			if (!ents)
+			{
+				throw std::runtime_error(zone_name + " has no map entities");
+			}
+			std::ifstream text(std::filesystem::path(edits.at("entities").get<std::string>()), std::ios::binary);
+			if (!text)
+			{
+				throw std::runtime_error("cannot read the entity text " + edits.at("entities").get<std::string>());
+			}
+			entity_text.assign(std::istreambuf_iterator<char>(text), {});
+			while (!entity_text.empty() && entity_text.back() == '\0')
+			{
+				entity_text.pop_back();
+			}
+			if (entity_text.empty() || entity_text.size() > 0x7FFFFFF0u)
+			{
+				throw std::runtime_error("the entity text is empty or too large");
+			}
+			report["entity_chars_before"] = ents->numEntityChars;
+			const ::iw8::ReplaySpawns spawns(entity_text);
+			const auto rebuild_spawns = edits.value("rebuild_spawns", true) && !spawns.records.empty();
+			if (rebuild_spawns)
+			{
+				// The spawn entities leave the text, as in a stock map (the same test as ReplaySpawns: classname key 212
+				// starting with mp_ and holding _spawn).
+				static const std::regex entity(R"(\{([^{}]*)\}\r?\n?)");
+				static const std::regex classname(R"re((?:^|\n)212\s+"([^"]*)")re");
+				std::string kept;
+				kept.reserve(entity_text.size());
+				std::size_t last = 0, removed = 0;
+				for (auto match = std::sregex_iterator(entity_text.begin(), entity_text.end(), entity);
+					match != std::sregex_iterator(); ++match)
+				{
+					const auto body = (*match)[1].str();
+					std::smatch name;
+					const auto spawn = std::regex_search(body, name, classname) && name[1].str().compare(0, 3, "mp_") == 0 &&
+						name[1].str().find("_spawn") != std::string::npos;
+					if (!spawn)
+					{
+						continue;
+					}
+					kept.append(entity_text, last, static_cast<std::size_t>(match->position()) - last);
+					last = static_cast<std::size_t>(match->position() + match->length());
+					++removed;
+				}
+				kept.append(entity_text, last, std::string::npos);
+				entity_text = std::move(kept);
+				report["spawn_entities_taken_out"] = removed;
+			}
+			ents->entityString = entity_text.data(); // c_str: the terminator is part of numEntityChars
+			ents->numEntityChars = static_cast<std::int32_t>(entity_text.size() + 1);
+			report["entity_chars"] = ents->numEntityChars;
+
+			if (rebuild_spawns)
+			{
+				// The compiled spawn list: one record per mp_*_spawn* entity in file order (checked: the records rebuilt
+				// from the stock spawns of mp_shipment written as entities equal the stock records).
+				const auto id = [&](const std::uint32_t index) -> scr_string_t
+				{
+					// A spawn without a target or a script_noteworthy holds the empty string, not the null string, as
+					// the stock records do.
+					return static_cast<scr_string_t>(SL_GetString(spawns.strings.at(index).data()));
+				};
+				spawn_records.reserve(spawns.records.size());
+				for (const auto& record : spawns.records)
+				{
+					SpawnPointEntityRecord native{};
+					native.index = record.index;
+					native.name = id(record.name);
+					native.target = id(record.target);
+					native.script_noteworthy = id(record.noteworthy);
+					for (auto axis = 0; axis < 3; axis++)
+					{
+						native.origin.v[axis] = record.origin[axis];
+						native.angles.v[axis] = record.angles[axis];
+					}
+					spawn_records.push_back(native);
+				}
+				report["spawns_before"] = ents->spawnList.spawnsCount;
+				ents->spawnList.spawnsCount = static_cast<std::uint16_t>(spawn_records.size());
+				ents->spawnList.spawns = spawn_records.empty() ? nullptr : spawn_records.data();
+				report["spawns"] = spawn_records.size();
+			}
+		}
+
+		if (edits.contains("hide_static_models"))
+		{
+			auto* world = static_cast<GfxWorld*>(find(ASSET_TYPE_GFXWORLD));
+			if (!world || !world->smodels.smodelInstanceData)
+			{
+				throw std::runtime_error(zone_name + " has no static model instances");
+			}
+			std::size_t hidden = 0;
+			for (const auto& entry : edits.at("hide_static_models"))
+			{
+				const auto index = entry.get<std::uint64_t>();
+				if (index >= world->smodels.instanceCount)
+				{
+					throw std::runtime_error("hide_static_models: instance " + std::to_string(index) + " is beyond the " +
+						std::to_string(world->smodels.instanceCount) + " instances of the map");
+				}
+				world->smodels.smodelInstanceData[index].scale = 0.0f;
+				++hidden;
+			}
+			report["static_model_instances"] = world->smodels.instanceCount;
+			report["hidden_static_models"] = hidden;
+		}
+
+		ScriptableCarry carry;
+		if (edits.contains("carry"))
+		{
+			std::map<std::string, std::set<AssetKey>> wanted;
+			std::set<std::string> models;
+			for (const auto& entry : edits.at("carry"))
+			{
+				const auto type_name = entry.at("type").get<std::string>();
+				std::int32_t type = -1;
+				for (std::int32_t candidate = 0; candidate < 256; candidate++)
+				{
+					const auto format = find_asset_format(candidate);
+					if (format && type_name == format->name)
+					{
+						type = candidate;
+						break;
+					}
+				}
+				if (type < 0)
+				{
+					throw std::runtime_error("carry: unknown asset type " + type_name);
+				}
+				const auto name = entry.at("name").get<std::string>();
+				wanted[entry.at("zone").get<std::string>()].insert({type, name});
+				if (type == ASSET_TYPE_XMODEL)
+				{
+					models.insert(name);
+				}
+			}
+			carry = CarryStockAssets(wanted, zone_folder);
+
+			// A carried model joins the level's model table (NetConstStrings of type 0 from the map), kept sorted.
+			if (!models.empty())
+			{
+				for (const auto& asset : zone->assets)
+				{
+					if (asset.type != ASSET_TYPE_NET_CONST_STRINGS || asset.referenced)
+					{
+						continue;
+					}
+					auto* table = static_cast<NetConstStrings*>(asset.header);
+					if (static_cast<std::uint32_t>(table->stringType) != 0 ||
+						static_cast<std::uint32_t>(table->sourceType) != 3)
+					{
+						continue;
+					}
+					std::set<std::string> listed;
+					for (std::uint32_t i = 0; i < table->entryCount; i++)
+					{
+						listed.insert(table->stringList[i] ? table->stringList[i] : "");
+					}
+					const auto before = listed.size();
+					listed.insert(models.begin(), models.end());
+					auto& list = string_lists.emplace_back();
+					for (const auto& text : listed)
+					{
+						list.push_back(names.emplace_back(text).data());
+					}
+					table->stringList = list.data();
+					table->entryCount = static_cast<std::uint32_t>(list.size());
+					report["level_models_added"] = listed.size() - before;
+					break;
+				}
+			}
+		}
+
+		const write_options options{.expected_size = zone->file.payload.size() + zone->file.payload.size() / 16};
+		std::filesystem::create_directories(output);
+		const auto write = [&](const loaded_zone& source, const std::vector<zone_asset>& wanted_additions,
+			const std::string& name, const write_options& how)
+		{
+			const auto additions = NewAdditions(source, wanted_additions);
+			auto written = write_zone(source, how, additions);
+			xfile::fastfile file{};
+			file.payload = std::move(written.data);
+			file.block_sizes = std::move(written.block_sizes);
+			file.xfile_version = source.file.xfile_version;
+			file.transient = source.file.transient;
+			file.preload_walk_size = std::max<std::uint64_t>(written.preload_walk_size, source.file.preload_walk_size);
+			// Stock zones declare more for the preload block than the writer computes: never less than the stock size.
+			for (std::size_t block = 0; block < file.block_sizes.size() && block < source.file.block_sizes.size(); block++)
+			{
+				file.block_sizes[block] = std::max(file.block_sizes[block], source.file.block_sizes[block]);
+			}
+			xfile::write(output / (name + ".ff"), definition().format, file);
+			return additions.size();
+		};
+		report["assets_added"] = write(*zone, carry.assets, zone_name, options);
+
+		if (!carry.techsets.empty())
+		{
+			const auto techsets_path = zone_folder / ("techsets_" + zone_name + ".ff");
+			if (!std::filesystem::exists(techsets_path))
+			{
+				throw std::runtime_error("stock zone " + techsets_path.string() + " was not found");
+			}
+			const auto techsets = load_zone(techsets_path, {.keep_temp_data = true});
+			const write_options techset_options{};
+			report["techset_assets_added"] = write(*techsets, carry.techsets, "techsets_" + zone_name, techset_options);
+		}
+
+		std::ofstream(output / (zone_name + ".edit-report.json"), std::ios::binary | std::ios::trunc) << report.dump(2) << "\n";
+		ZONETOOL_INFO("editzone: wrote %s (%s)", (output / (zone_name + ".ff")).string().data(), report.dump().data());
 	}
 }

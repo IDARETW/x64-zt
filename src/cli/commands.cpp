@@ -32,6 +32,7 @@ namespace zonetool::cli
 			command{"listzone", "listzone <zone> | listzone --all", list_zone},
 			command{"buildzone", "buildzone <zone>", build_zone},
 			command{"buildextraction", "buildextraction <extraction folder> --map <id> --replay <game_dx12_ship_replay.exe> [--metadata <json>] [--style iw3|iw8] [--acts <acts.exe>] [--output <folder>]", build_extraction},
+			command{"editzone", "editzone <zone> <edits.json> <output folder>", edit_zone},
 			command{"refreshzone", "refreshzone <deployed map folder> <rebuilt map folder> [<output folder>]", refresh_zone},
 			command{"patchzone", "patchzone <base.ff> <new.ff> [<out.fp>]", patch_zone},
 			command{"generatecsv", "generatecsv <map> [sp] [--path <dir>]...", generate_csv},
