@@ -3,6 +3,7 @@
 #include <game.hpp>
 #include <iw8/zone/loader.hpp>
 #include <iw8/zone/writer.hpp>
+#include <iw8/zone/patch_writer.h>
 #include <iw8/zone/ff_io.h>
 #include <iw8/common/fs_util.h>
 #include <iw8/common/log.h>
@@ -3068,7 +3069,8 @@ namespace zonetool::convert::iw3_iw8
 	//   "carry": [{"zone", "type", "name"}] assets of other stock zones added with everything they use (their
 	//       materials and technique sets go to the techsets companion); a carried xmodel is also named in the
 	//       level's model table so that a script_model entity can use it.
-	// Output: <output>/<zone>.ff, techsets_<zone>.ff when it changed, and <zone>.edit-report.json.
+	// Output: <output>/<zone>.ff, techsets_<zone>.ff when it changed, <output>/patch/<same names>.fp (the patches that
+	// turn the stock files into them; "patch": false leaves them out) and <zone>.edit-report.json.
 	void edit_zone(const std::filesystem::path& game_path, const std::string& zone_name,
 		const std::filesystem::path& edits_path, const std::filesystem::path& output)
 	{
@@ -3304,6 +3306,14 @@ namespace zonetool::convert::iw3_iw8
 				file.block_sizes[block] = std::max(file.block_sizes[block], source.file.block_sizes[block]);
 			}
 			xfile::write(output / (name + ".ff"), definition().format, file);
+			// The patch that turns the stock file into the edited zone: the game applies <zone>.fp beside <zone>.ff, so
+			// the edit installs as this one file and the stock zone stays as shipped. A stock patch of the same name is
+			// replaced by it (the edit was made on the patched zone).
+			if (edits.value("patch", true))
+			{
+				std::filesystem::create_directories(output / "patch");
+				write_patch(zone_folder / (name + ".ff"), output / (name + ".ff"), output / "patch" / (name + ".fp"));
+			}
 			return additions.size();
 		};
 		report["assets_added"] = write(*zone, carry.assets, zone_name, options);
