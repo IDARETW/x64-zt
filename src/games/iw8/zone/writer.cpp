@@ -224,6 +224,8 @@ namespace zonetool::iw8
 			std::unordered_set<const void*> references_;
 			// Virtual block positions of the inserted pointers and list entries that hold each written asset.
 			std::map<asset_key, std::size_t> aliases_;
+			// The keys of aliases_ that point at a name stub (no definition written yet).
+			std::set<asset_key> stub_keys_;
 			// The same for the stubs of write_options::reference_uses.
 			std::map<asset_key, std::size_t> reference_aliases_;
 			std::deque<std::vector<std::uint8_t>> stubs_;
@@ -292,7 +294,11 @@ namespace zonetool::iw8
 					return;
 				}
 
-				if (const auto alias = aliases.find(key); alias != aliases.end() && !kept)
+				// A zone can hold a name stub and the definition of the same asset (stock mp_br_quarry: scriptable
+				// ks_ac130_mp). When the stub was used first, the definition must still be written: aliasing it to the
+				// stub would drop it. Later uses then point at the definition.
+				const auto definition_after_stub = !reference && this->headers_.contains(header) && this->stub_keys_.contains(key);
+				if (const auto alias = aliases.find(key); alias != aliases.end() && !kept && !definition_after_stub)
 				{
 					writer.set_pointer(field, writer.offset_value(write_stream::virtual_block, alias->second));
 					return;
@@ -314,11 +320,18 @@ namespace zonetool::iw8
 				{
 					if (stub)
 					{
-						aliases.try_emplace(key, position);
+						if (aliases.try_emplace(key, position).second && !reference)
+						{
+							this->stub_keys_.insert(key);
+						}
 					}
 					else
 					{
 						aliases.insert_or_assign(key, position);
+						if (!reference)
+						{
+							this->stub_keys_.erase(key);
+						}
 					}
 				};
 

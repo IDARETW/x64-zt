@@ -127,6 +127,25 @@ namespace zonetool::iw8
 			const auto zone_assets = distinct_assets(zone);
 			if (written_assets != zone_assets || reloaded->list.size() != zone.list.size())
 			{
+				// Name what differs (up to 12 each way): the first step of finding why.
+				std::size_t shown = 0;
+				for (const auto& [type, name, referenced] : zone_assets)
+				{
+					if (!written_assets.contains({type, name, referenced}) && shown++ < 12)
+					{
+						const auto format = find_asset_format(type);
+						ZONETOOL_INFO("%s: only in the zone: %s \"%s\"%s", zone.name.data(), format ? format->name : "?", name.data(), referenced ? " (reference)" : "");
+					}
+				}
+				shown = 0;
+				for (const auto& [type, name, referenced] : written_assets)
+				{
+					if (!zone_assets.contains({type, name, referenced}) && shown++ < 12)
+					{
+						const auto format = find_asset_format(type);
+						ZONETOOL_INFO("%s: only in the written zone: %s \"%s\"%s", zone.name.data(), format ? format->name : "?", name.data(), referenced ? " (reference)" : "");
+					}
+				}
 				throw std::runtime_error(std::format("the written zone holds other assets: {} of {} assets, {} of {} list entries",
 					written_assets.size(), zone_assets.size(), reloaded->list.size(), zone.list.size()));
 			}
