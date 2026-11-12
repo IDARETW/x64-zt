@@ -3473,9 +3473,13 @@ namespace zonetool::convert::iw3_iw8
 	//       Havok's own primitive removal does (removed marker DE AD DE AD, a quad keeps its other half); nothing else
 	//       moves. A map with collision tiles is refused. "rebake_sun_shadow": true bakes
 	//       the compressed sun shadow again at the stock sun direction without the removed triangles (as "sun.direction";
-	//       "acts" or IW8_ACTS for the static models). What stays: the Umbra occlusion tome (a removed occluder still hides
-	//       what was behind it), the lightmaps, light grid and probes (baked contact shadows), static models (hide them
-	//       with hide_static_models / remove_static_model_collision) and the stock sun shadow unless re-baked.
+	//       "acts" or IW8_ACTS for the static models). "occlusion": "auto" (default) | "open" | "stock": the stock Umbra
+	//       tome was baked with the occluder surfaces (GFX_SURF_IS_UMBRA_OCCLUDER) as walls, so a removed occluder would
+	//       still hide what was behind it; "auto" replaces the tome with the conservative one of the converted maps (the
+	//       same objects and user IDs, one cell: Umbra culls nothing, the GPU passes cull) when a removed triangle belongs
+	//       to an occluder surface, "open" always, "stock" keeps it. A tome with gates is refused. What stays: the
+	//       lightmaps, light grid and probes (baked contact shadows), static models (hide them with hide_static_models /
+	//       remove_static_model_collision) and the stock sun shadow unless re-baked.
 	//   "stock_patches": {"<zone>.fp": "<file>" | ""} names, per patch file of the game's zone folder, the stock patch
 	//       to read that zone with ("" = the stock game has no patch of that name). The game ships patches with real
 	//       map data (mp_br_quarry.fp, mp_donetsk.fp, ...), and an installed edit replaces the patch of its zone: with
@@ -3763,6 +3767,7 @@ namespace zonetool::convert::iw3_iw8
 		// Kept alive until the zone is written.
 		std::deque<std::vector<std::uint16_t>> kept_world_indices;
 		std::vector<std::uint8_t> kept_world_collision;
+		std::vector<std::uint8_t> kept_world_tome;
 		bool rebake_sun_for_removal = false;
 		std::string rebake_acts;
 		if (edits.contains("remove_world_surfaces"))
@@ -3857,6 +3862,56 @@ namespace zonetool::convert::iw3_iw8
 			out["surfaces_not_resident"] = render.notResident;
 			ZONETOOL_INFO("editzone: remove_world_surfaces: %zu triangle(s) of %zu surface(s) no longer draw (%zu surface(s) emptied)",
 				render.triangles, render.touched.size(), render.emptied.size());
+
+			// Occlusion: the stock Umbra tome was baked with the occluder surfaces (GFX_SURF_IS_UMBRA_OCCLUDER) as walls.
+			// "auto" (default) replaces it with the conservative tome when a removed triangle belongs to an occluder
+			// surface, "open" always, "stock" never (research 96, "Occlusion").
+			{
+				const auto mode = node.value("occlusion", std::string("auto"));
+				if (mode != "auto" && mode != "open" && mode != "stock")
+				{
+					throw std::runtime_error("remove_world_surfaces.occlusion must be \"auto\", \"open\" or \"stock\"");
+				}
+				std::vector<std::uint32_t> occluders;
+				for (const auto s : render.touched)
+				{
+					if (world->surfaces.surfaces[s].flags & GFX_SURF_IS_UMBRA_OCCLUDER)
+					{
+						occluders.push_back(s);
+					}
+				}
+				nlohmann::ordered_json occlusion;
+				occlusion["mode"] = mode;
+				occlusion["occluder_surfaces_touched"] = occluders;
+				const bool open = mode == "open" || (mode == "auto" && !occluders.empty());
+				occlusion["opened"] = open;
+				if (open)
+				{
+					if (!world->umbraTomeData || !world->umbraTomeSize || world->numUmbraGates)
+					{
+						throw std::runtime_error(zone_name + (world->numUmbraGates ? " has Umbra gates" : " has no Umbra tome") +
+							": its occlusion cannot be opened (\"occlusion\": \"stock\" keeps it)");
+					}
+					const std::span<const std::uint8_t> stock_tome(world->umbraTomeData, world->umbraTomeSize);
+					const auto before = ::iw8::stockworld::ReadTome(stock_tome);
+					::iw8::stockworld::OcclusionOpening opening;
+					kept_world_tome = ::iw8::stockworld::OpenOcclusion(stock_tome, opening);
+					world->umbraTomeData = kept_world_tome.data();
+					world->umbraTomeSize = static_cast<std::uint32_t>(kept_world_tome.size());
+					world->umbraTome = nullptr;
+					occlusion["objects"] = opening.objects;
+					occlusion["objects_by_class"] = opening.classes;
+					occlusion["stock_tiles"] = before.tiles;
+					occlusion["stock_leaf_tiles"] = before.leafTiles;
+					occlusion["stock_clusters"] = before.clusters;
+					occlusion["tome_bytes_before"] = opening.bytesBefore;
+					occlusion["tome_bytes_after"] = opening.bytesAfter;
+					ZONETOOL_INFO("editzone: remove_world_surfaces: %zu occluder surface(s) touched; the Umbra tome (%zu bytes, %u tiles) "
+						"is now the conservative one (%zu bytes, %u objects): Umbra hides nothing, the GPU culls",
+						occluders.size(), opening.bytesBefore, before.tiles, opening.bytesAfter, opening.objects);
+				}
+				out["occlusion"] = occlusion;
+			}
 			if (node.value("collision", true) && !collision_boxes.empty())
 			{
 				auto* clip = static_cast<clipMap_t*>(find(ASSET_TYPE_CLIPMAP));

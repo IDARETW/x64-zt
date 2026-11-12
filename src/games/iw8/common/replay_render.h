@@ -376,4 +376,9 @@ replaybounds::Bounds StaticModelWorldBounds(const StaticModels &models, size_t i
 std::vector<uint8_t> BuildUmbraTome(const Mesh &mesh, const StaticModels &staticModels,
                                     const std::vector<uint32_t> &primaryLights = {},
                                     uint32_t reflectionProbeInstances = 0);
+// The conservative tome itself (what BuildUmbraTome writes): one tile, one cell over minimum..maximum that holds every
+// object, each object spanning the whole box, so Umbra culls nothing (no occlusion, no frustum or contribution cull)
+// and the GPU passes do all culling. userIDs: one Umbra user ID per object (class in bits 28-30).
+std::vector<uint8_t> BuildConservativeUmbraTome(const std::vector<uint32_t> &userIDs,
+                                                const float (&minimum)[3], const float (&maximum)[3]);
 } // namespace replayrender

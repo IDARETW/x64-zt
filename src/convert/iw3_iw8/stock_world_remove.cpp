@@ -3,6 +3,7 @@
 #include "stock_world_remove.h"
 
 #include <iw8/havok/mesh.hpp>
+#include <iw8/common/replay_render.h>
 
 #include <algorithm>
 #include <bit>
@@ -614,5 +615,103 @@ namespace iw8::stockworld
 		}
 		out["shapes"] = std::move(rows);
 		return out.dump();
+	}
+
+	namespace
+	{
+		// Umbra 3 ImpTome header (version 0xD6000014; the field names are those of the IW7 headers in
+		// src/games/iw7/structs.hpp, Umbra::ImpTome, whose offsets match Replay 1.20's tomes).
+		constexpr std::uint32_t kTomeVersion = 0xD6000014;
+		constexpr std::size_t kTomeHeaderSize = 0x170;
+
+		std::uint32_t tome_u32(std::span<const std::uint8_t> tome, const std::size_t offset)
+		{
+			if (offset + 4 > tome.size())
+			{
+				throw std::runtime_error("the Umbra tome is shorter than its header says");
+			}
+			std::uint32_t value;
+			std::memcpy(&value, tome.data() + offset, 4);
+			return value;
+		}
+
+		std::uint32_t tome_crc32c(const std::uint8_t* data, const std::size_t size)
+		{
+			std::uint32_t crc = 0xFFFFFFFFu;
+			for (std::size_t i = 0; i < size; ++i)
+			{
+				crc ^= data[i];
+				for (int bit = 0; bit < 8; ++bit)
+				{
+					crc = (crc >> 1) ^ (0x82F63B78u & (0u - (crc & 1u)));
+				}
+			}
+			return ~crc;
+		}
+	}
+
+	StockTome ReadTome(std::span<const std::uint8_t> tome)
+	{
+		if (tome.size() < kTomeHeaderSize || tome_u32(tome, 0x00) != kTomeVersion || tome_u32(tome, 0x08) != tome.size())
+		{
+			throw std::runtime_error("the GfxWorld Umbra tome is not a Replay 1.20 tome (version 0xD6000014)");
+		}
+		StockTome out;
+		out.checksumDisabled = tome_u32(tome, 0x04) == 0xD15AB1EDu;
+		out.checksumValid = !out.checksumDisabled && tome_u32(tome, 0x04) == tome_crc32c(tome.data() + 8, tome.size() - 8);
+		for (int axis = 0; axis < 3; ++axis)
+		{
+			std::memcpy(&out.mins[axis], tome.data() + 0x14 + 4 * axis, 4); // m_treeMin
+			std::memcpy(&out.maxs[axis], tome.data() + 0x20 + 4 * axis, 4); // m_treeMax
+		}
+		out.objects = tome_u32(tome, 0x40);           // m_numObjects
+		out.userIDStarts = tome_u32(tome, 0x4C) != 0; // m_userIDStarts
+		out.gates = tome_u32(tome, 0x68);             // m_numGates
+		out.clusters = tome_u32(tome, 0x7C);          // m_numClusters
+		out.leafTiles = tome_u32(tome, 0x8C);         // m_numLeafTiles
+		out.tiles = tome_u32(tome, 0x90);             // m_numTiles
+		out.tomes = tome_u32(tome, 0xB0);             // m_numTomes
+		const auto ids = tome_u32(tome, 0x50);        // m_userIDs
+		if (!out.objects || !ids || ids + 4ull * out.objects > tome.size())
+		{
+			throw std::runtime_error("the Umbra tome's user ID table is outside the tome");
+		}
+		out.userIDs.resize(out.objects);
+		std::memcpy(out.userIDs.data(), tome.data() + ids, 4ull * out.objects);
+		return out;
+	}
+
+	std::vector<std::uint8_t> OpenOcclusion(std::span<const std::uint8_t> stockTome, OcclusionOpening& report)
+	{
+		const auto stock = ReadTome(stockTome);
+		if (!stock.checksumValid && !stock.checksumDisabled)
+		{
+			throw std::runtime_error("the stock Umbra tome fails its checksum");
+		}
+		if (stock.gates || stock.tomes || stock.userIDStarts)
+		{
+			throw std::runtime_error(std::format("the stock Umbra tome has {} gate(s), {} tome(s) in a collection and {} user ID "
+				"starts: the conservative tome has none, so its occlusion is not replaced", stock.gates, stock.tomes,
+				stock.userIDStarts ? "its own" : "no"));
+		}
+		for (int axis = 0; axis < 3; ++axis)
+		{
+			if (!std::isfinite(stock.mins[axis]) || !std::isfinite(stock.maxs[axis]) || stock.mins[axis] >= stock.maxs[axis])
+			{
+				throw std::runtime_error("the stock Umbra tome has invalid bounds");
+			}
+		}
+		const float mins[3]{stock.mins[0], stock.mins[1], stock.mins[2]};
+		const float maxs[3]{stock.maxs[0], stock.maxs[1], stock.maxs[2]};
+		auto out = replayrender::BuildConservativeUmbraTome(stock.userIDs, mins, maxs);
+		report.objects = stock.objects;
+		report.classes = {};
+		for (const auto id : stock.userIDs)
+		{
+			++report.classes[(id >> 28) & 7];
+		}
+		report.bytesBefore = stockTome.size();
+		report.bytesAfter = out.size();
+		return out;
 	}
 }

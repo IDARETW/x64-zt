@@ -3524,17 +3524,6 @@ std::vector<uint8_t> BuildUmbraTome(const Mesh &m, const StaticModels &staticMod
         uint64_t(worldSurfaceCount) * 56 > m.bounds.size())
         throw std::runtime_error("Replay world surfaces cannot be represented by Umbra object IDs");
 
-    const unsigned indexWidth = objectIndexWidth(objectCount);
-    const auto packedObjects = packObjectIndices(objectCount, indexWidth);
-    std::vector<uint8_t> tome(kUmbraHeaderSize);
-    put(tome.data(), 0x00, kUmbraVersion);
-    put(tome.data(), 0x0C, 128.0f);
-    put(tome.data(), 0x40, objectCount);
-    put(tome.data(), 0x54, indexWidth);
-    put(tome.data(), 0x5C, objectCount);
-    put(tome.data(), 0x8C, uint32_t(1));
-    put(tome.data(), 0x90, uint32_t(1));
-
     float minimum[3], maximum[3];
     for (unsigned axis = 0; axis < 3; ++axis)
     {
@@ -3553,6 +3542,30 @@ std::vector<uint8_t> BuildUmbraTome(const Mesh &m, const StaticModels &staticMod
             maximum[axis] = std::max(maximum[axis], bounds.midpoint[axis] + bounds.halfSize[axis]);
         }
     }
+    return BuildConservativeUmbraTome(userIDList, minimum, maximum);
+}
+
+std::vector<uint8_t> BuildConservativeUmbraTome(const std::vector<uint32_t> &userIDList,
+                                                const float (&minimum)[3], const float (&maximum)[3])
+{
+    if (userIDList.empty() || userIDList.size() > 0x01000000)
+        throw std::runtime_error("Umbra objects cannot be represented by a conservative tome");
+    for (unsigned axis = 0; axis < 3; ++axis)
+        if (!std::isfinite(minimum[axis]) || !std::isfinite(maximum[axis]) ||
+            minimum[axis] >= maximum[axis])
+            throw std::runtime_error("Replay world has invalid Umbra bounds");
+    const auto objectCount = static_cast<uint32_t>(userIDList.size());
+    const unsigned indexWidth = objectIndexWidth(objectCount);
+    const auto packedObjects = packObjectIndices(objectCount, indexWidth);
+    std::vector<uint8_t> tome(kUmbraHeaderSize);
+    put(tome.data(), 0x00, kUmbraVersion);
+    put(tome.data(), 0x0C, 128.0f);
+    put(tome.data(), 0x40, objectCount);
+    put(tome.data(), 0x54, indexWidth);
+    put(tome.data(), 0x5C, objectCount);
+    put(tome.data(), 0x8C, uint32_t(1));
+    put(tome.data(), 0x90, uint32_t(1));
+
     std::memcpy(tome.data() + 0x14, minimum, sizeof(minimum));
     std::memcpy(tome.data() + 0x20, maximum, sizeof(maximum));
     std::memcpy(tome.data() + 0x150, minimum, sizeof(minimum));

@@ -68,4 +68,35 @@ namespace iw8::stockworld
 	// The world shape list as JSON for checks: per compressed mesh its triangles (game units, nine numbers each) and
 	// shape tags, and its convex instances (placed bounds in game units, shape tag, live: a primitive names it).
 	std::string DescribeCollision(std::span<const std::uint8_t> data, const zonetool::iw8::havok::type_table& compendium);
+
+	// Umbra occlusion (research 96, "Occlusion"). Replay culls world surfaces, static models, lights, probes and decal
+	// collections with the precomputed Umbra tome (GfxWorld.umbraTomeData): the occluders (surfaces with
+	// GFX_SURF_IS_UMBRA_OCCLUDER, static model collections with STATIC_MODEL_COLLECTION_FLAG_UMBRA_OCCLUDER) were
+	// voxelized into its cells and portals when the map was built, so a removed occluder still blocks the view there.
+	struct StockTome
+	{
+		std::uint32_t objects = 0;
+		std::uint32_t gates = 0, tomes = 0, clusters = 0, tiles = 0, leafTiles = 0;
+		bool userIDStarts = false; // objects with more than one user ID
+		std::array<float, 3> mins{}, maxs{};
+		std::vector<std::uint32_t> userIDs; // one per object
+		bool checksumValid = false;
+		bool checksumDisabled = false; // m_crc32 0xD15AB1ED: the stock tomes carry no checksum
+	};
+	StockTome ReadTome(std::span<const std::uint8_t> tome);
+
+	struct OcclusionOpening
+	{
+		std::uint32_t objects = 0;
+		std::array<std::uint32_t, 8> classes{}; // objects per user-ID class (bits 28-30)
+		std::size_t bytesBefore = 0, bytesAfter = 0;
+	};
+
+	// The stock tome replaced by the converter's conservative tome (replayrender::BuildConservativeUmbraTome, the one
+	// every converted map runs with): the same objects with the same user IDs, in the stock order, one cell over the
+	// stock tome's bounds, so Umbra hides nothing and the GPU passes (frustum, Hi-Z, LOD) do all the culling. Cells,
+	// portals and clusters of the stock tome are opaque to the converter, so a removed occluder cannot be taken out of
+	// them alone. Refused: a tome with gates (GfxWorld.umbraGates name them), tome collections or several user IDs per
+	// object.
+	std::vector<std::uint8_t> OpenOcclusion(std::span<const std::uint8_t> stockTome, OcclusionOpening& report);
 }
