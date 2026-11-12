@@ -1998,7 +1998,8 @@ int writeMapPackage(const Args &args, const std::string &map, const std::string 
         const auto worldStrings = iw8::internMapWorldStrings(
             writer, mapEntities, lighting,
             prepared ? prepared->staticModelCollisionModels : noStaticCollisionModels,
-            prepared ? &prepared->scriptableInstances : nullptr);
+            prepared ? &prepared->scriptableInstances : nullptr,
+            prepared ? &prepared->lootPoints : nullptr);
         replayrender::RegisterMapMaterials(writer, techsets, renderMesh);
         replayrender::RegisterReflectionProbeImage(writer, renderMesh);
         replayrender::RegisterVolumetricMaskImages(writer, renderMesh);

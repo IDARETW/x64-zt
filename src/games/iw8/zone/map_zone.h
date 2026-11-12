@@ -815,6 +815,9 @@ inline void writeSpatialLeaf(ZoneBuffer &zb)
 // instance's definition reference.
 struct MapScriptables
 {
+    // Loot points (spawnGroupLoot). Each takes one scriptable slot at run time: the loot count and the three server
+    // counts include them (research 86: on every stock map with loot).
+    std::vector<MapLootPoint> loot;
     std::vector<ScriptableInstance> instances;
     std::vector<std::array<uint32_t, 6>> strings;
     std::vector<uint64_t> definitionAliases;
@@ -920,6 +923,21 @@ inline void emitMapEntsBody(ZoneBuffer &zb, const char *assetName, const std::st
     // A null tree exits before allocating their instance-to-marker table.
     stamp64(me, 0x2C0, PTR_FOLLOWS);
     const bool hasScriptables = scriptables && !scriptables->instances.empty();
+    const uint32_t lootCount = scriptables ? static_cast<uint32_t>(scriptables->loot.size()) : 0u;
+    if (lootCount > 65000)
+        throw std::runtime_error("a map takes at most 65000 loot points");
+    if (lootCount)
+    {
+        // SpawnGroup at 0x2D0 (after ScriptableMapEnts, which ends with ffMemCost at 0x2C8): pointCount, points; no
+        // clusters, no zones.
+        stamp16(me, 0x2D0, static_cast<uint16_t>(lootCount));
+        stamp64(me, 0x2D8, PTR_FOLLOWS);
+        stamp32(me, 0x204, lootCount); // lootInstanceCount
+        stamp32(me, 0x208, lootCount); // the three server counts: the instances are added below
+        stamp32(me, 0x20C, lootCount);
+        stamp32(me, 0x210, lootCount);
+        stamp32(me, 0x2C8, 216);
+    }
     if (hasScriptables)
     {
         // ScriptableMapEnts at 0x1F8. The counts follow the definitions of the instances as in stock maps (IW8 Radiant
@@ -938,9 +956,9 @@ inline void emitMapEntsBody(ZoneBuffer &zb, const char *assetName, const std::st
             limits += instance.physicsLimit ? 1 : 0;
         }
         stamp32(me, 0x1FC, static_cast<uint32_t>(instances.size())); // mapInstanceCount
-        stamp32(me, 0x208, server);                                  // serverInstanceCount
-        stamp32(me, 0x20C, fixedParts);                              // serverFixedPartCount
-        stamp32(me, 0x210, usableParts);                             // serverUsablePartCount
+        stamp32(me, 0x208, server + lootCount);                      // serverInstanceCount
+        stamp32(me, 0x20C, fixedParts + lootCount);                  // serverFixedPartCount
+        stamp32(me, 0x210, usableParts + lootCount);                 // serverUsablePartCount
         for (unsigned k = 0; k < 6; ++k)
             stamp32(me, 0x214 + k * 4, limits); // ScriptablePhysicsLimits
         stamp64(me, 0x230, PTR_FOLLOWS);        // mapInstances
@@ -1055,6 +1073,20 @@ inline void emitMapEntsBody(ZoneBuffer &zb, const char *assetName, const std::st
         zb.writeT<float>(-100000.f);
     for (unsigned k = 0; k < 3; ++k)
         zb.writeT<float>(100000.f);
+    // MapEnts.spawnGroupLoot.points: SpawnGroupPoint, 28 bytes (origin, angles, u16 cluster, u16 zone), align 4.
+    if (lootCount)
+    {
+        zb.align(3);
+        for (const auto &point : scriptables->loot)
+        {
+            for (const float value : point.origin)
+                zb.writeT(value);
+            for (const float value : point.angles)
+                zb.writeT(value);
+            zb.writeT<uint16_t>(point.cache ? 0xFFFBu : 0xFFFDu);
+            zb.writeT<uint16_t>(0);
+        }
+    }
     // MapEnts.audioPASpeakers: after the scriptables (and the empty spawn-group,
     // effect, mayhem and spawner lists) in stream_mapents order.
     if (clientTriggers && !clientTriggers->paSpeakers.empty())
@@ -1414,7 +1446,8 @@ struct MapWorldStrings
 inline MapWorldStrings internMapWorldStrings(
     ZoneWriter &writer, const std::string &ents, const MapSun &lighting,
     const std::vector<staticmodelcollision::Model> &collisionModels,
-    const std::vector<ScriptableInstance> *scriptableInstances = nullptr)
+    const std::vector<ScriptableInstance> *scriptableInstances = nullptr,
+    const std::vector<MapLootPoint> *lootPoints = nullptr)
 {
     MapWorldStrings result;
     result.spawns = std::make_shared<ReplaySpawns>(ents);
@@ -1441,6 +1474,12 @@ inline MapWorldStrings internMapWorldStrings(
             result.scriptables->strings.push_back({result.spawns->intern("scriptable_" + instance.definition),
                                                    name(instance.target), name(instance.targetname), name(instance.linkname),
                                                    name(instance.linkto), name(instance.noteworthy)});
+    }
+    if (lootPoints && !lootPoints->empty())
+    {
+        if (!result.scriptables)
+            result.scriptables = std::make_shared<MapScriptables>();
+        result.scriptables->loot = *lootPoints;
     }
     const auto &strings = result.spawns->strings;
     if (strings.size() > 2)

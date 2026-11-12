@@ -3561,6 +3561,57 @@ std::optional<iw8::havok::PhysicsSystem> KeepBoneBodies(const iw8::havok::Physic
     return result;
 }
 
+// "loot_points" of the collision JSON (IW8 Radiant research 89): [{"origin": [x, y, z], "angles": [p, y, r],
+// "cache": true | false}], the places where the battle royale scripts may put loot ("cache": a loot cache point).
+std::vector<iw8::MapLootPoint> ReadLootPoints(const Json &collision)
+{
+    std::vector<iw8::MapLootPoint> result;
+    if (!collision.contains("loot_points"))
+        return result;
+    const auto &list = collision.at("loot_points");
+    if (!list.is_array() || list.size() > 65000)
+        throw std::runtime_error("loot_points must be a list of at most 65000 points");
+    for (std::size_t index = 0; index < list.size(); ++index)
+    {
+        const auto &entry = list[index];
+        const auto fail = [&](const std::string &what) {
+            throw std::runtime_error("loot_points[" + std::to_string(index) + "]: " + what);
+        };
+        if (!entry.is_object())
+            fail("not an object");
+        iw8::MapLootPoint point;
+        const auto vector = [&](const char *key, std::array<float, 3> &out, const bool required) {
+            if (!entry.contains(key))
+            {
+                if (required)
+                    fail(std::string("no ") + key);
+                return;
+            }
+            const auto &node = entry.at(key);
+            if (!node.is_array() || node.size() != 3)
+                fail(std::string(key) + " is not three numbers");
+            for (std::size_t axis = 0; axis < 3; ++axis)
+            {
+                if (!node[axis].is_number())
+                    fail(std::string(key) + " is not three numbers");
+                out[axis] = node[axis].get<float>();
+                if (!std::isfinite(out[axis]))
+                    fail(std::string(key) + " is not finite");
+            }
+        };
+        vector("origin", point.origin, true);
+        vector("angles", point.angles, false);
+        if (entry.contains("cache"))
+        {
+            if (!entry.at("cache").is_boolean())
+                fail("cache is not true or false");
+            point.cache = entry.at("cache").get<bool>();
+        }
+        result.push_back(point);
+    }
+    return result;
+}
+
 // "scriptable_instances" of the collision JSON (IW8 Radiant research 86): one object per placed scriptable with the
 // definition's name and the numbers of that definition the map-wide tables need. The definition must be in a zone the
 // game always has loaded: the map zone gets a name-only reference. A bad entry stops the build: a wrong count here is a
@@ -10132,6 +10183,7 @@ PreparedMap::PreparedMap(PreparedMap &&other) noexcept
     , render(std::move(other.render))
     , dynamicEntities(std::move(other.dynamicEntities))
     , scriptableInstances(std::move(other.scriptableInstances))
+    , lootPoints(std::move(other.lootPoints))
     , navigation(std::move(other.navigation))
     , mapScript(std::move(other.mapScript))
     , scriptMaterials(std::move(other.scriptMaterials))
@@ -10181,6 +10233,7 @@ PreparedMap &PreparedMap::operator=(PreparedMap &&other) noexcept
         render = std::move(other.render);
         dynamicEntities = std::move(other.dynamicEntities);
         scriptableInstances = std::move(other.scriptableInstances);
+        lootPoints = std::move(other.lootPoints);
         navigation = std::move(other.navigation);
         mapScript = std::move(other.mapScript);
         scriptMaterials = std::move(other.scriptMaterials);
@@ -12899,6 +12952,9 @@ PreparedMap PrepareFastfile(const ImportOptions &options)
     }
     // Scriptable instances and their dynamic entities (model basis: the list writer places them after the clutter
     // entries and before the brushes).
+    result.lootPoints = ReadLootPoints(collision);
+    if (!result.lootPoints.empty())
+        zt::info("iw3: %zu loot points", result.lootPoints.size());
     result.scriptableInstances = ReadScriptableInstances(collision);
     if (!result.scriptableInstances.empty())
     {

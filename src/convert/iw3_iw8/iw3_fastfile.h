@@ -280,6 +280,8 @@ struct PreparedMap
     // Scriptable instances of the map (collision JSON "scriptable_instances"); their dynamic entities are already in
     // dynamicEntities.
     std::vector<iw8::ScriptableInstance> scriptableInstances;
+    // Loot points of the map (collision JSON "loot_points").
+    std::vector<iw8::MapLootPoint> lootPoints;
     iw8::navigation::Source navigation;
     // IW8 GSC translated from the map's IW3 scripts (without the generated
     // minimap function), compiled with gsc-tool at package time.
