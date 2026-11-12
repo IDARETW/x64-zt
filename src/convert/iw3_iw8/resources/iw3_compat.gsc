@@ -219,6 +219,10 @@ iw3compat_setdvar( name, value )
         setdvar( "sm_sunCascadeSizeMultiplier1", value );
     else if ( name == "sm_suncascadesizemultiplier2" )
         setdvar( "sm_sunCascadeSizeMultiplier2", value );
+    // IW8 Radiant game mode settings (worldspawn iw8r_mode_dvars, research 87): the editor marks the name with
+    // "iw8r:" and the dvar after the mark is set as written (lower case).
+    else if ( getsubstr( name, 0, 5 ) == "iw8r:" )
+        setdvar( getsubstr( name, 5 ), value );
 }
 
 // IW3 ambientPlay is a 2D loop for everyone. Each player carries the converted
