@@ -324,28 +324,37 @@ namespace iw8::stocksun
 			}
 			replaysunshadow::Surface caster;
 			caster.vertices.reserve(3ull * tris.triCount);
-			for (std::uint32_t k = 0; k < 3u * tris.triCount; ++k)
+			for (std::uint32_t t = 0; t < tris.triCount; ++t)
 			{
-				const auto vertex = zone->drawVerts.indices[tris.baseIndex + k];
-				if (vertex >= tris.vertexCount)
+				const auto* triangle = zone->drawVerts.indices + tris.baseIndex + 3u * t;
+				// A degenerate triangle casts nothing (editzone remove_world_surfaces leaves its triangles so).
+				if (triangle[0] == triangle[1] && triangle[1] == triangle[2])
 				{
-					throw std::runtime_error("sun.direction: world surface " + std::to_string(index) + " has an index past its vertices");
+					continue;
 				}
-				replaysunshadow::Vertex out;
-				std::memcpy(out.position.data(), zone->drawVerts.posData + tris.posOffset + 12u * vertex, 12);
-				for (int axis = 0; axis < 3; ++axis)
+				for (std::uint32_t k = 0; k < 3u; ++k)
 				{
-					low[axis] = std::min(low[axis], out.position[axis]);
-					high[axis] = std::max(high[axis], out.position[axis]);
+					const auto vertex = triangle[k];
+					if (vertex >= tris.vertexCount)
+					{
+						throw std::runtime_error("sun.direction: world surface " + std::to_string(index) + " has an index past its vertices");
+					}
+					replaysunshadow::Vertex out;
+					std::memcpy(out.position.data(), zone->drawVerts.posData + tris.posOffset + 12u * vertex, 12);
+					for (int axis = 0; axis < 3; ++axis)
+					{
+						low[axis] = std::min(low[axis], out.position[axis]);
+						high[axis] = std::max(high[axis], out.position[axis]);
+					}
+					caster.vertices.push_back(out);
 				}
-				caster.vertices.push_back(out);
 			}
 			if (caster.vertices.empty())
 			{
 				continue;
 			}
 			++report.worldSurfaces;
-			report.worldTriangles += tris.triCount;
+			report.worldTriangles += caster.vertices.size() / 3;
 			scene.surfaces.push_back(std::move(caster));
 		}
 		if (!report.worldSurfaces)

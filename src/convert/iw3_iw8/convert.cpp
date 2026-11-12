@@ -18,6 +18,8 @@
 #include "iw3_render_assets.h"
 #include "iw3_vision.h"
 #include "stock_sun.h"
+#include "stock_world_remove.h"
+#include <iw8/havok/compendium.hpp>
 #include "iw3_scripts.h"
 #include <iw8/zone/iw8_ffheader.h>
 #include <iw8/zone/iw8_zone.h>
@@ -3460,6 +3462,19 @@ namespace zonetool::convert::iw3_iw8
 	//       fences, props and doors: radial and sparse-occluder entries, and no-spatial ones), a removal drops them; the
 	//       lists, chains, counts and the GfxWorld client arrays are rebuilt. Refused: streamed (transient) entries,
 	//       entries placed apart from their instance, and a removal when a list in a streamed zone names a later instance.
+	//   "remove_world_surfaces": {"boxes": [{"mins": [x, y, z], "maxs": [x, y, z]}], "surfaces": [n, ...],
+	//       "collision": true, "rebake_sun_shadow": false, "acts": "<acts.exe>"} takes world geometry out (IW8 Radiant
+	//       research 96). Render: every world triangle whose three vertices lie inside one box, and every triangle of the
+	//       listed surfaces (GfxWorld surface indices), becomes degenerate (its three indices the first one), so no draw
+	//       path (opaque, prepass, shadow maps, decals) rasterizes it; counts, offsets and surface indices stay stock.
+	//       Collision (boxes only; "collision": false keeps it): the triangles and convex shapes (brush hulls) of the
+	//       world's Havok compressed mesh (clipMap_t.havokWorldShapeData) that lie inside a box leave it in place, as
+	//       Havok's own primitive removal does (removed marker DE AD DE AD, a quad keeps its other half); nothing else
+	//       moves. A map with collision tiles is refused. "rebake_sun_shadow": true bakes
+	//       the compressed sun shadow again at the stock sun direction without the removed triangles (as "sun.direction";
+	//       "acts" or IW8_ACTS for the static models). What stays: the Umbra occlusion tome (a removed occluder still hides
+	//       what was behind it), the lightmaps, light grid and probes (baked contact shadows), static models (hide them
+	//       with hide_static_models / remove_static_model_collision) and the stock sun shadow unless re-baked.
 	//   "stock_patches": {"<zone>.fp": "<file>" | ""} names, per patch file of the game's zone folder, the stock patch
 	//       to read that zone with ("" = the stock game has no patch of that name). The game ships patches with real
 	//       map data (mp_br_quarry.fp, mp_donetsk.fp, ...), and an installed edit replaces the patch of its zone: with
@@ -3745,13 +3760,132 @@ namespace zonetool::convert::iw3_iw8
 		}
 
 		// Kept alive until the zone is written.
+		std::deque<std::vector<std::uint16_t>> kept_world_indices;
+		std::vector<std::uint8_t> kept_world_collision;
+		bool rebake_sun_for_removal = false;
+		std::string rebake_acts;
+		if (edits.contains("remove_world_surfaces"))
+		{
+			const auto& node = edits.at("remove_world_surfaces");
+			if (!node.is_object())
+			{
+				throw std::runtime_error("remove_world_surfaces must be an object with \"boxes\" and / or \"surfaces\"");
+			}
+			std::vector<::iw8::stockworld::Box> boxes;
+			if (node.contains("boxes"))
+			{
+				if (!node.at("boxes").is_array())
+				{
+					throw std::runtime_error("remove_world_surfaces.boxes must be a list of {\"mins\", \"maxs\"}");
+				}
+				std::size_t at = 0;
+				for (const auto& entry : node.at("boxes"))
+				{
+					const auto where = "remove_world_surfaces.boxes[" + std::to_string(at++) + "]";
+					::iw8::stockworld::Box box;
+					for (const char* key : {"mins", "maxs"})
+					{
+						if (!entry.is_object() || !entry.contains(key) || !entry.at(key).is_array() || entry.at(key).size() != 3)
+						{
+							throw std::runtime_error(where + ": " + key + " is not three numbers");
+						}
+						auto& out = std::string(key) == "mins" ? box.mins : box.maxs;
+						for (auto axis = 0; axis < 3; axis++)
+						{
+							out[axis] = entry.at(key)[axis].get<float>();
+							if (!std::isfinite(out[axis]))
+							{
+								throw std::runtime_error(where + ": " + key + " is not finite");
+							}
+						}
+					}
+					for (auto axis = 0; axis < 3; axis++)
+					{
+						if (box.mins[axis] > box.maxs[axis])
+						{
+							throw std::runtime_error(where + ": mins is above maxs");
+						}
+					}
+					boxes.push_back(box);
+				}
+			}
+			std::set<std::uint32_t> whole;
+			if (node.contains("surfaces"))
+			{
+				if (!node.at("surfaces").is_array())
+				{
+					throw std::runtime_error("remove_world_surfaces.surfaces must be a list of surface indices");
+				}
+				for (const auto& entry : node.at("surfaces"))
+				{
+					whole.insert(entry.get<std::uint32_t>());
+				}
+			}
+			if (boxes.empty() && whole.empty())
+			{
+				throw std::runtime_error("remove_world_surfaces names no box and no surface");
+			}
+			auto* world = static_cast<GfxWorld*>(find(ASSET_TYPE_GFXWORLD));
+			if (!world)
+			{
+				throw std::runtime_error(zone_name + " has no GfxWorld");
+			}
+			const auto render = ::iw8::stockworld::RemoveRenderTriangles(*world, boxes, whole, kept_world_indices);
+			nlohmann::ordered_json out;
+			out["boxes"] = boxes.size();
+			out["surfaces_asked"] = whole.size();
+			out["triangles_removed"] = render.triangles;
+			out["triangles_already_degenerate"] = render.alreadyDegenerate;
+			out["surfaces_touched"] = render.touched.size();
+			out["surfaces_emptied"] = render.emptied;
+			out["surfaces_not_resident"] = render.notResident;
+			ZONETOOL_INFO("editzone: remove_world_surfaces: %zu triangle(s) of %zu surface(s) no longer draw (%zu surface(s) emptied)",
+				render.triangles, render.touched.size(), render.emptied.size());
+			if (node.value("collision", true) && !boxes.empty())
+			{
+				auto* clip = static_cast<clipMap_t*>(find(ASSET_TYPE_CLIPMAP));
+				if (!clip || !clip->havokWorldShapeData || !clip->havokWorldShapeDataSize)
+				{
+					throw std::runtime_error(zone_name + " has no world collision shape");
+				}
+				const auto& compendium = zonetool::iw8::havok::replay_compendium(zone_folder);
+				::iw8::stockworld::CollisionRemoval collision;
+				kept_world_collision = ::iw8::stockworld::RemoveCollision(std::span(reinterpret_cast<const std::uint8_t*>(
+					clip->havokWorldShapeData), clip->havokWorldShapeDataSize), compendium, boxes, collision);
+				if (collision.trianglesRemoved || collision.convexRemoved)
+				{
+					clip->havokWorldShapeData = reinterpret_cast<char*>(kept_world_collision.data());
+					clip->havokWorldShapeDataSize = static_cast<std::uint32_t>(kept_world_collision.size());
+				}
+				out["collision"] = {{"shapes", collision.shapes}, {"triangles_before", collision.trianglesBefore},
+					{"triangles_removed", collision.trianglesRemoved}, {"triangles_after", collision.trianglesAfter},
+					{"convex_before", collision.convexBefore}, {"convex_removed", collision.convexRemoved},
+					{"convex_after", collision.convexAfter}, {"bytes_before", collision.bytesBefore},
+					{"bytes_after", collision.bytesAfter}};
+				ZONETOOL_INFO("editzone: remove_world_surfaces: collision %zu of %zu triangle(s) and %zu of %zu convex shape(s) removed",
+					collision.trianglesRemoved, collision.trianglesBefore, collision.convexRemoved, collision.convexBefore);
+			}
+			rebake_sun_for_removal = node.value("rebake_sun_shadow", false);
+			rebake_acts = node.value("acts", std::string{});
+			out["rebake_sun_shadow"] = rebake_sun_for_removal;
+			report["remove_world_surfaces"] = out;
+		}
+
+		// Kept alive until the zone is written.
 		std::vector<std::uint8_t> sun_shadow_bytes;
 		std::deque<std::vector<std::uint8_t>> vision_buffers;
 		std::string sun_entity_text;
-		if (edits.contains("sun"))
+		// remove_world_surfaces "rebake_sun_shadow" without a new sun direction: the stock direction baked again.
+		const bool rebake_only = rebake_sun_for_removal &&
+			!(edits.contains("sun") && edits.at("sun").is_object() && edits.at("sun").contains("direction"));
+		if (edits.contains("sun") || rebake_only)
 		{
-			const auto& node = edits.at("sun");
-			if (!node.is_object() || (!node.contains("color") && !node.contains("intensity") && !node.contains("direction")))
+			auto node = edits.contains("sun") ? edits.at("sun") : nlohmann::json::object();
+			if (node.is_object() && !rebake_acts.empty() && !node.contains("acts"))
+			{
+				node["acts"] = rebake_acts;
+			}
+			if (!node.is_object() || (!node.contains("color") && !node.contains("intensity") && !node.contains("direction") && !rebake_only))
 			{
 				throw std::runtime_error("sun must be an object with \"color\", \"intensity\" and / or \"direction\"");
 			}
@@ -3799,14 +3933,25 @@ namespace zonetool::convert::iw3_iw8
 			}
 			report["sun_color"] = {sun.colorLinearSrgb.v[0], sun.colorLinearSrgb.v[1], sun.colorLinearSrgb.v[2]};
 			report["sun_intensity"] = sun.intensity;
-			if (node.contains("direction"))
+			if (node.contains("direction") || rebake_only)
 			{
-				const auto& d = node.at("direction");
-				if (!d.is_array() || d.size() < 2 || d.size() > 3 || !d[0].is_number() || !d[1].is_number())
+				// The stock direction when only the removed geometry is baked out.
+				const std::array<float, 3> stock_toward{sun.dir.v[0], sun.dir.v[1], sun.dir.v[2]};
+				double pitch = 0, yaw = 0;
+				if (rebake_only)
 				{
-					throw std::runtime_error("sun.direction is not [pitch, yaw] in degrees");
+					::iw8::stocksun::Angles(stock_toward, pitch, yaw);
 				}
-				const auto pitch = d[0].get<double>(), yaw = d[1].get<double>();
+				else
+				{
+					const auto& d = node.at("direction");
+					if (!d.is_array() || d.size() < 2 || d.size() > 3 || !d[0].is_number() || !d[1].is_number())
+					{
+						throw std::runtime_error("sun.direction is not [pitch, yaw] in degrees");
+					}
+					pitch = d[0].get<double>();
+					yaw = d[1].get<double>();
+				}
 				if (!std::isfinite(pitch) || !std::isfinite(yaw) || pitch < -90.0 || pitch > -1.0)
 				{
 					throw std::runtime_error("sun.direction pitch must be -90 to -1 (a negative pitch is above the horizon)");
@@ -3832,7 +3977,7 @@ namespace zonetool::convert::iw3_iw8
 				const std::array<float, 3> before{sun.dir.v[0], sun.dir.v[1], sun.dir.v[2]};
 				double before_pitch = 0, before_yaw = 0;
 				::iw8::stocksun::Angles(before, before_pitch, before_yaw);
-				const auto toward = ::iw8::stocksun::TowardSun(pitch, yaw);
+				const auto toward = rebake_only ? stock_toward : ::iw8::stocksun::TowardSun(pitch, yaw);
 				const auto& stock_params = draw.compressedSunShadowParams;
 				report["sun_direction_before"] = {before_pitch, before_yaw};
 				report["sun_vector_before"] = {before[0], before[1], before[2]};
@@ -3976,6 +4121,10 @@ namespace zonetool::convert::iw3_iw8
 				auto visions = nlohmann::ordered_json::array();
 				for (const auto& asset : zone->assets)
 				{
+					if (rebake_only)
+					{
+						break;
+					}
 					if (asset.type != zonetool::iw8::ASSET_TYPE_RAWFILE || asset.referenced || !asset.header)
 					{
 						continue;
@@ -4023,7 +4172,8 @@ namespace zonetool::convert::iw3_iw8
 
 				// The worldspawn's sundirection (key 968), as the stock map writes it ("pitch yaw roll").
 				bool worldspawn_key = false;
-				if (auto* ents = static_cast<MapEnts*>(find(ASSET_TYPE_MAP_ENTS)); ents && ents->entityString && ents->numEntityChars > 1)
+				if (auto* ents = static_cast<MapEnts*>(find(ASSET_TYPE_MAP_ENTS)); !rebake_only && ents && ents->entityString &&
+					ents->numEntityChars > 1)
 				{
 					std::string text(ents->entityString, static_cast<std::size_t>(ents->numEntityChars - 1));
 					const auto open = text.find('{'), close = text.find('}');
@@ -4061,6 +4211,7 @@ namespace zonetool::convert::iw3_iw8
 					{"missing_models", scene_report.missingModels}};
 				report["sun_visions"] = visions;
 				report["sun_worldspawn_sundirection"] = worldspawn_key;
+				report["sun_shadow_rebaked_for_removal"] = rebake_only;
 			}
 		}
 

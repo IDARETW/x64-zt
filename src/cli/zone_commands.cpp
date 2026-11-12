@@ -17,6 +17,11 @@ namespace zonetool::convert::iw3_iw8
 		const zone_conversion& conversion);
 }
 
+namespace iw8::stockworld
+{
+	std::string DescribeCollision(std::span<const std::uint8_t> data, const zonetool::iw8::havok::type_table& compendium);
+}
+
 namespace zonetool::cli
 {
 	namespace
@@ -362,7 +367,7 @@ namespace zonetool::cli
 	{
 		if (settings.game->name != "iw8" || args.empty())
 		{
-			std::cout << "usage: -game iw8 havokinfo <file with Havok tagfile data> [--items]\n";
+			std::cout << "usage: -game iw8 havokinfo <file with Havok tagfile data> [--items] [--mesh <out.json>]\n";
 			return;
 		}
 		try
@@ -375,6 +380,14 @@ namespace zonetool::cli
 			}
 			const std::vector<std::uint8_t> data((std::istreambuf_iterator<char>(stream)), std::istreambuf_iterator<char>());
 			const auto& compendium = replay_compendium(settings.zone_folder());
+			// --mesh <out.json>: the world shape list's compressed meshes (triangles and convex instance bounds in game
+			// units), for checks of editzone remove_world_surfaces (IW8 Radiant research 96).
+			if (const auto mesh = std::ranges::find(args, std::string("--mesh")); mesh != args.end() && mesh + 1 != args.end())
+			{
+				std::ofstream(std::filesystem::path(*(mesh + 1)), std::ios::binary) << ::iw8::stockworld::DescribeCollision(data, compendium);
+				std::cout << std::format("{}: the world shape list written to {}\n", args[0], *(mesh + 1));
+				return;
+			}
 			const auto file = read_tagfile(data, &compendium);
 			// The reader maps the local types of a self-describing file onto the compendium.
 			const auto& types = compendium;
