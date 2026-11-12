@@ -2584,7 +2584,7 @@ int writeMapPackage(const Args &args, const std::string &map, const std::string 
                 if (asset.type != zonetool::iw8::ASSET_TYPE_MAP_ENTS || asset.referenced)
                     continue;
                 auto &block = static_cast<zonetool::iw8::MapEnts *>(asset.header)->scriptableMapEnts;
-                if (block.mapInstanceCount != scriptableInstances.size() || !block.mapInstances)
+                if (block.mapInstanceCount != scriptableInstances.size() || (!block.mapInstances && !scriptableInstances.empty()))
                     throw std::runtime_error("the map zone's scriptable instances do not match the extraction");
                 for (std::size_t index = 0; index < scriptableInstances.size(); ++index)
                 {
