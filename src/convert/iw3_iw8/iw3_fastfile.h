@@ -322,6 +322,8 @@ struct PreparedMap
     // ("Day 1 10:30:"), and each team's unit (allies, axis; stock IW8 names).
     std::string chyronClock;
     std::array<std::string, 2> chyronUnits;
+    // The map's own localized strings (the extraction's localize/strings.tsv): key and text, written into eng_<map>.
+    std::vector<std::pair<std::string, std::string>> mapStrings;
 
     PreparedMap();
     PreparedMap(const PreparedMap &) = delete;

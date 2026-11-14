@@ -2703,6 +2703,13 @@ int writeMapPackage(const Args &args, const std::string &map, const std::string 
              operation.c_str(), prepared->chyronClock.c_str(), prepared->chyronUnits[0].c_str(),
              prepared->chyronUnits[1].c_str());
     }
+    if (prepared && !prepared->mapStrings.empty())
+    {
+        // The map's own text (IW8 Radiant: hint strings and labels for the map script, &"KEY").
+        for (const auto &[key, text] : prepared->mapStrings)
+            iw8::localize::Register(english, key, text);
+        info("build-map: eng_%s: %zu localized string(s) of the map", map.c_str(), prepared->mapStrings.size());
+    }
     iw8::ZoneWriter worldwide;
     if (stockCopier)
     {

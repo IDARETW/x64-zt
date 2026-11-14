@@ -10227,6 +10227,7 @@ PreparedMap::PreparedMap(PreparedMap &&other) noexcept
     , clientTriggers(std::move(other.clientTriggers))
     , chyronClock(std::move(other.chyronClock))
     , chyronUnits(std::move(other.chyronUnits))
+    , mapStrings(std::move(other.mapStrings))
 {
     other.scratch.clear();
 }
@@ -10283,6 +10284,7 @@ PreparedMap &PreparedMap::operator=(PreparedMap &&other) noexcept
         clientTriggers = std::move(other.clientTriggers);
         chyronClock = std::move(other.chyronClock);
         chyronUnits = std::move(other.chyronUnits);
+        mapStrings = std::move(other.mapStrings);
         other.scratch.clear();
     }
     return *this;
@@ -10696,6 +10698,52 @@ std::string WithIw3CtfObjectives(const std::string &text, const std::string &map
 // cosines and the fade times in milliseconds, as Replay does. Without a .sun
 // file, Replay's stock values (mp_rust) apply: no sprite or flare, the stock
 // blind and glare.
+// The map's own localized strings: localize/strings.tsv, "KEY<TAB>text" per line. A key is letters, digits, '_' and
+// '/'; in the text "\\n" is a line break and "\\\\" one backslash. A line that does not fit is left out with a warning.
+std::vector<std::pair<std::string, std::string>> ReadMapStrings(const std::filesystem::path &exportRoot)
+{
+    std::vector<std::pair<std::string, std::string>> result;
+    std::ifstream input(exportRoot / "localize" / "strings.tsv", std::ios::binary);
+    if (!input)
+        return result;
+    std::set<std::string> seen;
+    std::string line;
+    std::size_t number = 0;
+    while (std::getline(input, line))
+    {
+        ++number;
+        if (!line.empty() && line.back() == '\r')
+            line.pop_back();
+        if (line.empty())
+            continue;
+        const auto tab = line.find('\t');
+        const std::string key = tab == std::string::npos ? line : line.substr(0, tab);
+        const bool keyOk = !key.empty() && key.size() <= 120 && std::ranges::all_of(key, [](const unsigned char value) {
+            return std::isalnum(value) || value == '_' || value == '/';
+        });
+        if (tab == std::string::npos || !keyOk || !seen.insert(key).second)
+        {
+            zt::warn("iw3: localize/strings.tsv line %zu left out (no tab, a key outside A-Z 0-9 _ /, or a key twice)", number);
+            continue;
+        }
+        std::string text;
+        for (std::size_t i = tab + 1; i < line.size(); ++i)
+        {
+            if (line[i] == '\\' && i + 1 < line.size() && (line[i + 1] == 'n' || line[i + 1] == '\\'))
+            {
+                text.push_back(line[i + 1] == 'n' ? '\n' : '\\');
+                ++i;
+            }
+            else
+                text.push_back(line[i]);
+        }
+        result.emplace_back(key, std::move(text));
+    }
+    if (!result.empty())
+        zt::info("iw3: %zu localized string(s) of the map (localize/strings.tsv)", result.size());
+    return result;
+}
+
 Json ReadSunFlare(const std::filesystem::path &exportRoot, const std::string &sourceMap)
 {
     std::map<std::string, float> values{
@@ -11221,6 +11269,7 @@ PreparedMap PrepareFastfile(const ImportOptions &options)
         std::snprintf(clock, sizeof(clock), "Day 1 %02d:%02d:", minutes / 60 % 24, minutes % 60);
         result.chyronClock = clock;
     }
+    result.mapStrings = ReadMapStrings(exportRoot);
     result.fxEffects = ReadPreparedFx(exportRoot);
     const auto nativeFx = ReadNativeFx(exportRoot);
     if (!nativeFx.empty())
