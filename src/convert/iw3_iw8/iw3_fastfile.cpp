@@ -8447,22 +8447,28 @@ void CopyCompass(const std::filesystem::path &extracted, const std::filesystem::
 std::size_t CopyHudImages(const std::filesystem::path &extracted, const std::filesystem::path &prepared)
 {
     std::size_t copied = 0;
-    std::error_code error;
-    for (std::filesystem::recursive_directory_iterator iterator(extracted, error), end;
-         !error && iterator != end; iterator.increment(error))
+    std::set<std::string> taken;
+    // .dds first: a name that exists in both forms is carried once.
+    for (const char *wanted : {".dds", ".iwi"})
     {
-        std::string extension = iterator->path().extension().string();
-        std::string stem = iterator->path().stem().string();
-        const auto lower = [](const unsigned char value) { return static_cast<char>(std::tolower(value)); };
-        std::ranges::transform(extension, extension.begin(), lower);
-        std::ranges::transform(stem, stem.begin(), lower);
-        if (!iterator->is_regular_file(error) || (extension != ".dds" && extension != ".iwi") || !stem.starts_with("hud_"))
-            continue;
-        const auto destination = prepared / "images" / (stem + extension);
-        std::filesystem::create_directories(destination.parent_path());
-        std::filesystem::copy_file(iterator->path(), destination, std::filesystem::copy_options::overwrite_existing);
-        zt::info("iw3: included HUD image %s", destination.filename().string().c_str());
-        ++copied;
+        std::error_code error;
+        for (std::filesystem::directory_iterator iterator(extracted / "images", error), end;
+             !error && iterator != end; iterator.increment(error))
+        {
+            std::string extension = iterator->path().extension().string();
+            std::string stem = iterator->path().stem().string();
+            const auto lower = [](const unsigned char value) { return static_cast<char>(std::tolower(value)); };
+            std::ranges::transform(extension, extension.begin(), lower);
+            std::ranges::transform(stem, stem.begin(), lower);
+            if (!iterator->is_regular_file(error) || extension != wanted || !stem.starts_with("hud_") ||
+                !taken.insert(stem).second)
+                continue;
+            const auto destination = prepared / "images" / (stem + extension);
+            std::filesystem::create_directories(destination.parent_path());
+            std::filesystem::copy_file(iterator->path(), destination, std::filesystem::copy_options::overwrite_existing);
+            zt::info("iw3: included HUD image %s", destination.filename().string().c_str());
+            ++copied;
+        }
     }
     return copied;
 }
