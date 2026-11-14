@@ -80,6 +80,9 @@ struct Cubemap
     std::vector<std::uint8_t> residentPixels;
     // Stored linear value x absoluteScale = IW3's radiance (decoded rgb * a).
     float absoluteScale{1};
+    // The probe array stores the image times this (an editor capture: its mean luminance brought to the stock
+    // probes' level; 1 for every other source).
+    float arrayGain{1};
 };
 
 struct SourceMaterial
@@ -938,7 +941,38 @@ Image DecodeDdsLevel(const std::span<const std::uint8_t> source, const unsigned 
 float Linear(float value);
 std::uint8_t SrgbByte(float linear);
 
-Cubemap DecodeDdsCubemap(const std::filesystem::path &path)
+// The stock probes' mean luminance (IW8 Radiant research 123: mp_shipment 0.82, mp_hideout 0.87, mp_m_speedball
+// 0.93 over all their probes): the level an editor capture is stored at.
+constexpr float kStockProbeMeanLuminance = 0.9f;
+
+// The gain that brings a cube's mean luminance (linear, weighted by solid angle) to the stock level. A black or
+// nearly black capture keeps gain 1; the gain is held to 64.
+float StockProbeGain(const Cubemap &cubemap)
+{
+    double sum = 0, weights = 0;
+    for (const auto &face : cubemap.faces)
+    {
+        if (face.empty())
+            continue;
+        const Image &image = face.front();
+        for (unsigned y = 0; y < image.height; ++y)
+            for (unsigned x = 0; x < image.width; ++x)
+            {
+                const double u = 2.0 * (x + 0.5) / image.width - 1.0, v = 2.0 * (y + 0.5) / image.height - 1.0;
+                const double weight = 1.0 / std::pow(1.0 + u * u + v * v, 1.5);
+                const std::uint8_t *texel = image.rgba.data() + (std::size_t(y) * image.width + x) * 4;
+                sum += weight * (0.2126 * Linear(texel[0] / 255.0f) + 0.7152 * Linear(texel[1] / 255.0f) +
+                                 0.0722 * Linear(texel[2] / 255.0f));
+                weights += weight;
+            }
+    }
+    const double mean = weights > 0 ? sum / weights : 0;
+    if (!(mean > 1.0e-3))
+        return 1.0f;
+    return static_cast<float>(std::min(double(kStockProbeMeanLuminance) / mean, 64.0));
+}
+
+Cubemap DecodeDdsCubemap(const std::filesystem::path &path, const bool editorCapture = false)
 {
     const auto bytes = ReadBytes(path);
     const std::span<const std::uint8_t> data(bytes);
@@ -1025,6 +1059,8 @@ Cubemap DecodeDdsCubemap(const std::filesystem::path &path)
                                              result.faces[face][level].rgba.end());
                 result.residentPixels.resize((result.residentPixels.size() + 15) & ~std::size_t{15});
             }
+        if (editorCapture)
+            result.arrayGain = StockProbeGain(result);
         return result;
     }
     if (!width || width != height || width > 4096 || mipCount > 13 ||
@@ -1103,15 +1139,25 @@ Cubemap DecodeDdsCubemap(const std::filesystem::path &path)
     float scale = 1;
     if (texels && intensitySum > 0 && intensityMax > 0)
         scale = static_cast<float>(std::min(colourSum / intensitySum, 1.0 / intensityMax));
-    result.absoluteScale = 1.0f / scale;
-    for (auto &face : result.faces)
-        for (auto &image : face)
-            for (std::size_t pixel = 0; pixel < image.rgba.size(); pixel += 4)
-            {
-                const float luminance = std::min(pixelLuminance(&image.rgba[pixel], true) * scale, 1.0f);
-                const std::uint8_t grey = SrgbByte(luminance);
-                image.rgba[pixel] = image.rgba[pixel + 1] = image.rgba[pixel + 2] = grey;
-            }
+    if (editorCapture)
+    {
+        // The editor's own render of the map (IW8 Radiant research 123): colour as it is, no IW3 intensity in the
+        // alpha; stored at the stock probes' level.
+        result.absoluteScale = 1.0f;
+        result.arrayGain = StockProbeGain(result);
+    }
+    else
+    {
+        result.absoluteScale = 1.0f / scale;
+        for (auto &face : result.faces)
+            for (auto &image : face)
+                for (std::size_t pixel = 0; pixel < image.rgba.size(); pixel += 4)
+                {
+                    const float luminance = std::min(pixelLuminance(&image.rgba[pixel], true) * scale, 1.0f);
+                    const std::uint8_t grey = SrgbByte(luminance);
+                    image.rgba[pixel] = image.rgba[pixel + 1] = image.rgba[pixel + 2] = grey;
+                }
+    }
     for (unsigned level = 0; level < mipCount; ++level)
         for (unsigned face = 0; face < 6; ++face)
         {
@@ -1615,7 +1661,7 @@ std::vector<std::uint8_t> BuildReflectionProbeArray(const std::vector<Cubemap> &
                         const std::size_t pixel =
                             (static_cast<std::size_t>(y) * targetWidth + x) * 4;
                         for (unsigned channel = 0; channel < sample.size(); ++channel)
-                            image[pixel + channel] = sample[channel];
+                            image[pixel + channel] = sample[channel] * cubemap.arrayGain;
                         image[pixel + 3] = 1.0f;
                     }
                 const std::size_t expected =
@@ -5676,6 +5722,7 @@ RenderPlan PrepareRenderAssets(const std::filesystem::path &exportRoot, const Js
     plan.reflectionProbes.reserve(sourceProbes.size());
     std::vector<Cubemap> probeCubemaps;
     std::vector<float> probeLevels;
+    std::vector<float> probeGains;
     probeCubemaps.reserve(sourceProbes.size());
     // IW3 reserves probe 0 for R_CreateDefaultProbe's flat diagnostic image.
     // R_FindNearestReflectionProbe/R_AddAllProbesToAllCells skip it when
@@ -5706,9 +5753,19 @@ RenderPlan PrepareRenderAssets(const std::filesystem::path &exportRoot, const Js
         std::error_code error;
         if (!std::filesystem::is_regular_file(sourcePath, error))
             throw std::runtime_error("missing IW3 reflection-probe image '" + sourceName + "'");
-        Cubemap cubemap = DecodeDdsCubemap(sourcePath);
-        probeLevels.push_back(cubemap.absoluteScale);
+        const bool editorCapture = source.value("capture", std::string()) == "editor";
+        Cubemap cubemap = DecodeDdsCubemap(sourcePath, editorCapture);
+        // Stored value x level = the capture's own radiance, whatever the array's gain.
+        probeLevels.push_back(cubemap.absoluteScale / cubemap.arrayGain);
+        probeGains.push_back(cubemap.arrayGain);
         probe.sh = ProjectReflectionSh(cubemap);
+        // The zone's SH describes the stored image.
+        for (auto &channel : probe.sh)
+            for (float &coefficient : channel)
+                coefficient *= cubemap.arrayGain;
+        if (editorCapture)
+            zt::info("iw3: reflection probe %zu is an editor capture: colour kept, stored at %.2fx (mean luminance %.3f)",
+                     index, cubemap.arrayGain, kStockProbeMeanLuminance / cubemap.arrayGain);
         const std::string filename = map + "_reflection_probe_" + std::to_string(index) + ".rgba";
         const auto digest = Sha256(cubemap.residentPixels);
         const std::string targetName = "mw120r/" + map + "_reflection_probe_" +
@@ -5731,11 +5788,16 @@ RenderPlan PrepareRenderAssets(const std::filesystem::path &exportRoot, const Js
     }
     {
         std::array<std::array<double, 3>, 9> average{};
-        for (const auto &probe : plan.reflectionProbes)
+        for (std::size_t slot = 0; slot < plan.reflectionProbes.size(); ++slot)
+        {
+            // The glass environment keeps the capture's own level (the array gain taken out again).
+            const auto &probe = plan.reflectionProbes[slot];
+            const double gain = slot < probeGains.size() && probeGains[slot] > 0 ? probeGains[slot] : 1.0;
             for (unsigned coefficient = 0; coefficient < 9; ++coefficient)
                 for (unsigned channel = 0; channel < 3; ++channel)
                     average[coefficient][channel] +=
-                        probe.sh[channel][coefficient] / plan.reflectionProbes.size();
+                        probe.sh[channel][coefficient] / gain / plan.reflectionProbes.size();
+        }
         plan.glassEnvironment = "#define MAP_GLASS_SH {";
         for (unsigned coefficient = 0; coefficient < 9; ++coefficient)
             plan.glassEnvironment +=
@@ -5776,6 +5838,13 @@ RenderPlan PrepareRenderAssets(const std::filesystem::path &exportRoot, const Js
         appendKey(cubemap.width);
         appendKey(cubemap.height);
         appendKey(cubemap.mipCount);
+        if (cubemap.arrayGain != 1.0f)
+        {
+            std::uint32_t gainBits;
+            std::memcpy(&gainBits, &cubemap.arrayGain, sizeof(gainBits));
+            appendKey(0x6761696eu); // "gain"
+            appendKey(gainBits);
+        }
         for (const auto &face : cubemap.faces)
             for (const Image &level : face)
             {
