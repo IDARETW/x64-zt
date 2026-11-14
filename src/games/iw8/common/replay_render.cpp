@@ -1,4 +1,5 @@
 #include <std_include.hpp>
+#include "umbra_bake.hpp"
 #include "replay_render.h"
 #include "../structs.hpp"
 #include "log.h"
@@ -3480,10 +3481,29 @@ void EmitVertices(ZoneWriter &w, const Mesh &m)
     w.write(m.indices.data(), m.indices.size());
 }
 
+namespace
+{
+std::vector<std::array<float, 6>> g_umbraOccluders;
+uint32_t g_umbraMaxCells = 0;
+std::string g_umbraBakeSummary;
+} // namespace
+
+void SetUmbraOccluders(std::vector<std::array<float, 6>> occluders, const uint32_t maxCells)
+{
+    g_umbraOccluders = std::move(occluders);
+    g_umbraMaxCells = maxCells;
+}
+
+const std::string &UmbraBakeSummary()
+{
+    return g_umbraBakeSummary;
+}
+
 std::vector<uint8_t> BuildUmbraTome(const Mesh &m, const StaticModels &staticModels,
                                     const std::vector<uint32_t> &primaryLights,
                                     const uint32_t reflectionProbeInstances)
 {
+    g_umbraBakeSummary.clear();
     BuildStaticModelLayout(staticModels);
     const uint32_t worldSurfaceCount = m.worldSurfaceCount();
     const uint32_t staticModelCount = static_cast<uint32_t>(staticModels.instances.size());
@@ -3541,6 +3561,79 @@ std::vector<uint8_t> BuildUmbraTome(const Mesh &m, const StaticModels &staticMod
             minimum[axis] = std::min(minimum[axis], bounds.midpoint[axis] - bounds.halfSize[axis]);
             maximum[axis] = std::max(maximum[axis], bounds.midpoint[axis] + bounds.halfSize[axis]);
         }
+    }
+    if (!g_umbraOccluders.empty())
+    {
+        // An occlusion bake (IW8 Radiant plan 2.4): cells and portals from the occluder boxes. Objects in user ID
+        // order; a world surface and a static model are listed by the cells their real box touches, everything else
+        // (lights, probes, volumetrics, decal collections, the sky) by every cell.
+        umbrabake::Input bake;
+        for (unsigned axis = 0; axis < 3; ++axis)
+        {
+            bake.scene.mn[axis] = minimum[axis];
+            bake.scene.mx[axis] = maximum[axis];
+        }
+        if (g_umbraMaxCells)
+            bake.maxCells = g_umbraMaxCells;
+        for (const auto &box : g_umbraOccluders)
+        {
+            umbrabake::Box b;
+            for (unsigned axis = 0; axis < 3; ++axis)
+            {
+                b.mn[axis] = box[axis];
+                b.mx[axis] = box[3 + axis];
+            }
+            bake.occluders.push_back(b);
+        }
+        bake.objects.resize(userIDList.size());
+        for (size_t object = 0; object < userIDList.size(); ++object)
+        {
+            bake.objects[object].userId = userIDList[object];
+            bake.objects[object].everywhere = true;
+        }
+        for (uint32_t surface = 0; surface < worldSurfaceCount; ++surface)
+        {
+            float midpoint[3], halfSize[3];
+            std::memcpy(midpoint, m.bounds.data() + size_t(surface) * 56, sizeof(midpoint));
+            std::memcpy(halfSize, m.bounds.data() + size_t(surface) * 56 + 12, sizeof(halfSize));
+            bool finite = true;
+            for (unsigned axis = 0; axis < 3; ++axis)
+                finite = finite && std::isfinite(midpoint[axis]) && std::isfinite(halfSize[axis]) &&
+                         halfSize[axis] >= 0 && halfSize[axis] < 50000.0f;
+            if (!finite)
+                continue; // the sky and other unbounded surfaces: every cell
+            auto &o = bake.objects[surface];
+            o.everywhere = false;
+            for (unsigned axis = 0; axis < 3; ++axis)
+            {
+                o.box.mn[axis] = midpoint[axis] - halfSize[axis];
+                o.box.mx[axis] = midpoint[axis] + halfSize[axis];
+            }
+        }
+        for (uint32_t model = 0; model < staticModelCount; ++model)
+        {
+            const auto bounds = TransformBounds(staticModels.models[staticModels.instances[model].model].bounds,
+                                                staticModels.instances[model]);
+            auto &o = bake.objects[size_t(worldSurfaceCount) + model];
+            o.everywhere = false;
+            for (unsigned axis = 0; axis < 3; ++axis)
+            {
+                o.box.mn[axis] = bounds.midpoint[axis] - bounds.halfSize[axis];
+                o.box.mx[axis] = bounds.midpoint[axis] + bounds.halfSize[axis];
+            }
+        }
+        auto baked = umbrabake::bake(bake);
+        if (baked.ok)
+        {
+            g_umbraBakeSummary = "occlusion bake: " + std::to_string(baked.stats.occludersUsed) + " of " +
+                                 std::to_string(baked.stats.occludersGiven) + " occluder box(es), " +
+                                 std::to_string(baked.stats.cells) + " cell(s), " + std::to_string(baked.stats.portals) +
+                                 " portal(s), " + std::to_string(baked.stats.viewNodes) + " view tree node(s), " +
+                                 std::to_string(userIDList.size()) + " object(s) in " + std::to_string(baked.stats.listEntries) +
+                                 " list entries, " + std::to_string(baked.tome.size()) + " bytes";
+            return std::move(baked.tome);
+        }
+        g_umbraBakeSummary = "occlusion bake failed (" + baked.error + "): the one-cell tome is written";
     }
     return BuildConservativeUmbraTome(userIDList, minimum, maximum);
 }

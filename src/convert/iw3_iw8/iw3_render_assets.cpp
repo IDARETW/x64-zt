@@ -1,5 +1,7 @@
 #include <std_include.hpp>
 #include "iw3_render_assets.h"
+#include <iw8/common/replay_render.h>
+#include <array>
 #include "iw3_ledger.h"
 
 #include "resources.h"
@@ -5506,6 +5508,22 @@ RenderPlan PrepareRenderAssets(const std::filesystem::path &exportRoot, const Js
         materials.push_back(std::move(material));
     }
     g_iw7SpecularDefines = world.value("iw7_specular", false) ? "#define MAP_IW7_SPECULAR 1\n" : "";
+    // "umbra_occluders": [[x0, y0, z0, x1, y1, z1], ...] (IW8 Radiant plan 2.4): solid boxes for the occlusion bake of
+    // the map's Umbra tome; "umbra_max_cells" limits its cells. Without the key the one-cell tome is written.
+    {
+        std::vector<std::array<float, 6>> occluders;
+        if (const auto boxes = world.find("umbra_occluders"); boxes != world.end() && boxes->is_array())
+            for (const auto &box : *boxes)
+            {
+                if (!box.is_array() || box.size() != 6)
+                    throw std::runtime_error("umbra_occluders: a box is six numbers (minimum and maximum corner)");
+                std::array<float, 6> values{};
+                for (size_t k = 0; k < 6; ++k)
+                    values[k] = box[k].get<float>();
+                occluders.push_back(values);
+            }
+        replayrender::SetUmbraOccluders(std::move(occluders), world.value("umbra_max_cells", 0u));
+    }
     g_surfaceShaderSource.clear();
     if (const auto custom = world.find("iw8r_surface_shader"); custom != world.end() && custom->is_string() &&
                                                               !custom->get<std::string>().empty())

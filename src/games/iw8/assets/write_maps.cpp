@@ -1,3 +1,4 @@
+#include <cstdio>
 #include <std_include.hpp>
 #include "../iw8_structs.h"
 #include "../zone/iw8_zone.h"
@@ -328,6 +329,8 @@ void emitGfxMapBody(ZoneWriter &zw, const char *assetName, const std::string &me
     const auto umbraTome = replayrender::BuildUmbraTome(
         mesh, staticModels, lights.umbraLights,
         replayrender::ReflectionProbeInstanceCount(mesh));
+    if (!replayrender::UmbraBakeSummary().empty())
+        std::printf("%s\n", replayrender::UmbraBakeSummary().c_str());
     const auto cellCount = static_cast<uint32_t>(mesh.cells.size());
     const auto cellWordCount = (cellCount + 31u) >> 5;
     std::vector<uint8_t> gw(kSizeGfxWorld, 0);

@@ -376,6 +376,12 @@ replaybounds::Bounds StaticModelWorldBounds(const StaticModels &models, size_t i
 std::vector<uint8_t> BuildUmbraTome(const Mesh &mesh, const StaticModels &staticModels,
                                     const std::vector<uint32_t> &primaryLights = {},
                                     uint32_t reflectionProbeInstances = 0);
+// Occluder boxes for the next BuildUmbraTome (x0, y0, z0, x1, y1, z1 each; empty: the one-cell tome). With boxes the
+// tome gets real cells and portals (umbra_bake.hpp): Umbra then hides what lies behind them. maxCells limits the
+// cells (0: the baker's default).
+void SetUmbraOccluders(std::vector<std::array<float, 6>> occluders, uint32_t maxCells = 0);
+// What the last BuildUmbraTome did with them ("" when it wrote the one-cell tome without being asked for more).
+const std::string &UmbraBakeSummary();
 // The conservative tome itself (what BuildUmbraTome writes): one tile, one cell over minimum..maximum that holds every
 // object, each object spanning the whole box, so Umbra culls nothing (no occlusion, no frustum or contribution cull)
 // and the GPU passes do all culling. userIDs: one Umbra user ID per object (class in bits 28-30).
