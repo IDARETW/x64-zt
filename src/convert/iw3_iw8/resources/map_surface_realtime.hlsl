@@ -1614,7 +1614,11 @@ float4 main(Input input) : SV_TARGET0 {
         iw8rSurfaceIn.sunColor = nativeSun ? sun : 0;
         iw8rSurfaceIn.sunShadow = visibility;
         iw8rSurfaceIn.ambient = indirect;
+#ifdef MAP_IW8_LIGHTING
         iw8rSurfaceIn.gloss = gloss;
+#else
+        iw8rSurfaceIn.gloss = .3;
+#endif
         color = iw8rSurface(iw8rSurfaceIn);
     }
 #endif
