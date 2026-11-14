@@ -2416,6 +2416,33 @@ BakeResult BakeCollision(const BakeInput &input)
     const FloorMaterials floors(input.footsteps);
 
     BakeResult result;
+    {
+        // The mount edges beside the native collision: "MWEDGE01", a count, then 32 bytes per edge (two end points,
+        // the adjacent normal's angle, the open angle as a half float, the flags, one unused byte).
+        auto edgesPath = input.collision;
+        edgesPath += ".edges";
+        if (std::filesystem::exists(edgesPath))
+        {
+            const auto bytes = ReadFile(edgesPath);
+            if (bytes.size() < 12 || std::memcmp(bytes.data(), "MWEDGE01", 8) != 0)
+                throw std::runtime_error("Mount edge file is not MWEDGE01");
+            std::uint32_t count{};
+            std::memcpy(&count, bytes.data() + 8, 4);
+            if (bytes.size() != 12 + std::size_t{count} * 32)
+                throw std::runtime_error("Mount edge file has the wrong size");
+            result.mountEdges.resize(count);
+            for (std::uint32_t index = 0; index < count; ++index)
+            {
+                const auto *record = bytes.data() + 12 + std::size_t{index} * 32;
+                auto &edge = result.mountEdges[index];
+                std::memcpy(edge.a, record, 12);
+                std::memcpy(edge.b, record + 12, 12);
+                std::memcpy(&edge.adjacentNormal, record + 24, 4);
+                std::memcpy(&edge.openAngle, record + 28, 2);
+                edge.flags = record[30];
+            }
+        }
+    }
     result.models = collision.models;
     result.hulls.reserve(collision.hulls.size());
     for (const Hull &source : collision.hulls)

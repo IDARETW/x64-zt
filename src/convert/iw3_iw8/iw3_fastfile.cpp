@@ -13104,6 +13104,46 @@ PreparedMap PrepareFastfile(const ImportOptions &options)
         if (result.collisionTiles)
             zt::info("iw3: the world collision is built as streamed collision tiles");
     }
+    // "mount_edges" (IW8 Radiant research 125): the edges a weapon can be mounted on, each
+    // [ax, ay, az, bx, by, bz, adjacentNormal, openAngle, flags] (the angle in radians, the open angle as the stored
+    // half float, flags with bit 0). They travel beside the native collision as collision.native.edges.
+    if (collision.contains("mount_edges"))
+    {
+        const auto &list = collision.at("mount_edges");
+        if (!list.is_array() || list.size() > 200000)
+            throw std::runtime_error("mount_edges must be a list of at most 200000 edges");
+        std::vector<std::uint8_t> bytes(12 + list.size() * 32);
+        std::memcpy(bytes.data(), "MWEDGE01", 8);
+        const auto count = static_cast<std::uint32_t>(list.size());
+        std::memcpy(bytes.data() + 8, &count, 4);
+        for (std::size_t index = 0; index < list.size(); ++index)
+        {
+            const auto &edge = list[index];
+            if (!edge.is_array() || edge.size() != 9)
+                throw std::runtime_error("mount_edges[" + std::to_string(index) + "] must hold 9 numbers");
+            auto *record = bytes.data() + 12 + index * 32;
+            for (std::size_t part = 0; part < 7; ++part)
+            {
+                const float value = edge[part].get<float>();
+                if (!std::isfinite(value))
+                    throw std::runtime_error("mount_edges[" + std::to_string(index) + "] has a number that is not finite");
+                std::memcpy(record + part * 4, &value, 4);
+            }
+            const auto open = edge[7].get<std::uint32_t>();
+            const auto flags = edge[8].get<std::uint32_t>();
+            if (open > 0xFFFF || !(flags & 1) || (flags & ~0xBu))
+                throw std::runtime_error("mount_edges[" + std::to_string(index) + "] has a bad open angle or flags");
+            const auto open16 = static_cast<std::uint16_t>(open);
+            std::memcpy(record + 28, &open16, 2);
+            record[30] = static_cast<std::uint8_t>(flags);
+        }
+        const auto edgesPath = result.scratch / "collision.native.edges";
+        std::ofstream out(edgesPath, std::ios::binary);
+        out.write(reinterpret_cast<const char *>(bytes.data()), static_cast<std::streamsize>(bytes.size()));
+        if (!out)
+            throw std::runtime_error("Cannot write " + edgesPath.string());
+        zt::info("iw3: %zu mount edges for the map's edge list", list.size());
+    }
     if (collision.contains("carry_assets"))
     {
         const auto &list = collision.at("carry_assets");

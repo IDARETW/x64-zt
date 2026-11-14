@@ -7,6 +7,8 @@
 #include <string_view>
 #include <vector>
 
+#include "map_edges.hpp"
+
 namespace iw8::havok
 {
 
@@ -92,6 +94,8 @@ struct BakeResult
     std::vector<CollisionHull> hulls;
     std::vector<TriggerModel> triggers;
     std::vector<LadderFace> ladders;
+    // Mount edges of the map (IW8 Radiant research 125), from the file <collision>.edges when it is there.
+    std::vector<iw8r::MapEdge> mountEdges;
     // With BakeInput::tiles: `world` is the list with one slot per tile below, and these are the tile shapes.
     bool tiled{};
     std::vector<CollisionTileShape> tiles;
