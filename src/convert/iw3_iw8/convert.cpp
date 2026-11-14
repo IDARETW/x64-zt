@@ -5786,6 +5786,10 @@ namespace zonetool::convert::iw3_iw8
 		//   scene depth). A lit technique whose pixel stage has the thermal mask argument (code image 79) gets it: the
 		//   argument is re-pointed to the scene depth (code image 0, "Frontend FloatZ") and the shader is spliced in
 		//   screen mode with that register. A shader that cannot take it gets "program".
+		//   "keep_names" (optional, for a zone whose sets and shaders other zones name: research 128): the technique
+		//   sets keep their names and a shader of the zone is not changed in place; its filtered copy is added under a
+		//   new name. "materials" (optional): a regular expression; only the sets of this zone's materials whose name
+		//   matches are filtered (the first-person weapon and hands: "_vm_|vm_").
 		//   IW8 Radiant's map shader filter on a stock map: every lit technique of the map's technique sets (zone
 		//   techsets_<map>) gets its pixel shader with the filter's instructions spliced in before its end
 		//   (dxbc_splice.hpp), so the game's own lighting stays and its final colour passes through the filter. What
@@ -5925,6 +5929,33 @@ namespace zonetool::convert::iw3_iw8
 			std::map<std::string, std::string> renamed_sets;
 			std::size_t techniques = 0, shaders = 0, shaders_shared = 0, shaders_missing = 0, shaders_refused = 0, sets = 0;
 			std::string first_refusal;
+			const bool keep_names = node.value("keep_names", false);
+			// "materials": the technique sets of the matching materials of the techset zone (null: every set).
+			std::set<const MaterialTechniqueSet*> wanted_sets;
+			const bool only_wanted = node.contains("materials") && node.at("materials").is_string() &&
+				!node.at("materials").get<std::string>().empty();
+			std::size_t materials_matched = 0;
+			if (only_wanted)
+			{
+				const std::regex pattern(node.at("materials").get<std::string>(), std::regex::icase | std::regex::optimize);
+				for (const auto& asset : filtered_techsets->assets)
+				{
+					if (asset.type != ASSET_TYPE_MATERIAL || asset.referenced)
+					{
+						continue;
+					}
+					const auto* material = static_cast<const Material*>(asset.header);
+					if (material->name && material->techniqueSet && std::regex_search(material->name, pattern))
+					{
+						wanted_sets.insert(material->techniqueSet);
+						++materials_matched;
+					}
+				}
+				if (wanted_sets.empty())
+				{
+					throw std::runtime_error("lit_filter: no material of techsets_" + zone_name + " matches \"materials\"");
+				}
+			}
 			// The screen program: a filtered shader -> the register its scene depth is read at (absent: the plain filter).
 			std::map<const ComputeShader*, std::uint16_t> screen_register;
 			std::size_t shaders_screen = 0, techniques_screen = 0, techniques_screen_unbound = 0, screen_refused = 0;
@@ -5957,6 +5988,10 @@ namespace zonetool::convert::iw3_iw8
 				}
 				auto* set = static_cast<MaterialTechniqueSet*>(asset.header);
 				if (!set->name || *set->name == ',' || !set->maskedTechniques)
+				{
+					continue;
+				}
+				if (only_wanted && !wanted_sets.contains(set))
 				{
 					continue;
 				}
@@ -6054,7 +6089,7 @@ namespace zonetool::convert::iw3_iw8
 							filter_programs.push_back(std::move(spliced));
 							auto& program = filter_programs.back();
 							names.push_back("iw8rf_" + hex(program.data() + 4, 13));
-							if (source == shader)
+							if (source == shader && !keep_names)
 							{
 								fresh = shader;  // owned by the techset zone: changed in place
 							}
@@ -6114,7 +6149,11 @@ namespace zonetool::convert::iw3_iw8
 					changed = true;
 					++techniques;
 				}
-				if (changed)
+				if (changed && keep_names)
+				{
+					++sets;  // the set keeps its name: other zones name it
+				}
+				else if (changed)
 				{
 					const std::string old_name = set->name;
 					const auto slash = old_name.find('/');
@@ -6171,6 +6210,9 @@ namespace zonetool::convert::iw3_iw8
 				{"shaders_without_program_names", missing_names},
 				{"shaders_refused", shaders_refused},
 				{"first_refusal", first_refusal},
+				{"keep_names", keep_names},
+				{"materials_matched", materials_matched},
+				{"sets_wanted", wanted_sets.size()},
 				{"screen_program", !screen_filter.empty()},
 				{"shaders_with_screen", shaders_screen},
 				{"techniques_with_screen", techniques_screen},
