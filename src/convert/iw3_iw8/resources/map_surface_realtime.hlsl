@@ -1294,6 +1294,8 @@ float4 main(Input input) : SV_TARGET0 {
 #endif
 #if defined(MAP_FLOW_HDR) && defined(MAP_FLOW) && !defined(MAP_COVERAGE)
     texel.a *= input.color.a; // FlowTexel expanded the colour with the vertex colour already.
+#elif defined(IW8R_EDGES) && !defined(STATIC_MODEL)
+    // IW8 Radiant: the world's vertex colour holds the brush faces' edge data for the map's surface shader.
 #else
     texel *= input.color;
 #endif
@@ -1604,7 +1606,7 @@ float4 main(Input input) : SV_TARGET0 {
 #if defined(IW8R_CUSTOM) && !defined(MAP_COVERAGE)
     // The map's surface shader (IW8 Radiant "iw8r_surface_shader"): its lit colour for every lit surface, from the same
     // inputs the editor's viewport gives it (IW8RSurface). Sky, layers and unlit materials keep theirs.
-    if (!unlit && !sky && !layer) {
+    {
         IW8RSurface iw8rSurfaceIn;
         iw8rSurfaceIn.albedo = texel.rgb;
         iw8rSurfaceIn.alpha = 1;
@@ -1621,8 +1623,17 @@ float4 main(Input input) : SV_TARGET0 {
 #else
         iw8rSurfaceIn.gloss = .3;
 #endif
-        color = iw8rSurface(iw8rSurfaceIn);
-        iw8rCustomLit = true;
+        iw8rSurfaceIn.faceNormal = normalize(input.normal);
+#if defined(IW8R_EDGES) && !defined(STATIC_MODEL)
+        iw8rEdgeFields(iw8rSurfaceIn, input.color.rgb, ddx(input.relativePosition), ddy(input.relativePosition));
+#else
+        iw8rEdgeFields(iw8rSurfaceIn, float3(1, 0, 0), 0, 0);
+#endif
+        const float3 iw8rColor = iw8rSurface(iw8rSurfaceIn);
+        if (!unlit && !sky && !layer) {
+            color = iw8rColor;
+            iw8rCustomLit = true;
+        }
     }
 #endif
 #if MAP_DEBUG_MODE == 0
