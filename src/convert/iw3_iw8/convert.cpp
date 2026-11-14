@@ -777,6 +777,7 @@ AssetTally addMapAssets(iw8::ZoneWriter &writer, iw8::ZoneWriter &techsets,
 
     const std::string compassName = "compass_map_" + map;
     bool hasCompass = false;
+    std::vector<std::string> hudImages; // the map's own HUD images (hud_*): each gets a 2D material of its name
     for (const std::string &name : dumpimg::listImageDumps(dumpDirectory))
     {
         const dumpimg::ImageDumpFile input = dumpimg::readImageDump(dumpDirectory, name);
@@ -790,6 +791,21 @@ AssetTally addMapAssets(iw8::ZoneWriter &writer, iw8::ZoneWriter &techsets,
         }
         ++tally.images;
         hasCompass = hasCompass || input.name == compassName;
+        if (input.name.starts_with("hud_"))
+            hudImages.push_back(input.name);
+    }
+    for (const std::string &name : hudImages)
+    {
+        if (!convdump::mtl::writeUiMaterial(techsets, name, name))
+        {
+            ++tally.failures;
+            if (tally.firstFailure.empty())
+                tally.firstFailure = "HUD material " + name;
+            continue;
+        }
+        replayrender::RegisterMaterialReference(writer, name);
+        ++tally.materials;
+        info("assets: HUD image %s with its 2D material (setshader(\"%s\", w, h) in the map script)", name.c_str(), name.c_str());
     }
     if (hasCompass)
     {
@@ -1789,10 +1805,14 @@ std::vector<OutputLedgerRow> outputLedgerRows(
                     origin = "stock IES profiles (section 19)";
                 else if (name == "compass_map_" + map)
                     origin = "IW3 minimap image";
+                else if (name.starts_with("hud_"))
+                    origin = "HUD image of the map";
                 break;
             case ASSET_TYPE_MATERIAL:
                 if (name == "compass_map_" + map)
                     origin = "minimap material for the IW3 minimap image";
+                else if (name.starts_with("hud_"))
+                    origin = "2D material of the map's HUD image";
                 break;
             case ASSET_TYPE_PHYSICSASSET:
                 if (name.starts_with("mw120r_glasschunk"))

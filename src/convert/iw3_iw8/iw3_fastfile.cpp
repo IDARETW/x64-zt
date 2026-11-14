@@ -1992,6 +1992,8 @@ void AuditSourceAssetDeclarations(const std::filesystem::path &root,
                 return {"converted", "load screen: becomes the map preview / loading image"};
             if (lower.starts_with("compass_map_"))
                 return {"converted", "minimap: converted by the compass step"};
+            if (lower.starts_with("hud_"))
+                return {"converted", "HUD image of the map: carried with a 2D material of its name"};
             if (lower == "$outdoor")
                 return {"n/a", "IW3 outdoor mask; Replay worlds carry their own $outdoor (heightfield)"};
             const auto owners = imageMaterials.find(name);
@@ -8440,6 +8442,31 @@ void CopyCompass(const std::filesystem::path &extracted, const std::filesystem::
     }
 }
 
+// The map's own HUD images (images named hud_*): copied beside the minimap so the map step converts them and gives
+// each a 2D material of its name (convert.cpp addMapAssets). Returns how many were copied.
+std::size_t CopyHudImages(const std::filesystem::path &extracted, const std::filesystem::path &prepared)
+{
+    std::size_t copied = 0;
+    std::error_code error;
+    for (std::filesystem::recursive_directory_iterator iterator(extracted, error), end;
+         !error && iterator != end; iterator.increment(error))
+    {
+        std::string extension = iterator->path().extension().string();
+        std::string stem = iterator->path().stem().string();
+        const auto lower = [](const unsigned char value) { return static_cast<char>(std::tolower(value)); };
+        std::ranges::transform(extension, extension.begin(), lower);
+        std::ranges::transform(stem, stem.begin(), lower);
+        if (!iterator->is_regular_file(error) || (extension != ".dds" && extension != ".iwi") || !stem.starts_with("hud_"))
+            continue;
+        const auto destination = prepared / "images" / (stem + extension);
+        std::filesystem::create_directories(destination.parent_path());
+        std::filesystem::copy_file(iterator->path(), destination, std::filesystem::copy_options::overwrite_existing);
+        zt::info("iw3: included HUD image %s", destination.filename().string().c_str());
+        ++copied;
+    }
+    return copied;
+}
+
 unsigned FootstepMaterial(std::string material, const RenderPlan &renderPlan)
 {
     const auto source = renderPlan.materials.find(material);
@@ -13383,6 +13410,7 @@ PreparedMap PrepareFastfile(const ImportOptions &options)
     result.collision = result.scratch / "collision.native";
     WriteCollision(result.collision, nativeCollision);
     CopyCompass(extracted, result.root, sourceMap, options.map);
+    CopyHudImages(extracted, result.root);
     timing.lap("entities and collision write");
 
     zt::info("iw3: normalized %zu triangles, %zu collision hulls, %zu brush models, %zu static "
