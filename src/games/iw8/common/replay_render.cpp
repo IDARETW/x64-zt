@@ -215,6 +215,17 @@ bool hasPixelTextureArgument(const std::vector<uint8_t> &args, const uint8_t reg
     return false;
 }
 
+// A code image argument (type 1) of the pixel stage at a register, for one code image.
+bool hasPixelCodeImageArgument(const std::vector<uint8_t> &args, const uint8_t registerIndex,
+                               const uint16_t codeImage)
+{
+    for (size_t offset = 0; offset + 6 <= args.size(); offset += 6)
+        if (args[offset] == 1 && (args[offset + 1] & 0x10) && args[offset + 2] == registerIndex &&
+            args[offset + 4] == (codeImage & 0xff) && args[offset + 5] == (codeImage >> 8))
+            return true;
+    return false;
+}
+
 bool hasCodeTextureArgument(const std::vector<uint8_t> &args, const uint8_t stageMask,
                             const uint8_t destination, const uint16_t codeImage)
 {
@@ -320,6 +331,18 @@ void validateGeneratedTextureBindings(const Material &material, const bool stati
                 {
                     reflection->Release();
                     throw std::runtime_error("Generated GTAO sampler is not bound to s8: " +
+                                             technique.name);
+                }
+                continue;
+            }
+            if (resourceName == "iw8rSceneZ")
+            {
+                // IW8 Radiant custom surface shaders read the scene depth: code image 0 at the shader's register.
+                if (binding.Type != D3D_SIT_TEXTURE || binding.BindPoint > UINT8_MAX ||
+                    !hasPixelCodeImageArgument(technique.args, static_cast<uint8_t>(binding.BindPoint), 0))
+                {
+                    reflection->Release();
+                    throw std::runtime_error("Generated scene depth is not bound to code image 0: " +
                                              technique.name);
                 }
                 continue;

@@ -11205,6 +11205,13 @@ PreparedMap PrepareFastfile(const ImportOptions &options)
                  value.start, value.color[0], value.color[1], value.color[2], value.colorIntensity, value.maxOpacity,
                  value.skyIntensity);
     }
+    // True when the map's vision turns the game's atmospheric fog on (IW8 Radiant: vision overrides with
+    // fogAtmosphericScattering 1). The game then fogs every opaque pixel and the sky itself, so the surface shader
+    // bakes no fog (it would be applied twice).
+    bool gameFog = false;
+    // ... or the volumetric air (volumetricAirDensity above 0), or the map has volumetric boxes: see-through surfaces
+    // then fog themselves and take the air before them in the surface shader (MAP_GAME_FOG).
+    bool gameAir = world.contains("volumetrics") && world.at("volumetrics").is_array() && !world.at("volumetrics").empty();
     {
         // An IW7 extraction's own volumetric air, veil and light scatter (iw7_volumetrics).
         const auto volumetrics = world.find("iw7_volumetrics");
@@ -11219,6 +11226,23 @@ PreparedMap PrepareFastfile(const ImportOptions &options)
                 visionOverrides = Json::parse(input, nullptr, false);
                 if (visionOverrides.is_discarded() || !visionOverrides.is_object())
                     throw std::runtime_error("invalid vision overrides: " + path.string());
+                for (const char *key : {"fogAtmosphericScattering", "MKKLQTSKSO"})
+                    if (const auto value = visionOverrides.find(key); value != visionOverrides.end())
+                        gameFog = value->is_number()    ? value->get<float>() >= 0.5f
+                                  : value->is_boolean() ? value->get<bool>()
+                                  : value->is_string()  ? std::atof(value->get<std::string>().c_str()) >= 0.5
+                                                        : false;
+                for (const char *key : {"volumetricAirDensity", "NSKNLMKQSR"})
+                    if (const auto value = visionOverrides.find(key); value != visionOverrides.end())
+                        gameAir = gameAir || (value->is_number()   ? value->get<float>() > 0.0f
+                                              : value->is_string() ? std::atof(value->get<std::string>().c_str()) > 0.0
+                                                                   : false);
+                if (gameFog)
+                {
+                    zt::info("iw3: the map's vision turns the game's atmospheric fog on: no fog is baked into the surface shader");
+                    if (expFog || nativeFog)
+                        zt::warn("iw3: the map also has a script or vision fog of its own; it is left out, the game's fog replaces it");
+                }
             }
         }
         const std::string vision = BuildReplayVision(expFog, result.gradingClutName, options.style,
@@ -12276,8 +12300,10 @@ PreparedMap PrepareFastfile(const ImportOptions &options)
                             modelMaterialNames, entityMaterialNames, fxMaterials, shadowWorldMaterialNames,
                             shadowModelMaterialNames, options.searchPaths, mapDirectory,
                             options.map, options.renderCache,
-                            FogShaderDefines(expFog, options.style, ReadMapSun(exportRoot, sourceMap),
-                                             lightingMatch.lightUnitScale, nativeFog),
+                            (gameFog || gameAir ? std::string("#define MAP_GAME_FOG 1\n") : std::string()) +
+                                FogShaderDefines(gameFog ? std::optional<ExpFog>{} : expFog, options.style,
+                                                 ReadMapSun(exportRoot, sourceMap), lightingMatch.lightUnitScale,
+                                                 gameFog ? std::optional<NativeFog>{} : nativeFog),
                             static_cast<unsigned>(sourceStaticModels.instances.size()),
                             entityLightVolume ? &*entityLightVolume : nullptr,
                             lightingMatch.lightUnitScale, options.style == MapStyle::iw3, options.replayZones);

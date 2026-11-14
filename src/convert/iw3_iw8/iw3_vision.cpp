@@ -804,6 +804,10 @@ std::string BuildReplayVision(const std::optional<ExpFog> &fog, const std::strin
     }
     if (!gradingClut.empty())
         overrides["NONMKTKNNM"] = gradingClut; // grading CLUT (stock: <map>_clut)
+    // The atmospheric fog's sun glow points at the map's sun in both styles (stock visions name their own direction;
+    // the table default is not the map's). Nothing reads it while the atmospheric fog is off.
+    if (!overrides.contains("RLNQONPKS"))
+        overrides["RLNQONPKS"] = Vector(sunDirection); // fogSunDir
 
     // vision/<map>.overrides.json (IW8 Radiant's vision editor): {"<dev name or token>": value, ...}, applied last.
     // A value is a number, a [x, y, z] array or a string; unknown names fail the build rather than vanish.

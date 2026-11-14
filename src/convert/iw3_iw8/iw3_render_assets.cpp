@@ -3177,6 +3177,9 @@ std::vector<std::uint8_t> CompileUncached(const std::string &source, const char 
 // IW8 Radiant's map surface shader (world JSON "iw8r_surface_shader": the IW8RSurface struct and its iw8rSurface
 // function), prepended to the surface pixel shaders with IW8R_CUSTOM; empty for maps without one.
 std::string g_surfaceShaderSource;
+// True when that shader reads the scene's depth (iw8rSceneDepth): the lit techniques then bind Replay's scene depth
+// (code image 0) where the thermal mask (code image 79) was.
+bool g_surfaceSceneDepth = false;
 
 std::vector<std::uint8_t> Compile(const std::string &source, const char *target, const char *name)
 {
@@ -3427,6 +3430,24 @@ void AppendTextureArgument(Json &technique, const std::string_view hex)
     technique["args"] = Hex(args);
 }
 
+// Re-points a technique's code image argument (type 1) from one code image to another, the register kept.
+void RepointCodeImage(Json &technique, const std::uint16_t from, const std::uint16_t to)
+{
+    auto args = Unhex(technique.at("args").get<std::string>());
+    unsigned found = 0;
+    for (std::size_t at = 0; at + 6 <= args.size(); at += 6)
+        if (args[at] == 1 && (args[at + 4] | (args[at + 5] << 8)) == from)
+        {
+            args[at + 4] = static_cast<std::uint8_t>(to & 0xff);
+            args[at + 5] = static_cast<std::uint8_t>(to >> 8);
+            ++found;
+        }
+    if (found != 1)
+        throw std::runtime_error("the lit technique has no single code image " + std::to_string(from) +
+                                 " argument to give the scene depth");
+    technique["args"] = Hex(args);
+}
+
 void KeepReferencedShaders(Json &techset)
 {
     std::set<std::string> needed;
@@ -3657,6 +3678,8 @@ Json BuildTechset(const std::string &map, const unsigned columns, const unsigned
     }
     if (uvdTexture)
         AppendTextureArgument(lit, "05100c003900"); // t12, slot 0x39: the noise map, in MaterialTextureID_flowMap
+    if (g_surfaceSceneDepth)
+        RepointCodeImage(lit, 79, 0); // t4 (models t3): Replay's scene depth for iw8rSceneDepth
     PatchStateIdentity(lit, pixel);
 
     const auto depthProgram =
@@ -5571,9 +5594,23 @@ RenderPlan PrepareRenderAssets(const std::filesystem::path &exportRoot, const Js
         replayrender::SetUmbraOccluders(std::move(occluders), world.value("umbra_max_cells", 0u));
     }
     g_surfaceShaderSource.clear();
+    g_surfaceSceneDepth = false;
     if (const auto custom = world.find("iw8r_surface_shader"); custom != world.end() && custom->is_string() &&
                                                               !custom->get<std::string>().empty())
-        g_surfaceShaderSource = "#define IW8R_CUSTOM 1\n" + custom->get<std::string>() + "\n#line 1 \"iw3_map_surface.hlsl\"\n";
+    {
+        const std::string code = custom->get<std::string>();
+        // An editor that hands over the screen inputs (pixel, viewDepth, eye) has them in its struct; a shader that
+        // calls iw8rSceneDepth gets the function (defined in the surface shader, after the view constants) and the
+        // depth's precision.
+        std::string head = "#define IW8R_CUSTOM 1\n";
+        if (code.find("viewDepth;") != std::string::npos && code.find(" eye;") != std::string::npos)
+            head += "#define IW8R_SURFACE_SCREEN 1\n";
+        g_surfaceSceneDepth = code.find("iw8rSceneDepth(") != std::string::npos;
+        if (g_surfaceSceneDepth)
+            head += "#define IW8R_SCENE_DEPTH 1\nfloat iw8rSceneDepth(float2 pixel);\n"
+                    "static const float iw8rSceneDepthStep = 1.0 / 1024.0;\n";
+        g_surfaceShaderSource = head + code + "\n#line 1 \"iw3_map_surface.hlsl\"\n";
+    }
     g_emissionDefines = std::ranges::any_of(materials, [](const SourceMaterial &material) {
                             return (material.flags & kEmissionFlag) != 0;
                         })

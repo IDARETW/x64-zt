@@ -30,7 +30,7 @@
 #endif
 // The volumetric in-scatter's texel count and size (cb7[187..188]); the stock blended world shaders declare 213 rows (PS
 // 077107f8).
-#if defined(MAP_VOLUMETRIC_EXTINCTION) && MAP_LIGHTING_ROWS < 189
+#if (defined(MAP_VOLUMETRIC_EXTINCTION) || defined(MAP_GAME_FOG)) && MAP_LIGHTING_ROWS < 189
 #undef MAP_LIGHTING_ROWS
 #define MAP_LIGHTING_ROWS 189
 #endif
@@ -104,6 +104,26 @@ SamplerState gtaoSampler : register(s8);
 cbuffer ReplayView : register(b2) {
     float4 replayView[8];
 };
+#ifdef IW8R_SCENE_DEPTH
+// IW8 Radiant custom surface shaders: the scene's depth (iw8rSceneDepth, declared ahead of the shader's code). It is
+// Replay's "Frontend FloatZ", code image 0: the view depth / 6 in a 16-bit float, negative on first-person viewmodel
+// pixels, 65500 and up for the sky (IW8 Radiant research 104). The stock effect shaders read it the same way: the
+// pixel scaled by replayView[7].x and shifted by the mip in replayView[7].z. The lit technique's code image argument
+// (79: the thermal mask, which this shader never reads) is re-pointed to it (RepointCodeImage).
+#ifdef STATIC_MODEL
+Texture2D<float4> iw8rSceneZ : register(t3);
+#else
+Texture2D<float4> iw8rSceneZ : register(t4);
+#endif
+float iw8rSceneDepth(float2 pixel) {
+    if (pixel.x < 0 || pixel.y < 0)
+        return 0;
+    const uint mip = asuint(replayView[7].z);
+    // Past the right or bottom edge Load gives 0: "no depth", as the interface says.
+    const float depth = abs(iw8rSceneZ.Load(int3(uint2(pixel * replayView[7].x) >> mip, mip)).x) * 6.0;
+    return depth >= 392999.0 ? 1e9 : depth;
+}
+#endif
 #if (defined(MAP_UV_ANIMATION) || defined(MAP_TRANSMISSION) || defined(MAP_REVEAL_LAYERS) || defined(MAP_UV_CLAMP) || \
      defined(MAP_VOLUMETRIC_EXTINCTION)) && !defined(MAP_COVERAGE)
 // The material's pixel constants (cb3, the converter's stamp): row 1 holds its transmission (MAP_TRANSMISSION) and its
@@ -125,7 +145,38 @@ float2 AnimatedUv(float2 uv, float3 animation, float t) {
 cbuffer ReplayLighting : register(b7) {
     float4 replayLighting[MAP_LIGHTING_ROWS];
 };
-#if defined(MAP_VOLUMETRIC_EXTINCTION) && !defined(MAP_COVERAGE)
+#if defined(MAP_GAME_FOG) && !defined(MAP_COVERAGE)
+// Replay's analytic fog for a see-through pixel, as its own blended world shaders compute it (PS 077107f8 lines
+// 1612-1758; IW8 Radiant research 111 sections 4-5 and 127 part B): no sky branch, no Warzone circle, no fog spline.
+// T is the transmittance, L the in-scatter in this shader's light units. With the game's fog off (the plain branch at
+// opacity 0) it gives T = 1, L = 0.
+void GameFogTranslucent(float3 relativePosition, out float3 T, out float3 L) {
+    float len = length(relativePosition);
+    float3 dir = relativePosition / max(len, 1e-6);
+    float path = len + replayLighting[132].w;
+    float cosS = dot(dir, replayLighting[132].xyz);
+    if (replayLighting[137].z < -0.5) {
+        float sunF = saturate(cosS * replayLighting[137].x + replayLighting[137].y);
+        float2 t = max(exp2(-path * replayLighting[133].xy), replayLighting[134].w);
+        float tt = saturate(lerp(t.x, t.y, sunF));
+        T = tt;
+        L = lerp(replayLighting[135].xyz, replayLighting[134].xyz, sunF) * (1 - tt);
+    } else {
+        float x = saturate(path * replayLighting[137].w);
+        float k = relativePosition.z * replayLighting[133].w;
+        float H = abs(k) > 1e-6 ? (1 - exp2(-k * 1.442695)) / k * replayLighting[135].w : replayLighting[135].w;
+        H += replayLighting[136].w;
+        T = exp2(-x * H * replayLighting[133].xyz);
+        float g = replayLighting[134].w;
+        float m = 1 - g * cosS;
+        float pR = (1 + cosS * cosS) * 0.059683;
+        float pM = (1 - g * g) * 0.079577 / (m * m);
+        L = (replayLighting[134].xyz * pM + replayLighting[135].xyz * pR) * (1 - T);
+    }
+    L /= MAP_LIGHT_UNIT_SCALE;
+}
+#endif
+#if (defined(MAP_VOLUMETRIC_EXTINCTION) || defined(MAP_GAME_FOG)) && !defined(MAP_COVERAGE)
 // Replay's volumetric extinction (code texture 26: t111) before a pixel, read as its lit translucent world shaders read it
 // (tw/twc lit_3_lit_bad_*, PS 077107f8): at the screen position and the depth slice of the view depth less 4 through the
 // four segments of cb7[48] and their scales cb7[49] (the far end past 0.984375 of depth). IW7's god-ray PS a9891c63
@@ -1624,6 +1675,11 @@ float4 main(Input input) : SV_TARGET0 {
         iw8rSurfaceIn.gloss = .3;
 #endif
         iw8rSurfaceIn.faceNormal = normalize(input.normal);
+#ifdef IW8R_SURFACE_SCREEN
+        iw8rSurfaceIn.pixel = input.position.xy;
+        iw8rSurfaceIn.viewDepth = input.position.w;
+        iw8rSurfaceIn.eye = replayView[4].xyz;
+#endif
 #if defined(IW8R_EDGES) && !defined(STATIC_MODEL)
         iw8rEdgeFields(iw8rSurfaceIn, input.color.rgb, ddx(input.relativePosition), ddy(input.relativePosition));
 #else
@@ -1770,7 +1826,22 @@ float4 main(Input input) : SV_TARGET0 {
         fogFactor = saturate(exp(-MAP_FOG_DENSITY * (length(input.relativePosition) - MAP_FOG_START)));
 #endif
 #endif
-#if defined(MAP_VOLUMETRIC_EXTINCTION) && !defined(MAP_COVERAGE) && MAP_DEBUG_MODE == 0
+#if defined(MAP_GAME_FOG) && !defined(MAP_COVERAGE) && MAP_DEBUG_MODE == 0
+    // The game's own fog and volumetric air (IW8 Radiant iw8r_haze / volumetric boxes): Replay's fog pass and its
+    // volumetric composite cover opaque pixels only, so every see-through surface (blended materials, additive and
+    // multiply layers) fogs itself and takes the air before it, as Replay's own blended shaders do.
+    float3 gameFogT = 1, gameFogL = 0;
+    float gameAirT = 1;
+    float3 gameAirS = 0;
+    if ((kind == 2 || (flags & 768) != 0) && !skyPlaced)
+    {
+        GameFogTranslucent(input.relativePosition, gameFogT, gameFogL);
+        float gameSlice = VolumetricSlice(input.position);
+        gameAirT = VolumetricExtinction(screenUV, gameSlice);
+        if (kind == 2)
+            gameAirS = VolumetricScatter(screenUV, gameSlice) * replayLighting[42].y / MAP_LIGHT_UNIT_SCALE;
+    }
+#elif defined(MAP_VOLUMETRIC_EXTINCTION) && !defined(MAP_COVERAGE) && MAP_DEBUG_MODE == 0
     // IW7's blended and additive surfaces that read its volumetric extinction (row 2.w): Replay's volumetric pass covers
     // what lies behind them, so they dim by the extinction before them and blended ones add the in-scatter over their
     // coverage, as Replay's blended world shaders do (PS 077107f8).
@@ -1801,6 +1872,11 @@ float4 main(Input input) : SV_TARGET0 {
     // them to neutral. Additive layers add light that fog fades out (IW3
     // fogged additive techniques toward black).
     // IW3 ps_mul: lerp(1, texture * vertex colour, vertex alpha).
+#if defined(MAP_GAME_FOG) && !defined(MAP_COVERAGE) && MAP_DEBUG_MODE == 0
+    // (Under the game's fog a multiply layer fades to neutral by the fog and the air before it.)
+    if ((flags & 512) != 0)
+        return float4(lerp(1, texel.rgb, input.color.a * fogFactor * dot(gameFogT, 1.0 / 3) * gameAirT), 1);
+#endif
     if ((flags & 512) != 0)
         return float4(lerp(1, texel.rgb, input.color.a * fogFactor), 1);
     // IW3's additive pixel shaders (vertcol_simple_add, zfeather_add_nf) output
@@ -1808,7 +1884,11 @@ float4 main(Input input) : SV_TARGET0 {
     // fade along their length through vertex alpha, and drew as uniform
     // hard-ended sheets without it (Gulag, owner test 2026-10-16). Additive
     // layers blend ONE/ONE, srcalpha-additive ones included.
-#if defined(MAP_VOLUMETRIC_EXTINCTION) && !defined(MAP_COVERAGE) && MAP_DEBUG_MODE == 0
+#if defined(MAP_GAME_FOG) && !defined(MAP_COVERAGE) && MAP_DEBUG_MODE == 0
+    // (An additive layer only dims: no in-scatter of its own.)
+    if ((flags & 256) != 0)
+        color *= gameFogT * gameAirT;
+#elif defined(MAP_VOLUMETRIC_EXTINCTION) && !defined(MAP_COVERAGE) && MAP_DEBUG_MODE == 0
     color *= (flags & 256) != 0 ? volumetricTransmittance : 1;
 #endif
     if ((flags & 256) != 0)
@@ -1832,7 +1912,10 @@ float4 main(Input input) : SV_TARGET0 {
         reflection += specular;
     if (kind == 2)
         color = color * alpha + reflection * fogFactor;
-#if defined(MAP_VOLUMETRIC_EXTINCTION) && !defined(MAP_COVERAGE) && MAP_DEBUG_MODE == 0
+#if defined(MAP_GAME_FOG) && !defined(MAP_COVERAGE) && MAP_DEBUG_MODE == 0
+    // out = (C T + a L) Tv + a Sv (PS 077107f8 lines 1891-1997); an opaque surface has T = Tv = 1 and L = Sv = 0.
+    color = color * (gameFogT * gameAirT) + alpha * (gameFogL * gameAirT + gameAirS);
+#elif defined(MAP_VOLUMETRIC_EXTINCTION) && !defined(MAP_COVERAGE) && MAP_DEBUG_MODE == 0
     color = color * volumetricTransmittance + volumetricInScatter * alpha;
 #endif
     return float4(min(color * MAP_LIGHT_UNIT_SCALE * replayLighting[42].x, 32255.0), alpha);

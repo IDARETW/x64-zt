@@ -15,6 +15,12 @@
 // `ret` and has no other `ret` / `retc` / discard after an output write; the filter shader declares only v0, o0 and
 // temps (no resources, constant buffers, immediate constant buffers or indexable temps).
 //
+// A filter that reads the screen (DxbcSpliceOptions::sceneDepthRegister >= 0; a map shader's iw8rFilterScreen, the ink
+// lines of a stock map): its program also has input 1, SV_Position, and the texture t0, read with Load only. Input 1
+// becomes the stock shader's own position input (it must have one that carries every part the filter reads), t0
+// becomes the stock shader's texture register `sceneDepthRegister`, where the technique binds the scene depth; when
+// the stock shader does not declare that register the filter's declaration is added.
+//
 // The container's checksum is recomputed (dxbcChecksum: Direct3D refuses a blob whose checksum is wrong).
 
 #include <array>
@@ -40,10 +46,15 @@ struct DxbcInfo {
 };
 bool dxbcInspect(const std::vector<uint8_t>& blob, DxbcInfo& info, std::string* err = nullptr);
 
+struct DxbcSpliceOptions {
+    // >= 0: the filter reads the screen (see the top); the stock shader's texture register for the scene depth.
+    int sceneDepthRegister = -1;
+};
+
 // The stock shader with the filter shader's instructions between its last output write and its final ret (see the
 // top). False with *err when a requirement is not met; `out` is then empty.
 bool dxbcSpliceFilter(const std::vector<uint8_t>& stock, const std::vector<uint8_t>& filter, std::vector<uint8_t>& out,
-                      std::string* err = nullptr);
+                      std::string* err = nullptr, const DxbcSpliceOptions& options = {});
 
 }  // namespace iw8r
 
@@ -96,8 +107,19 @@ void wr32(uint8_t* p, uint32_t v) {
 
 // ---- the token stream
 constexpr uint32_t kOpCustomData = 53, kOpDiscard = 13, kOpRet = 62, kOpRetc = 63, kOpDclTemps = 104, kOpDclGlobalFlags = 106,
-                   kOpDclInputPs = 98, kOpDclOutput = 101;
-constexpr uint32_t kTypeTemp = 0, kTypeInput = 1, kTypeOutput = 2, kTypeImm32 = 4, kTypeImm64 = 5, kTypeNull = 13;
+                   kOpDclInputPs = 98, kOpDclOutput = 101, kOpDclResource = 88, kOpDclInputPsSiv = 100;
+constexpr uint32_t kTypeTemp = 0, kTypeInput = 1, kTypeOutput = 2, kTypeImm32 = 4, kTypeImm64 = 5, kTypeNull = 13, kTypeResource = 7;
+constexpr uint32_t kNamePosition = 1;       // the system value name of SV_Position
+constexpr uint32_t kDimensionTexture2D = 3; // dcl_resource's dimension field (bits 11..15)
+
+// The components (bit 0 x .. bit 3 w) an operand token names: its mask, its swizzle or its one selected component.
+uint32_t operandComponents(uint32_t tok) {
+    if ((tok & 3u) != 2u) return 0xFu;  // not a four-component operand: taken as all
+    const uint32_t mode = (tok >> 2) & 3u;
+    if (mode == 0) return (tok >> 4) & 0xFu;
+    if (mode == 1) return (1u << ((tok >> 4) & 3u)) | (1u << ((tok >> 6) & 3u)) | (1u << ((tok >> 8) & 3u)) | (1u << ((tok >> 10) & 3u));
+    return 1u << ((tok >> 4) & 3u);
+}
 
 bool isDeclaration(uint32_t op) { return (op >= 88 && op <= 106) || (op >= 143 && op <= 162) || op == kOpCustomData; }
 
@@ -323,8 +345,10 @@ inline bool dxbcInspect(const std::vector<uint8_t>& blob, DxbcInfo& info, std::s
     return true;
 }
 
-inline bool dxbcSpliceFilter(const std::vector<uint8_t>& stock, const std::vector<uint8_t>& filter, std::vector<uint8_t>& out, std::string* err) {
+inline bool dxbcSpliceFilter(const std::vector<uint8_t>& stock, const std::vector<uint8_t>& filter, std::vector<uint8_t>& out, std::string* err,
+                      const DxbcSpliceOptions& options) {
     out.clear();
+    const bool screen = options.sceneDepthRegister >= 0;
     const auto fail = [&](const std::string& m) {
         if (err) *err = m;
         return false;
@@ -340,6 +364,9 @@ inline bool dxbcSpliceFilter(const std::vector<uint8_t>& stock, const std::vecto
     uint32_t stockTemps = 0;
     unsigned rets = 0, writes = 0;
     bool haveTemps = false, endsInRet = false, sawCode = false;
+    int positionInput = -1;          // the stock shader's SV_Position input register
+    uint32_t positionMask = 0;       // the components it declares
+    int sceneDepthDimension = -1;    // the dimension the stock shader declares for the scene depth register (-1: none)
     std::vector<std::pair<size_t, size_t>> outputOperands;  // operand token, index token
     Instruction in;
     for (size_t at = 0; at < s.code.size(); at += in.tokens) {
@@ -347,6 +374,15 @@ inline bool dxbcSpliceFilter(const std::vector<uint8_t>& stock, const std::vecto
         if (in.op == kOpDclTemps && in.tokens >= 2) tempsAt = at + 1, stockTemps = s.code[at + 1], haveTemps = true;
         if (isDeclaration(in.op)) {
             if (!sawCode) declEnd = at + in.tokens;
+            if (screen && (in.op == kOpDclInputPsSiv || in.op == kOpDclResource) && in.tokens >= 3) {
+                Operand d;
+                if (parseOperand(s.code, in.operandsAt, at + in.tokens, d) && d.dims == 1 && d.immediateIndex) {
+                    if (in.op == kOpDclInputPsSiv && s.code[at + in.tokens - 1] == kNamePosition)
+                        positionInput = int(s.code[d.index0]), positionMask = operandComponents(s.code[d.at]);
+                    if (in.op == kOpDclResource && d.type == kTypeResource && int(s.code[d.index0]) == options.sceneDepthRegister)
+                        sceneDepthDimension = int((s.code[at] >> 11) & 31u);
+                }
+            }
             continue;
         }
         sawCode = true;
@@ -364,6 +400,9 @@ inline bool dxbcSpliceFilter(const std::vector<uint8_t>& stock, const std::vecto
     }
     if (rets != 1 || !endsInRet) return fail("stock shader: it must end in its only return (" + std::to_string(rets) + " found)");
     if (!writes) return fail("stock shader: it never writes output 0");
+    if (screen && positionInput < 0) return fail("stock shader: it has no screen position input for a filter that reads the screen");
+    if (screen && sceneDepthDimension >= 0 && uint32_t(sceneDepthDimension) != kDimensionTexture2D)
+        return fail("stock shader: its register t" + std::to_string(options.sceneDepthRegister) + " is not a 2D texture");
 
     // ---- the filter shader: v0 in, o0 out, temps; everything else is refused
     uint32_t filterTemps = 0;
@@ -371,6 +410,7 @@ inline bool dxbcSpliceFilter(const std::vector<uint8_t>& stock, const std::vecto
     const uint32_t result = stockTemps;        // the stock colour
     const uint32_t base = stockTemps + 1;      // the filter's temp 0
     bool filterEnded = false;
+    std::vector<uint32_t> textureDeclaration;  // the filter's dcl of t0, with the stock register (screen mode)
     for (size_t at = 0; at < f.code.size(); at += in.tokens) {
         if (!nextInstruction(f.code, at, in)) return fail("filter shader: the instruction stream is malformed");
         if (isDeclaration(in.op)) {
@@ -380,6 +420,18 @@ inline bool dxbcSpliceFilter(const std::vector<uint8_t>& stock, const std::vecto
                 Operand o;
                 if (!parseOperand(f.code, in.operandsAt, at + in.tokens, o) || !o.immediateIndex || f.code[o.index0] != 0)
                     return fail("filter shader: it may only read input 0 and write output 0");
+            } else if (screen && in.op == kOpDclInputPsSiv) {
+                Operand o;
+                if (!parseOperand(f.code, in.operandsAt, at + in.tokens, o) || !o.immediateIndex || f.code[o.index0] != 1 ||
+                    f.code[at + in.tokens - 1] != kNamePosition)
+                    return fail("filter shader: its second input must be the screen position");
+            } else if (screen && in.op == kOpDclResource) {
+                Operand o;
+                if (!parseOperand(f.code, in.operandsAt, at + in.tokens, o) || o.type != kTypeResource || o.dims != 1 || !o.immediateIndex ||
+                    f.code[o.index0] != 0 || ((f.code[at] >> 11) & 31u) != kDimensionTexture2D)
+                    return fail("filter shader: its only texture must be the 2D texture t0 (the scene depth)");
+                textureDeclaration.assign(f.code.begin() + long(at), f.code.begin() + long(at + in.tokens));
+                textureDeclaration[o.index0 - at] = uint32_t(options.sceneDepthRegister);
             } else if (in.op != kOpDclGlobalFlags) {
                 return fail("filter shader: it declares something other than its input, output and temps (no textures, buffers, "
                             "arrays or constant tables in a filter)");
@@ -401,10 +453,18 @@ inline bool dxbcSpliceFilter(const std::vector<uint8_t>& stock, const std::vecto
             const size_t rel = o.at - at, idx = o.index0 - at;
             if (o.type == kTypeTemp) {
                 copy[idx] += base;
+            } else if (o.type == kTypeInput && screen && copy[idx] == 1) {
+                // The screen position: the stock shader's own, which must carry what the filter reads.
+                if (operandComponents(copy[rel]) & ~positionMask)
+                    return fail("stock shader: its screen position input lacks a part the filter reads");
+                copy[idx] = uint32_t(positionInput);
             } else if (o.type == kTypeInput) {
                 if (copy[idx] != 0) return fail("filter shader: it reads an input other than 0");
                 copy[rel] = (copy[rel] & ~(0xFFu << 12)) | (kTypeTemp << 12);
                 copy[idx] = result;
+            } else if (o.type == kTypeResource && screen) {
+                if (copy[idx] != 0) return fail("filter shader: it reads a texture other than t0");
+                copy[idx] = uint32_t(options.sceneDepthRegister);
             } else if (o.type == kTypeOutput) {
                 if (copy[idx] != 0) return fail("filter shader: it writes an output other than 0");
             } else {
@@ -428,6 +488,10 @@ inline bool dxbcSpliceFilter(const std::vector<uint8_t>& stock, const std::vecto
         const uint32_t dcl[2] = {kOpDclTemps | (2u << 24), temps};
         s.code.insert(s.code.begin() + long(declEnd), dcl, dcl + 2);
     }
+    // The scene depth's declaration, when the stock shader has none for that register (after the insert above, which
+    // is at or behind it, so declEnd still holds).
+    if (screen && sceneDepthDimension < 0 && !textureDeclaration.empty())
+        s.code.insert(s.code.begin() + long(declEnd), textureDeclaration.begin(), textureDeclaration.end());
     out = writeContainer(s);
     return true;
 }
