@@ -3486,6 +3486,10 @@ namespace zonetool::convert::iw3_iw8
 	//       map data (mp_br_quarry.fp, mp_donetsk.fp, ...), and an installed edit replaces the patch of its zone: with
 	//       the saved stock patch named here the edit starts from the stock map again, not from the installed edit.
 	//       Without the key every zone is read with the patch beside it, as the game reads it.
+	//   "stock_zones": {"<zone>.ff": "<file>"} names, per zone file of the game's zone folder, the file to read in its
+	//       place (with the patch beside that file). The game takes a patch of a signed zone only with its own
+	//       signature, so an edit is installed as a whole unsigned zone in place of the stock file, which is kept
+	//       elsewhere: named here, the edit starts from the stock zone again (IW8 Radiant research 116).
 	// Output: <output>/<zone>.ff, techsets_<zone>.ff when it changed, <output>/patch/<same names>.fp (the patches that
 	// turn the stock files into them; "patch": false leaves them out) and <zone>.edit-report.json.
 	void edit_zone(const std::filesystem::path& game_path, const std::string& zone_name,
@@ -3534,6 +3538,32 @@ namespace zonetool::convert::iw3_iw8
 				list.push_back(name + (file.empty() ? " (no stock patch)" : ""));
 			}
 			report["stock_patches"] = list;
+		}
+
+		if (edits.contains("stock_zones"))
+		{
+			const auto& named = edits.at("stock_zones");
+			if (!named.is_object())
+			{
+				throw std::runtime_error("stock_zones must be an object: zone file name -> stock zone file");
+			}
+			auto list = nlohmann::ordered_json::array();
+			for (const auto& [name, value] : named.items())
+			{
+				const std::filesystem::path file_name(name);
+				if (!value.is_string() || file_name.has_parent_path() || file_name.extension() != ".ff")
+				{
+					throw std::runtime_error("stock_zones: \"" + name + "\" must be a zone file name (<zone>.ff) with a file path");
+				}
+				const auto file = value.get<std::string>();
+				if (file.empty() || !std::filesystem::exists(std::filesystem::path(file)))
+				{
+					throw std::runtime_error("stock_zones: the stock zone " + file + " was not found");
+				}
+				zonetool::xfile::use_zone_file(zone_folder / file_name, std::filesystem::path(file));
+				list.push_back(name);
+			}
+			report["stock_zones"] = list;
 		}
 
 		auto zone = load_zone(zone_path, {.keep_temp_data = true});

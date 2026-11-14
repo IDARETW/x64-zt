@@ -1165,6 +1165,12 @@ namespace zonetool::xfile
 			return overrides;
 		}
 
+		std::map<std::filesystem::path, std::filesystem::path>& zone_overrides()
+		{
+			static std::map<std::filesystem::path, std::filesystem::path> overrides;
+			return overrides;
+		}
+
 		std::filesystem::path override_key(const std::filesystem::path& zone_path)
 		{
 			std::error_code error;
@@ -1561,15 +1567,26 @@ namespace zonetool::xfile
 		patch_overrides()[override_key(zone_path)] = patch_path;
 	}
 
+	void use_zone_file(const std::filesystem::path& zone_path, const std::filesystem::path& file)
+	{
+		zone_overrides()[override_key(zone_path)] = file;
+	}
+
 	fastfile read(const std::filesystem::path& path, const format& format, const bool apply_patch)
 	{
+		auto source = path;
+		if (const auto named = zone_overrides().find(override_key(path)); named != zone_overrides().end())
+		{
+			source = named->second;
+		}
+
 		std::string data;
-		if (!game_files::read(path, data))
+		if (!game_files::read(source, data))
 		{
 			throw std::runtime_error("cannot read file");
 		}
 
-		return read(path, std::move(data), format, apply_patch);
+		return read(source, std::move(data), format, apply_patch);
 	}
 
 	fastfile read(const std::filesystem::path& path, std::string data, const format& format, const bool apply_patch)
