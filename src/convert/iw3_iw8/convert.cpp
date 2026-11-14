@@ -1765,7 +1765,7 @@ std::vector<OutputLedgerRow> outputLedgerRows(
                 origin = "bot navigation generated from the converted collision";
                 break;
             case ASSET_TYPE_EDGELIST:
-                origin = "IW3 ladders (clipmap)";
+                origin = "ladders and mount edges (collision)";
                 break;
             case ASSET_TYPE_DYNENTITYLIST:
                 origin = "IW3 dynamic entities";
@@ -1807,6 +1807,8 @@ std::vector<OutputLedgerRow> outputLedgerRows(
                     origin = "IW3 minimap image";
                 else if (name.starts_with("hud_"))
                     origin = "HUD image of the map";
+                else if (name.starts_with("mw120r/" + map + "_volumetric_mask_"))
+                    origin = "mask picture of a volumetric box (world volumetrics)";
                 break;
             case ASSET_TYPE_MATERIAL:
                 if (name == "compass_map_" + map)
