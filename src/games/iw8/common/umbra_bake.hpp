@@ -555,7 +555,11 @@ inline Result bake(const Input& in) {
     t.resize((t.size() + 15) & ~size_t(15));
     const uint64_t tileBytes = t.size() - tile;
     if (tileBytes >= (1u << 24)) return fail("the tile is larger than 16 MB: fewer cells or occluders are needed");
-    put(t, tile + 0x2C, uint32_t(uint32_t(tileBytes) << 8 | 3u));
+    // Flags 5, as every stock leaf tile with a view tree (shipment, rust, speedball): bit 2 tells the game that a view
+    // leaf's value is an offset into the cell index list, which is what is written below. Without it the game takes
+    // the value for the cell number itself (Umbra_KDTree_lookupLeafRange 0x1420079D0, the leaf reader 0x142007B60;
+    // research 129): a tome written with 3 hid surfaces and models in the game test of 2026-11-14.
+    put(t, tile + 0x2C, uint32_t(uint32_t(tileBytes) << 8 | 5u));
     put(t, tileOffsets, tile);
     put(t, 0x08, uint32_t(t.size()));
     put(t, 0x04, crc32c(t.data() + 8, t.size() - 8));

@@ -1078,7 +1078,9 @@ void validateUmbraTome(const std::vector<uint8_t> &data, uint32_t objectCount,
     validateRange(data, tile, kUmbraTileHeaderSize, "tile");
     const uint32_t sizeAndFlags = read32(data, tile + 0x2C);
     const uint32_t tileSize = sizeAndFlags >> 8;
-    if ((sizeAndFlags & 0xFF) != 3 || tileSize < kUmbraTileHeaderSize ||
+    // Flags 3: the one-cell tome (its one view leaf holds 0, cell 0). Flags 5: a baked tome, whose view leaves hold
+    // offsets into the cell list as stock tiles do (bit 2; IW8 Radiant research 129).
+    if (((sizeAndFlags & 0xFF) != 3 && (sizeAndFlags & 0xFF) != 5) || tileSize < kUmbraTileHeaderSize ||
         uint64_t(tile) + tileSize > data.size() || read32(data, tile + 0x18) != 33 ||
         read32(data, tile + 0x34) != 1)
         throw std::runtime_error("Invalid conservative Umbra tile header");
