@@ -1599,6 +1599,8 @@ float4 main(Input input) : SV_TARGET0 {
 #endif
     float3 specular = 0;
     float3 color = texel.rgb * light;
+    // True where the map's surface shader gave the colour (no converter specular is added to it then).
+    bool iw8rCustomLit = false;
 #if defined(IW8R_CUSTOM) && !defined(MAP_COVERAGE)
     // The map's surface shader (IW8 Radiant "iw8r_surface_shader"): its lit colour for every lit surface, from the same
     // inputs the editor's viewport gives it (IW8RSurface). Sky, layers and unlit materials keep theirs.
@@ -1620,6 +1622,7 @@ float4 main(Input input) : SV_TARGET0 {
         iw8rSurfaceIn.gloss = .3;
 #endif
         color = iw8rSurface(iw8rSurfaceIn);
+        iw8rCustomLit = true;
     }
 #endif
 #if MAP_DEBUG_MODE == 0
@@ -1667,13 +1670,13 @@ float4 main(Input input) : SV_TARGET0 {
         specular = fresnel * distribution * visibilityTerm * ndotl * sun * visibility;
     }
     specular += environmentSpecular;
-    if (!iw8Window)
+    if (!iw8Window && !iw8rCustomLit)
         color += specular;
 #elif MAP_SOURCE_CHANNELS && MAP_DEBUG_MODE == 0
     // --style iw3: IW3 added its sun specular in the gamma-encoded framebuffer
     // (like its fog); added linearly it over-brightened dark surfaces.
     // Window glass reflects in the glass path below (unscaled by coverage).
-    if (!unlit && !(kind == 2 && !layer && !decalLayer)) {
+    if (!unlit && !iw8rCustomLit && !(kind == 2 && !layer && !decalLayer)) {
         int surfaceProbe = fixedProbe;
 #if defined(STATIC_MODEL) && defined(MAP_INSTANCE_LIGHTING)
         if (input.instance != 0xffffffff)
