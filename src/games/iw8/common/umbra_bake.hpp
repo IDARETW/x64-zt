@@ -14,7 +14,8 @@
 //     reached. A cell lists the objects whose real box touches it; `everywhere` objects are listed by every cell.
 //   - the view tree: the tile's cube split at midpoints until a leaf lies in one cell; a leaf in no cell (solid, or
 //     outside the map) lists the nearest cell, so a camera is never without a cell. Occluder faces are moved inward
-//     to a grid of about 4 units so that the midpoints can meet them.
+//     to a grid of about 4 units so that the midpoints can meet them. A leaf never lists several cells (stock tomes
+//     never do): when the tree would outgrow its budget, the space is cut again with half the cells.
 // Not seen in game. The converter uses it only when the map asks for it.
 #pragma once
 
@@ -46,11 +47,12 @@ struct Input {
     uint32_t maxCells = 4096;     // 2..60000
     float minOccluderSide = 64;   // an occluder needs two sides at least this long
     float objectMargin = 2;       // an object's box grows by this before the cells are chosen
-    uint32_t maxViewNodes = 400000;
+    uint32_t maxViewNodes = 1000000;  // the view tree's size limit (a leaf never lists several cells)
 };
 struct Stats {
     uint32_t cells = 0, portals = 0, occludersUsed = 0, occludersGiven = 0, solidBoxes = 0;
     uint32_t viewNodes = 0, viewLeaves = 0, listEntries = 0, objectsEverywhere = 0, objectsByNearestCell = 0;
+    uint32_t retries = 0;  // times the space was cut again with half the cells, for the view tree to fit
 };
 struct Result {
     bool ok = false;
@@ -200,58 +202,144 @@ inline Result bake(const Input& in) {
     }
     std::stable_sort(occ.begin(), occ.end(), [](const Occ& a, const Occ& b) { return a.area > b.area; });
 
-    // Free space, cut along the occluders' faces.
-    const uint32_t maxCells = std::clamp<uint32_t>(in.maxCells, 2u, 60000u);
-    // The scene box is the free space to start with. The rest of the cube is outside the map: no cell (a camera
-    // there gets the nearest one), so it joins nothing.
-    QBox whole{{0, 0, 0}, {kSide, kSide, kSide}};
-    for (int k = 0; k < 3; ++k) whole.hi[k] = std::max<uint32_t>(grid, snapUp(quantum(in.scene.mx[k], k, true)));
-    std::vector<QBox> cells{whole};
-    std::vector<QBox> solid;
-    for (const Occ& o : occ) {
-        size_t touched = 0;
-        for (const QBox& c : cells) touched += overlaps(c, o.q) ? 1 : 0;
-        if (!touched) continue;  // already inside other occluders
-        if (cells.size() + touched * 6 > maxCells) continue;  // would make too many cells: this one hides nothing
-        std::vector<QBox> next;
-        next.reserve(cells.size() + touched * 6);
-        for (const QBox& c : cells) {
-            if (!overlaps(c, o.q)) {
-                next.push_back(c);
-                continue;
-            }
-            QBox rest = c;  // what is left of the cell; the slabs outside the occluder are cut off it, axis by axis
-            for (int k = 0; k < 3; ++k) {
-                if (o.q.lo[k] > rest.lo[k]) {
-                    QBox below = rest;
-                    below.hi[k] = o.q.lo[k];
-                    next.push_back(below);
-                    rest.lo[k] = o.q.lo[k];
-                }
-                if (o.q.hi[k] < rest.hi[k]) {
-                    QBox above = rest;
-                    above.lo[k] = o.q.hi[k];
-                    next.push_back(above);
-                    rest.hi[k] = o.q.hi[k];
-                }
-            }
-            solid.push_back(rest);  // inside the occluder
-        }
-        cells.swap(next);
-        ++res.stats.occludersUsed;
-    }
-    if (cells.empty()) return fail("the occluders fill the whole scene");
-    const uint32_t cellCount = uint32_t(cells.size());
-    res.stats.cells = cellCount;
-    res.stats.solidBoxes = uint32_t(solid.size());
-
-    // Portals: the shared rectangle of two cells that touch on a face. Found per plane.
+    // Free space, cut along the occluders' faces; then the view tree, which maps a point to its cell. A leaf of that
+    // tree must lie in one cell (stock tomes hold exactly one cell per leaf, research 110), so when the tree does not
+    // fit its node budget the space is cut again with half the cells.
     struct Portal {
         uint32_t target;
         uint8_t face;
         uint16_t plane;
         uint16_t rect[2][2];
     };
+    struct Node {
+        QBox q;
+        std::vector<uint32_t> touching;
+    };
+    // The scene box is the free space to start with. The rest of the cube is outside the map: no cell (a camera
+    // there gets the nearest one), so it joins nothing.
+    QBox whole{{0, 0, 0}, {kSide, kSide, kSide}};
+    for (int k = 0; k < 3; ++k) whole.hi[k] = std::max<uint32_t>(grid, snapUp(quantum(in.scene.mx[k], k, true)));
+    std::vector<QBox> cells, solid;
+    std::vector<uint8_t> codes;
+    std::vector<std::vector<uint32_t>> leafCells;
+    const auto nearestCell = [&](const QBox& q) {
+        uint32_t best = 0;
+        double bestD = 1e300;
+        for (uint32_t i = 0; i < uint32_t(cells.size()); ++i) {
+            double d = 0;
+            for (int k = 0; k < 3; ++k) {
+                const double gap = q.lo[k] >= cells[i].hi[k] ? double(q.lo[k]) - cells[i].hi[k] + 1 : (cells[i].lo[k] >= q.hi[k] ? double(cells[i].lo[k]) - q.hi[k] + 1 : 0.0);
+                d += gap * gap;
+            }
+            if (d < bestD) bestD = d, best = i;
+        }
+        return best;
+    };
+    uint32_t maxCells = std::clamp<uint32_t>(in.maxCells, 2u, 60000u);
+    for (;;) {
+        cells.assign(1, whole);
+        solid.clear();
+        res.stats.occludersUsed = 0;
+        for (const Occ& o : occ) {
+            size_t touched = 0;
+            for (const QBox& c : cells) touched += overlaps(c, o.q) ? 1 : 0;
+            if (!touched) continue;  // already inside other occluders
+            if (cells.size() + touched * 6 > maxCells) continue;  // would make too many cells: this one hides nothing
+            std::vector<QBox> next;
+            next.reserve(cells.size() + touched * 6);
+            for (const QBox& c : cells) {
+                if (!overlaps(c, o.q)) {
+                    next.push_back(c);
+                    continue;
+                }
+                QBox rest = c;  // what is left of the cell; the slabs outside the occluder are cut off it, axis by axis
+                for (int k = 0; k < 3; ++k) {
+                    if (o.q.lo[k] > rest.lo[k]) {
+                        QBox below = rest;
+                        below.hi[k] = o.q.lo[k];
+                        next.push_back(below);
+                        rest.lo[k] = o.q.lo[k];
+                    }
+                    if (o.q.hi[k] < rest.hi[k]) {
+                        QBox above = rest;
+                        above.lo[k] = o.q.hi[k];
+                        next.push_back(above);
+                        rest.hi[k] = o.q.hi[k];
+                    }
+                }
+                solid.push_back(rest);  // inside the occluder
+            }
+            cells.swap(next);
+            ++res.stats.occludersUsed;
+        }
+        if (cells.empty()) return fail("the occluders fill the whole scene");
+
+        // The view tree: the cube split at midpoints until every leaf lies in one cell, or in no cell (solid, or
+        // outside the map), which gets the nearest cell. A node is split along an axis on which a boundary of a cell
+        // it touches lies strictly inside it, the longest such axis first. Breadth first, so the k-th inner node's
+        // children are nodes 2k + 1 and 2k + 2.
+        codes.clear();
+        leafCells.clear();
+        bool fits = true;
+        std::vector<Node> level;
+        Node root;
+        root.q = QBox{{0, 0, 0}, {kSide, kSide, kSide}};
+        root.touching.resize(cells.size());
+        for (uint32_t i = 0; i < uint32_t(cells.size()); ++i) root.touching[i] = i;
+        level.push_back(std::move(root));
+        size_t pending = 1;  // nodes not yet given a code
+        while (!level.empty() && fits) {
+            std::vector<Node> nextLevel;
+            for (Node& n : level) {
+                --pending;
+                int axis = -1;
+                for (int k = 0; k < 3; ++k) {
+                    const uint32_t size = n.q.hi[k] - n.q.lo[k];
+                    if (size < 2 || (axis >= 0 && size <= n.q.hi[axis] - n.q.lo[axis])) continue;
+                    bool cut = false;
+                    for (const uint32_t c : n.touching)
+                        if ((cells[c].lo[k] > n.q.lo[k] && cells[c].lo[k] < n.q.hi[k]) || (cells[c].hi[k] > n.q.lo[k] && cells[c].hi[k] < n.q.hi[k])) {
+                            cut = true;
+                            break;
+                        }
+                    if (cut) axis = k;
+                }
+                if (axis < 0) {
+                    codes.push_back(3);
+                    if (n.touching.empty()) n.touching.push_back(nearestCell(n.q));
+                    leafCells.push_back(std::move(n.touching));
+                    continue;
+                }
+                if (codes.size() + pending + nextLevel.size() + 2 > in.maxViewNodes) {
+                    fits = false;
+                    break;
+                }
+                codes.push_back(uint8_t(axis));
+                const uint32_t mid = n.q.lo[axis] + (n.q.hi[axis] - n.q.lo[axis]) / 2;
+                Node lo, hi;
+                lo.q = hi.q = n.q;
+                lo.q.hi[axis] = mid;
+                hi.q.lo[axis] = mid;
+                for (const uint32_t c : n.touching) {
+                    if (overlaps(cells[c], lo.q)) lo.touching.push_back(c);
+                    if (overlaps(cells[c], hi.q)) hi.touching.push_back(c);
+                }
+                nextLevel.push_back(std::move(lo));
+                nextLevel.push_back(std::move(hi));
+            }
+            pending += nextLevel.size();
+            level.swap(nextLevel);
+        }
+        if (fits) break;
+        if (cells.size() <= 1) return fail("the view tree does not fit even for one cell");
+        maxCells = std::max<uint32_t>(2u, std::min<uint32_t>(maxCells, uint32_t(cells.size())) / 2);
+        ++res.stats.retries;
+    }
+    const uint32_t cellCount = uint32_t(cells.size());
+    res.stats.cells = cellCount;
+    res.stats.solidBoxes = uint32_t(solid.size());
+
+    // Portals: the shared rectangle of two cells that touch on a face. Found per plane.
     std::vector<std::vector<Portal>> portals(cellCount);
     for (int a = 0; a < 3; ++a) {
         const int b = (a + 1) % 3, c = (a + 2) % 3;
@@ -285,19 +373,6 @@ inline Result bake(const Input& in) {
         });
 
     // Which cells list each object.
-    const auto nearestCell = [&](const QBox& q) {
-        uint32_t best = 0;
-        double bestD = 1e300;
-        for (uint32_t i = 0; i < cellCount; ++i) {
-            double d = 0;
-            for (int k = 0; k < 3; ++k) {
-                const double gap = q.lo[k] >= cells[i].hi[k] ? double(q.lo[k]) - cells[i].hi[k] + 1 : (cells[i].lo[k] >= q.hi[k] ? double(cells[i].lo[k]) - q.hi[k] + 1 : 0.0);
-                d += gap * gap;
-            }
-            if (d < bestD) bestD = d, best = i;
-        }
-        return best;
-    };
     std::vector<std::vector<uint32_t>> lists(cellCount);
     for (uint32_t oi = 0; oi < objectCount; ++oi) {
         const Object& o = in.objects[oi];
@@ -321,66 +396,6 @@ inline Result bake(const Input& in) {
         if (!any) {
             lists[nearestCell(q)].push_back(oi);
             ++res.stats.objectsByNearestCell;
-        }
-    }
-
-    // The view tree: the cube split at midpoints until every leaf lies in one cell (or in no cell: solid or outside,
-    // which gets the nearest cell). A node is split along an axis on which a boundary of a cell it touches lies
-    // strictly inside it, the longest such axis first. Breadth first, so the k-th inner node's children are nodes
-    // 2k + 1 and 2k + 2. When the node budget runs out the remaining nodes become leaves that list every cell they
-    // touch.
-    struct Node {
-        QBox q;
-        std::vector<uint32_t> touching;
-    };
-    std::vector<uint8_t> codes;
-    std::vector<std::vector<uint32_t>> leafCells;
-    {
-        std::vector<Node> level;
-        Node root;
-        root.q = QBox{{0, 0, 0}, {kSide, kSide, kSide}};
-        root.touching.resize(cellCount);
-        for (uint32_t i = 0; i < cellCount; ++i) root.touching[i] = i;
-        level.push_back(std::move(root));
-        size_t pending = 1;  // nodes not yet given a code
-        while (!level.empty()) {
-            std::vector<Node> nextLevel;
-            for (Node& n : level) {
-                --pending;
-                int axis = -1;
-                for (int k = 0; k < 3; ++k) {
-                    const uint32_t size = n.q.hi[k] - n.q.lo[k];
-                    if (size < 2 || (axis >= 0 && size <= n.q.hi[axis] - n.q.lo[axis])) continue;
-                    bool cut = false;
-                    for (const uint32_t c : n.touching)
-                        if ((cells[c].lo[k] > n.q.lo[k] && cells[c].lo[k] < n.q.hi[k]) || (cells[c].hi[k] > n.q.lo[k] && cells[c].hi[k] < n.q.hi[k])) {
-                            cut = true;
-                            break;
-                        }
-                    if (cut) axis = k;
-                }
-                const bool budget = codes.size() + pending + nextLevel.size() + 2 <= in.maxViewNodes;
-                if (axis < 0 || !budget) {
-                    codes.push_back(3);
-                    if (n.touching.empty()) n.touching.push_back(nearestCell(n.q));
-                    leafCells.push_back(std::move(n.touching));
-                    continue;
-                }
-                codes.push_back(uint8_t(axis));
-                const uint32_t mid = n.q.lo[axis] + (n.q.hi[axis] - n.q.lo[axis]) / 2;
-                Node lo, hi;
-                lo.q = hi.q = n.q;
-                lo.q.hi[axis] = mid;
-                hi.q.lo[axis] = mid;
-                for (const uint32_t c : n.touching) {
-                    if (overlaps(cells[c], lo.q)) lo.touching.push_back(c);
-                    if (overlaps(cells[c], hi.q)) hi.touching.push_back(c);
-                }
-                nextLevel.push_back(std::move(lo));
-                nextLevel.push_back(std::move(hi));
-            }
-            pending += nextLevel.size();
-            level.swap(nextLevel);
         }
     }
     res.stats.viewNodes = uint32_t(codes.size());

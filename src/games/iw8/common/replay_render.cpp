@@ -3630,7 +3630,8 @@ std::vector<uint8_t> BuildUmbraTome(const Mesh &m, const StaticModels &staticMod
                                  std::to_string(baked.stats.cells) + " cell(s), " + std::to_string(baked.stats.portals) +
                                  " portal(s), " + std::to_string(baked.stats.viewNodes) + " view tree node(s), " +
                                  std::to_string(userIDList.size()) + " object(s) in " + std::to_string(baked.stats.listEntries) +
-                                 " list entries, " + std::to_string(baked.tome.size()) + " bytes";
+                                 " list entries, " + std::to_string(baked.tome.size()) + " bytes" +
+                                 (baked.stats.retries ? " (cut again " + std::to_string(baked.stats.retries) + " time(s) with fewer cells for the view tree to fit)" : std::string());
             return std::move(baked.tome);
         }
         g_umbraBakeSummary = "occlusion bake failed (" + baked.error + "): the one-cell tome is written";
