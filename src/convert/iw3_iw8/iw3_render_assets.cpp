@@ -3126,6 +3126,10 @@ std::unordered_map<std::string, std::shared_future<std::vector<std::uint8_t>>> g
 
 std::vector<std::uint8_t> CompileUncached(const std::string &source, const char *target, const char *name);
 
+// IW8 Radiant's map surface shader (world JSON "iw8r_surface_shader": the IW8RSurface struct and its iw8rSurface
+// function), prepended to the surface pixel shaders with IW8R_CUSTOM; empty for maps without one.
+std::string g_surfaceShaderSource;
+
 std::vector<std::uint8_t> Compile(const std::string &source, const char *target, const char *name)
 {
     std::string keyed = std::string(target) + '\n' + name + '\n' + source;
@@ -3518,7 +3522,8 @@ Json BuildTechset(const std::string &map, const unsigned columns, const unsigned
     std::string pixelSource =
         "#define MAP_SOURCE_SUN_MASK 1\n#define MAP_SOURCE_CHANNELS 1\n" + glassEnvironment +
         g_emissionDefines + g_backFaceDefines + g_revealDefines + g_iw7SpecularDefines + g_skyObjectDefines +
-        g_unlitMaskDefines + g_uvAnimationDefines + g_transmissionDefines + g_uvClampDefines + g_extinctionDefines;
+        g_unlitMaskDefines + g_uvAnimationDefines + g_transmissionDefines + g_uvClampDefines + g_extinctionDefines +
+        g_surfaceShaderSource;
     if (const char *diag = std::getenv("IW8_ZONETOOL_DIAG_NO_PROBES"); diag && *diag == '1')
         pixelSource += "#define MAP_DIAG_NO_PROBES 1\n";
     if (model)
@@ -5501,6 +5506,10 @@ RenderPlan PrepareRenderAssets(const std::filesystem::path &exportRoot, const Js
         materials.push_back(std::move(material));
     }
     g_iw7SpecularDefines = world.value("iw7_specular", false) ? "#define MAP_IW7_SPECULAR 1\n" : "";
+    g_surfaceShaderSource.clear();
+    if (const auto custom = world.find("iw8r_surface_shader"); custom != world.end() && custom->is_string() &&
+                                                              !custom->get<std::string>().empty())
+        g_surfaceShaderSource = "#define IW8R_CUSTOM 1\n" + custom->get<std::string>() + "\n#line 1 \"iw3_map_surface.hlsl\"\n";
     g_emissionDefines = std::ranges::any_of(materials, [](const SourceMaterial &material) {
                             return (material.flags & kEmissionFlag) != 0;
                         })

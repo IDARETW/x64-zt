@@ -1599,6 +1599,25 @@ float4 main(Input input) : SV_TARGET0 {
 #endif
     float3 specular = 0;
     float3 color = texel.rgb * light;
+#if defined(IW8R_CUSTOM) && !defined(MAP_COVERAGE)
+    // The map's surface shader (IW8 Radiant "iw8r_surface_shader"): its lit colour for every lit surface, from the same
+    // inputs the editor's viewport gives it (IW8RSurface). Sky, layers and unlit materials keep theirs.
+    if (!unlit && !sky && !layer) {
+        IW8RSurface iw8rSurfaceIn;
+        iw8rSurfaceIn.albedo = texel.rgb;
+        iw8rSurfaceIn.alpha = 1;
+        iw8rSurfaceIn.normal = shadingNormal;
+        iw8rSurfaceIn.view = normalize(-input.relativePosition);
+        iw8rSurfaceIn.position = input.relativePosition + replayView[4].xyz;
+        iw8rSurfaceIn.uv = input.uv.xy;
+        iw8rSurfaceIn.sunDir = direction;
+        iw8rSurfaceIn.sunColor = nativeSun ? sun : 0;
+        iw8rSurfaceIn.sunShadow = visibility;
+        iw8rSurfaceIn.ambient = indirect;
+        iw8rSurfaceIn.gloss = gloss;
+        color = iw8rSurface(iw8rSurfaceIn);
+    }
+#endif
 #if MAP_DEBUG_MODE == 0
     // Converted IW3 primary lights (spots, omnis) through Replay's local
     // light lists and shadows: areas IW3 lit only with them were black.
