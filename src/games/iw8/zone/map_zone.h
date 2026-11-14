@@ -775,6 +775,15 @@ inline void emitMapEdgeListBody(ZoneBuffer &zb, const std::vector<havok::LadderF
     }
     stamp32(body, 0x70, static_cast<uint32_t>(list.indices.size()));
     stamp64(body, 0x78, PTR_FOLLOWS);
+    // Mount adjacency (the edges a mounted player can move between): one word per edge and the records, or neither.
+    static_assert(sizeof(iw8r::MapEdgeAdjacency) == 12);
+    if (!list.adjacencyMeta.empty())
+    {
+        stamp32(body, 0x80, static_cast<uint32_t>(list.adjacencyMeta.size()));
+        stamp64(body, 0x88, PTR_FOLLOWS);
+        stamp32(body, 0x90, static_cast<uint32_t>(list.adjacency.size()));
+        stamp64(body, 0x98, PTR_FOLLOWS);
+    }
 
     zb.pushStream(XFILE_BLOCK_TEMP_PRELOAD);
     zb.align(7);
@@ -813,6 +822,13 @@ inline void emitMapEdgeListBody(ZoneBuffer &zb, const std::vector<havok::LadderF
     }
     zb.align(3);
     zb.write(list.indices.data(), list.indices.size() * sizeof(uint32_t));
+    if (!list.adjacencyMeta.empty())
+    {
+        zb.align(3);
+        zb.write(list.adjacencyMeta.data(), list.adjacencyMeta.size() * sizeof(uint32_t));
+        zb.align(3);
+        zb.write(list.adjacency.data(), list.adjacency.size() * sizeof(iw8r::MapEdgeAdjacency));
+    }
     zb.popStream();
     zb.popStream();
 }
