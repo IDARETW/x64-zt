@@ -108,6 +108,23 @@ namespace zonetool::iw8
 			std::unordered_map<std::uint32_t, std::uint32_t> indices_;
 		};
 
+		struct preload_link
+		{
+			std::string label;
+			std::int32_t type;
+			void* header;
+		};
+
+		// A list entry (its header `top`) whose preloaded assets nest deeper than Replay's preload mark stack (2): the
+		// second asset of the chain (`type`, `header`) is to be listed just before it.
+		struct preload_move
+		{
+			void* top;
+			std::int32_t type;
+			void* header;
+			std::string chain;
+		};
+
 		class zone_assets_writer
 		{
 		public:
@@ -191,6 +208,7 @@ namespace zonetool::iw8
 					this->writer_.write_copy(entries.data(), entries.size() * sizeof(xasset_entry));
 					for (auto& entry : entries)
 					{
+						this->list_header_ = entry.header;
 						this->write_list_asset(stream, entry);
 					}
 				}
@@ -226,6 +244,19 @@ namespace zonetool::iw8
 			std::map<asset_key, std::size_t> aliases_;
 			// The keys of aliases_ that point at a name stub (no definition written yet).
 			std::set<asset_key> stub_keys_;
+			// Inline preloaded assets in progress (type name and asset name), outermost first: Replay's preload mark
+			// stack holds two (see write_asset).
+			std::vector<preload_link> preload_chain_;
+			void* list_header_ = nullptr;  // the header of the list entry being written
+			std::vector<preload_move> preload_moves_;
+
+		public:
+			const std::vector<preload_move>& preload_moves() const
+			{
+				return this->preload_moves_;
+			}
+
+		private:
 			// The same for the stubs of write_options::reference_uses.
 			std::map<asset_key, std::size_t> reference_aliases_;
 			std::deque<std::vector<std::uint8_t>> stubs_;
@@ -354,6 +385,25 @@ namespace zonetool::iw8
 				const auto preloaded = format->preload_block == preload_block;
 				if (preloaded)
 				{
+					// Replay 1.20 keeps the preload marks of nested preloaded assets in a stack of two without a bound
+					// check (push 0x140D97A80, stack 0x145DA4830, counter 0x145DA48B8): a third level overwrites the
+					// counter and the next push faults (0xC0000005 at 0x140D97ADD). Refuse such a zone here.
+					preload_chain_.push_back({std::string(format->name) + " \"" + key.second + "\"", type, header});
+					if (preload_chain_.size() > 2)
+					{
+						std::string chain;
+						for (const auto& link : preload_chain_)
+						{
+							chain += (chain.empty() ? "" : " > ") + link.label;
+						}
+						if (!this->collect_)
+						{
+							throw std::runtime_error(std::format("preloaded assets nest {} deep inline ({}); the game holds "
+								"2 and crashes on load", preload_chain_.size(), chain));
+						}
+						// Collecting: write_zone lists the middle asset before this entry and collects again.
+						this->preload_moves_.push_back({this->list_header_, preload_chain_[1].type, preload_chain_[1].header, chain});
+					}
 					writer.push_stream(preload_block);
 					writer.align(3);
 					writer.align(format->alignment);
@@ -392,6 +442,7 @@ namespace zonetool::iw8
 				{
 					writer.pop_stream();
 					writer.pop_stream();
+					preload_chain_.pop_back();
 				}
 			}
 
@@ -424,14 +475,67 @@ namespace zonetool::iw8
 	written_zone write_zone(const std::span<const zone_asset> list, const std::span<const zone_asset> assets,
 		const std::span<const char* const> script_strings, const write_options& options)
 	{
-		script_string_table strings(script_strings);
+		// Replay's preload mark stack holds two nested preloaded assets (see write_asset). An entry that nests three deep
+		// gets its middle asset listed just before it (it then aliases that one), as stock zones order a scriptable's
+		// models before it; the collecting pass runs again until no chain is left.
+		std::vector<zone_asset> ordered(list.begin(), list.end());
+		for (std::size_t round = 0;; ++round)
 		{
-			zone_assets_writer collector(assets, strings, options, true);
-			collector.write(list);
-		}
+			script_string_table strings(script_strings);
+			std::vector<preload_move> moves;
+			{
+				zone_assets_writer collector(assets, strings, options, true);
+				collector.write(ordered);
+				moves = collector.preload_moves();
+			}
 
-		zone_assets_writer writer(assets, strings, options, false);
-		return writer.write(list);
+			if (moves.empty())
+			{
+				zone_assets_writer writer(assets, strings, options, false);
+				return writer.write(ordered);
+			}
+
+			if (round >= 64)
+			{
+				throw std::runtime_error(std::format("preloaded assets still nest 3 deep after listing their middle assets "
+					"first ({})", moves.front().chain));
+			}
+
+			std::size_t moved = 0;
+			for (const auto& move : moves)
+			{
+				const auto find = [&](void* header, const std::int32_t type)
+				{
+					return std::find_if(ordered.begin(), ordered.end(), [&](const zone_asset& a)
+					{
+						return a.header == header && (type < 0 || a.type == type);
+					});
+				};
+				auto top = find(move.top, -1);
+				auto middle = find(move.header, move.type);
+				if (top == ordered.end() || (middle != ordered.end() && middle < top))
+				{
+					continue;  // already listed before it (a later move did it), or no list entry to put it before
+				}
+				zone_asset entry{move.type, move.header, false};
+				if (middle != ordered.end())
+				{
+					entry = *middle;
+					ordered.erase(middle);
+					top = find(move.top, -1);
+				}
+				ordered.insert(top, entry);
+				++moved;
+			}
+
+			if (!moved)
+			{
+				throw std::runtime_error(std::format("preloaded assets nest 3 deep inline ({}); the game holds 2 and "
+					"crashes on load, and listing the middle asset first is not possible", moves.front().chain));
+			}
+
+			printf("[info] zone writer: %zu asset(s) listed before their users (Replay preloads 2 levels deep)\n", moved);
+		}
 	}
 
 	written_zone write_zone(const loaded_zone& zone, const write_options& options)
