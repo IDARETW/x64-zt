@@ -382,28 +382,31 @@ namespace zonetool::iw8
 
 				// The map preload loads the header of most types to block 2, which keeps it until the zone is loaded:
 				// reserve it there too, around the asset, so that nested assets come after it.
+				// Replay 1.20's loaders push every asset they load onto DB_PatchMem's asset stack, which holds two records
+				// and has no bound check (q_DB_PatchMem_PushAsset 0x140D97A80 records at [counter]; stack 0x145DA4830,
+				// counter 0x145DA48B8): an asset loaded inline in an inline asset of a list entry overwrites the counter
+				// and the next push faults (0xC0000005 at 0x140D97ADD). Every type counts (210 loaders push, the
+				// map-preloaded ones and the others alike). Refuse such a zone here; collecting, record it to move.
+				preload_chain_.push_back({std::string(format->name) + " \"" + key.second + "\"", type, header});
+				if (preload_chain_.size() > 2)
+				{
+					std::string chain;
+					for (const auto& link : preload_chain_)
+					{
+						chain += (chain.empty() ? "" : " > ") + link.label;
+					}
+					if (!this->collect_)
+					{
+						throw std::runtime_error(std::format("assets nest {} deep inline ({}); the game holds 2 and crashes "
+							"on load", preload_chain_.size(), chain));
+					}
+					// Collecting: write_zone lists the middle asset before this entry and collects again.
+					this->preload_moves_.push_back({this->list_header_, preload_chain_[1].type, preload_chain_[1].header, chain});
+				}
+
 				const auto preloaded = format->preload_block == preload_block;
 				if (preloaded)
 				{
-					// Replay 1.20 keeps the preload marks of nested preloaded assets in a stack of two without a bound
-					// check (push 0x140D97A80, stack 0x145DA4830, counter 0x145DA48B8): a third level overwrites the
-					// counter and the next push faults (0xC0000005 at 0x140D97ADD). Refuse such a zone here.
-					preload_chain_.push_back({std::string(format->name) + " \"" + key.second + "\"", type, header});
-					if (preload_chain_.size() > 2)
-					{
-						std::string chain;
-						for (const auto& link : preload_chain_)
-						{
-							chain += (chain.empty() ? "" : " > ") + link.label;
-						}
-						if (!this->collect_)
-						{
-							throw std::runtime_error(std::format("preloaded assets nest {} deep inline ({}); the game holds "
-								"2 and crashes on load", preload_chain_.size(), chain));
-						}
-						// Collecting: write_zone lists the middle asset before this entry and collects again.
-						this->preload_moves_.push_back({this->list_header_, preload_chain_[1].type, preload_chain_[1].header, chain});
-					}
 					writer.push_stream(preload_block);
 					writer.align(3);
 					writer.align(format->alignment);
@@ -442,8 +445,8 @@ namespace zonetool::iw8
 				{
 					writer.pop_stream();
 					writer.pop_stream();
-					preload_chain_.pop_back();
 				}
+				preload_chain_.pop_back();
 			}
 
 			// A referenced asset keeps the header bytes of its zone. An asset that the zone does not hold (an asset of
@@ -534,7 +537,11 @@ namespace zonetool::iw8
 					"crashes on load, and listing the middle asset first is not possible", moves.front().chain));
 			}
 
-			printf("[info] zone writer: %zu asset(s) listed before their users (Replay preloads 2 levels deep)\n", moved);
+			printf("[info] zone writer: %zu asset(s) listed before their users (Replay's asset stack holds 2 levels)\n", moved);
+			for (const auto& move : moves)
+			{
+				printf("[info]   %s\n", move.chain.c_str());
+			}
 		}
 	}
 
