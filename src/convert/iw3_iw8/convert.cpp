@@ -1827,8 +1827,9 @@ int writeMapPackage(const Args &args, const std::string &map, const std::string 
         }
         const auto primaryLightCount = static_cast<uint32_t>(lighting.primaryLights.size());
         const auto sunPrimaryLightIndex = lighting.sunPrimaryLightIndex;
-        const replayrender::StaticModels staticModels =
-            prepared ? prepared->staticModels : replayrender::StaticModels{};
+        // A reference, not a copy: the static models of a large map hold gigabytes of geometry.
+        static const replayrender::StaticModels noStaticModels{};
+        const replayrender::StaticModels &staticModels = prepared ? prepared->staticModels : noStaticModels;
         const std::array<float, 3> sunDirection{lighting.direction[0], lighting.direction[1],
                                                 lighting.direction[2]};
         // The world's IES lookup strip and the stock IES LightDefs (flashlight,
@@ -2045,6 +2046,20 @@ int writeMapPackage(const Args &args, const std::string &map, const std::string 
         // Release the companion's resident body before building the main one.
         writer.build();
         timing.lap("main zone build");
+        // The main zone body now holds the render description, static models, collision models, sun shadow scene and
+        // navigation; the rest of the build reads only names, effects and sounds (outputLedgerRows, the chyron). They
+        // are released before the zone write, whose rewrite holds the payload twice: Breakneck's 2.9 GB zone ran out of
+        // memory there with them still alive (about 12.6 GB of free commit, 2026-11-08).
+        if (prepared)
+        {
+            nlohmann::json().swap(prepared->render);
+            prepared->staticModels = {};
+            std::vector<iw8::staticmodelcollision::Model>().swap(prepared->staticModelCollisionModels);
+            prepared->shadowScene = {};
+            prepared->navigation = {};
+            std::vector<iw8::DynamicEntity>().swap(prepared->dynamicEntities);
+            std::vector<std::uint8_t>().swap(prepared->gradingClutPixels);
+        }
         const auto mapParams = withPostloadMargin(writeParams(writer));
         const auto native = prepared ? std::span<const zonetool::iw8::zone_asset>(prepared->nativeAssets)
                                      : std::span<const zonetool::iw8::zone_asset>{};
